@@ -369,6 +369,125 @@ class DiscogsClient:
             logger.error(f"Discogs API error ({endpoint}): {e}")
             return None
 
+    # --- User Collection (powers Your Albums Discogs source) ---
+
+    def get_authenticated_username(self) -> Optional[str]:
+        """Resolve the username for the configured personal token.
+
+        Discogs's `/oauth/identity` endpoint returns the user's
+        username when called with a valid token. Cached on the
+        instance so subsequent calls don't re-hit the API.
+        """
+        if hasattr(self, '_cached_username'):
+            return self._cached_username
+        if not self.is_authenticated():
+            self._cached_username = None
+            return None
+        data = self._api_get('/oauth/identity')
+        username = data.get('username') if data else None
+        self._cached_username = username
+        return username
+
+    def get_user_collection(self, username: Optional[str] = None,
+                            folder_id: int = 0,
+                            per_page: int = 100,
+                            max_pages: int = 50) -> List[Dict[str, Any]]:
+        """Fetch a Discogs user's collection (folder 0 = "All").
+
+        Returns a list of normalized release dicts ready for
+        ``database.upsert_liked_album``:
+            {
+                'album_name': str,
+                'artist_name': str,
+                'release_id': int,        # Discogs release id
+                'image_url': str | None,
+                'release_date': str,      # 'YYYY' (Discogs only stores year)
+                'total_tracks': int,
+            }
+
+        Pagination caps at ``max_pages`` to bound runtime — at 100/page
+        that's 5000 releases, more than enough for typical collections.
+        Authenticated calls only (Discogs collection is private).
+        """
+        if not self.is_authenticated():
+            logger.warning("Discogs collection fetch attempted without token")
+            return []
+
+        if not username:
+            username = self.get_authenticated_username()
+            if not username:
+                logger.warning("Could not resolve Discogs username for token")
+                return []
+
+        results: List[Dict[str, Any]] = []
+        page = 1
+        while page <= max_pages:
+            data = self._api_get(
+                f'/users/{username}/collection/folders/{folder_id}/releases',
+                {'page': page, 'per_page': per_page, 'sort': 'added', 'sort_order': 'desc'},
+            )
+            if not data:
+                break
+
+            releases = data.get('releases', []) or []
+            if not releases:
+                break
+
+            for entry in releases:
+                info = entry.get('basic_information') or {}
+                release_id = entry.get('id') or info.get('id')
+                if not release_id:
+                    continue
+                title = info.get('title') or ''
+                # Discogs `artists` is a list of {name, id, ...}; first is primary.
+                artists = info.get('artists') or []
+                artist_name = ''
+                if artists and isinstance(artists[0], dict):
+                    artist_name = (artists[0].get('name') or '').strip()
+                # Strip trailing "(N)" disambiguation suffix Discogs adds.
+                artist_name = re.sub(r'\s*\(\d+\)$', '', artist_name)
+                if not title or not artist_name:
+                    continue
+
+                # Image URLs: cover_image is the primary, also has thumb.
+                image_url = (info.get('cover_image')
+                             or info.get('thumb')
+                             or '')
+
+                year = info.get('year')
+                release_date = str(year) if year and year > 0 else ''
+
+                results.append({
+                    'album_name': title.strip(),
+                    'artist_name': artist_name,
+                    'release_id': int(release_id),
+                    'image_url': image_url or None,
+                    'release_date': release_date,
+                    'total_tracks': 0,  # Not in basic_information; populated via get_release if needed
+                })
+
+            pagination = data.get('pagination') or {}
+            if page >= int(pagination.get('pages') or 1):
+                break
+            page += 1
+
+        logger.info(f"Discogs collection: fetched {len(results)} releases for {username}")
+        return results
+
+    def get_release(self, release_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch full Discogs release detail including tracklist.
+
+        Returns the raw API response so callers can render rich
+        Discogs context (year, format, label, country, tracklist).
+        """
+        if not release_id:
+            return None
+        try:
+            release_id = int(release_id)
+        except (TypeError, ValueError):
+            return None
+        return self._api_get(f'/releases/{release_id}')
+
     # --- Search Methods (same signatures as iTunes/Deezer) ---
 
     def search_artists(self, query: str, limit: int = 10) -> List[Artist]:

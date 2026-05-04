@@ -1060,17 +1060,33 @@ async function openYourAlbumDownload(index) {
     if (!album) { showToast('Album data not found', 'error'); return; }
     showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
     try {
-        // Prefer Spotify ID, fall back to Deezer, then search by name
+        // Per-source dispatch: open with whichever source has an ID for
+        // this album. For pure-Discogs collection items (no Spotify/
+        // Deezer match), dispatch goes straight to Discogs so the
+        // modal opens with Discogs context (vinyl/CD release detail,
+        // tracklist from Discogs). For Spotify saved albums (no
+        // discogs id), goes to Spotify. For multi-source albums
+        // (album exists in BOTH Spotify saved and Discogs collection,
+        // rare), tries streaming sources first since they have
+        // tracklists with proper IDs ready for download.
         let albumData = null;
         const nameParams = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
-        if (album.spotify_album_id) {
-            const r = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${nameParams}`);
-            if (r.ok) albumData = await r.json();
+        const discogsId = album.discogs_release_id || album.discogs_id;
+
+        const trySources = [];
+        if (album.spotify_album_id) trySources.push(['spotify', album.spotify_album_id]);
+        if (album.deezer_album_id) trySources.push(['deezer', album.deezer_album_id]);
+        if (discogsId) trySources.push(['discogs', discogsId]);
+
+        for (const [src, id] of trySources) {
+            const r = await fetch(`/api/discover/album/${src}/${id}?${nameParams}`);
+            if (r.ok) {
+                albumData = await r.json();
+                if (albumData && albumData.tracks && albumData.tracks.length > 0) break;
+                albumData = null;  // empty payload — try next
+            }
         }
-        if (!albumData && album.deezer_album_id) {
-            const r = await fetch(`/api/discover/album/deezer/${album.deezer_album_id}?${nameParams}`);
-            if (r.ok) albumData = await r.json();
-        }
+
         if (!albumData) {
             // Last resort — search by name
             const r = await fetch(`/api/discover/album/spotify/search?${nameParams}`);
@@ -1156,6 +1172,7 @@ async function openYourAlbumsSourcesModal() {
         { id: 'spotify', label: 'Spotify', icon: '\uD83C\uDFB5' },
         { id: 'tidal', label: 'Tidal', icon: '\uD83C\uDF0A' },
         { id: 'deezer', label: 'Deezer', icon: '\uD83C\uDFB6' },
+        { id: 'discogs', label: 'Discogs', icon: '\uD83D\uDCBF' },
     ];
     const state = {};
     sourceInfo.forEach(s => { state[s.id] = enabled.includes(s.id); });
