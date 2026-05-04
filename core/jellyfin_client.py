@@ -116,9 +116,15 @@ class JellyfinTrack:
 
         # File path and media info (used by quality scanner and DB update)
         self.path = jellyfin_data.get('Path')
-        # Extract bitrate from MediaSources if available
+        # Extract bitrate + file size from MediaSources if available.
+        # `file_size` powers the Library Disk Usage card on the Stats
+        # page — populated free during the deep scan from data Jellyfin
+        # already returns in MediaSources[].
         media_sources = jellyfin_data.get('MediaSources', [])
         self.bitRate = (media_sources[0].get('Bitrate') or 0) // 1000 if media_sources else None  # Convert bps to kbps
+        self.file_size = (media_sources[0].get('Size') or 0) if media_sources else None
+        if self.file_size == 0:
+            self.file_size = None
         
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:

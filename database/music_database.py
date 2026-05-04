@@ -294,6 +294,7 @@ class MusicDatabase:
                     duration INTEGER,  -- milliseconds
                     file_path TEXT,
                     bitrate INTEGER,
+                    file_size INTEGER,  -- bytes; populated by deep scan from media-server API
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -669,6 +670,23 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE tracks ADD COLUMN track_artist TEXT")
                     logger.info("Added track_artist column to tracks table")
+                except Exception:
+                    pass
+
+            # Migration: add file_size column so the Stats page can show
+            # total library size on disk without having to walk the
+            # filesystem on every request. Populated by the deep scan from
+            # whatever the media server reports (Plex MediaPart.size,
+            # Jellyfin MediaSources[].Size, Navidrome <song size="...">,
+            # SoulSync standalone os.path.getsize). NULL on existing rows
+            # until the next deep scan fills them in — UI handles the
+            # NULL case by showing "(run a Deep Scan to populate)".
+            try:
+                cursor.execute("SELECT file_size FROM tracks LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
+                    logger.info("Added file_size column to tracks table")
                 except Exception:
                     pass
 
@@ -3648,6 +3666,85 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def get_library_disk_usage(self):
+        """Aggregate disk usage of the on-disk music library.
+
+        Returns:
+            {
+                'total_bytes': int,           # sum of all known file sizes
+                'tracks_with_size': int,      # count of tracks with a known size
+                'tracks_without_size': int,   # count of tracks where size is NULL
+                'by_format': {                # bytes per file extension
+                    'flac': int, 'mp3': int, ...
+                },
+                'has_data': bool,             # False on fresh installs / before first deep scan
+            }
+
+        Returns the empty-shape dict when the column doesn't exist (very
+        old install pre-migration) — UI shows "(run a Deep Scan)" in
+        that case rather than crashing.
+        """
+        empty = {
+            'total_bytes': 0,
+            'tracks_with_size': 0,
+            'tracks_without_size': 0,
+            'by_format': {},
+            'has_data': False,
+        }
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Confirm column exists (defensive against fresh-install race
+            # where the migration hasn't run yet).
+            try:
+                cursor.execute("SELECT file_size FROM tracks LIMIT 1")
+            except Exception:
+                return empty
+
+            cursor.execute(
+                "SELECT COALESCE(SUM(file_size), 0), "
+                "       COUNT(file_size), "
+                "       COUNT(*) - COUNT(file_size) "
+                "FROM tracks"
+            )
+            row = cursor.fetchone()
+            total_bytes = int(row[0] or 0)
+            tracks_with_size = int(row[1] or 0)
+            tracks_without_size = int(row[2] or 0)
+
+            # Per-format breakdown via Python aggregation. Doing the
+            # extension split in SQLite is fragile (paths with dots
+            # before the file extension would group wrong); doing it
+            # in Python is one os.path.splitext per row, which is
+            # negligible cost compared to the SUM() above.
+            cursor.execute(
+                "SELECT file_path, file_size FROM tracks "
+                "WHERE file_size IS NOT NULL AND file_path IS NOT NULL "
+                "      AND file_path != ''"
+            )
+            by_format: dict = {}
+            for path, size in cursor.fetchall():
+                ext = os.path.splitext(path)[1].lstrip('.').lower()
+                if not ext or len(ext) > 6:
+                    continue
+                by_format[ext] = by_format.get(ext, 0) + int(size or 0)
+
+            return {
+                'total_bytes': total_bytes,
+                'tracks_with_size': tracks_with_size,
+                'tracks_without_size': tracks_without_size,
+                'by_format': by_format,
+                'has_data': tracks_with_size > 0,
+            }
+        except Exception as e:
+            logger.error(f"Error getting library disk usage: {e}")
+            return empty
+        finally:
+            if conn:
+                conn.close()
+
     @staticmethod
     def _listening_time_filter(time_range, alias=''):
         """Build a WHERE clause for time-range filtering."""
@@ -4970,12 +5067,20 @@ class MusicDatabase:
                 # Get file path and media info (Plex-specific, Jellyfin may not have these)
                 file_path = None
                 bitrate = None
+                file_size = None
                 if hasattr(track_obj, 'media') and track_obj.media:
                     media = track_obj.media[0] if track_obj.media else None
                     if media:
                         if hasattr(media, 'parts') and media.parts:
                             part = media.parts[0]
                             file_path = getattr(part, 'file', None)
+                            # Plex's MediaPart exposes the file size in bytes
+                            # via plexapi — pull it for the Library Disk
+                            # Usage card on Stats. None when the server
+                            # didn't report a size.
+                            _plex_size = getattr(part, 'size', None)
+                            if isinstance(_plex_size, int) and _plex_size > 0:
+                                file_size = _plex_size
                         bitrate = getattr(media, 'bitrate', None)
 
                 # Fallback for Navidrome/Subsonic tracks
@@ -4985,6 +5090,14 @@ class MusicDatabase:
                     bitrate = track_obj.bitRate
                 if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
+                # File size: Jellyfin / Navidrome / SoulSync-standalone
+                # all set track_obj.file_size on their wrapper class.
+                # Plex came in via the media.parts[0].size path above —
+                # don't clobber that.
+                if file_size is None and hasattr(track_obj, 'file_size'):
+                    _wrapper_size = getattr(track_obj, 'file_size', None)
+                    if isinstance(_wrapper_size, int) and _wrapper_size > 0:
+                        file_size = _wrapper_size
 
                 # Extract per-track artist for compilations/DJ mixes.
                 # Only stored when it differs from the album artist.
@@ -5040,21 +5153,26 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
-                    # isrc, bpm, and all other enrichment data
+                    # isrc, bpm, and all other enrichment data. file_size uses
+                    # COALESCE(?, file_size) so a NULL from the server (e.g.
+                    # Jellyfin sometimes omits Size on first sync) doesn't wipe
+                    # an existing value.
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?, server_source = ?,
+                            duration = ?, file_path = ?, bitrate = ?,
+                            file_size = COALESCE(?, file_size),
+                            server_source = ?,
                             track_artist = COALESCE(?, track_artist),
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
