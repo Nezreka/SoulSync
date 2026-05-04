@@ -17,7 +17,6 @@ import time
 import platform
 import asyncio
 import uuid
-import threading
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -296,14 +295,13 @@ class YouTubeClient:
         self.progress_callback = callback
 
     def _progress_hook(self, d):
-        """
-        yt-dlp progress hook - called during download to report progress.
-        Updates the active_downloads dictionary for the current download.
-        Mirrors Soulseek's transfer status updates.
-        """
+        """yt-dlp progress hook — called during download to report
+        progress. Writes to the engine record (Phase C2 lifted state
+        out of the per-client dict; this hook follows suit)."""
         try:
-            # Only update if we have a current download ID
             if not self.current_download_id:
+                return
+            if self._engine is None:
                 return
 
             status = d.get('status', 'unknown')
@@ -313,24 +311,18 @@ class YouTubeClient:
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                 speed = d.get('speed', 0) or 0
                 eta = d.get('eta', 0) or 0
+                percent = (downloaded / total) * 100 if total > 0 else 0
 
-                if total > 0:
-                    percent = (downloaded / total) * 100
-                else:
-                    percent = 0
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'state': 'InProgress, Downloading',
+                    'progress': round(percent, 1),
+                    'transferred': downloaded,
+                    'size': total,
+                    'speed': int(speed),
+                    'time_remaining': int(eta) if eta > 0 else None,
+                })
 
-                # Update active downloads dictionary (thread-safe update with lock)
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        download_info = self.active_downloads[self.current_download_id]
-                        download_info['state'] = 'InProgress, Downloading'  # Match Soulseek state format
-                        download_info['progress'] = round(percent, 1)
-                        download_info['transferred'] = downloaded
-                        download_info['size'] = total
-                        download_info['speed'] = int(speed)
-                        download_info['time_remaining'] = int(eta) if eta > 0 else None
-
-                # Also update current_download_progress for legacy compatibility
+                # Legacy progress dict for any external listeners.
                 self.current_download_progress = {
                     'status': 'downloading',
                     'percent': round(percent, 1),
@@ -340,30 +332,27 @@ class YouTubeClient:
                     'eta': int(eta),
                     'filename': d.get('filename', '')
                 }
-
-                # Call progress callback if set (for UI updates)
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'finished':
-                # Download finished, ffmpeg is converting to MP3
-                # Keep state as 'InProgress, Downloading' - the download thread will set final state
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        self.active_downloads[self.current_download_id]['progress'] = 95.0  # Almost done (converting)
-
+                # Download finished — ffmpeg now converts to MP3. The
+                # engine.worker thread flips to 'Completed, Succeeded'
+                # once _download_sync returns; this just bumps progress
+                # to 95% so the UI doesn't sit at 99.9% during the
+                # ffmpeg post-process.
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'progress': 95.0,
+                })
                 self.current_download_progress['status'] = 'postprocessing'
                 self.current_download_progress['percent'] = 95.0
-
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'error':
-                # Mark as error (thread-safe)
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        self.active_downloads[self.current_download_id]['state'] = 'Errored'
-
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'state': 'Errored',
+                })
                 self.current_download_progress['status'] = 'error'
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
