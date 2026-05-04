@@ -171,3 +171,104 @@ class DownloadEngine:
                 if dl_id == download_id:
                     return source, dict(record)
         return None
+
+    # ------------------------------------------------------------------
+    # Cross-source query dispatch — Phase B2 surface
+    # ------------------------------------------------------------------
+    #
+    # The orchestrator historically iterated every plugin in its own
+    # ``get_all_downloads`` / ``get_download_status`` / ``cancel_download``
+    # methods (with hand-maintained client lists, before the registry
+    # came along). That iteration logic moves into the engine here so
+    # the orchestrator becomes a thin pass-through (Phase B3).
+    #
+    # In Phase B these methods iterate the registered plugins and call
+    # their existing ``get_all_downloads`` / ``cancel_download``
+    # methods — same behavior as today, just in a new home. Phase C/D
+    # will replace plugin-iteration with direct engine-state queries
+    # once the thread worker is also lifted.
+    #
+    # All methods are async to match the per-plugin contract.
+
+    async def get_all_downloads(self):
+        """Aggregated view across every registered plugin's active
+        downloads. Returns a flat list of DownloadStatus objects."""
+        all_downloads = []
+        for plugin in self._plugins.values():
+            if plugin is None:
+                continue
+            try:
+                all_downloads.extend(await plugin.get_all_downloads())
+            except Exception:
+                pass
+        return all_downloads
+
+    async def get_download_status(self, download_id: str):
+        """Find a download_id across every plugin. Returns the first
+        plugin's response or None if no plugin owns it."""
+        for plugin in self._plugins.values():
+            if plugin is None:
+                continue
+            try:
+                status = await plugin.get_download_status(download_id)
+                if status:
+                    return status
+            except Exception:
+                pass
+        return None
+
+    async def cancel_download(self, download_id: str,
+                              source_hint: Optional[str] = None,
+                              remove: bool = False) -> bool:
+        """Cancel a download. ``source_hint`` is the source name (or
+        legacy username string like ``'deezer_dl'``) — when provided,
+        routes directly to that plugin. When omitted, every plugin
+        is asked in turn until one accepts the cancel."""
+        # Direct routing when the caller knows the source.
+        if source_hint:
+            # Streaming source names ARE the username. Soulseek
+            # uses a real peer username (anything not in our plugin
+            # registry), so route those to the soulseek plugin.
+            target_plugin = self._plugins.get(source_hint)
+            if target_plugin is not None and source_hint != 'soulseek':
+                try:
+                    return await target_plugin.cancel_download(
+                        download_id, source_hint, remove,
+                    )
+                except Exception:
+                    return False
+            soulseek = self._plugins.get('soulseek')
+            if soulseek is not None:
+                try:
+                    return await soulseek.cancel_download(download_id, source_hint, remove)
+                except Exception:
+                    return False
+
+        # No hint → ask every plugin until one cancels successfully.
+        for plugin in self._plugins.values():
+            if plugin is None:
+                continue
+            try:
+                if await plugin.cancel_download(download_id, source_hint, remove):
+                    return True
+            except Exception:
+                pass
+        return False
+
+    async def clear_all_completed_downloads(self) -> bool:
+        """Best-effort cleanup of every plugin's completed-downloads
+        list. Skips plugins that report not-configured (saves API
+        calls + log noise)."""
+        results = []
+        for source_name, plugin in self._plugins.items():
+            if plugin is None:
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                logger.debug("Skipping %s clear_all_completed_downloads (not configured)", source_name)
+                continue
+            try:
+                results.append(await plugin.clear_all_completed_downloads())
+            except Exception as exc:
+                logger.warning("%s clear_all_completed_downloads failed: %s", source_name, exc)
+                results.append(False)
+        return all(results) if results else True
