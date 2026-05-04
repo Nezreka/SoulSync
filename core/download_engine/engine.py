@@ -91,10 +91,25 @@ class DownloadEngine:
         been migrated to the engine yet simply don't define
         ``set_engine`` — they keep their pre-engine behavior
         unchanged.
+
+        Also reads the plugin's declared ``RateLimitPolicy`` (via
+        the ``rate_limit_policy()`` method or ``RATE_LIMIT_POLICY``
+        class attribute) and applies it to the worker. Plugins that
+        don't declare a policy get the conservative default
+        (concurrency=1, delay=0).
         """
         if source_name in self._plugins:
             logger.warning("Plugin %s already registered with engine — overwriting", source_name)
         self._plugins[source_name] = plugin
+
+        # Apply the plugin's rate-limit policy BEFORE set_engine so
+        # set_engine callbacks can override per-source if they need
+        # config-driven values (e.g. YouTube's user-tunable delay).
+        from core.download_engine.rate_limit import resolve_policy
+        policy = resolve_policy(plugin)
+        self.worker.set_concurrency(source_name, policy.download_concurrency)
+        self.worker.set_delay(source_name, policy.download_delay_seconds)
+
         set_engine = getattr(plugin, 'set_engine', None)
         if callable(set_engine):
             try:

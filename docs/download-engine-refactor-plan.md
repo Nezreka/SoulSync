@@ -118,7 +118,11 @@ After Phase A: ~50 new tests pinning current behavior. We can refactor with conf
 
 After Phase C: ~490 LOC of duplicated thread management deleted. Each affected client shrinks.
 
-### Phase D — Search retry + quality filter lift
+### Phase D — SKIPPED
+
+**Original intent:** Lift search retry / query normalization / quality filter into engine. **Dropped after surveying actual per-source search code.** Search is 90% source-specific (slskd event subscription vs yt-dlp subprocess vs HTTP REST vs HLS quality map), not 60% like the original plan estimated. Lifting would be either lossy (force per-source quirks through a uniform interface) or bloated (adapter code bigger than the original). The shared portion is ~10 LOC per source — not worth a SearchOrchestrator. Per-source search stays per-source.
+
+### Phase D (original — kept for reference, NOT executed)
 
 **Commit D1:** New `core/download_engine/search.py` — `SearchOrchestrator`. Owns: query normalization, shortened-query retry ladder, quality filter, dedup. Calls `plugin.search_raw(query)` for the actual API hit.
 
