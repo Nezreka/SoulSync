@@ -133,11 +133,61 @@ class DownloadOrchestrator:
 
         logger.info(f"Download Orchestrator settings reloaded - Mode: {self.mode}")
 
-    def _client(self, name):
-        """Get a client by name, returning None if not initialized.
-        Resolves both canonical names (``deezer``) and legacy aliases
-        (``deezer_dl``) via the registry."""
+    def client(self, name):
+        """Generic accessor for a download source client by name.
+
+        Cin's review feedback: external callers should reach into
+        per-source clients via this method (``orch.client('hifi')``)
+        instead of attribute access (``orch.hifi``). Resolves both
+        canonical names (``deezer``) and legacy aliases (``deezer_dl``)
+        via the registry. Returns None if the source isn't registered
+        or failed to initialize.
+        """
         return self.registry.get(name)
+
+    # Internal alias kept for legacy callers inside this file.
+    _client = client
+
+    def configured_clients(self) -> dict:
+        """Return ``{source_name: client}`` for every download source
+        that's both initialized AND reports is_configured() == True.
+
+        Replaces the legacy per-source iteration pattern Cin called
+        out — `if hasattr(orch, 'soulseek') and orch.soulseek and
+        orch.soulseek.is_configured(): download_clients['soulseek']
+        = orch.soulseek` repeated for each source.
+        """
+        result = {}
+        for name, client in self.registry.all_plugins():
+            try:
+                if not hasattr(client, 'is_configured') or client.is_configured():
+                    result[name] = client
+            except Exception as exc:
+                logger.debug("%s is_configured raised: %s", name, exc)
+        return result
+
+    def reload_instances(self, source: str = None) -> bool:
+        """Reload a source's instance config (e.g. HiFi instance list,
+        Qobuz session restore). Generic dispatch — caller passes the
+        source name instead of reaching for ``orch.hifi.reload_instances()``.
+
+        When ``source`` is None, reloads every source that has a
+        ``reload_instances`` method.
+        """
+        sources = [source] if source else list(self.registry.names())
+        ok = True
+        for name in sources:
+            client = self.client(name)
+            if client is None:
+                continue
+            if not hasattr(client, 'reload_instances'):
+                continue
+            try:
+                client.reload_instances()
+            except Exception as exc:
+                logger.warning("%s reload_instances failed: %s", name, exc)
+                ok = False
+        return ok
 
     def is_configured(self) -> bool:
         """
@@ -470,3 +520,34 @@ class DownloadOrchestrator:
             except Exception:
                 ok = False
         return ok
+
+
+# ---------------------------------------------------------------------------
+# Singleton accessor — mirrors Cin's metadata engine pattern
+# (``get_metadata_engine()``). Callers that don't need a custom
+# registry use this instead of instantiating DownloadOrchestrator
+# directly. Currently web_server.py constructs the singleton at
+# startup and exposes it via the legacy ``soulseek_client`` global;
+# this factory exists for new callers + future migration of that
+# global to a more honestly-named ``download_orchestrator``.
+# ---------------------------------------------------------------------------
+
+_default_orchestrator: Optional['DownloadOrchestrator'] = None
+
+
+def get_download_orchestrator() -> 'DownloadOrchestrator':
+    """Return (lazily creating) the process-wide DownloadOrchestrator
+    singleton. Mirrors the ``get_metadata_engine()`` pattern Cin used
+    for the metadata engine refactor."""
+    global _default_orchestrator
+    if _default_orchestrator is None:
+        _default_orchestrator = DownloadOrchestrator()
+    return _default_orchestrator
+
+
+def set_download_orchestrator(orchestrator: 'DownloadOrchestrator') -> None:
+    """Set the process-wide singleton. Used by web_server.py at boot
+    to install the orchestrator it constructs as the default for
+    callers that grab via ``get_download_orchestrator()``."""
+    global _default_orchestrator
+    _default_orchestrator = orchestrator
