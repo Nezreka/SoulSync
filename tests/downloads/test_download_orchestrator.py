@@ -100,3 +100,108 @@ def test_clear_all_completed_downloads_propagates_configured_failures():
 
     assert result is False
     assert orch.soulseek.clear_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Cin-2 generic accessors
+# ---------------------------------------------------------------------------
+
+
+def test_client_returns_registered_client_by_name():
+    """Cin's review feedback: orch.client('hifi') is the canonical
+    way to reach a per-source client, replacing orch.hifi attribute
+    access."""
+    soulseek = _FakeClient()
+    youtube = _FakeClient()
+    orch = _build_orchestrator(soulseek=soulseek, youtube=youtube)
+
+    assert orch.client('soulseek') is soulseek
+    assert orch.client('youtube') is youtube
+    assert orch.client('made_up') is None
+
+
+def test_configured_clients_excludes_unconfigured_sources():
+    """Replaces the legacy iteration pattern: 6+ if/hasattr/is_configured
+    checks per source. Single call returns dict of configured clients."""
+    configured = _FakeClient(configured=True)
+    unconfigured = _FakeClient(configured=False)
+    orch = _build_orchestrator(
+        soulseek=configured,
+        youtube=unconfigured,
+    )
+    result = orch.configured_clients()
+    assert 'soulseek' in result
+    assert 'youtube' not in result
+    assert result['soulseek'] is configured
+
+
+def test_reload_instances_dispatches_to_named_source():
+    """Generic dispatch — caller passes source name instead of
+    reaching for orch.hifi.reload_instances() directly."""
+
+    class _ReloadableClient(_FakeClient):
+        def __init__(self):
+            super().__init__(configured=True)
+            self.reload_called = False
+
+        def reload_instances(self):
+            self.reload_called = True
+
+    hifi = _ReloadableClient()
+    soulseek = _FakeClient()  # No reload_instances method
+    orch = _build_orchestrator(soulseek=soulseek, hifi=hifi)
+
+    assert orch.reload_instances('hifi') is True
+    assert hifi.reload_called is True
+
+
+def test_reload_instances_skips_clients_without_method():
+    """Sources that don't expose reload_instances are skipped, not
+    treated as failures."""
+    soulseek = _FakeClient()  # No reload_instances method
+    orch = _build_orchestrator(soulseek=soulseek)
+    # Calling on a source without the method = silent no-op
+    assert orch.reload_instances('soulseek') is True
+
+
+def test_reload_instances_with_no_args_reloads_every_source():
+    """When called with no source argument, hits every registered
+    source that exposes reload_instances."""
+
+    class _ReloadableClient(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.reload_called = False
+
+        def reload_instances(self):
+            self.reload_called = True
+
+    a = _ReloadableClient()
+    b = _ReloadableClient()
+    orch = _build_orchestrator(soulseek=a, hifi=b)
+
+    orch.reload_instances()
+    assert a.reload_called is True
+    assert b.reload_called is True
+
+
+# ---------------------------------------------------------------------------
+# Singleton factory (matches Cin's get_metadata_engine pattern)
+# ---------------------------------------------------------------------------
+
+
+def test_get_download_orchestrator_returns_set_singleton():
+    """When set_download_orchestrator has been called (web_server.py
+    does this at boot), get_download_orchestrator returns the
+    installed instance instead of building a fresh one."""
+    from core.download_orchestrator import (
+        get_download_orchestrator,
+        set_download_orchestrator,
+    )
+
+    orch = _build_orchestrator(soulseek=_FakeClient())
+    set_download_orchestrator(orch)
+    try:
+        assert get_download_orchestrator() is orch
+    finally:
+        set_download_orchestrator(None)
