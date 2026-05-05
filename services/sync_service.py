@@ -7,7 +7,7 @@ from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Trac
 from core.plex_client import PlexClient, PlexTrackInfo
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
-from core.soulseek_client import SoulseekClient
+from core.download_orchestrator import DownloadOrchestrator
 from core.matching_engine import MusicMatchingEngine, MatchResult
 
 logger = get_logger("sync_service")
@@ -44,12 +44,12 @@ class SyncProgress:
     failed_tracks: int = 0
 
 class PlaylistSyncService:
-    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient, jellyfin_client: JellyfinClient = None, navidrome_client = None):
+    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, download_orchestrator: DownloadOrchestrator, jellyfin_client: JellyfinClient = None, navidrome_client = None):
         self.spotify_client = spotify_client
         self.plex_client = plex_client
         self.jellyfin_client = jellyfin_client
         self.navidrome_client = navidrome_client
-        self.soulseek_client = soulseek_client
+        self.download_orchestrator = download_orchestrator
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
@@ -635,7 +635,7 @@ class PlaylistSyncService:
                 query = self.matching_engine.generate_download_query(match_result.spotify_track)
                 logger.info(f"Attempting to download: {query}")
                 
-                download_id = await self.soulseek_client.search_and_download_best(query, expected_track=match_result.spotify_track)
+                download_id = await self.download_orchestrator.search_and_download_best(query, expected_track=match_result.spotify_track)
                 
                 if download_id:
                     downloaded_count += 1

@@ -30,7 +30,7 @@ import pytest
 
 from core import soundcloud_client
 from core.soundcloud_client import SoundcloudClient, _sanitize_filename
-from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +89,19 @@ def tmp_dl(tmp_path: Path) -> Path:
     p = tmp_path / "downloads"
     p.mkdir()
     return p
+
+
+def _wire_engine(client: SoundcloudClient) -> 'DownloadEngine':
+    """Phase C7: SoundCloud no longer owns its own active_downloads
+    dict — state lives on engine.DownloadEngine. Tests that
+    construct a bare client must wire an engine so download() can
+    dispatch and the client's query/cancel methods read from
+    somewhere. Returns the engine for tests that want to inspect
+    state directly."""
+    from core.download_engine import DownloadEngine
+    engine = DownloadEngine()
+    client.set_engine(engine)
+    return engine
 
 
 def test_is_available_when_yt_dlp_installed(tmp_dl: Path) -> None:
@@ -261,9 +274,10 @@ def test_download_rejects_invalid_filename_format(tmp_dl: Path) -> None:
 
 
 def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
-    """Verify the contract: returns a download_id, populates active_downloads,
-    spawns a thread that ultimately drives state to terminal."""
+    """Verify the contract: returns a download_id, engine record is
+    populated, the worker drives state to terminal."""
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
     completed_path = tmp_dl / "track.mp3"
     completed_path.write_bytes(b"x" * (200 * 1024))  # > MIN_AUDIO_SIZE
 
@@ -275,16 +289,14 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
         ))
 
     assert download_id is not None
-    # Thread runs async; wait briefly for terminal state
     deadline = time.time() + 2
     while time.time() < deadline:
-        with client._download_lock:
-            state = client.active_downloads[download_id]['state']
-        if state == 'Completed, Succeeded':
+        record = engine.get_record('soundcloud', download_id)
+        if record and record['state'] == 'Completed, Succeeded':
             break
         time.sleep(0.05)
 
-    info = client.active_downloads[download_id]
+    info = engine.get_record('soundcloud', download_id)
     assert info['state'] == 'Completed, Succeeded'
     assert info['progress'] == 100.0
     assert info['file_path'] == str(completed_path)
@@ -293,6 +305,7 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
 
 def test_download_thread_marks_failed_when_sync_returns_none(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
     with patch.object(client, '_download_sync', return_value=None):
         download_id = _run(client.download(
             'soundcloud',
@@ -300,25 +313,25 @@ def test_download_thread_marks_failed_when_sync_returns_none(tmp_dl: Path) -> No
         ))
     deadline = time.time() + 2
     while time.time() < deadline:
-        with client._download_lock:
-            state = client.active_downloads[download_id]['state']
-        if state == 'Errored':
+        record = engine.get_record('soundcloud', download_id)
+        if record and record['state'] == 'Errored':
             break
         time.sleep(0.05)
-    assert client.active_downloads[download_id]['state'] == 'Errored'
+    assert engine.get_record('soundcloud', download_id)['state'] == 'Errored'
 
 
 def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
     """If a user cancels mid-download and the sync function then returns
-    None, the thread should NOT overwrite the explicit Cancelled state
-    with a generic Errored state."""
+    None, the worker must NOT overwrite the explicit Cancelled state
+    with a generic Errored state. The legacy per-client thread had
+    this guard; engine.worker._mark_terminal preserves it for every
+    source via a single check."""
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
 
     def _slow_sync(download_id, *_):
-        # Simulate cancellation racing a None return
         time.sleep(0.05)
-        with client._download_lock:
-            client.active_downloads[download_id]['state'] = 'Cancelled'
+        engine.update_record('soundcloud', download_id, {'state': 'Cancelled'})
         return None
 
     with patch.object(client, '_download_sync', side_effect=_slow_sync):
@@ -326,12 +339,11 @@ def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
 
     deadline = time.time() + 2
     while time.time() < deadline:
-        with client._download_lock:
-            state = client.active_downloads[download_id]['state']
-        if state == 'Cancelled':
+        record = engine.get_record('soundcloud', download_id)
+        if record and record['state'] in ('Cancelled', 'Errored'):
             break
         time.sleep(0.05)
-    assert client.active_downloads[download_id]['state'] == 'Cancelled'
+    assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
 
 
 # ---------------------------------------------------------------------------
@@ -375,15 +387,15 @@ def test_download_sync_writes_file_and_returns_path(tmp_dl: Path, monkeypatch) -
     )
     monkeypatch.setattr(soundcloud_client, "yt_dlp", fake_yt_dlp)
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
 
-    with client._download_lock:
-        client.active_downloads['dl1'] = {
-            'id': 'dl1', 'filename': '', 'username': 'soundcloud',
-            'state': 'Initializing', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-            'track_id': 'abc', 'permalink_url': 'u', 'display_name': 'My Track',
-            'file_path': None,
-        }
+    engine.add_record('soundcloud', 'dl1', {
+        'id': 'dl1', 'filename': '', 'username': 'soundcloud',
+        'state': 'Initializing', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+        'track_id': 'abc', 'permalink_url': 'u', 'display_name': 'My Track',
+        'file_path': None,
+    })
 
     result = client._download_sync('dl1', 'https://soundcloud.com/x/y', 'My Track')
     assert result is not None
@@ -414,15 +426,15 @@ def test_download_sync_rejects_too_small_file(tmp_dl: Path, monkeypatch) -> None
     )
     monkeypatch.setattr(soundcloud_client, "yt_dlp", fake_yt_dlp)
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
 
-    with client._download_lock:
-        client.active_downloads['dl2'] = {
-            'id': 'dl2', 'filename': '', 'username': 'soundcloud',
-            'state': 'Initializing', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-            'track_id': 'tiny', 'permalink_url': 'u', 'display_name': 'Tiny',
-            'file_path': None,
-        }
+    engine.add_record('soundcloud', 'dl2', {
+        'id': 'dl2', 'filename': '', 'username': 'soundcloud',
+        'state': 'Initializing', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+        'track_id': 'tiny', 'permalink_url': 'u', 'display_name': 'Tiny',
+        'file_path': None,
+    })
     result = client._download_sync('dl2', 'https://soundcloud.com/x/y', 'Tiny')
     assert result is None
     # File got cleaned up after rejection
@@ -451,13 +463,13 @@ def test_download_sync_handles_yt_dlp_raising(tmp_dl: Path, monkeypatch) -> None
     )
     monkeypatch.setattr(soundcloud_client, "yt_dlp", fake_yt_dlp)
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
 
-    with client._download_lock:
-        client.active_downloads['dl3'] = {
-            'id': 'dl3', 'filename': '', 'username': 'soundcloud',
-            'state': 'Initializing', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine.add_record('soundcloud', 'dl3', {
+        'id': 'dl3', 'filename': '', 'username': 'soundcloud',
+        'state': 'Initializing', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     assert client._download_sync('dl3', 'https://soundcloud.com/x/y', 'Boom') is None
 
 
@@ -474,104 +486,96 @@ def test_download_sync_returns_none_when_yt_dlp_unavailable(tmp_dl: Path, monkey
 
 def test_update_download_progress_populates_ledger(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['p1'] = {
-            'id': 'p1', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'p1', {
+        'id': 'p1', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     speed_start = time.time() - 1.0  # 1 second ago
     client._update_download_progress('p1', downloaded=512_000, total=1_024_000,
                                       speed_start=speed_start)
-    info = client.active_downloads['p1']
+    info = engine.get_record('soundcloud', 'p1')
     assert info['transferred'] == 512_000
     assert info['size'] == 1_024_000
-    # 50% complete, capped below 100
     assert 49.0 <= info['progress'] <= 51.0
-    # Speed roughly 512KB/s
     assert info['speed'] > 0
-    # Time remaining should be roughly 1 second
     assert info['time_remaining'] is not None
     assert 0 < info['time_remaining'] < 5
 
 
 def test_update_download_progress_caps_at_99_9(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['p2'] = {
-            'id': 'p2', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'p2', {
+        'id': 'p2', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     client._update_download_progress('p2', downloaded=1_000_000,
                                       total=1_000_000, speed_start=time.time() - 1)
-    assert client.active_downloads['p2']['progress'] == 99.9
+    assert engine.get_record('soundcloud', 'p2')['progress'] == 99.9
 
 
 def test_update_download_progress_silently_skips_unknown_id(tmp_dl: Path) -> None:
     """No-op if the download id isn't tracked — defensive against late hooks."""
     client = SoundcloudClient(download_path=str(tmp_dl))
+    _wire_engine(client)
     # Should not raise
     client._update_download_progress('does_not_exist', 100, 1000, time.time())
 
 
 def test_update_download_progress_fragmented_uses_fragment_count(tmp_dl: Path) -> None:
     """HLS-aware progress: fragment 5 of 10 → ~50%, regardless of byte
-    estimate. Pins the SoundCloud HLS UX fix where byte-based progress
-    stayed stuck near 0."""
+    estimate."""
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['hls1'] = {
-            'id': 'hls1', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'hls1', {
+        'id': 'hls1', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     client._update_download_progress_fragmented(
         'hls1', downloaded=512_000, fragment_index=5, fragment_count=10,
         speed_start=time.time() - 1.0,
     )
-    info = client.active_downloads['hls1']
+    info = engine.get_record('soundcloud', 'hls1')
     assert 49.0 <= info['progress'] <= 51.0
-    # Total size estimate extrapolates from per-fragment average
     assert info['size'] == 1_024_000  # 512000 * (10/5)
-    # Time remaining computed
     assert info['time_remaining'] is not None and info['time_remaining'] > 0
 
 
 def test_update_download_progress_fragmented_caps_at_99_9(tmp_dl: Path) -> None:
-    """Final fragment shouldn't push percentage to 100 — outer thread
-    owns the final flip. Mirrors byte-based behavior."""
+    """Final fragment shouldn't push percentage to 100."""
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['hls2'] = {
-            'id': 'hls2', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'hls2', {
+        'id': 'hls2', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     client._update_download_progress_fragmented(
         'hls2', downloaded=10_000_000, fragment_index=10, fragment_count=10,
         speed_start=time.time() - 5.0,
     )
-    assert client.active_downloads['hls2']['progress'] == 99.9
+    assert engine.get_record('soundcloud', 'hls2')['progress'] == 99.9
 
 
 def test_update_download_progress_fragmented_handles_zero_index(tmp_dl: Path) -> None:
-    """Defensive: yt-dlp can call the progress hook with fragment_index=0
-    on the very first callback (HLS init segment). Progress is 0% and
-    nothing crashes."""
+    """Defensive: fragment_index=0 on first callback → progress 0,
+    no crash."""
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['hls3'] = {
-            'id': 'hls3', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'hls3', {
+        'id': 'hls3', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     client._update_download_progress_fragmented(
         'hls3', downloaded=0, fragment_index=0, fragment_count=10,
         speed_start=time.time(),
     )
-    # No exception, progress stays 0
-    assert client.active_downloads['hls3']['progress'] == 0.0
+    assert engine.get_record('soundcloud', 'hls3')['progress'] == 0.0
 
 
 def test_update_download_progress_fragmented_silently_skips_unknown_id(tmp_dl: Path) -> None:
@@ -590,13 +594,13 @@ def test_update_download_progress_fragmented_silently_skips_unknown_id(tmp_dl: P
 
 def test_get_all_downloads_returns_status_objects(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['s1'] = {
-            'id': 's1', 'filename': 'f', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 33.3, 'size': 1000,
-            'transferred': 333, 'speed': 100, 'time_remaining': 7,
-            'file_path': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 's1', {
+        'id': 's1', 'filename': 'f', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 33.3, 'size': 1000,
+        'transferred': 333, 'speed': 100, 'time_remaining': 7,
+        'file_path': None,
+    })
     out = _run(client.get_all_downloads())
     assert len(out) == 1
     assert isinstance(out[0], DownloadStatus)
@@ -606,54 +610,56 @@ def test_get_all_downloads_returns_status_objects(tmp_dl: Path) -> None:
 
 def test_get_download_status_returns_none_for_unknown(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
+    _wire_engine(client)
     assert _run(client.get_download_status('nope')) is None
 
 
 def test_cancel_download_marks_state(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['c1'] = {
-            'id': 'c1', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 50.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'c1', {
+        'id': 'c1', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 50.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     assert _run(client.cancel_download('c1')) is True
-    assert client.active_downloads['c1']['state'] == 'Cancelled'
+    assert engine.get_record('soundcloud', 'c1')['state'] == 'Cancelled'
 
 
 def test_cancel_download_with_remove_drops_entry(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
-    with client._download_lock:
-        client.active_downloads['c2'] = {
-            'id': 'c2', 'filename': '', 'username': 'soundcloud',
-            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
-            'transferred': 0, 'speed': 0, 'time_remaining': None,
-        }
+    engine = _wire_engine(client)
+    engine.add_record('soundcloud', 'c2', {
+        'id': 'c2', 'filename': '', 'username': 'soundcloud',
+        'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+        'transferred': 0, 'speed': 0, 'time_remaining': None,
+    })
     assert _run(client.cancel_download('c2', remove=True)) is True
-    assert 'c2' not in client.active_downloads
+    assert engine.get_record('soundcloud', 'c2') is None
 
 
 def test_cancel_download_returns_false_for_unknown(tmp_dl: Path) -> None:
     client = SoundcloudClient(download_path=str(tmp_dl))
+    _wire_engine(client)
     assert _run(client.cancel_download('not_real')) is False
 
 
 def test_clear_completed_drops_terminal_entries_only(tmp_dl: Path) -> None:
     """Terminal states get cleared; in-flight downloads survive."""
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
     base = {'filename': '', 'username': 'soundcloud', 'progress': 0.0,
             'size': 0, 'transferred': 0, 'speed': 0, 'time_remaining': None}
-    with client._download_lock:
-        client.active_downloads['done'] = {**base, 'id': 'done', 'state': 'Completed, Succeeded'}
-        client.active_downloads['err']  = {**base, 'id': 'err',  'state': 'Errored'}
-        client.active_downloads['cnc']  = {**base, 'id': 'cnc',  'state': 'Cancelled'}
-        client.active_downloads['live'] = {**base, 'id': 'live', 'state': 'InProgress, Downloading'}
+    engine.add_record('soundcloud', 'done', {**base, 'id': 'done', 'state': 'Completed, Succeeded'})
+    engine.add_record('soundcloud', 'err', {**base, 'id': 'err', 'state': 'Errored'})
+    engine.add_record('soundcloud', 'cnc', {**base, 'id': 'cnc', 'state': 'Cancelled'})
+    engine.add_record('soundcloud', 'live', {**base, 'id': 'live', 'state': 'InProgress, Downloading'})
 
     assert _run(client.clear_all_completed_downloads()) is True
-    assert 'done' not in client.active_downloads
-    assert 'err' not in client.active_downloads
-    assert 'cnc' not in client.active_downloads
-    assert 'live' in client.active_downloads
+    assert engine.get_record('soundcloud', 'done') is None
+    assert engine.get_record('soundcloud', 'err') is None
+    assert engine.get_record('soundcloud', 'cnc') is None
+    assert engine.get_record('soundcloud', 'live') is not None
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +729,7 @@ def test_live_download_a_known_public_track(tmp_dl: Path) -> None:
     another reliably-public free track.
     """
     client = SoundcloudClient(download_path=str(tmp_dl))
+    engine = _wire_engine(client)
     # Search-then-download flow: pick the first hit for a popular query
     tracks, _ = _run(client.search("creative commons electronic music"))
     assert tracks, "Live search returned no results"
@@ -735,7 +742,7 @@ def test_live_download_a_known_public_track(tmp_dl: Path) -> None:
     final_state = None
     final_path = None
     while time.time() < deadline:
-        info = client.active_downloads.get(download_id, {})
+        info = engine.get_record('soundcloud', download_id) or {}
         final_state = info.get('state')
         final_path = info.get('file_path')
         if final_state in {'Completed, Succeeded', 'Errored', 'Cancelled'}:

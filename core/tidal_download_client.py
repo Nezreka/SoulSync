@@ -14,7 +14,6 @@ import re
 import asyncio
 import uuid
 import time
-import threading
 import shutil
 import subprocess
 from typing import List, Optional, Dict, Any, Tuple
@@ -33,7 +32,7 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
-from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("tidal_download_client")
 
@@ -93,7 +92,10 @@ HLS_QUALITY_MAP = {
 HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
 
-class TidalDownloadClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class TidalDownloadClient(DownloadSourcePlugin):
     """
     Tidal download client using tidalapi.
     Provides search, matching, and download capabilities as a drop-in alternative to YouTube/Soulseek.
@@ -116,11 +118,20 @@ class TidalDownloadClient:
         self.session: Optional['tidalapi.Session'] = None
         self._init_session()
 
-        self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = threading.Lock()
-
         self._device_auth_future = None
         self._device_auth_link = None
+
+        # Engine reference is populated by set_engine() at registration
+        # time. Until then dispatch returns None — orchestrator wires
+        # this immediately so the only None case is tests that bypass
+        # the orchestrator.
+        self._engine = None
+
+    def set_engine(self, engine):
+        """Engine callback — gives the client access to the central
+        thread worker + state store. Engine calls this during
+        ``register_plugin`` if the plugin defines it."""
+        self._engine = engine
 
     def set_shutdown_check(self, check_callable):
         self.shutdown_check = check_callable
@@ -604,85 +615,36 @@ class TidalDownloadClient:
             ) from exc
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
+        if '||' not in filename:
+            logger.error(f"Invalid filename format: {filename}")
+            return None
+        if self._engine is None:
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("Tidal client has no engine reference — cannot dispatch download")
+
+        track_id_str, display_name = filename.split('||', 1)
         try:
-            if '||' not in filename:
-                logger.error(f"Invalid filename format: {filename}")
-                return None
-
-            track_id_str, display_name = filename.split('||', 1)
-            try:
-                track_id = int(track_id_str)
-            except ValueError:
-                logger.error(f"Invalid Tidal track ID: {track_id_str}")
-                return None
-
-            logger.info(f"Starting Tidal download: {display_name}")
-
-            download_id = str(uuid.uuid4())
-
-            with self._download_lock:
-                self.active_downloads[download_id] = {
-                    'id': download_id,
-                    'filename': filename,
-                    'username': 'tidal',
-                    'state': 'Initializing',
-                    'progress': 0.0,
-                    'size': 0,
-                    'transferred': 0,
-                    'speed': 0,
-                    'time_remaining': None,
-                    'track_id': track_id,
-                    'display_name': display_name,
-                    'file_path': None,
-                }
-
-            download_thread = threading.Thread(
-                target=self._download_thread_worker,
-                args=(download_id, track_id, display_name, filename),
-                daemon=True,
-            )
-            download_thread.start()
-
-            logger.info(f"Tidal download {download_id} started in background")
-            return download_id
-
-        except Exception as e:
-            logger.error(f"Failed to start Tidal download: {e}")
-            import traceback
-            traceback.print_exc()
+            track_id = int(track_id_str)
+        except ValueError:
+            logger.error(f"Invalid Tidal track ID: {track_id_str}")
             return None
 
-    def _download_thread_worker(self, download_id: str, track_id: int, display_name: str, original_filename: str):
-        try:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'InProgress, Downloading'
+        logger.info(f"Starting Tidal download: {display_name}")
 
-            file_path = self._download_sync(download_id, track_id, display_name)
-
-            if file_path:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Completed, Succeeded'
-                        self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = file_path
-
-                logger.info(f"Tidal download {download_id} completed: {file_path}")
-            else:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Errored'
-
-                logger.error(f"Tidal download {download_id} failed")
-
-        except Exception as e:
-            logger.error(f"Tidal download thread failed for {download_id}: {e}")
-            import traceback
-            traceback.print_exc()
-
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
+        return self._engine.worker.dispatch(
+            source_name='tidal',
+            target_id=track_id,
+            display_name=display_name,
+            original_filename=filename,
+            impl_callable=self._download_sync,
+            extra_record_fields={
+                'track_id': track_id,
+                'display_name': display_name,
+            },
+        )
 
     def _download_sync(self, download_id: str, track_id: int, display_name: str) -> Optional[str]:
         if not self.session or not self.session.check_login():
@@ -727,9 +689,8 @@ class TidalDownloadClient:
                 speed_start = time.time()
                 segments_completed = 0
 
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['size'] = 0
+                if self._engine is not None:
+                    self._engine.update_record('tidal', download_id, {'size': 0})
 
                 with intermediate_path.open('wb') as output_file:
                     if init_uri:
@@ -828,97 +789,82 @@ class TidalDownloadClient:
     def _update_download_progress(self, download_id: str, downloaded: int,
                                   segments_completed: int, total_segments: int,
                                   speed_start: float):
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return
-            info = self.active_downloads[download_id]
-            info['transferred'] = downloaded
+        if self._engine is None:
+            return
+        record = self._engine.get_record('tidal', download_id)
+        if record is None:
+            return
 
-            now = time.time()
-            elapsed_total = now - speed_start
-            speed = int(downloaded / elapsed_total) if elapsed_total > 0 else 0
-            info['speed'] = speed
+        now = time.time()
+        elapsed_total = now - speed_start
+        speed = int(downloaded / elapsed_total) if elapsed_total > 0 else 0
 
-            if total_segments > 0:
-                progress = (segments_completed / total_segments) * 100
-                info['progress'] = round(min(progress, 99.9), 1)
+        progress = record.get('progress', 0.0)
+        if total_segments > 0:
+            progress = round(min((segments_completed / total_segments) * 100, 99.9), 1)
 
-            time_remaining = None
-            if speed > 0:
-                remaining_bytes = downloaded * (total_segments / max(segments_completed, 1)) - downloaded
-                if remaining_bytes > 0:
-                    time_remaining = int(remaining_bytes / speed)
-            info['time_remaining'] = time_remaining
+        time_remaining = None
+        if speed > 0:
+            remaining_bytes = downloaded * (total_segments / max(segments_completed, 1)) - downloaded
+            if remaining_bytes > 0:
+                time_remaining = int(remaining_bytes / speed)
+
+        self._engine.update_record('tidal', download_id, {
+            'transferred': downloaded,
+            'speed': speed,
+            'progress': progress,
+            'time_remaining': time_remaining,
+        })
+
+    def _record_to_status(self, record):
+        return DownloadStatus(
+            id=record['id'],
+            filename=record['filename'],
+            username=record['username'],
+            state=record['state'],
+            progress=record['progress'],
+            size=record.get('size', 0),
+            transferred=record.get('transferred', 0),
+            speed=record.get('speed', 0),
+            time_remaining=record.get('time_remaining'),
+            file_path=record.get('file_path'),
+        )
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        download_statuses = []
-
-        with self._download_lock:
-            for _download_id, info in self.active_downloads.items():
-                status = DownloadStatus(
-                    id=info['id'],
-                    filename=info['filename'],
-                    username=info['username'],
-                    state=info['state'],
-                    progress=info['progress'],
-                    size=info['size'],
-                    transferred=info['transferred'],
-                    speed=info['speed'],
-                    time_remaining=info.get('time_remaining'),
-                    file_path=info.get('file_path'),
-                )
-                download_statuses.append(status)
-
-        return download_statuses
+        if self._engine is None:
+            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('tidal')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return None
-
-            info = self.active_downloads[download_id]
-            return DownloadStatus(
-                id=info['id'],
-                filename=info['filename'],
-                username=info['username'],
-                state=info['state'],
-                progress=info['progress'],
-                size=info['size'],
-                transferred=info['transferred'],
-                speed=info['speed'],
-                time_remaining=info.get('time_remaining'),
-                file_path=info.get('file_path'),
-            )
+        if self._engine is None:
+            return None
+        record = self._engine.get_record('tidal', download_id)
+        return self._record_to_status(record) if record is not None else None
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        try:
-            with self._download_lock:
-                if download_id not in self.active_downloads:
-                    logger.warning(f"Download {download_id} not found")
-                    return False
-
-                self.active_downloads[download_id]['state'] = 'Cancelled'
-                logger.info(f"Marked Tidal download {download_id} as cancelled")
-
-                if remove:
-                    del self.active_downloads[download_id]
-                    logger.info(f"Removed Tidal download {download_id} from queue")
-
-            return True
-        except Exception as e:
-            logger.error(f"Failed to cancel download {download_id}: {e}")
+        if self._engine is None:
             return False
+        if self._engine.get_record('tidal', download_id) is None:
+            logger.warning(f"Tidal download {download_id} not found")
+            return False
+        self._engine.update_record('tidal', download_id, {'state': 'Cancelled'})
+        logger.info(f"Marked Tidal download {download_id} as cancelled")
+        if remove:
+            self._engine.remove_record('tidal', download_id)
+            logger.info(f"Removed Tidal download {download_id} from queue")
+        return True
 
     async def clear_all_completed_downloads(self) -> bool:
+        if self._engine is None:
+            return True
         try:
-            with self._download_lock:
-                ids_to_remove = [
-                    did for did, info in self.active_downloads.items()
-                    if info.get('state', '') in ('Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted')
-                ]
-                for did in ids_to_remove:
-                    del self.active_downloads[did]
-
+            terminal = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+            for record in list(self._engine.iter_records_for_source('tidal')):
+                if record.get('state') in terminal:
+                    self._engine.remove_record('tidal', record['id'])
             return True
         except Exception as e:
             logger.error(f"Error clearing downloads: {e}")

@@ -64,7 +64,7 @@ download_batches = None
 sync_states = None
 youtube_playlist_states = None
 tidal_discovery_states = None
-soulseek_client = None
+download_orchestrator = None
 _log_path = None
 _log_dir = None
 app = None
@@ -80,7 +80,7 @@ def init(
     sync_states_dict,
     youtube_playlist_states_dict,
     tidal_discovery_states_dict,
-    soulseek_client_obj,
+    download_orchestrator_obj,
     log_path,
     log_dir,
     flask_app,
@@ -90,7 +90,7 @@ def init(
     """Bind shared state/helpers from web_server."""
     global SOULSYNC_VERSION, _DIRECT_RUN, _status_cache, qobuz_enrichment_worker
     global download_batches, sync_states, youtube_playlist_states
-    global tidal_discovery_states, soulseek_client, _log_path, _log_dir
+    global tidal_discovery_states, download_orchestrator, _log_path, _log_dir
     global app, get_database, _get_tidal_client
     SOULSYNC_VERSION = soulsync_version
     _DIRECT_RUN = direct_run
@@ -100,7 +100,7 @@ def init(
     sync_states = sync_states_dict
     youtube_playlist_states = youtube_playlist_states_dict
     tidal_discovery_states = tidal_discovery_states_dict
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
     _log_path = log_path
     _log_dir = log_dir
     app = flask_app
@@ -292,9 +292,9 @@ def get_debug_info():
 
     # Download client init failures
     info['download_client_failures'] = []
-    if soulseek_client and hasattr(soulseek_client, '_init_failures'):
-        info['download_client_failures'] = soulseek_client._init_failures
-    elif not soulseek_client:
+    if download_orchestrator and hasattr(download_orchestrator, '_init_failures'):
+        info['download_client_failures'] = download_orchestrator._init_failures
+    elif not download_orchestrator:
         info['download_client_failures'] = ['ALL (orchestrator failed to initialize)']
 
     # API rate monitor — current calls/min, 24h totals, peaks, rate limit events

@@ -2,7 +2,7 @@
 
 Body is byte-identical to the original. Wishlist helpers are
 direct imports from core.wishlist.*; runtime state comes from
-core.runtime_state; automation_engine, soulseek_client, and the
+core.runtime_state; automation_engine, download_orchestrator, and the
 sweep helper are injected via init() because they are constructed
 in web_server.py.
 """
@@ -29,15 +29,15 @@ logger = logging.getLogger(__name__)
 
 # Injected at runtime via init().
 automation_engine = None
-soulseek_client = None
+download_orchestrator = None
 _sweep_empty_download_directories = None
 
 
-def init(engine, soulseek_client_obj, sweep_fn):
+def init(engine, download_orchestrator_obj, sweep_fn):
     """Bind shared singletons + the sweep helper from web_server."""
-    global automation_engine, soulseek_client, _sweep_empty_download_directories
+    global automation_engine, download_orchestrator, _sweep_empty_download_directories
     automation_engine = engine
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
     _sweep_empty_download_directories = sweep_fn
 
 
@@ -185,7 +185,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         # Auto-cleanup: Clear completed downloads from slskd
         try:
             logger.info(f"[Auto-Cleanup] Clearing completed downloads from slskd after batch {batch_id}")
-            run_async(soulseek_client.clear_all_completed_downloads())
+            run_async(download_orchestrator.clear_all_completed_downloads())
             logger.info("[Auto-Cleanup] Completed downloads cleared from slskd")
         except Exception as cleanup_error:
             logger.warning(f"[Auto-Cleanup] Failed to clear completed downloads: {cleanup_error}")

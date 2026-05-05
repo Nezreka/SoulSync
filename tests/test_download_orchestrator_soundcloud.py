@@ -39,18 +39,18 @@ def orchestrator() -> DownloadOrchestrator:
 
 
 def test_orchestrator_constructs_soundcloud_client(orchestrator: DownloadOrchestrator) -> None:
-    assert orchestrator.soundcloud is not None
-    assert isinstance(orchestrator.soundcloud, SoundcloudClient)
+    assert orchestrator.client('soundcloud') is not None
+    assert isinstance(orchestrator.client('soundcloud'), SoundcloudClient)
 
 
 def test_client_lookup_resolves_soundcloud(orchestrator: DownloadOrchestrator) -> None:
-    """Verify the dict-based name → client lookup includes SoundCloud."""
-    assert orchestrator._client('soundcloud') is orchestrator.soundcloud
+    """Verify the registry-backed name → client lookup includes SoundCloud."""
+    assert orchestrator.client('soundcloud') is orchestrator.registry.get('soundcloud')
 
 
 def test_client_lookup_returns_none_for_unknown(orchestrator: DownloadOrchestrator) -> None:
     """Sanity: unknown sources don't somehow resolve to SoundCloud."""
-    assert orchestrator._client('made_up') is None
+    assert orchestrator.client('made_up') is None
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ def test_download_routes_soundcloud_username_to_client(orchestrator: DownloadOrc
     async def _fake_download(username, filename, file_size=0):
         return sentinel
 
-    with patch.object(orchestrator.soundcloud, 'download', side_effect=_fake_download) as mock_dl:
+    with patch.object(orchestrator.client('soundcloud'), 'download', side_effect=_fake_download) as mock_dl:
         result = _run(orchestrator.download(
             'soundcloud',
             '999||https://soundcloud.com/x/y||Display',
@@ -93,13 +93,13 @@ def test_download_routes_soundcloud_username_to_client(orchestrator: DownloadOrc
 def test_download_unknown_username_still_falls_to_soulseek(orchestrator: DownloadOrchestrator) -> None:
     """Adding SoundCloud must not change the legacy Soulseek-fallback
     behavior for unrecognized usernames."""
-    if orchestrator.soulseek is None:
+    if orchestrator.client('soulseek') is None:
         pytest.skip("Soulseek client unavailable in this environment")
 
     async def _fake_soulseek_download(username, filename, file_size=0):
         return 'soulseek-id'
 
-    with patch.object(orchestrator.soulseek, 'download', side_effect=_fake_soulseek_download) as mock_dl:
+    with patch.object(orchestrator.client('soulseek'), 'download', side_effect=_fake_soulseek_download) as mock_dl:
         result = _run(orchestrator.download('some_random_user', 'file.mp3', 0))
     assert result == 'soulseek-id'
     mock_dl.assert_called_once()
@@ -122,8 +122,8 @@ def test_hybrid_search_iterates_soundcloud_when_in_order(orchestrator: DownloadO
     async def _fake_search(query, timeout=None, progress_callback=None):
         return ([fake_track], [])
 
-    with patch.object(orchestrator.soundcloud, 'search', side_effect=_fake_search), \
-         patch.object(orchestrator.soundcloud, 'is_configured', return_value=True):
+    with patch.object(orchestrator.client('soundcloud'), 'search', side_effect=_fake_search), \
+         patch.object(orchestrator.client('soundcloud'), 'is_configured', return_value=True):
         tracks, albums = _run(orchestrator.search("any query"))
 
     assert tracks == [fake_track]
@@ -136,7 +136,7 @@ def test_hybrid_search_skips_unconfigured_soundcloud(orchestrator: DownloadOrche
     orchestrator.mode = 'hybrid'
     orchestrator.hybrid_order = ['soundcloud', 'soulseek']
 
-    if orchestrator.soulseek is None:
+    if orchestrator.client('soulseek') is None:
         pytest.skip("Soulseek client unavailable in this environment")
 
     soulseek_track = MagicMock()
@@ -145,9 +145,9 @@ def test_hybrid_search_skips_unconfigured_soundcloud(orchestrator: DownloadOrche
     async def _fake_soulseek_search(query, timeout=None, progress_callback=None):
         return ([soulseek_track], [])
 
-    with patch.object(orchestrator.soundcloud, 'is_configured', return_value=False), \
-         patch.object(orchestrator.soulseek, 'is_configured', return_value=True), \
-         patch.object(orchestrator.soulseek, 'search', side_effect=_fake_soulseek_search):
+    with patch.object(orchestrator.client('soundcloud'), 'is_configured', return_value=False), \
+         patch.object(orchestrator.client('soulseek'), 'is_configured', return_value=True), \
+         patch.object(orchestrator.client('soulseek'), 'search', side_effect=_fake_soulseek_search):
         tracks, _ = _run(orchestrator.search("any"))
 
     assert tracks == [soulseek_track]
@@ -166,7 +166,7 @@ def test_get_all_downloads_walks_soundcloud(orchestrator: DownloadOrchestrator) 
     async def _fake_get_all():
         return [fake_status]
 
-    with patch.object(orchestrator.soundcloud, 'get_all_downloads', side_effect=_fake_get_all):
+    with patch.object(orchestrator.client('soundcloud'), 'get_all_downloads', side_effect=_fake_get_all):
         all_dl = _run(orchestrator.get_all_downloads())
 
     assert any(d is fake_status for d in all_dl)
@@ -180,7 +180,7 @@ def test_get_download_status_finds_soundcloud_id(orchestrator: DownloadOrchestra
     async def _fake_get_status(download_id):
         return fake_status if download_id == 'sc-2' else None
 
-    with patch.object(orchestrator.soundcloud, 'get_download_status', side_effect=_fake_get_status):
+    with patch.object(orchestrator.client('soundcloud'), 'get_download_status', side_effect=_fake_get_status):
         result = _run(orchestrator.get_download_status('sc-2'))
 
     assert result is fake_status
@@ -192,7 +192,7 @@ def test_cancel_routes_soundcloud_username(orchestrator: DownloadOrchestrator) -
     async def _fake_cancel(download_id, username=None, remove=False):
         return True
 
-    with patch.object(orchestrator.soundcloud, 'cancel_download', side_effect=_fake_cancel) as mock_cancel:
+    with patch.object(orchestrator.client('soundcloud'), 'cancel_download', side_effect=_fake_cancel) as mock_cancel:
         ok = _run(orchestrator.cancel_download('sc-3', username='soundcloud'))
     assert ok is True
     mock_cancel.assert_called_once()
@@ -210,7 +210,7 @@ def test_clear_completed_walks_soundcloud(orchestrator: DownloadOrchestrator) ->
     async def _fake_clear():
         return True
 
-    with patch.object(orchestrator.soundcloud, 'clear_all_completed_downloads', side_effect=_fake_clear) as mock_clear:
+    with patch.object(orchestrator.client('soundcloud'), 'clear_all_completed_downloads', side_effect=_fake_clear) as mock_clear:
         _run(orchestrator.clear_all_completed_downloads())
     mock_clear.assert_called_once()
 
@@ -228,8 +228,8 @@ def test_soundcloud_only_mode_uses_soundcloud(orchestrator: DownloadOrchestrator
     async def _fake_search(query, timeout=None, progress_callback=None):
         return ([MagicMock(username='soundcloud')], [])
 
-    with patch.object(orchestrator.soundcloud, 'search', side_effect=_fake_search) as mock_sc, \
-         patch.object(orchestrator.soulseek, 'search', side_effect=AssertionError("soulseek must not be searched")):
+    with patch.object(orchestrator.client('soundcloud'), 'search', side_effect=_fake_search) as mock_sc, \
+         patch.object(orchestrator.client('soulseek'), 'search', side_effect=AssertionError("soulseek must not be searched")):
         tracks, _ = _run(orchestrator.search("any"))
 
     assert len(tracks) == 1
