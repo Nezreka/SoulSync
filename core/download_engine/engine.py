@@ -60,10 +60,12 @@ class DownloadEngine:
 
     def __init__(self) -> None:
         self.state_lock = threading.RLock()
-        # Composite key: (source_name, download_id) → record dict.
-        # RLock so a plugin's worker callback can re-enter while
-        # holding the lock for its own update.
-        self._records: Dict[Tuple[str, str], DownloadRecord] = {}
+        # Nested dict: source_name → {download_id → record}. Replaces
+        # the original single-dict composite-key layout so
+        # ``iter_records_for_source`` is O(source_records) instead of
+        # O(total_records). RLock so a plugin's worker callback can
+        # re-enter while holding the lock for its own update.
+        self._records: Dict[str, Dict[str, DownloadRecord]] = {}
         # Plugins that have registered with the engine. Source name
         # → plugin instance.
         self._plugins: Dict[str, Any] = {}
@@ -162,16 +164,16 @@ class DownloadEngine:
         directly via their own dicts; Phase B2 routes them through
         here)."""
         with self.state_lock:
-            key = (source_name, download_id)
-            if key in self._records:
+            source_bucket = self._records.setdefault(source_name, {})
+            if download_id in source_bucket:
                 logger.warning("Replacing existing download record for %s/%s", source_name, download_id)
-            self._records[key] = dict(record)
+            source_bucket[download_id] = dict(record)
 
     def update_record(self, source_name: str, download_id: str, patch: DownloadRecord) -> None:
         """Apply a partial patch to an existing record. No-op if the
         record was already removed (e.g. cancelled mid-update)."""
         with self.state_lock:
-            existing = self._records.get((source_name, download_id))
+            existing = self._records.get(source_name, {}).get(download_id)
             if existing is None:
                 return
             existing.update(patch)
@@ -191,7 +193,7 @@ class DownloadEngine:
         the check + write closes the window.
         """
         with self.state_lock:
-            existing = self._records.get((source_name, download_id))
+            existing = self._records.get(source_name, {}).get(download_id)
             if existing is None:
                 return False
             if existing.get('state') in skip_if_state_in:
@@ -203,25 +205,35 @@ class DownloadEngine:
         """Delete a record (cancellation cleanup). Returns the
         removed record or None if not found."""
         with self.state_lock:
-            return self._records.pop((source_name, download_id), None)
+            source_bucket = self._records.get(source_name)
+            if not source_bucket:
+                return None
+            removed = source_bucket.pop(download_id, None)
+            # Drop the empty source bucket so iteration / membership
+            # checks don't see a stale source key.
+            if not source_bucket:
+                self._records.pop(source_name, None)
+            return removed
 
     def get_record(self, source_name: str, download_id: str) -> Optional[DownloadRecord]:
         """Return a SHALLOW COPY of the record. Caller mutations
         don't affect engine state — use ``update_record`` for that."""
         with self.state_lock:
-            record = self._records.get((source_name, download_id))
+            record = self._records.get(source_name, {}).get(download_id)
             return dict(record) if record is not None else None
 
     def iter_records_for_source(self, source_name: str) -> Iterator[DownloadRecord]:
         """Yield SHALLOW COPIES of every record owned by a source.
         Holds the lock briefly to snapshot, then yields outside the
-        lock so callers can spend arbitrary time on each record."""
+        lock so callers can spend arbitrary time on each record.
+
+        With the nested-dict layout this is O(source_records) — only
+        touches the bucket for the requested source, not every record
+        across every source.
+        """
         with self.state_lock:
-            snapshot = [
-                dict(record)
-                for (source, _), record in self._records.items()
-                if source == source_name
-            ]
+            source_bucket = self._records.get(source_name, {})
+            snapshot = [dict(record) for record in source_bucket.values()]
         for record in snapshot:
             yield record
 
