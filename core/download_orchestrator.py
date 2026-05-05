@@ -547,10 +547,8 @@ class DownloadOrchestrator:
 # Singleton accessor — mirrors Cin's metadata engine pattern
 # (``get_metadata_engine()``). Callers that don't need a custom
 # registry use this instead of instantiating DownloadOrchestrator
-# directly. Currently web_server.py constructs the singleton at
-# startup and exposes it via the legacy ``soulseek_client`` global;
-# this factory exists for new callers + future migration of that
-# global to a more honestly-named ``download_orchestrator``.
+# directly. web_server.py constructs the singleton at startup and
+# exposes it via the ``download_orchestrator`` global.
 # ---------------------------------------------------------------------------
 
 _default_orchestrator: Optional['DownloadOrchestrator'] = None

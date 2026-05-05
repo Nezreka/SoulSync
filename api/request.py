@@ -104,7 +104,7 @@ def _run_search_and_download(request_id, query, notify_url):
             if request_id in _pending_requests:
                 _pending_requests[request_id]['status'] = 'searching'
 
-        soulseek = current_app._get_current_object().soulsync.get('soulseek_client')
+        soulseek = current_app._get_current_object().soulsync.get('download_orchestrator')
         if not soulseek:
             with _requests_lock:
                 if request_id in _pending_requests:

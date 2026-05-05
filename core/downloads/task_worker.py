@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TaskWorkerDeps:
     """Bundle of cross-cutting deps the per-task download worker needs."""
-    soulseek_client: Any
+    download_orchestrator: Any
     matching_engine: Any
     run_async: Callable
     try_source_reuse: Callable                    # (task_id, batch_id, track) -> bool
@@ -210,7 +210,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
 
             try:
                 # Perform search with timeout
-                tracks_result, _ = deps.run_async(deps.soulseek_client.search(query, timeout=30))
+                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(query, timeout=30))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns
@@ -272,9 +272,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # === HYBRID FALLBACK: If primary source failed, try remaining sources directly ===
         # The orchestrator's hybrid search stops at the first source with results, even if
         # those results all fail quality filtering. Try remaining sources individually.
-        if getattr(deps.soulseek_client, 'mode', '') == 'hybrid':
+        if getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
-                orch = deps.soulseek_client
+                orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []
                 if not hybrid_order:
                     primary = getattr(orch, 'hybrid_primary', 'soulseek')

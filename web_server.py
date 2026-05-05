@@ -570,7 +570,7 @@ IS_SHUTTING_DOWN = False
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
-spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
     spotify_client = get_spotify_client()
@@ -604,7 +604,7 @@ except Exception as e:
     logger.error(f"  SoulSync library client failed to initialize: {e}")
 
 try:
-    soulseek_client = DownloadOrchestrator()
+    download_orchestrator = DownloadOrchestrator()
     logger.info("  Download orchestrator initialized")
 except Exception as e:
     logger.error(f"  Download orchestrator failed to initialize: {e}")
@@ -622,7 +622,7 @@ except Exception as e:
     logger.error(f"  Matching engine failed to initialize: {e}")
 
 try:
-    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
+    sync_service = PlaylistSyncService(spotify_client, plex_client, download_orchestrator, jellyfin_client, navidrome_client)
     logger.info("  Playlist sync service initialized")
 except Exception as e:
     logger.error(f"  Playlist sync service failed to initialize: {e}")
@@ -630,8 +630,8 @@ except Exception as e:
 # Inject shutdown check callback into every download source that
 # accepts one. Generic dispatch via the registry — no per-source
 # attribute reaches needed.
-if soulseek_client and hasattr(soulseek_client, 'registry'):
-    for _src_name, _src_client in soulseek_client.registry.all_plugins():
+if download_orchestrator and hasattr(download_orchestrator, 'registry'):
+    for _src_name, _src_client in download_orchestrator.registry.all_plugins():
         if _src_client is not None and hasattr(_src_client, 'set_shutdown_check'):
             try:
                 _src_client.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
@@ -1993,9 +1993,9 @@ def _register_automation_handlers():
         hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
         soulseek_active = (dl_mode == 'soulseek' or
                           (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
-        # soulseek_client is a DownloadOrchestrator; the real client lives on
-        # .soulseek. Match the getattr pattern used at the other call sites.
-        slskd = getattr(soulseek_client, 'soulseek', None) if soulseek_client else None
+        # Reach the underlying SoulseekClient via the orchestrator's
+        # generic accessor.
+        slskd = download_orchestrator.client('soulseek') if download_orchestrator else None
         if not soulseek_active or not slskd or not slskd.base_url:
             _update_automation_progress(automation_id,
                 log_line='Soulseek not active — skipped', log_type='skip')
@@ -2005,7 +2005,7 @@ def _register_automation_handlers():
                 log_line='Auto-clear disabled in settings', log_type='skip')
             return {'status': 'skipped'}
         try:
-            success = run_async(soulseek_client.maintain_search_history_with_buffer(
+            success = run_async(download_orchestrator.maintain_search_history_with_buffer(
                 keep_searches=50, trigger_threshold=200
             ))
             if success:
@@ -2041,7 +2041,7 @@ def _register_automation_handlers():
                     log_line='Skipped — downloads active', log_type='skip')
                 return {'status': 'completed'}
 
-            run_async(soulseek_client.clear_all_completed_downloads())
+            run_async(download_orchestrator.clear_all_completed_downloads())
             if not has_post_processing:
                 _sweep_empty_download_directories()
             _update_automation_progress(automation_id,
@@ -2096,7 +2096,7 @@ def _register_automation_handlers():
                 log_line='Download queue: skipped (active batches)', log_type='skip')
         else:
             try:
-                run_async(soulseek_client.clear_all_completed_downloads())
+                run_async(download_orchestrator.clear_all_completed_downloads())
                 steps.append('Download queue: cleared')
                 _update_automation_progress(automation_id,
                     log_line='Download queue: cleared', log_type='success')
@@ -2154,7 +2154,7 @@ def _register_automation_handlers():
                 _update_automation_progress(automation_id,
                     log_line='Search cleanup: disabled in settings', log_type='skip')
             else:
-                run_async(soulseek_client.maintain_search_history_with_buffer(
+                run_async(download_orchestrator.maintain_search_history_with_buffer(
                     keep_searches=50, trigger_threshold=200
                 ))
                 steps.append('Search history: cleaned')
@@ -2286,7 +2286,7 @@ def _register_automation_handlers():
             if automation_id:
                 _update_automation_progress(automation_id,
                     phase='Searching', log_line=f'Searching: {query}', log_type='info')
-            result = run_async(soulseek_client.search_and_download_best(query))
+            result = run_async(download_orchestrator.search_and_download_best(query))
             if result:
                 if automation_id:
                     _update_automation_progress(automation_id,
@@ -2348,7 +2348,7 @@ try:
     app.register_blueprint(api_bp, url_prefix='/api/v1')
     app.soulsync = {
         'spotify_client': spotify_client,
-        'soulseek_client': soulseek_client,
+        'download_orchestrator': download_orchestrator,
         'tidal_client': tidal_client,
         'matching_engine': matching_engine,
         'config_manager': config_manager,
@@ -2453,8 +2453,9 @@ def get_cached_transfer_data():
 
             # First, get Soulseek downloads from API
             transfers_data = None
-            if not soulseek_known_down and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.client("soulseek").base_url:
-                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not soulseek_known_down and _slsk and _slsk.base_url:
+                transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
                 for user_data in transfers_data:
@@ -2477,9 +2478,9 @@ def get_cached_transfer_data():
                 all_downloads = []
                 # Generic dispatch — engine returns active downloads
                 # across every plugin in one call, no per-source iteration.
-                if soulseek_client and hasattr(soulseek_client, 'engine'):
+                if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
-                        all_downloads = run_async(soulseek_client.engine.get_all_downloads())
+                        all_downloads = run_async(download_orchestrator.engine.get_all_downloads())
                     except Exception:
                         pass
                 for download in all_downloads:
@@ -3052,7 +3053,7 @@ def _build_prepare_stream_deps():
 
     return _streaming_prepare.PrepareStreamDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         stream_lock=stream_lock,
         project_root=os.path.dirname(os.path.abspath(__file__)),
         docker_resolve_path=docker_resolve_path,
@@ -3499,10 +3500,10 @@ def get_status():
             if is_serverless:
                 soulseek_status = True
                 soulseek_response_time = 0
-            elif soulseek_relevant and soulseek_client:
+            elif soulseek_relevant and download_orchestrator:
                 soulseek_start = time.time()
                 try:
-                    soulseek_status = run_async(soulseek_client.check_connection())
+                    soulseek_status = run_async(download_orchestrator.check_connection())
                 except Exception:
                     soulseek_status = False
                 soulseek_response_time = (time.time() - soulseek_start) * 1000
@@ -3915,7 +3916,7 @@ def _build_system_stats():
 
     if soulseek_active and not soulseek_known_down:
         try:
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     if 'directories' in user_data:
@@ -4141,11 +4142,11 @@ def handle_settings():
             if navidrome_client:
                 navidrome_client.reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
-            if soulseek_client:
-                soulseek_client.reload_settings()
+            if download_orchestrator:
+                download_orchestrator.reload_settings()
                 # Reload YouTube client settings (rate limiting, cookies)
-                if hasattr(soulseek_client, 'youtube'):
-                    soulseek_client.client("youtube").reload_settings()
+                if hasattr(download_orchestrator, 'youtube'):
+                    download_orchestrator.client("youtube").reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
@@ -4177,7 +4178,7 @@ def handle_settings():
             data = dict(config_manager.config_data)
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
             try:
-                data['_source_status'] = soulseek_client.get_source_status()
+                data['_source_status'] = download_orchestrator.get_source_status()
             except Exception:
                 pass
             return jsonify(data)
@@ -6728,7 +6729,7 @@ def _build_search_deps():
         spotify_client=spotify_client,
         hydrabase_client=hydrabase_client,
         hydrabase_worker=hydrabase_worker,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         fix_artist_image_url=fix_artist_image_url,
         is_hydrabase_active=_is_hydrabase_active,
         get_metadata_fallback_source=_get_metadata_fallback_source,
@@ -6754,7 +6755,7 @@ def search_music():
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     try:
-        results = _search_basic.run_basic_soulseek_search(query, soulseek_client, run_async)
+        results = _search_basic.run_basic_soulseek_search(query, download_orchestrator, run_async)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except Exception as e:
@@ -6809,7 +6810,7 @@ def enhanced_search_source(source_name):
 
     When the requested source's client isn't available (Spotify unauthed,
     Discogs missing token, Hydrabase disconnected, MusicBrainz import
-    failure, soulseek_client.client("youtube") missing), returns plain JSON
+    failure, download_orchestrator.client("youtube") missing), returns plain JSON
     `{"artists":[],"albums":[],"tracks":[],"available":false}` to match
     the original endpoint contract.
     """
@@ -6894,7 +6895,7 @@ def stream_enhanced_search_track():
             album_name=album_name,
             duration_ms=duration_ms,
             config_manager=config_manager,
-            soulseek_client=soulseek_client,
+            download_orchestrator=download_orchestrator,
             matching_engine=matching_engine,
             run_async=run_async,
         )
@@ -7033,7 +7034,7 @@ def download_music_video():
             def _progress(pct):
                 _music_video_downloads[video_id]['progress'] = round(pct, 1)
 
-            final_path = soulseek_client.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
+            final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
 
             if final_path and os.path.exists(final_path):
                 _music_video_downloads[video_id]['status'] = 'completed'
@@ -7092,7 +7093,7 @@ def start_download():
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
 
-                    download_id = run_async(soulseek_client.download(
+                    download_id = run_async(download_orchestrator.download(
                         username,
                         filename,
                         file_size
@@ -7141,7 +7142,7 @@ def start_download():
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
-            download_id = run_async(soulseek_client.download(username, filename, file_size))
+            download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
@@ -7337,7 +7338,7 @@ def get_download_status():
     A robust status checker that correctly finds completed files by searching
     the entire download directory with fuzzy matching, mirroring the logic from downloads.py.
     """
-    if not soulseek_client:
+    if not download_orchestrator:
         return jsonify({"transfers": []})
 
     try:
@@ -7346,7 +7347,7 @@ def get_download_status():
         soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
         transfers_data = None
         if not soulseek_known_down:
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
 
         # Don't return early if no Soulseek transfers - YouTube/Tidal downloads need to be checked too!
         all_transfers = []
@@ -7414,7 +7415,7 @@ def get_download_status():
                                                 transfer_id = file_info.get('id')
                                                 if transfer_id:
                                                     try:
-                                                        run_async(soulseek_client.cancel_download(str(transfer_id), username, remove=True))
+                                                        run_async(download_orchestrator.cancel_download(str(transfer_id), username, remove=True))
                                                     except Exception:
                                                         pass
                                                 _orphaned_download_keys.discard(context_key)
@@ -7526,7 +7527,7 @@ def get_download_status():
 
         # Also include YouTube/Tidal downloads in the response
         try:
-            all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
+            all_streaming_downloads = run_async(download_orchestrator.get_all_downloads())
 
             for download in all_streaming_downloads:
                 if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
@@ -7658,7 +7659,7 @@ def cancel_download():
         return jsonify({"success": False, "error": "Missing download_id or username."}), 400
 
     try:
-        success = _downloads_cancel.cancel_single_download(soulseek_client, run_async, download_id, username)
+        success = _downloads_cancel.cancel_single_download(download_orchestrator, run_async, download_id, username)
         if success:
             return jsonify({"success": True, "message": "Download cancelled."})
         return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
@@ -7672,7 +7673,7 @@ def cancel_all_downloads():
     """Cancel all active downloads from slskd, then clear completed ones."""
     try:
         success, msg = _downloads_cancel.cancel_all_active(
-            soulseek_client, run_async, _sweep_empty_download_directories,
+            download_orchestrator, run_async, _sweep_empty_download_directories,
         )
         if success:
             return jsonify({"success": True, "message": msg})
@@ -7687,7 +7688,7 @@ def clear_finished_downloads():
     """Clear all terminal (completed, cancelled, failed) downloads from slskd."""
     try:
         success = _downloads_cancel.clear_finished_active(
-            soulseek_client, run_async, _sweep_empty_download_directories,
+            download_orchestrator, run_async, _sweep_empty_download_directories,
         )
         if success:
             return jsonify({"success": True, "message": "Finished downloads cleared."})
@@ -8074,7 +8075,7 @@ def clear_all_searches():
     Clear all searches from slskd search history.
     """
     try:
-        success = run_async(soulseek_client.clear_all_searches())
+        success = run_async(download_orchestrator.clear_all_searches())
         if success:
             add_activity_item("", "Search Cleanup", "All search history cleared manually", "Now")
             return jsonify({"success": True, "message": "All searches cleared."})
@@ -8094,7 +8095,7 @@ def maintain_search_history():
         keep_searches = data.get('keep_searches', 50)
         trigger_threshold = data.get('trigger_threshold', 200)
         
-        success = run_async(soulseek_client.maintain_search_history_with_buffer(
+        success = run_async(download_orchestrator.maintain_search_history_with_buffer(
             keep_searches=keep_searches, trigger_threshold=trigger_threshold
         ))
         if success:
@@ -11674,7 +11675,7 @@ def redownload_search_sources(track_id):
         # Get all available download source clients
         download_clients = {}
         try:
-            orch = soulseek_client  # The download orchestrator
+            orch = download_orchestrator  # The download orchestrator
             if hasattr(orch, 'soulseek') and orch.soulseek:
                 if not (hasattr(orch.soulseek, 'is_configured') and not orch.soulseek.is_configured()):
                     download_clients['soulseek'] = orch.soulseek
@@ -11698,7 +11699,7 @@ def redownload_search_sources(track_id):
 
         if not download_clients:
             # Fallback: use orchestrator directly
-            download_clients = {'default': soulseek_client}
+            download_clients = {'default': download_orchestrator}
 
         logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
@@ -12660,7 +12661,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                 continue
 
             # Start download
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12708,7 +12709,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             if not username or not filename:
                 continue
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12816,7 +12817,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 'disc_number': corrected_meta.get('disc_number', 1)
             }
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12883,7 +12884,7 @@ def start_matched_download():
             if not username or not filename:
                 return jsonify({"success": False, "error": "Missing username or filename"}), 400
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12943,7 +12944,7 @@ def start_matched_download():
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
             
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12972,7 +12973,7 @@ def start_matched_download():
 
 def _parse_filename_metadata(filename: str) -> dict:
     """
-    A direct port of the metadata parsing logic from the GUI's soulseek_client.py.
+    A direct port of the metadata parsing logic from the GUI's download_orchestrator.py.
     This is the crucial missing step that cleans filenames BEFORE Spotify matching.
     """
     return parse_filename_metadata(filename)
@@ -14148,7 +14149,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
 
@@ -14253,7 +14254,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
 
@@ -14377,7 +14378,7 @@ def _post_process_matched_download(context_key, context, file_path):
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
         ),
     )
 
@@ -16821,7 +16822,7 @@ def _build_master_deps():
 
     return _downloads_master.MasterDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         run_async=run_async,
         mb_worker=mb_worker,
         mb_release_cache=mb_release_cache,
@@ -16859,7 +16860,7 @@ def _build_post_processing_deps():
     """Build the PostProcessDeps bundle from web_server.py globals on each call."""
     return _downloads_post_processing.PostProcessDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         run_async=run_async,
         docker_resolve_path=docker_resolve_path,
         extract_filename=extract_filename,
@@ -16886,7 +16887,7 @@ from core.downloads import task_worker as _downloads_task_worker
 def _build_task_worker_deps():
     """Build TaskWorkerDeps bundle from web_server.py globals on each call."""
     return _downloads_task_worker.TaskWorkerDeps(
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         matching_engine=matching_engine,
         run_async=run_async,
         try_source_reuse=_try_source_reuse,
@@ -16912,7 +16913,7 @@ from core.downloads import candidates as _downloads_candidates
 def _build_candidates_deps():
     """Build the CandidatesDeps bundle from web_server.py globals on each call."""
     return _downloads_candidates.CandidatesDeps(
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         spotify_client=spotify_client,
         run_async=run_async,
         get_database=get_database,
@@ -17077,7 +17078,7 @@ def _try_source_reuse(task_id, batch_id, track):
     # Sort by confidence, filter by quality preference
     candidates.sort(key=lambda c: c.confidence, reverse=True)
     _sr.info(f"Found {len(candidates)} candidates above 0.70, best={candidates[0].confidence:.3f} ({candidates[0].filename})")
-    slsk = soulseek_client.client("soulseek") if hasattr(soulseek_client, 'soulseek') else soulseek_client
+    slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'soulseek') else download_orchestrator
     filtered = slsk.filter_results_by_quality_preference(candidates)
     if not filtered:
         _sr.info(f"Quality filter rejected all candidates for task {task_id}")
@@ -17156,8 +17157,8 @@ def _store_batch_source(batch_id, username, filename):
         return
 
     try:
-        # Access SoulseekClient directly (soulseek_client is DownloadOrchestrator)
-        slsk = soulseek_client.client("soulseek") if hasattr(soulseek_client, 'soulseek') else soulseek_client
+        # Access SoulseekClient directly (download_orchestrator is DownloadOrchestrator)
+        slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'soulseek') else download_orchestrator
         _sr.info(f"Browsing {username}:{folder_path}...")
         files = run_async(slsk.browse_user_directory(username, folder_path))
         if not files:
@@ -17488,7 +17489,7 @@ def cancel_download_task():
         if download_id and username:
             try:
                 # This is an async call, so we run it and wait
-                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+                run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                 logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
                 logger.error(f"Failed to cancel download on slskd, but worker already moved on: {e}")
@@ -17733,14 +17734,14 @@ def cancel_task_v2():
                 # username: youtube/tidal/qobuz/hifi/deezer_dl/lidarr go to
                 # their streaming clients, anything else goes to Soulseek.
                 #
-                # Replaces an older block that assumed soulseek_client was a
+                # Replaces an older block that assumed download_orchestrator was a
                 # raw SoulseekClient and accessed .base_url / ._make_request
                 # directly — crashed with AttributeError on the orchestrator
                 # and silently left streaming downloads running in background.
                 try:
                     logger.info(f"[Atomic Cancel] Dispatching cancel to orchestrator: username={username} download_id={download_id}")
                     cancel_success = run_async(
-                        soulseek_client.cancel_download(download_id, username, remove=True)
+                        download_orchestrator.cancel_download(download_id, username, remove=True)
                     )
                     if cancel_success:
                         logger.info(f"[Atomic Cancel] Orchestrator cancelled download: {download_id}")
@@ -19725,7 +19726,7 @@ def get_discover_album(source, album_id):
 def hifi_status():
     """Check if HiFi API instances are reachable."""
     try:
-        hifi = soulseek_client.client("hifi")
+        hifi = download_orchestrator.client("hifi")
         available = hifi.is_available()
         version = hifi.get_version() if available else None
         return jsonify({
@@ -19749,8 +19750,8 @@ def soundcloud_status():
     """
     try:
         sc = None
-        if soulseek_client and hasattr(soulseek_client, 'soundcloud'):
-            sc = soulseek_client.client("soundcloud")
+        if download_orchestrator and hasattr(download_orchestrator, 'soundcloud'):
+            sc = download_orchestrator.client("soundcloud")
         if not sc:
             return jsonify({
                 "available": False,
@@ -19778,7 +19779,7 @@ def hifi_instances():
     """Check availability of all HiFi API instances."""
     import requests as req
     try:
-        hifi = soulseek_client.client("hifi")
+        hifi = download_orchestrator.client("hifi")
         instances = list(hifi._instances)
         results = []
         for url in instances:
@@ -19834,8 +19835,8 @@ def hifi_add_instance():
         if not added:
             return jsonify({'success': False, 'error': 'Instance already exists'}), 400
         # Reload the HiFi client
-        if soulseek_client:
-            soulseek_client.reload_instances('hifi')
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error adding HiFi instance: {e}")
@@ -19856,8 +19857,8 @@ def hifi_remove_instance():
         if not removed:
             return jsonify({'success': False, 'error': 'Instance not found'}), 404
         # Reload the HiFi client
-        if soulseek_client:
-            soulseek_client.reload_instances('hifi')
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error removing HiFi instance: {e}")
@@ -19877,8 +19878,8 @@ def hifi_toggle_instance():
         from database.music_database import get_database
         db = get_database()
         db.toggle_hifi_instance(url, enabled)
-        if soulseek_client:
-            soulseek_client.reload_instances('hifi')
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error toggling HiFi instance: {e}")
@@ -19899,8 +19900,8 @@ def hifi_reorder_instances():
         if not db.reorder_hifi_instances(urls):
             return jsonify({'success': False, 'error': 'One or more URLs not found'}), 400
         # Reload the HiFi client
-        if soulseek_client:
-            soulseek_client.reload_instances('hifi')
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error reordering HiFi instances: {e}")
@@ -20052,9 +20053,9 @@ def deezer_download_test_download():
 
 def _get_tidal_download_client():
     """Get Tidal download client from the orchestrator, with helpful error if unavailable."""
-    if not soulseek_client:
+    if not download_orchestrator:
         raise RuntimeError("Download orchestrator not initialized — check startup logs for errors")
-    tidal = soulseek_client.client("tidal") if hasattr(soulseek_client, 'client') else None
+    tidal = download_orchestrator.client("tidal") if hasattr(download_orchestrator, 'client') else None
     if not tidal:
         raise RuntimeError("Tidal download client not available — ensure tidalapi is installed")
     return tidal
@@ -20126,7 +20127,7 @@ def qobuz_auth_login():
         if not email or not password:
             return jsonify({"success": False, "error": "Email and password required"}), 400
 
-        qobuz = soulseek_client.client("qobuz")
+        qobuz = download_orchestrator.client("qobuz")
         result = qobuz.login(email, password)
 
         if result['status'] == 'success':
@@ -20149,7 +20150,7 @@ def qobuz_auth_token():
         if not token:
             return jsonify({"success": False, "error": "Auth token required"}), 400
 
-        qobuz = soulseek_client.client("qobuz")
+        qobuz = download_orchestrator.client("qobuz")
         result = qobuz.login_with_token(token)
 
         if result['status'] == 'success':
@@ -20166,7 +20167,7 @@ def qobuz_auth_token():
 def qobuz_auth_status():
     """Check if Qobuz client is authenticated."""
     try:
-        qobuz = soulseek_client.client("qobuz")
+        qobuz = download_orchestrator.client("qobuz")
         authenticated = qobuz.is_authenticated()
         user_info = {}
         if authenticated and qobuz.user_info:
@@ -20183,7 +20184,7 @@ def qobuz_auth_status():
 def qobuz_auth_logout():
     """Logout from Qobuz."""
     try:
-        soulseek_client.client("qobuz").logout()
+        download_orchestrator.client("qobuz").logout()
         _sync_qobuz_credentials_to_worker()
         return jsonify({"success": True})
     except Exception as e:
@@ -21125,7 +21126,7 @@ def _get_metadata_fallback_client():
 def get_deezer_arl_status():
     """Check if Deezer ARL is configured and authenticated."""
     try:
-        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if deezer_dl and deezer_dl.is_authenticated():
             user_data = deezer_dl._user_data or {}
             return jsonify({
@@ -21142,7 +21143,7 @@ def get_deezer_arl_status():
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
     try:
-        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated. Configure your ARL token in Settings > Downloads.'}), 401
 
@@ -21170,7 +21171,7 @@ def get_deezer_arl_playlists():
 def get_deezer_arl_playlist_tracks(playlist_id):
     """Fetch full playlist with tracks via ARL (like /api/spotify/playlist/<id>)."""
     try:
-        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
@@ -27362,8 +27363,8 @@ def get_your_artists_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
-                          and soulseek_client.client("deezer_dl").is_authenticated())
+            deezer_arl = (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+                          and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
         except Exception:
@@ -27484,10 +27485,10 @@ def _fetch_and_match_liked_artists(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
-                  and soulseek_client.client("deezer_dl").is_authenticated()):
+            elif (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+                  and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
-                artists = soulseek_client.client("deezer_dl").get_user_favorite_artists(limit=200)
+                artists = download_orchestrator.client("deezer_dl").get_user_favorite_artists(limit=200)
             for a in artists:
                 database.upsert_liked_artist(
                     artist_name=a['name'], source_service='deezer',
@@ -27634,8 +27635,8 @@ def get_your_albums_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
-                          and soulseek_client.client("deezer_dl").is_authenticated())
+            deezer_arl = (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+                          and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
         except Exception:
@@ -27742,10 +27743,10 @@ def _fetch_liked_albums(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
                 albums = deezer_cl.get_user_favorite_albums(limit=500)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
-                  and soulseek_client.client("deezer_dl").is_authenticated()):
+            elif (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+                  and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
-                albums = soulseek_client.client("deezer_dl").get_user_favorite_albums(limit=500)
+                albums = download_orchestrator.client("deezer_dl").get_user_favorite_albums(limit=500)
             for a in albums:
                 database.upsert_liked_album(
                     album_name=a['album_name'], artist_name=a['artist_name'],
@@ -32666,7 +32667,7 @@ register_runtime_clients(
 )
 
 _init_connection_test(
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     qobuz_worker=qobuz_enrichment_worker,
     hydrabase_client_obj=hydrabase_client,
     docker_resolve_url_fn=docker_resolve_url,
@@ -32679,12 +32680,12 @@ _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_clien
 
 _init_download_validation(
     matching_engine_obj=matching_engine,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
 )
 
 _init_wishlist_failed(
     engine=automation_engine,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     sweep_fn=_sweep_empty_download_directories,
 )
 
@@ -32703,7 +32704,7 @@ _init_debug_info(
     sync_states_dict=sync_states,
     youtube_playlist_states_dict=youtube_playlist_states,
     tidal_discovery_states_dict=tidal_discovery_states,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     log_path=_log_path,
     log_dir=_log_dir,
     flask_app=app,
@@ -32722,7 +32723,7 @@ _init_download_monitor(
     start_next_batch_of_downloads=_start_next_batch_of_downloads,
     orphaned_download_keys=_orphaned_download_keys,
     missing_download_executor_obj=missing_download_executor,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
 )
 
 # --- Hydrabase Auto-Reconnect ---

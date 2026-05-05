@@ -129,7 +129,7 @@ def _build_deps(**overrides):
         spotify_client=None,
         hydrabase_client=None,
         hydrabase_worker=None,
-        soulseek_client=None,
+        download_orchestrator=None,
         fix_artist_image_url=lambda u: f'FIXED::{u}' if u else None,
         is_hydrabase_active=lambda: False,
         get_metadata_fallback_source=lambda: 'spotify',
@@ -470,19 +470,19 @@ class _FakeSoulseekWithYT:
 
 def test_resolve_youtube_videos_returns_subclient():
     yt = _FakeYouTube()
-    deps = _build_deps(soulseek_client=_FakeSoulseekWithYT(yt))
+    deps = _build_deps(download_orchestrator=_FakeSoulseekWithYT(yt))
     assert orchestrator.resolve_youtube_videos_client(deps) is yt
 
 
 def test_resolve_youtube_videos_no_soulseek_returns_none():
-    deps = _build_deps(soulseek_client=None)
+    deps = _build_deps(download_orchestrator=None)
     assert orchestrator.resolve_youtube_videos_client(deps) is None
 
 
 def test_resolve_youtube_videos_no_youtube_attr_returns_none():
     class _NoYT:
         pass
-    deps = _build_deps(soulseek_client=_NoYT())
+    deps = _build_deps(download_orchestrator=_NoYT())
     assert orchestrator.resolve_youtube_videos_client(deps) is None
 
 

@@ -121,7 +121,7 @@ def register_routes(bp):
 
         try:
             from utils.async_helpers import run_async
-            soulseek = current_app.soulsync.get("soulseek_client")
+            soulseek = current_app.soulsync.get("download_orchestrator")
             if not soulseek:
                 return api_error("NOT_AVAILABLE", "Soulseek client not configured.", 503)
 
@@ -138,7 +138,7 @@ def register_routes(bp):
         """Cancel all active downloads and clear completed ones."""
         try:
             from utils.async_helpers import run_async
-            soulseek = current_app.soulsync.get("soulseek_client")
+            soulseek = current_app.soulsync.get("download_orchestrator")
             if not soulseek:
                 return api_error("NOT_AVAILABLE", "Soulseek client not configured.", 503)
 

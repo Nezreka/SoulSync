@@ -49,7 +49,7 @@ class SearchDeps:
     spotify_client: Any
     hydrabase_client: Any
     hydrabase_worker: Any
-    soulseek_client: Any
+    download_orchestrator: Any
     fix_artist_image_url: Callable[[Optional[str]], Optional[str]]
     is_hydrabase_active: Callable[[], bool]
     get_metadata_fallback_source: Callable[[], str]
@@ -291,9 +291,9 @@ def run_enhanced_search(query: str, requested_source: str, deps: SearchDeps) -> 
 def resolve_youtube_videos_client(deps: SearchDeps):
     """Return the YouTube download client (used for music-video search)
     via the orchestrator's generic accessor, or None when unavailable."""
-    if not deps.soulseek_client or not hasattr(deps.soulseek_client, 'client'):
+    if not deps.download_orchestrator or not hasattr(deps.download_orchestrator, 'client'):
         return None
-    return deps.soulseek_client.client('youtube')
+    return deps.download_orchestrator.client('youtube')
 
 
 def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> Iterator[str]:
