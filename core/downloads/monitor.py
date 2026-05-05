@@ -277,18 +277,18 @@ class WebUIDownloadMonitor:
                     except Exception:
                         pass
                 for download in all_downloads:
-                        key = _make_context_key(download.username, download.filename)
-                        # Convert DownloadStatus to transfer dict format for monitor compatibility
-                        live_transfers[key] = {
-                            'id': download.id,
-                            'filename': download.filename,
-                            'username': download.username,
-                            'state': download.state,
-                            'percentComplete': download.progress,
-                            'size': download.size,
-                            'bytesTransferred': download.transferred,
-                            'averageSpeed': download.speed,
-                        }
+                    key = _make_context_key(download.username, download.filename)
+                    # Convert DownloadStatus to transfer dict format for monitor compatibility
+                    live_transfers[key] = {
+                        'id': download.id,
+                        'filename': download.filename,
+                        'username': download.username,
+                        'state': download.state,
+                        'percentComplete': download.progress,
+                        'size': download.size,
+                        'bytesTransferred': download.transferred,
+                        'averageSpeed': download.speed,
+                    }
             except Exception as yt_error:
                 logger.error(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
 
