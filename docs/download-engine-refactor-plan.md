@@ -191,8 +191,9 @@ After Phase C: ~490 LOC of duplicated thread management deleted. Each affected c
 
 ## Compatibility commitments
 
-- Backward-compat `orchestrator.soulseek` / `orchestrator.youtube` / etc. attributes preserved through every phase.
-- Backward-compat `clear_all_searches`, `_make_request`, `signal_download_completion`, etc. (Soulseek-specific reaches) preserved through every phase.
+- **Originally** the plan was to preserve `orchestrator.soulseek` / `orchestrator.youtube` / etc. attribute aliases through every phase. Cin's review pass removed them in favor of the generic `orchestrator.client('<name>')` accessor — this is a breaking change for any external code that reached into per-source attributes directly. Anything in-tree was migrated as part of the same PR; in-flight branches will need to update.
+- The legacy `soulseek_client` global handle was renamed to `download_orchestrator` in the same review pass. Any module that imported / referenced `soulseek_client` was migrated; in-flight branches will need to update.
+- Soulseek-specific helper methods (`clear_all_searches`, `_make_request`, `signal_download_completion`, etc.) still live on the orchestrator and continue to work — but reach the underlying SoulseekClient via `orchestrator.client('soulseek')` instead of `orchestrator.soulseek`.
 - Frontend status dashboard keys (`deezer_dl` alias) preserved.
 - Config format unchanged.
 - DB schema unchanged.

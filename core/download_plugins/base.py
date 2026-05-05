@@ -29,13 +29,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Protocol, Tuple, runtime_checkable
 
-# Soulseek client owns the canonical TrackResult / AlbumResult /
-# DownloadStatus dataclasses — every other source already imports
-# from there. We only need them for type annotations on this
-# protocol; using TYPE_CHECKING avoids a circular import once the
-# clients themselves inherit from DownloadSourcePlugin (Cin's
-# review feedback — clients explicitly declare conformance instead
-# of relying on structural typing).
+# core.download_plugins.types owns the canonical TrackResult /
+# AlbumResult / DownloadStatus dataclasses (lifted out of
+# core.soulseek_client so plugins don't import from a sibling source
+# just to satisfy the contract). We only need them for type
+# annotations on this protocol; TYPE_CHECKING avoids a circular
+# import once the clients themselves inherit from DownloadSourcePlugin
+# (Cin's review feedback — clients explicitly declare conformance
+# instead of relying on structural typing).
 if TYPE_CHECKING:
     from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 
