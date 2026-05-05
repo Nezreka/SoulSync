@@ -4145,8 +4145,9 @@ def handle_settings():
             if download_orchestrator:
                 download_orchestrator.reload_settings()
                 # Reload YouTube client settings (rate limiting, cookies)
-                if hasattr(download_orchestrator, 'youtube'):
-                    download_orchestrator.client("youtube").reload_settings()
+                _yt = download_orchestrator.client("youtube")
+                if _yt:
+                    _yt.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
@@ -11672,28 +11673,13 @@ def redownload_search_sources(track_id):
         candidates = []
         database = get_database()
 
-        # Get all available download source clients
+        # Get all available download source clients via the orchestrator's
+        # generic accessor — replaces the old per-source if/hasattr chain
+        # that Cin called out as defeating the purpose of the registry refactor.
         download_clients = {}
         try:
-            orch = download_orchestrator  # The download orchestrator
-            if hasattr(orch, 'soulseek') and orch.soulseek:
-                if not (hasattr(orch.soulseek, 'is_configured') and not orch.soulseek.is_configured()):
-                    download_clients['soulseek'] = orch.soulseek
-            if hasattr(orch, 'youtube') and orch.youtube:
-                if not (hasattr(orch.youtube, 'is_configured') and not orch.youtube.is_configured()):
-                    download_clients['youtube'] = orch.youtube
-            if hasattr(orch, 'tidal') and orch.tidal:
-                if not (hasattr(orch.tidal, 'is_configured') and not orch.tidal.is_configured()):
-                    download_clients['tidal'] = orch.tidal
-            if hasattr(orch, 'qobuz') and orch.qobuz:
-                if not (hasattr(orch.qobuz, 'is_configured') and not orch.qobuz.is_configured()):
-                    download_clients['qobuz'] = orch.qobuz
-            if hasattr(orch, 'hifi') and orch.hifi:
-                if not (hasattr(orch.hifi, 'is_configured') and not orch.hifi.is_configured()):
-                    download_clients['hifi'] = orch.hifi
-            if hasattr(orch, 'deezer_dl') and orch.deezer_dl:
-                if not (hasattr(orch.deezer_dl, 'is_configured') and not orch.deezer_dl.is_configured()):
-                    download_clients['deezer_dl'] = orch.deezer_dl
+            if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
+                download_clients = dict(download_orchestrator.configured_clients())
         except Exception as e:
             logger.warning(f"[Redownload] Error getting download clients: {e}")
 
@@ -17078,7 +17064,7 @@ def _try_source_reuse(task_id, batch_id, track):
     # Sort by confidence, filter by quality preference
     candidates.sort(key=lambda c: c.confidence, reverse=True)
     _sr.info(f"Found {len(candidates)} candidates above 0.70, best={candidates[0].confidence:.3f} ({candidates[0].filename})")
-    slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'soulseek') else download_orchestrator
+    slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'client') else download_orchestrator
     filtered = slsk.filter_results_by_quality_preference(candidates)
     if not filtered:
         _sr.info(f"Quality filter rejected all candidates for task {task_id}")
@@ -17158,7 +17144,7 @@ def _store_batch_source(batch_id, username, filename):
 
     try:
         # Access SoulseekClient directly (download_orchestrator is DownloadOrchestrator)
-        slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'soulseek') else download_orchestrator
+        slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'client') else download_orchestrator
         _sr.info(f"Browsing {username}:{folder_path}...")
         files = run_async(slsk.browse_user_directory(username, folder_path))
         if not files:
@@ -19749,9 +19735,7 @@ def soundcloud_status():
     of just verifying the import succeeded.
     """
     try:
-        sc = None
-        if download_orchestrator and hasattr(download_orchestrator, 'soundcloud'):
-            sc = download_orchestrator.client("soundcloud")
+        sc = download_orchestrator.client("soundcloud") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not sc:
             return jsonify({
                 "available": False,
@@ -27363,7 +27347,7 @@ def get_your_artists_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+            deezer_arl = (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
                           and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
@@ -27485,7 +27469,7 @@ def _fetch_and_match_liked_artists(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
-            elif (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+            elif (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
                   and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
                 artists = download_orchestrator.client("deezer_dl").get_user_favorite_artists(limit=200)
@@ -27635,7 +27619,7 @@ def get_your_albums_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+            deezer_arl = (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
                           and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
@@ -27743,7 +27727,7 @@ def _fetch_liked_albums(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
                 albums = deezer_cl.get_user_favorite_albums(limit=500)
-            elif (hasattr(download_orchestrator, 'deezer_dl') and download_orchestrator.client("deezer_dl")
+            elif (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
                   and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
                 albums = download_orchestrator.client("deezer_dl").get_user_favorite_albums(limit=500)
