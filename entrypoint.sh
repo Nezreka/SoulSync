@@ -35,9 +35,15 @@ if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
         usermod -o -u "$PUID" soulsync
     fi
 
-    # Fix ownership of app directories
-    echo "🔒 Fixing permissions on app directories..."
-    chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+    # Only do the expensive recursive chown if the data directory ownership
+    # doesn't already match — avoids walking large libraries on every restart.
+    DATA_OWNER=$(stat -c '%u:%g' /app/data 2>/dev/null || echo "unknown")
+    if [ "$DATA_OWNER" != "$PUID:$PGID" ]; then
+        echo "🔒 Fixing permissions on app directories..."
+        chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+    else
+        echo "✅ App directory permissions already correct"
+    fi
 else
     echo "✅ User/Group IDs already correct"
 fi
