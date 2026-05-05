@@ -31,13 +31,28 @@ class _Recorder:
 
 
 class _FakeClient:
-    """Stub soulseek client. `mode` defaults to non-hybrid."""
+    """Stub download orchestrator. `mode` defaults to non-hybrid.
+    Per-source stubs passed via ``subclients`` are surfaced through
+    ``client(name)`` (the registry-backed accessor on the real
+    orchestrator); plain attrs (hybrid_order, hybrid_primary, etc.)
+    are set as attributes so getattr() lookups still resolve them."""
+    _CLIENT_NAMES = {'soulseek', 'youtube', 'tidal', 'qobuz', 'hifi',
+                     'deezer_dl', 'lidarr', 'soundcloud'}
+
     def __init__(self, results=None, mode='soulseek', subclients=None):
         self._results = results if results is not None else []
         self.mode = mode
         self.search_calls = []
+        self._client_map = {}
         for k, v in (subclients or {}).items():
-            setattr(self, k, v)
+            if k in self._CLIENT_NAMES:
+                self._client_map[k] = v
+            else:
+                # config-style attrs (hybrid_order, hybrid_primary, etc.)
+                setattr(self, k, v)
+
+    def client(self, name):
+        return self._client_map.get(name)
 
     async def search(self, query, timeout=30):
         self.search_calls.append((query, timeout))

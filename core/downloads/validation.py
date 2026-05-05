@@ -24,12 +24,56 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
+def filter_soundcloud_previews(results, expected_track):
+    """Drop SoundCloud preview snippets so they never reach the cache,
+    the modal, or the auto-download attempt.
+
+    SoundCloud serves a ~30s preview clip for tracks gated behind Go+ /
+    login. yt-dlp accepts the preview as the download payload, the
+    integrity check catches the truncated file, but the user just sees
+    "all candidates failed" with previews still listed in the modal
+    (and clickable for manual retry, which downloads another preview).
+
+    Filter at every spot raw search results enter the task: validation
+    scoring, modal-cache fallback when validation drops everything,
+    and the not-found raw-results cache. Keep candidates that genuinely
+    are short (intros, sound effects) when the expected track is also
+    short.
+    """
+    if not results or not expected_track:
+        return results
+    expected_ms = getattr(expected_track, 'duration_ms', 0) or 0
+    if expected_ms <= 0:
+        return results
+    expected_secs = expected_ms / 1000.0
+    if expected_secs <= 60:
+        return results
+
+    def _is_preview(r):
+        if getattr(r, 'username', None) != 'soundcloud':
+            return False
+        cand_ms = getattr(r, 'duration', None) or 0
+        if cand_ms <= 0:
+            return False
+        cand_secs = cand_ms / 1000.0
+        return cand_secs < 35 or cand_secs < expected_secs * 0.5
+
+    return [r for r in results if not _is_preview(r)]
+
+
 def get_valid_candidates(results, spotify_track, query):
     """
     This function is a direct port from sync.py. It scores and filters
     Soulseek search results against a Spotify track to find the best, most
     accurate download candidates.
     """
+    if not results:
+        return []
+
+    # Pre-filter: drop SoundCloud preview snippets when expected
+    # duration is non-trivially long. Same helper is also applied at
+    # the modal-cache fallback path so previews never reach the UI.
+    results = filter_soundcloud_previews(results, spotify_track)
     if not results:
         return []
 
@@ -50,29 +94,6 @@ def get_valid_candidates(results, spotify_track, query):
 
         scored = []
         for r in results:
-            # SoundCloud-specific: drop preview snippets BEFORE scoring.
-            # Anonymous SoundCloud serves a ~30s preview clip for tracks
-            # gated behind Go+ / login. yt-dlp accepts these as the
-            # download payload, the integrity check catches them
-            # post-download, but the user just sees "all candidates
-            # failed". Filter at search time when we know expected
-            # duration so the matcher never picks a 30s clip for a
-            # 5-minute track. Keep candidates that genuinely are short
-            # (intros, sound effects) when the expected track is also
-            # short.
-            if r.username == 'soundcloud' and expected_duration and r.duration:
-                cand_secs = r.duration / 1000.0
-                expected_secs = expected_duration / 1000.0
-                # Drop if expected is non-trivially long AND candidate is
-                # near the SoundCloud 30s preview boundary OR less than
-                # half the expected duration.
-                if expected_secs > 60 and (cand_secs < 35 or cand_secs < expected_secs * 0.5):
-                    logger.info(
-                        f"[SoundCloud] Dropping preview/short candidate "
-                        f"'{r.title}' ({cand_secs:.1f}s vs expected {expected_secs:.1f}s)"
-                    )
-                    continue
-
             # Score using matching engine's generic scorer (same weights as Soulseek)
             confidence, match_type = matching_engine.score_track_match(
                 source_title=expected_title,
