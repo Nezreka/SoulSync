@@ -603,6 +603,23 @@ try:
 except Exception as e:
     logger.error(f"  SoulSync library client failed to initialize: {e}")
 
+# Build the MediaServerEngine on top of the per-client globals above.
+# Engine wraps the same instances — no double-init. Provides
+# ``engine.method()`` dispatch in place of the historic
+# ``if active_server == 'plex' / 'jellyfin' / ...`` chains.
+try:
+    from core.media_server import MediaServerEngine
+    media_server_engine = MediaServerEngine(clients={
+        'plex':      plex_client,
+        'jellyfin':  jellyfin_client,
+        'navidrome': navidrome_client,
+        'soulsync':  soulsync_library_client,
+    })
+    logger.info("  Media server engine initialized")
+except Exception as e:
+    logger.error(f"  Media server engine failed to initialize: {e}")
+    media_server_engine = None
+
 try:
     soulseek_client = DownloadOrchestrator()
     logger.info("  Download orchestrator initialized")
@@ -3460,23 +3477,14 @@ def get_status():
 
         metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
-        # Test media server - use EXISTING instances (they have internal caching)
-        # Media server clients already cache connection checks internally
+        # Test media server — engine reads active_server config + dispatches
+        # to the right client (with internal connection caching). Engine
+        # returns False safely if the active client is None / not registered.
         if current_time - _status_cache_timestamps['media_server'] > STATUS_CACHE_TTL:
             media_server_start = time.time()
-            media_server_status = False
-            if active_server == "plex" and plex_client:
-                # Use existing instance - has 30s internal connection cache
-                media_server_status = plex_client.is_connected()
-            elif active_server == "jellyfin" and jellyfin_client:
-                # Use existing instance - has internal connection caching
-                media_server_status = jellyfin_client.is_connected()
-            elif active_server == "navidrome" and navidrome_client:
-                # Use existing instance
-                media_server_status = navidrome_client.is_connected()
-            elif active_server == "soulsync":
-                # Standalone mode — always connected if Transfer folder exists
-                media_server_status = soulsync_library_client.is_connected() if soulsync_library_client else False
+            media_server_status = (
+                media_server_engine.is_connected() if media_server_engine else False
+            )
             media_server_response_time = (time.time() - media_server_start) * 1000
             _status_cache['media_server'] = {
                 'connected': media_server_status,
@@ -9293,15 +9301,9 @@ def get_artist_enhanced_detail(artist_id):
             if album.get('thumb_url'):
                 album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
 
-        # Include server type for sync option
+        # Include server type for sync option — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
 
         return jsonify(result)
