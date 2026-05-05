@@ -230,10 +230,12 @@ def normalize_deezer_track(raw: dict[str, Any]) -> MetadataTrack:
     contributors = raw.get("contributors") or []
     artists = _normalize_artists(contributors if len(_as_list(contributors)) > 1 else [artist] if artist else [])
     image_url = _first_non_empty(album.get("cover_xl"), album.get("cover_big"), album.get("cover_medium"))
-    album_type = raw.get("type") or album.get("type")
-    if not album_type:
+    album_type = str(album.get("type") or "").lower()
+    if not album_type or album_type == "track":
         nb_tracks = int(album.get("nb_tracks", 0) or 0)
         album_type = _infer_album_type_from_track_count(nb_tracks)
+    elif album_type == "compile":
+        album_type = "compilation"
     return MetadataTrack(
         id=str(raw.get("id", "")),
         name=str(raw.get("title", "")),

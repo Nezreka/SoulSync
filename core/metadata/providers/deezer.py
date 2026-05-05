@@ -86,12 +86,30 @@ class DeezerMetadataAdapter(BaseMetadataAdapter):
         albums: list[dict[str, Any]] = []
         offset = 0
         page_size = 100
+        artist_data = self.get_artist_raw(artist_id) or {}
+        artist_name = str(artist_data.get("name", "") or "").strip()
+        artist_stub: dict[str, Any] = {"id": artist_data.get("id") or artist_id}
+        if artist_name:
+            artist_stub["name"] = artist_name
         while offset < limit:
             fetch_limit = min(page_size, limit - offset)
             data = self._request_api(f"artist/{artist_id}/albums", {"limit": fetch_limit, "index": offset})
             if not data or not data.get("data"):
                 break
-            albums.extend(list(data.get("data") or []))
+            for item in list(data.get("data") or []):
+                if not isinstance(item, dict):
+                    continue
+                enriched = dict(item)
+                album_artist = enriched.get("artist")
+                if isinstance(album_artist, dict):
+                    merged_artist = dict(artist_stub)
+                    merged_artist.update(album_artist)
+                    enriched["artist"] = merged_artist
+                else:
+                    enriched["artist"] = dict(artist_stub)
+                if artist_name and not enriched.get("artist_name"):
+                    enriched["artist_name"] = artist_name
+                albums.append(enriched)
             if len(data.get("data") or []) < fetch_limit:
                 break
             offset += len(data.get("data") or [])

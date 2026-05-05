@@ -157,6 +157,7 @@ class ITunesMetadataAdapter(BaseMetadataAdapter):
             return []
 
         seen: dict[str, dict[str, Any]] = {}
+        track_count_cache: dict[str, int] = {}
 
         def _normalize_album_name(name: str) -> str:
             normalized = (name or "").lower().strip()
@@ -170,12 +171,28 @@ class ITunesMetadataAdapter(BaseMetadataAdapter):
             normalized = re.sub(r"\s+", " ", normalized).strip()
             return normalized
 
+        def _album_has_tracks(collection_id: str) -> bool:
+            if not collection_id:
+                return False
+            if collection_id not in track_count_cache:
+                items = self._lookup_raw(id=collection_id, entity="song", limit=200)
+                track_count_cache[collection_id] = sum(
+                    1
+                    for item in items
+                    if item.get("wrapperType") == "track" and item.get("kind") == "song"
+                )
+            return track_count_cache[collection_id] > 0
+
         for album_data in results:
             if album_data.get("wrapperType") != "collection":
                 continue
             normalized_name = _normalize_album_name(str(album_data.get("collectionName", "") or ""))
+            collection_id = str(album_data.get("collectionId", "") or "")
             current = seen.get(normalized_name)
             is_explicit = album_data.get("collectionExplicitness") == "explicit"
+            has_tracks = not is_explicit or _album_has_tracks(collection_id)
+            if not has_tracks:
+                continue
             if current is None:
                 seen[normalized_name] = {"data": album_data, "is_explicit": is_explicit}
                 continue
