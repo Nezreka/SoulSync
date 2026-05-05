@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")

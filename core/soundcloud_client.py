@@ -40,7 +40,7 @@ from config.settings import config_manager
 
 # Standard data structures shared across all download clients so downstream
 # matching/post-processing stays source-agnostic.
-from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("soundcloud_client")
 

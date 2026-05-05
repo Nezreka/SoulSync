@@ -33,7 +33,7 @@ import requests as http_requests
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
-from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("hifi_client")
 

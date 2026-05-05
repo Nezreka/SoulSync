@@ -208,7 +208,7 @@ def redownload_start(track_id):
         # Build a TrackResult-like candidate and submit to download
         def _run_redownload():
             try:
-                from core.soulseek_client import TrackResult
+                from core.download_plugins.types import TrackResult
                 from core.itunes_client import Track as MetaTrack
                 tr = TrackResult(
                     username=candidate['username'],

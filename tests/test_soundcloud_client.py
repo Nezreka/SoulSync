@@ -30,7 +30,7 @@ import pytest
 
 from core import soundcloud_client
 from core.soundcloud_client import SoundcloudClient, _sanitize_filename
-from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 
 
 # ---------------------------------------------------------------------------

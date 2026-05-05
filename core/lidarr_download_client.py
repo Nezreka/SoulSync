@@ -28,7 +28,7 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
-from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("lidarr_client")
 
