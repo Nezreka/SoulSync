@@ -50,6 +50,29 @@ def get_valid_candidates(results, spotify_track, query):
 
         scored = []
         for r in results:
+            # SoundCloud-specific: drop preview snippets BEFORE scoring.
+            # Anonymous SoundCloud serves a ~30s preview clip for tracks
+            # gated behind Go+ / login. yt-dlp accepts these as the
+            # download payload, the integrity check catches them
+            # post-download, but the user just sees "all candidates
+            # failed". Filter at search time when we know expected
+            # duration so the matcher never picks a 30s clip for a
+            # 5-minute track. Keep candidates that genuinely are short
+            # (intros, sound effects) when the expected track is also
+            # short.
+            if r.username == 'soundcloud' and expected_duration and r.duration:
+                cand_secs = r.duration / 1000.0
+                expected_secs = expected_duration / 1000.0
+                # Drop if expected is non-trivially long AND candidate is
+                # near the SoundCloud 30s preview boundary OR less than
+                # half the expected duration.
+                if expected_secs > 60 and (cand_secs < 35 or cand_secs < expected_secs * 0.5):
+                    logger.info(
+                        f"[SoundCloud] Dropping preview/short candidate "
+                        f"'{r.title}' ({cand_secs:.1f}s vs expected {expected_secs:.1f}s)"
+                    )
+                    continue
+
             # Score using matching engine's generic scorer (same weights as Soulseek)
             confidence, match_type = matching_engine.score_track_match(
                 source_title=expected_title,
