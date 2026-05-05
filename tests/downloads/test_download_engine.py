@@ -34,6 +34,29 @@ def test_get_plugin_returns_none_for_unknown_source():
     assert engine.get_plugin('made_up') is None
 
 
+def test_register_plugin_swallows_set_engine_failure(caplog):
+    """Per JohnBaumb: if a plugin's ``set_engine`` callback raises,
+    registration shouldn't take down the engine — the failure gets
+    logged + the plugin stays registered. The plugin's own download()
+    method is responsible for surfacing the missing-engine state to
+    the user (see ``test_download_raises_when_engine_not_wired`` per
+    source). Pinning this so a future refactor can't accidentally
+    propagate the set_engine exception and crash boot.
+    """
+    class _BrokenSetEngine:
+        def set_engine(self, engine):
+            raise RuntimeError("plugin's set_engine blew up")
+
+    engine = DownloadEngine()
+    plugin = _BrokenSetEngine()
+    # Should not raise.
+    engine.register_plugin('flaky', plugin)
+
+    # Plugin still registered + lookupable.
+    assert engine.get_plugin('flaky') is plugin
+    assert 'flaky' in engine.registered_sources()
+
+
 def test_register_plugin_overwrites_on_duplicate(caplog):
     """Re-registering under the same name overwrites and warns. Not a
     common path but useful so test fixtures that build a fresh engine
@@ -318,6 +341,36 @@ def test_engine_get_all_downloads_aggregates_across_plugins():
     result = _run_async(engine.get_all_downloads())
     assert len(result) == 3
     assert {r.id for r in result} == {'yt-1', 'td-1', 'td-2'}
+
+
+def test_engine_get_all_downloads_excludes_dont_invoke_plugin():
+    """Per JohnBaumb: the monitor calls engine.get_all_downloads(
+    exclude=('soulseek',)) AFTER already pulling slskd transfers via
+    the transfers/downloads endpoint. The whole point of the exclude
+    is to NOT touch soulseek's plugin a second time — so the plugin's
+    get_all_downloads must literally not be called when its name is
+    in the exclude list. Pin that semantic explicitly (a test that
+    just checks IDs would pass even if soulseek was called and
+    returned [])."""
+    engine = DownloadEngine()
+    sl_plugin = _FakePlugin('soulseek', downloads=[_FakeStatus('sl-1', 'soulseek')])
+    yt_plugin = _FakePlugin('youtube', downloads=[_FakeStatus('yt-1', 'youtube')])
+    engine.register_plugin('soulseek', sl_plugin)
+    engine.register_plugin('youtube', yt_plugin)
+
+    # Sentinel — flips True if get_all_downloads is called on soulseek.
+    soulseek_called = []
+    original_get_all = sl_plugin.get_all_downloads
+    async def _tracking_get_all():
+        soulseek_called.append(True)
+        return await original_get_all()
+    sl_plugin.get_all_downloads = _tracking_get_all
+
+    _run_async(engine.get_all_downloads(exclude=('soulseek',)))
+    assert soulseek_called == [], (
+        "soulseek's get_all_downloads was invoked despite being in exclude — "
+        "monitor would still double-fetch slskd"
+    )
 
 
 def test_engine_get_all_downloads_skips_excluded_sources():

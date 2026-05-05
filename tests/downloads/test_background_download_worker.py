@@ -406,6 +406,108 @@ def test_semaphore_concurrency_can_be_increased():
 # ---------------------------------------------------------------------------
 
 
+def test_impl_can_observe_cancel_mid_flight_via_state_check():
+    """Per JohnBaumb: existing tests cover Cancelled-preserve AFTER impl
+    returns — but plugins also poll engine state mid-download (via
+    ``_is_cancelled`` helpers) to abort partial transfers. Pin that
+    contract: a cancel landing while impl is mid-flight must be
+    visible to a subsequent ``engine.get_record()`` from the impl
+    thread.
+    """
+    engine = DownloadEngine()
+    impl_started = threading.Event()
+    impl_can_finish = threading.Event()
+    observed_state_during_impl = []
+
+    def impl(download_id, target_id, display_name):
+        impl_started.set()
+        # Wait for the test thread to write Cancelled, then check
+        # what we can observe from inside the impl callback.
+        impl_can_finish.wait(timeout=2.0)
+        record = engine.get_record('youtube', download_id)
+        observed_state_during_impl.append(record.get('state') if record else None)
+        return None  # impl noticed cancel + bailed out
+
+    download_id = engine.worker.dispatch(
+        source_name='youtube',
+        target_id='vid',
+        display_name='X',
+        original_filename='vid||X',
+        impl_callable=impl,
+    )
+
+    # Wait for impl to start, then inject a cancel.
+    impl_started.wait(timeout=1.0)
+    engine.update_record('youtube', download_id, {'state': 'Cancelled'})
+    impl_can_finish.set()
+
+    # Wait for impl to finish (its append populates observed_state).
+    # Engine state is already Cancelled at this point, so polling on
+    # state would race: it'd break before impl ran the get_record line.
+    deadline = time.time() + 2.0
+    while not observed_state_during_impl and time.time() < deadline:
+        time.sleep(0.01)
+
+    # impl observed the Cancelled state mid-flight via get_record,
+    # AND the worker preserved Cancelled after impl returned None.
+    assert observed_state_during_impl == ['Cancelled']
+    assert engine.get_record('youtube', download_id)['state'] == 'Cancelled'
+
+
+def test_per_source_delays_dont_block_other_sources():
+    """Per JohnBaumb: per-source semaphores + delays must not let one
+    slow source stall another. YouTube's 3s rate-limit delay should
+    not delay a Tidal download starting in parallel.
+
+    Configure YouTube with a 0.5s delay, dispatch one YouTube download
+    (which holds the source's serial slot + arms the next-call delay),
+    then immediately dispatch a Tidal download. Tidal must complete
+    well before YouTube's delay window would have elapsed.
+    """
+    engine = DownloadEngine()
+    engine.worker.set_delay('youtube', 0.5)
+
+    yt_completed = threading.Event()
+    td_completed = threading.Event()
+
+    def yt_impl(download_id, target_id, display_name):
+        time.sleep(0.05)
+        yt_completed.set()
+        return '/tmp/yt.mp3'
+
+    def td_impl(download_id, target_id, display_name):
+        td_completed.set()
+        return '/tmp/td.flac'
+
+    # First YouTube call. After it finishes, the worker arms the
+    # 0.5s delay BEFORE the next youtube dispatch can run.
+    engine.worker.dispatch(
+        source_name='youtube', target_id='a', display_name='A',
+        original_filename='a||A', impl_callable=yt_impl,
+    )
+    yt_completed.wait(timeout=1.0)
+
+    # Second YouTube would now block 0.5s on the rate-limit delay.
+    # Dispatch one to occupy that wait, then dispatch Tidal — Tidal
+    # must NOT wait on YouTube's delay.
+    engine.worker.dispatch(
+        source_name='youtube', target_id='b', display_name='B',
+        original_filename='b||B', impl_callable=lambda *a: '/tmp/y.mp3',
+    )
+
+    td_start = time.time()
+    engine.worker.dispatch(
+        source_name='tidal', target_id='t1', display_name='T',
+        original_filename='t1||T', impl_callable=td_impl,
+    )
+    td_completed.wait(timeout=0.4)
+    td_elapsed = time.time() - td_start
+
+    # Tidal must have finished in well under 0.5s (the YouTube delay).
+    assert td_completed.is_set(), "Tidal blocked on YouTube's per-source delay"
+    assert td_elapsed < 0.4, f"Tidal took {td_elapsed:.2f}s — should be near-instant"
+
+
 def test_delay_enforces_minimum_gap_between_downloads():
     """Pinning: YouTube uses 3s delay today (legacy
     `_download_delay`). Worker-driven delay must enforce the same
