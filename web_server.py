@@ -9551,13 +9551,7 @@ def get_track_tag_preview(track_id):
 
         # Include server type so frontend can offer server sync option
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
@@ -9658,15 +9652,9 @@ def get_batch_tag_preview():
 
             results.append(entry)
 
-        # Server type info
+        # Server type info — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
