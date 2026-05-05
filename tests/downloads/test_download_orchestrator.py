@@ -51,14 +51,6 @@ def _build_orchestrator(**clients):
     orch = DownloadOrchestrator.__new__(DownloadOrchestrator)
     orch.registry = registry
     orch._init_failures = registry.init_failures
-    orch.soulseek = registry.get('soulseek')
-    orch.youtube = registry.get('youtube')
-    orch.tidal = registry.get('tidal')
-    orch.qobuz = registry.get('qobuz')
-    orch.hifi = registry.get('hifi')
-    orch.deezer_dl = registry.get('deezer')
-    orch.lidarr = registry.get('lidarr')
-    orch.soundcloud = registry.get('soundcloud')
     # Engine — orchestrator delegates per-source query/cancel
     # methods to it, so the test fixture must build one and
     # register every mock plugin under its canonical name.
@@ -87,8 +79,8 @@ def test_clear_all_completed_downloads_ignores_unconfigured_clients():
     result = _run_async(orch.clear_all_completed_downloads())
 
     assert result is True
-    assert orch.soulseek.clear_calls == 1
-    assert orch.youtube.clear_calls == 0
+    assert orch.client('soulseek').clear_calls == 1
+    assert orch.client('youtube').clear_calls == 0
 
 
 def test_clear_all_completed_downloads_propagates_configured_failures():
@@ -99,7 +91,7 @@ def test_clear_all_completed_downloads_propagates_configured_failures():
     result = _run_async(orch.clear_all_completed_downloads())
 
     assert result is False
-    assert orch.soulseek.clear_calls == 1
+    assert orch.client('soulseek').clear_calls == 1
 
 
 # ---------------------------------------------------------------------------

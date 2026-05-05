@@ -462,7 +462,10 @@ class _FakeYouTube:
 
 class _FakeSoulseekWithYT:
     def __init__(self, youtube):
-        self.youtube = youtube
+        self._youtube = youtube
+
+    def client(self, name):
+        return self._youtube if name == 'youtube' else None
 
 
 def test_resolve_youtube_videos_returns_subclient():

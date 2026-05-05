@@ -372,7 +372,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
                     logger.info(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
-                    slsk = deps.soulseek_client.soulseek if hasattr(deps.soulseek_client, 'soulseek') else deps.soulseek_client
+                    slsk = deps.soulseek_client.client('soulseek') if hasattr(deps.soulseek_client, 'client') else deps.soulseek_client
 
                     # Try multiple query variations (banned keywords in artist/album name can return 0 results)
                     album_queries = [f"{artist_name} {album_name}"]

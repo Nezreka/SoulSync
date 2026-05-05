@@ -14,10 +14,9 @@ Supports eight modes:
 
 The orchestrator dispatches through ``core.download_plugins.registry``
 instead of hardcoded per-source ``[self.soulseek, self.youtube, ...]``
-lists. The ``self.<source>`` attributes are preserved for backward
-compatibility — anything outside this file that reaches in for a
-specific client (e.g. ``orchestrator.soulseek._make_request`` for
-Soulseek-specific internals) keeps working unchanged.
+lists. External callers reach individual clients via the generic
+``orchestrator.client('<name>')`` accessor (alias-aware), not direct
+attribute access.
 """
 
 import asyncio
@@ -57,19 +56,6 @@ class DownloadOrchestrator:
         self.registry.initialize()
         self._init_failures = self.registry.init_failures
 
-        # Backward-compat attribute aliases so existing callers like
-        # ``orchestrator.soulseek._make_request(...)`` keep working
-        # unchanged. The registry is the source of truth for dispatch;
-        # these are convenience handles for source-specific internals.
-        self.soulseek = self.registry.get('soulseek')
-        self.youtube = self.registry.get('youtube')
-        self.tidal = self.registry.get('tidal')
-        self.qobuz = self.registry.get('qobuz')
-        self.hifi = self.registry.get('hifi')
-        self.deezer_dl = self.registry.get('deezer')
-        self.lidarr = self.registry.get('lidarr')
-        self.soundcloud = self.registry.get('soundcloud')
-
         # Engine — owns cross-source state, threading, search retry,
         # rate-limits, fallback. Built in subsequent phases. For Phase
         # B it's just an empty registry of plugins so future phases
@@ -106,15 +92,17 @@ class DownloadOrchestrator:
         self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
-        if self.soulseek:
-            self.soulseek._setup_client()
+        soulseek = self.client('soulseek')
+        if soulseek:
+            soulseek._setup_client()
             logger.info("Soulseek client config reloaded")
 
         # Reconnect Deezer if ARL changed
         deezer_arl = config_manager.get('deezer_download.arl', '')
-        if deezer_arl and self.deezer_dl:
-            self.deezer_dl.reconnect(deezer_arl)
-            self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+        deezer_dl = self.client('deezer_dl')
+        if deezer_arl and deezer_dl:
+            deezer_dl.reconnect(deezer_arl)
+            deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
         # Reload download path for all clients that cache it.
         # Soulseek owns the path config and is reloaded above; every
@@ -381,7 +369,8 @@ class DownloadOrchestrator:
         elif is_streaming:
             filtered_results = tracks
         else:
-            filtered_results = self.soulseek.filter_results_by_quality_preference(tracks) if self.soulseek else tracks
+            soulseek = self.client('soulseek')
+            filtered_results = soulseek.filter_results_by_quality_preference(tracks) if soulseek else tracks
 
         if not filtered_results:
             logger.warning(f"No suitable quality results found for: {query}")
@@ -459,9 +448,10 @@ class DownloadOrchestrator:
             True if successful
         """
         # This is Soulseek-specific, so only call on Soulseek client
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             return False
-        return await self.soulseek.signal_download_completion(download_id, username, remove)
+        return await soulseek.signal_download_completion(download_id, username, remove)
 
     async def clear_all_completed_downloads(self) -> bool:
         """Clear completed downloads from every source. Delegates
@@ -485,9 +475,10 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             raise RuntimeError("Soulseek client not available (failed to initialize)")
-        return await self.soulseek._make_request(method, endpoint, **kwargs)
+        return await soulseek._make_request(method, endpoint, **kwargs)
 
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs):
         """
@@ -502,9 +493,10 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             raise RuntimeError("Soulseek client not available (failed to initialize)")
-        return await self.soulseek._make_direct_request(method, endpoint, **kwargs)
+        return await soulseek._make_direct_request(method, endpoint, **kwargs)
 
     async def clear_all_searches(self) -> bool:
         """
@@ -513,7 +505,8 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.clear_all_searches() if self.soulseek else True
+        soulseek = self.client('soulseek')
+        return await soulseek.clear_all_searches() if soulseek else True
 
     async def maintain_search_history_with_buffer(self, keep_searches: int = 50, trigger_threshold: int = 200) -> bool:
         """
@@ -526,7 +519,8 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold) if self.soulseek else True
+        soulseek = self.client('soulseek')
+        return await soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold) if soulseek else True
 
     async def cancel_all_downloads(self) -> bool:
         """Cancel and remove all downloads from all sources.

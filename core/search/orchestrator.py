@@ -289,10 +289,11 @@ def run_enhanced_search(query: str, requested_source: str, deps: SearchDeps) -> 
 # ---------------------------------------------------------------------------
 
 def resolve_youtube_videos_client(deps: SearchDeps):
-    """Return the soulseek_client.youtube subclient or None when unavailable."""
-    if not deps.soulseek_client:
+    """Return the YouTube download client (used for music-video search)
+    via the orchestrator's generic accessor, or None when unavailable."""
+    if not deps.soulseek_client or not hasattr(deps.soulseek_client, 'client'):
         return None
-    return getattr(deps.soulseek_client, 'youtube', None)
+    return deps.soulseek_client.client('youtube')
 
 
 def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> Iterator[str]:

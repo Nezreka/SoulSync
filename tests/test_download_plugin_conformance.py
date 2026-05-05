@@ -147,17 +147,17 @@ def test_plugin_class_async_methods_are_coroutines(plugin_name):
 
 
 def test_orchestrator_uses_registry_for_dispatch():
-    """The orchestrator must hold a registry reference and the
-    backward-compat ``self.<source>`` attributes must point at the
-    SAME instances the registry returned. Anything that reaches in
-    for ``orchestrator.soulseek`` and any future code that uses
-    ``orchestrator.registry.get('soulseek')`` should be looking at
-    the same object."""
+    """The orchestrator must hold a registry reference and the generic
+    ``client(name)`` accessor must return the same instances the
+    registry holds. Per-source attribute aliases (``orchestrator.soulseek``
+    etc.) were removed in favor of ``orchestrator.client('soulseek')``;
+    the legacy alias name (``deezer_dl``) still resolves to the canonical
+    deezer plugin via the registry's alias map."""
     from core.download_orchestrator import DownloadOrchestrator
 
     orchestrator = DownloadOrchestrator()
     assert hasattr(orchestrator, 'registry')
-    assert orchestrator.soulseek is orchestrator.registry.get('soulseek')
-    assert orchestrator.youtube is orchestrator.registry.get('youtube')
-    assert orchestrator.deezer_dl is orchestrator.registry.get('deezer')
-    assert orchestrator.lidarr is orchestrator.registry.get('lidarr')
+    assert orchestrator.client('soulseek') is orchestrator.registry.get('soulseek')
+    assert orchestrator.client('youtube') is orchestrator.registry.get('youtube')
+    assert orchestrator.client('deezer_dl') is orchestrator.registry.get('deezer')
+    assert orchestrator.client('lidarr') is orchestrator.registry.get('lidarr')

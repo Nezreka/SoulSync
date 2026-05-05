@@ -118,15 +118,9 @@ def stream_search_track(
 
     queries = _build_stream_queries(track_name, artist_name, effective_mode)
 
-    stream_clients = {
-        'youtube': soulseek_client.youtube,
-        'tidal': soulseek_client.tidal,
-        'qobuz': soulseek_client.qobuz,
-        'hifi': soulseek_client.hifi,
-        'deezer_dl': soulseek_client.deezer_dl,
-        'lidarr': soulseek_client.lidarr,
-    }
-    stream_client = stream_clients.get(effective_mode)
+    # Map mode name to canonical registry name (legacy 'deezer_dl'
+    # alias resolves to 'deezer' via the orchestrator's registry).
+    stream_client = soulseek_client.client(effective_mode)
     use_direct_client = stream_client is not None
 
     max_peer_queue = config_manager.get('soulseek.max_peer_queue', 0) or 0
