@@ -120,6 +120,22 @@ def test_remove_record_returns_none_when_missing():
     assert engine.remove_record('qobuz', 'never-existed') is None
 
 
+def test_remove_record_drops_empty_source_bucket():
+    """Per JohnBaumb: nested layout makes per-source iteration
+    O(source_records). Removing the last record for a source must
+    also drop the empty source bucket so future iter_records_for_source
+    calls don't see a stale source key."""
+    engine = DownloadEngine()
+    engine.add_record('youtube', 'yt-1', {'title': 'A'})
+    engine.remove_record('youtube', 'yt-1')
+
+    # Source bucket gone — internal state matches the contract.
+    assert 'youtube' not in engine._records
+    # Public surface still answers correctly.
+    assert list(engine.iter_records_for_source('youtube')) == []
+    assert engine.get_record('youtube', 'yt-1') is None
+
+
 # ---------------------------------------------------------------------------
 # Iteration
 # ---------------------------------------------------------------------------
