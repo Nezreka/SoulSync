@@ -273,7 +273,13 @@ class WebUIDownloadMonitor:
                 all_downloads = []
                 if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
-                        all_downloads = run_async(download_orchestrator.engine.get_all_downloads())
+                        # Exclude soulseek — slskd transfers were already
+                        # pulled via the transfers/downloads endpoint above.
+                        # Without the exclude both fetch paths run, doubling
+                        # the per-tick slskd API hit.
+                        all_downloads = run_async(
+                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                        )
                     except Exception:
                         pass
                 for download in all_downloads:

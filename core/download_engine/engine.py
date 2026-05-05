@@ -277,15 +277,21 @@ class DownloadEngine:
     #
     # All methods are async to match the per-plugin contract.
 
-    async def get_all_downloads(self):
+    async def get_all_downloads(self, exclude: Tuple[str, ...] = ()):
         """Aggregated view across every registered plugin's active
         downloads. Per-plugin exceptions are swallowed (one source
         failing shouldn't take down cross-source aggregation) but
         logged at debug level — same defensive shape the legacy
-        orchestrator had."""
+        orchestrator had.
+
+        ``exclude`` skips named sources entirely. The download monitor
+        passes ``('soulseek',)`` so it doesn't double-fetch slskd
+        transfers (it already pulled them via the slskd transfers
+        endpoint earlier in the same loop).
+        """
         all_downloads = []
         for source_name, plugin in self._plugins.items():
-            if plugin is None:
+            if plugin is None or source_name in exclude:
                 continue
             try:
                 all_downloads.extend(await plugin.get_all_downloads())

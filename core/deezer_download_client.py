@@ -613,8 +613,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             logger.error("Deezer not authenticated — cannot download")
             return None
         if self._engine is None:
-            logger.error("Deezer client has no engine reference — cannot dispatch download")
-            return None
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("Deezer client has no engine reference — cannot dispatch download")
 
         # Parse filename: "track_id||display_name"
         parts = filename.split('||', 1)

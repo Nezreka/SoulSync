@@ -2474,32 +2474,35 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator).
-            # Every streaming source must appear here — task progress for in-flight
-            # downloads comes from this lookup. Missing a source = task.progress
-            # stays at 0 even when the underlying client knows the real percent.
+            # Also add non-Soulseek downloads. Soulseek is excluded
+            # because slskd's transfers endpoint was already pulled
+            # above — without the exclude both fetch paths run.
+            # Every streaming source must appear here — task progress
+            # for in-flight downloads comes from this lookup. Missing a
+            # source = task.progress stays at 0 even when the
+            # underlying client knows the real percent.
             try:
                 all_downloads = []
-                # Generic dispatch — engine returns active downloads
-                # across every plugin in one call, no per-source iteration.
                 if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
-                        all_downloads = run_async(download_orchestrator.engine.get_all_downloads())
+                        all_downloads = run_async(
+                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                        )
                     except Exception:
                         pass
                 for download in all_downloads:
-                        key = _make_context_key(download.username, download.filename)
-                        # Convert DownloadStatus to transfer dict format
-                        live_transfers_lookup[key] = {
-                            'id': download.id,
-                            'filename': download.filename,
-                            'username': download.username,
-                            'state': download.state,
-                            'percentComplete': download.progress,
-                            'size': download.size,
-                            'bytesTransferred': download.transferred,
-                            'averageSpeed': download.speed,
-                        }
+                    key = _make_context_key(download.username, download.filename)
+                    # Convert DownloadStatus to transfer dict format
+                    live_transfers_lookup[key] = {
+                        'id': download.id,
+                        'filename': download.filename,
+                        'username': download.username,
+                        'state': download.state,
+                        'percentComplete': download.progress,
+                        'size': download.size,
+                        'bytesTransferred': download.transferred,
+                        'averageSpeed': download.speed,
+                    }
             except Exception as e:
                 logger.error(f"Could not fetch streaming source downloads: {e}")
 

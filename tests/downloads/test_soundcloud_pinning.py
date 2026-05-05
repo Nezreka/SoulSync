@@ -50,13 +50,16 @@ def test_download_returns_none_for_empty_track_id_or_url(sc_client_with_engine):
     assert _run_async(client.download('soundcloud', 'track123||', 0)) is None
 
 
-def test_download_returns_none_when_engine_not_wired():
+def test_download_raises_when_engine_not_wired():
+    """Defensive: client without engine reference must raise so the
+    orchestrator's download_with_fallback surfaces the error and
+    moves on to the next source. Returning None silently would drop
+    the download with no user feedback (per JohnBaumb)."""
+    import pytest
     client = SoundcloudClient.__new__(SoundcloudClient)
     client._engine = None
-    result = _run_async(client.download(
-        'soundcloud', 'sc-1||https://soundcloud.com/x/y||T', 0,
-    ))
-    assert result is None
+    with pytest.raises(RuntimeError, match="engine reference"):
+        _run_async(client.download('soundcloud', 'v||t', 0))
 
 
 def test_download_accepts_three_part_filename_with_display(sc_client_with_engine):
