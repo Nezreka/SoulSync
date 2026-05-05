@@ -18,6 +18,12 @@ phased plan.
 """
 
 from core.media_server.contract import MediaServerClient
+from core.media_server.engine import MediaServerEngine
 from core.media_server.registry import MediaServerRegistry, build_default_registry
 
-__all__ = ["MediaServerClient", "MediaServerRegistry", "build_default_registry"]
+__all__ = [
+    "MediaServerClient",
+    "MediaServerEngine",
+    "MediaServerRegistry",
+    "build_default_registry",
+]
