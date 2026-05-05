@@ -256,11 +256,18 @@ class BackgroundDownloadWorker:
                 self._last_download_at[source_name] = time.time()
 
                 if file_path:
-                    self._engine.update_record(source_name, download_id, {
-                        'state': 'Completed, Succeeded',
-                        'progress': 100.0,
-                        'file_path': file_path,
-                    })
+                    # Atomic write — preserve Cancelled if user cancelled
+                    # between impl returning and this write. Same guard
+                    # _mark_terminal uses; Cin flagged both split sites.
+                    self._engine.update_record_unless_state(
+                        source_name, download_id,
+                        {
+                            'state': 'Completed, Succeeded',
+                            'progress': 100.0,
+                            'file_path': file_path,
+                        },
+                        skip_if_state_in=('Cancelled',),
+                    )
                     logger.info(
                         "%s download %s completed: %s",
                         source_name, download_id, file_path,
@@ -291,15 +298,18 @@ class BackgroundDownloadWorker:
         'Cancelled' state set by the user via cancel_download.
         Mirrors the legacy per-client guard
         (``if state != 'Cancelled': state = 'Errored'``) every
-        client used to hand-roll inside its thread worker."""
-        record = self._engine.get_record(source_name, download_id)
-        if record is None:
-            return  # already removed (e.g. cancel + remove)
-        if record.get('state') == 'Cancelled':
-            return  # user explicitly cancelled — leave it
+        client used to hand-roll inside its thread worker.
+
+        Uses ``update_record_unless_state`` so the check + write are
+        atomic under the engine's state_lock. Cin caught a race
+        where a cancel landing between the read-snapshot + write
+        could overwrite Cancelled back to Errored / Completed.
+        """
         patch: Dict[str, Any] = {
             'state': 'Completed, Succeeded' if success else 'Errored',
         }
         if error is not None:
             patch['error'] = error
-        self._engine.update_record(source_name, download_id, patch)
+        self._engine.update_record_unless_state(
+            source_name, download_id, patch, skip_if_state_in=('Cancelled',),
+        )

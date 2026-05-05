@@ -76,7 +76,9 @@ class DownloadOrchestrator:
         # can route through it without further orchestrator changes.
         self.engine = engine if engine is not None else DownloadEngine()
         for source_name, plugin in self.registry.all_plugins():
-            self.engine.register_plugin(source_name, plugin)
+            spec = self.registry.get_spec(source_name)
+            aliases = spec.aliases if spec else ()
+            self.engine.register_plugin(source_name, plugin, aliases=aliases)
 
         if self._init_failures:
             logger.warning(f"Download clients failed to initialize: {', '.join(self._init_failures)}")
@@ -246,17 +248,42 @@ class DownloadOrchestrator:
 
         return False
 
+    def _normalize_source_name(self, name: str) -> Optional[str]:
+        """Convert a possibly-aliased source name (e.g. legacy
+        ``'deezer_dl'``) to the canonical registry name (``'deezer'``).
+        Returns None if the input matches neither a canonical name
+        nor an alias.
+
+        Cin's review caught a bug where legacy alias values from
+        config (hybrid_order containing ``'deezer_dl'``) silently
+        dropped Deezer from hybrid mode because the canonical-name
+        membership check rejected the alias.
+        """
+        spec = self.registry.get_spec(name) if name else None
+        return spec.name if spec else None
+
     def _resolve_source_chain(self) -> List[str]:
         """Order the configured sources for hybrid mode. Prefers
         ``hybrid_order`` config; falls back to legacy
-        primary/secondary pair when no order set."""
-        registry_names = set(self.registry.names())
+        primary/secondary pair when no order set. Normalizes alias
+        names through the registry so legacy ``deezer_dl`` config
+        values resolve correctly to the canonical ``deezer`` plugin."""
         if self.hybrid_order:
-            return [s for s in self.hybrid_order if s in registry_names]
-        primary = self.hybrid_primary if self.hybrid_primary in registry_names else 'soulseek'
-        secondary = self.hybrid_secondary if self.hybrid_secondary in registry_names else 'soulseek'
+            chain = []
+            seen = set()
+            for raw in self.hybrid_order:
+                canonical = self._normalize_source_name(raw)
+                if canonical and canonical not in seen:
+                    chain.append(canonical)
+                    seen.add(canonical)
+            return chain
+        primary = self._normalize_source_name(self.hybrid_primary) or 'soulseek'
+        secondary = self._normalize_source_name(self.hybrid_secondary) or 'soulseek'
         if secondary == primary:
-            secondary = next((name for name in registry_names if name != primary), 'soulseek')
+            secondary = next(
+                (name for name in self.registry.names() if name != primary),
+                'soulseek',
+            )
         chain = [primary, secondary]
         if not chain:
             chain = ['soulseek']

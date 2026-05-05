@@ -190,6 +190,53 @@ def test_reload_instances_with_no_args_reloads_every_source():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Cin bug 2: hybrid_order alias normalization
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_source_chain_normalizes_legacy_aliases():
+    """Cin's bug 2: hybrid_order config containing the legacy alias
+    'deezer_dl' was silently dropped because the canonical-name
+    membership check rejected it. Orchestrator must normalize via
+    the registry alias map first."""
+    orch = _build_orchestrator(
+        soulseek=_FakeClient(),
+        deezer_dl=_FakeClient(),
+        youtube=_FakeClient(),
+    )
+    orch.hybrid_order = ['deezer_dl', 'soulseek', 'youtube']
+    orch.hybrid_primary = None
+    orch.hybrid_secondary = None
+
+    chain = orch._resolve_source_chain()
+    assert chain == ['deezer', 'soulseek', 'youtube']
+
+
+def test_resolve_source_chain_dedupes_alias_and_canonical():
+    """If both 'deezer' and 'deezer_dl' appear, dedupe to single entry."""
+    orch = _build_orchestrator(
+        soulseek=_FakeClient(),
+        deezer_dl=_FakeClient(),
+    )
+    orch.hybrid_order = ['deezer_dl', 'deezer', 'soulseek']
+    orch.hybrid_primary = None
+    orch.hybrid_secondary = None
+
+    chain = orch._resolve_source_chain()
+    assert chain == ['deezer', 'soulseek']
+
+
+def test_resolve_source_chain_drops_unknown_names():
+    orch = _build_orchestrator(soulseek=_FakeClient(), youtube=_FakeClient())
+    orch.hybrid_order = ['nonsense', 'soulseek', 'also_fake', 'youtube']
+    orch.hybrid_primary = None
+    orch.hybrid_secondary = None
+
+    chain = orch._resolve_source_chain()
+    assert chain == ['soulseek', 'youtube']
+
+
 def test_get_download_orchestrator_returns_set_singleton():
     """When set_download_orchestrator has been called (web_server.py
     does this at boot), get_download_orchestrator returns the

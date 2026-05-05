@@ -190,6 +190,40 @@ def test_worker_preserves_cancelled_when_impl_returns_none():
     )
 
 
+def test_worker_preserves_cancelled_when_impl_returns_success():
+    """Cin's bug 3 follow-up: the success path also has a read-then-write
+    race. If the user cancels between the impl returning a valid file
+    path and the worker writing 'Completed, Succeeded', the cancel is
+    overwritten. The success-path write must use the same atomic
+    Cancelled-preserve guard as _mark_terminal."""
+    engine = DownloadEngine()
+
+    def impl(download_id, target_id, display_name):
+        # User cancels mid-impl, then impl finishes successfully.
+        engine.update_record('youtube', download_id, {'state': 'Cancelled'})
+        return '/tmp/file.flac'
+
+    download_id = engine.worker.dispatch(
+        source_name='youtube',
+        target_id='vid',
+        display_name='X',
+        original_filename='vid||X',
+        impl_callable=impl,
+    )
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        record = engine.get_record('youtube', download_id)
+        if record and record['state'] in ('Cancelled', 'Completed, Succeeded'):
+            break
+        time.sleep(0.01)
+
+    record = engine.get_record('youtube', download_id)
+    assert record['state'] == 'Cancelled', (
+        f"Worker clobbered user's Cancelled with {record['state']}"
+    )
+
+
 def test_worker_preserves_cancelled_when_impl_raises():
     """Same Cancelled-preserve guard, but for the impl-raises path."""
     engine = DownloadEngine()
