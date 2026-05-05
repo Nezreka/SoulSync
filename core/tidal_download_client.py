@@ -92,7 +92,10 @@ HLS_QUALITY_MAP = {
 HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
 
-class TidalDownloadClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class TidalDownloadClient(DownloadSourcePlugin):
     """
     Tidal download client using tidalapi.
     Provides search, matching, and download capabilities as a drop-in alternative to YouTube/Soulseek.
