@@ -45,6 +45,7 @@ class MediaServerEngine:
         self,
         registry: Optional[MediaServerRegistry] = None,
         active_server_resolver=None,
+        clients: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize the engine.
 
@@ -56,9 +57,29 @@ class MediaServerEngine:
                 ``config_manager.get_active_media_server``. Tests
                 inject a custom resolver to switch active server
                 without touching real config.
+            clients: Pre-built {name: client_instance} dict. When
+                provided, the engine wraps these instances directly
+                instead of asking the registry to construct fresh
+                ones. web_server.py uses this so the engine
+                shares the same client objects as the
+                pre-existing global variables (no double-init).
         """
         self.registry = registry if registry is not None else build_default_registry()
-        self.registry.initialize()
+
+        if clients is not None:
+            # Wrap pre-built instances (production case from web_server.py
+            # init). Skip registry.initialize() — we already have the
+            # instances, just stash them in the registry's slots so
+            # registry.get(name) works.
+            for name, client in clients.items():
+                self.registry._instances[name] = client
+            # Mark any registered-but-not-supplied as failed init so
+            # active_client() returns None for them.
+            for name in self.registry._specs:
+                if name not in self.registry._instances:
+                    self.registry._instances[name] = None
+        else:
+            self.registry.initialize()
 
         if active_server_resolver is None:
             from config.settings import config_manager
