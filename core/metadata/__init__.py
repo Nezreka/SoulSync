@@ -1,5 +1,6 @@
 """Metadata package public surface."""
 
+from core.metadata.engine import MetadataEngine, MetadataSourceFacade, get_metadata_engine
 from core.metadata.album_tracks import (
     get_album_for_source,
     get_album_tracks_for_source,
@@ -10,6 +11,11 @@ from core.metadata.album_tracks import (
 from core.metadata.artist_image import get_artist_image_url
 from core.metadata.artwork import is_internal_image_host, normalize_image_url
 from core.metadata.cache import MetadataCache, get_metadata_cache
+from core.metadata.constants import (
+    METADATA_PROVIDER_SOURCES,
+    METADATA_SOURCE_LABELS,
+    METADATA_SOURCE_PRIORITY,
+)
 from core.metadata.completion import (
     check_album_completion,
     check_artist_discography_completion,
@@ -20,9 +26,27 @@ from core.metadata.discography import (
     get_artist_detail_discography,
     get_artist_discography,
 )
+from core.metadata.contracts import (
+    MetadataLookupOutcome,
+    MetadataLookupRequest,
+    MetadataProviderStatus,
+    MetadataSearchOutcome,
+    MetadataSearchRequest,
+)
+from core.metadata.exceptions import (
+    MetadataNotFound,
+    MetadataProviderError,
+    MetadataRateLimited,
+)
 from core.metadata.lookup import MetadataLookupOptions
+from core.metadata.models import (
+    MetadataAlbum,
+    MetadataArtist,
+    MetadataPlaylist,
+    MetadataRecord,
+    MetadataTrack,
+)
 from core.metadata.registry import (
-    METADATA_SOURCE_PRIORITY,
     clear_cached_metadata_client,
     clear_cached_metadata_clients,
     clear_cached_profile_spotify_client,
@@ -30,6 +54,7 @@ from core.metadata.registry import (
     get_deezer_client,
     get_discogs_client,
     get_hydrabase_client,
+    get_enabled_metadata_sources,
     get_itunes_client,
     get_primary_client,
     get_primary_source,
@@ -38,6 +63,7 @@ from core.metadata.registry import (
     get_source_priority,
     get_spotify_client,
     is_hydrabase_enabled,
+    is_metadata_source_enabled,
     register_profile_spotify_credentials_provider,
     register_runtime_clients,
 )
@@ -56,11 +82,27 @@ from core.metadata.similar_artists import (
 
 __all__ = [
     "METADATA_SOURCE_PRIORITY",
+    "METADATA_SOURCE_LABELS",
+    "METADATA_PROVIDER_SOURCES",
     "METADATA_SOURCE_STATUS_TTL",
+    "MetadataAlbum",
     "MetadataCache",
+    "MetadataArtist",
+    "MetadataEngine",
+    "MetadataLookupOutcome",
+    "MetadataLookupRequest",
     "MetadataLookupOptions",
     "MetadataProvider",
+    "MetadataProviderError",
+    "MetadataProviderStatus",
+    "MetadataRateLimited",
+    "MetadataNotFound",
+    "MetadataRecord",
     "MetadataService",
+    "MetadataSearchOutcome",
+    "MetadataSearchRequest",
+    "MetadataSourceFacade",
+    "MetadataTrack",
     "check_album_completion",
     "check_artist_discography_completion",
     "check_single_completion",
@@ -77,12 +119,14 @@ __all__ = [
     "get_client_for_source",
     "get_deezer_client",
     "get_discogs_client",
+    "get_enabled_metadata_sources",
     "get_hydrabase_client",
     "get_itunes_client",
     "get_metadata_cache",
     "get_metadata_source_status",
     "get_metadata_service",
     "get_musicmap_similar_artists",
+    "get_metadata_engine",
     "get_primary_client",
     "get_primary_source",
     "get_spotify_client_for_profile",
@@ -94,6 +138,7 @@ __all__ = [
     "iter_artist_discography_completion_events",
     "iter_musicmap_similar_artist_events",
     "is_hydrabase_enabled",
+    "is_metadata_source_enabled",
     "is_internal_image_host",
     "register_profile_spotify_credentials_provider",
     "register_runtime_clients",

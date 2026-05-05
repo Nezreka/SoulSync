@@ -15,6 +15,7 @@ from core.metadata.album_tracks import (
     get_artist_albums_for_source,
     resolve_album_reference,
 )
+from core.metadata.engine import MetadataEngine, MetadataSourceFacade, get_metadata_engine
 from core.metadata.artist_image import get_artist_image_url
 from core.metadata.cache import MetadataCache, get_metadata_cache
 from core.metadata.completion import (
@@ -45,6 +46,7 @@ from core.metadata.registry import (
     get_client_for_source,
     get_deezer_client,
     get_discogs_client,
+    get_enabled_metadata_sources,
     get_hydrabase_client,
     get_itunes_client,
     get_primary_client,
@@ -54,6 +56,7 @@ from core.metadata.registry import (
     get_source_priority,
     get_spotify_client,
     is_hydrabase_enabled,
+    is_metadata_source_enabled,
     register_profile_spotify_credentials_provider,
     register_runtime_clients,
 )
@@ -76,9 +79,11 @@ except Exception:  # pragma: no cover - optional dependency fallback
 __all__ = [
     "METADATA_SOURCE_PRIORITY",
     "MetadataCache",
+    "MetadataEngine",
     "MetadataLookupOptions",
     "MetadataProvider",
     "MetadataService",
+    "MetadataSourceFacade",
     "SpotifyClient",
     "iTunesClient",
     "_build_artist_detail_release_card",
@@ -106,9 +111,11 @@ __all__ = [
     "get_client_for_source",
     "get_deezer_client",
     "get_discogs_client",
+    "get_enabled_metadata_sources",
     "get_hydrabase_client",
     "get_itunes_client",
     "get_metadata_cache",
+    "get_metadata_engine",
     "get_metadata_service",
     "get_musicmap_similar_artists",
     "get_primary_client",
@@ -120,6 +127,7 @@ __all__ = [
     "iter_artist_discography_completion_events",
     "iter_musicmap_similar_artist_events",
     "is_hydrabase_enabled",
+    "is_metadata_source_enabled",
     "register_profile_spotify_credentials_provider",
     "register_runtime_clients",
     "requests",

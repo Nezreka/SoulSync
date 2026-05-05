@@ -81,7 +81,7 @@ def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[
     if total_tracks:
         return int(total_tracks)
 
-    release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
+    release_id = _extract_lookup_value(release, 'source_id', 'id', 'album_id', 'release_id')
     if not release_id:
         return 0
 
@@ -111,7 +111,7 @@ def check_album_completion(
         source_chain = source_chain or _get_completion_source_chain(source_override)
         album_name = album_data.get('name', '')
         total_tracks = _resolve_completion_track_total(album_data, source_chain)
-        album_id = album_data.get('id', '')
+        album_id = album_data.get('source_id') or album_data.get('id', '')
 
         # If total_tracks is 0 (Discogs masters don't include track counts),
         # try to fetch the real count from the prioritized metadata sources.
@@ -136,6 +136,7 @@ def check_album_completion(
         except Exception as db_error:
             logger.error(f"Database error for album '{album_name}': {db_error}")
             return {
+                "source_id": album_id,
                 "id": album_id,
                 "name": album_name,
                 "status": "error",
@@ -172,6 +173,7 @@ def check_album_completion(
         )
 
         return {
+            "source_id": album_id,
             "id": album_id,
             "name": album_name,
             "status": status,
@@ -186,7 +188,8 @@ def check_album_completion(
     except Exception as e:
         logger.error(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
         return {
-            "id": album_data.get('id', ''),
+            "source_id": album_data.get('source_id') or album_data.get('id', ''),
+            "id": album_data.get('source_id') or album_data.get('id', ''),
             "name": album_data.get('name', 'Unknown'),
             "status": "error",
             "owned_tracks": 0,
@@ -213,7 +216,7 @@ def check_single_completion(
         single_name = single_data.get('name', '')
         raw_total_tracks = single_data.get('total_tracks', 1)
         total_tracks = raw_total_tracks if raw_total_tracks is not None else 1
-        single_id = single_data.get('id', '')
+        single_id = single_data.get('source_id') or single_data.get('id', '')
         album_type = single_data.get('album_type', 'single')
         formats = []
 
@@ -267,6 +270,7 @@ def check_single_completion(
             )
 
             return {
+                "source_id": single_id,
                 "id": single_id,
                 "name": single_name,
                 "status": status,
@@ -316,6 +320,7 @@ def check_single_completion(
             )
 
             return {
+                "source_id": single_id,
                 "id": single_id,
                 "name": single_name,
                 "status": status,
@@ -331,7 +336,8 @@ def check_single_completion(
     except Exception as e:
         logger.error(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
         return {
-            "id": single_data.get('id', ''),
+            "source_id": single_data.get('source_id') or single_data.get('id', ''),
+            "id": single_data.get('source_id') or single_data.get('id', ''),
             "name": single_data.get('name', 'Unknown'),
             "status": "error",
             "owned_tracks": 0,
@@ -411,7 +417,8 @@ def iter_artist_discography_completion_events(
             yield {
                 'type': 'error',
                 'container_type': 'albums',
-                'id': album.get('id', ''),
+                'source_id': album.get('source_id') or album.get('id', ''),
+                'id': album.get('source_id') or album.get('id', ''),
                 'name': album.get('name', 'Unknown'),
                 'error': str(e),
             }
@@ -436,7 +443,8 @@ def iter_artist_discography_completion_events(
             yield {
                 'type': 'error',
                 'container_type': 'singles',
-                'id': single.get('id', ''),
+                'source_id': single.get('source_id') or single.get('id', ''),
+                'id': single.get('source_id') or single.get('id', ''),
                 'name': single.get('name', 'Unknown'),
                 'error': str(e),
             }

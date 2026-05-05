@@ -29,9 +29,13 @@ def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
     primary_source = metadata_registry.get_primary_source()
     source_chain = list(metadata_registry.get_source_priority(primary_source))
     override = (options.source_override or '').strip().lower()
+    enabled_sources = tuple(source.strip().lower() for source in (options.enabled_sources or ()) if source and str(source).strip())
 
     if override:
         source_chain = [override] + [source for source in source_chain if source != override]
+
+    if enabled_sources:
+        source_chain = [source for source in source_chain if source in enabled_sources]
 
     if not options.allow_fallback:
         source_chain = source_chain[:1]
@@ -82,7 +86,7 @@ def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
 
 
 def _build_similar_artist_payload(artist_data: Any, source: str) -> Optional[Dict[str, Any]]:
-    artist_id = _extract_lookup_value(artist_data, 'id', 'artist_id', 'spotify_id', 'itunes_id', 'deezer_id')
+    artist_id = _extract_lookup_value(artist_data, 'source_id', 'id', 'artist_id', 'spotify_id', 'itunes_id', 'deezer_id')
     if not artist_id:
         return None
 
@@ -113,6 +117,7 @@ def _build_similar_artist_payload(artist_data: Any, source: str) -> Optional[Dic
         popularity = 0
 
     return {
+        'source_id': str(artist_id),
         'id': str(artist_id),
         'name': str(name or artist_id),
         'image_url': _extract_artist_image_url(artist_data),
@@ -132,7 +137,7 @@ def _resolve_musicmap_artist_source_ids(artist_name: str, source_chain: List[str
             continue
 
         search_results = _search_artists_for_source(source, client, artist_name, limit=1)
-        searched_source_ids[source] = _extract_lookup_value(search_results[0], 'id', 'artist_id') if search_results else None
+        searched_source_ids[source] = _extract_lookup_value(search_results[0], 'source_id', 'id', 'artist_id') if search_results else None
 
     return searched_source_ids
 
@@ -165,7 +170,7 @@ def _match_musicmap_similar_artist(
         if matched_name and matched_name == searched_name:
             continue
 
-        matched_id = _extract_lookup_value(matched_artist, 'id', 'artist_id')
+        matched_id = _extract_lookup_value(matched_artist, 'source_id', 'id', 'artist_id')
         if not matched_id:
             continue
 
@@ -244,7 +249,7 @@ def iter_musicmap_similar_artist_events(
             if not payload:
                 continue
 
-            payload_id = str(payload.get('id') or '')
+            payload_id = str(payload.get('source_id') or payload.get('id') or '')
             if payload_id in seen_ids:
                 continue
 
