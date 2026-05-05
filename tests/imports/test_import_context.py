@@ -64,9 +64,9 @@ def test_normalize_import_context_promotes_neutral_fields_without_legacy_aliases
     assert get_import_has_full_metadata(normalized) is False
 
 
-def test_normalize_import_context_promotes_legacy_source_alias():
+def test_normalize_import_context_keeps_source_field():
     context = {
-        "_source": "spotify",
+        "source": "spotify",
         "artist": {"name": "Artist One", "id": "artist-1"},
         "album": {"name": "Album One", "id": "album-1"},
         "track_info": {"name": "Song One", "id": "track-1"},
@@ -76,7 +76,6 @@ def test_normalize_import_context_promotes_legacy_source_alias():
     normalized = normalize_import_context(context)
 
     assert normalized["source"] == "spotify"
-    assert "_source" not in normalized
     assert get_import_source(normalized) == "spotify"
 
 

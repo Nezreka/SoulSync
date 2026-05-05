@@ -342,8 +342,6 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
         'uri': _extract_lookup_value(track_item, 'uri', default='') or '',
         'album': album_info,
         'source': source,
-        'provider': source,
-        '_source': source,
     }
 
 
@@ -360,8 +358,6 @@ def _build_album_tracks_payload(
         album_name=album_name, artist_name=artist_name, source=source,
     )
     album_info['source'] = source
-    album_info['_source'] = source
-    album_info['provider'] = source
     track_items = _extract_album_track_items(album_data, tracks_data)
     tracks = [_build_album_track_entry(track, album_info, source) for track in track_items]
 

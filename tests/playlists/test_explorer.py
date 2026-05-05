@@ -269,7 +269,7 @@ def test_discovered_artist_grouping_uses_matched_data():
                 'album_name': 'Local Album',
                 'extra_data': json.dumps({
                     'discovered': True,
-                    'provider': 'spotify',
+                    'source': 'spotify',
                     'matched_data': {
                         'artists': [{'name': 'Discovered Artist', 'id': 'sp-aid'}],
                         'album': {'name': 'Discovered Album'},
@@ -306,7 +306,7 @@ def test_provider_mismatch_falls_back_to_raw_track_name():
                 'album_name': 'Raw Album',
                 'extra_data': json.dumps({
                     'discovered': True,
-                    'provider': 'itunes',  # mismatch
+                    'source': 'itunes',  # mismatch
                     'matched_data': {
                         'artists': [{'name': 'iTunes Artist'}],
                     },

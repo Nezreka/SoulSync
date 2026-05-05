@@ -105,8 +105,8 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
 
             # Only use discovery data if it matches the active metadata source
             is_discovered = extra.get('discovered', False)
-            provider = (extra.get('provider') or '').lower()
-            source_matches = provider == source_name or (provider in ('itunes', 'apple') and source_name == 'itunes')
+            source = (extra.get('source') or '').lower()
+            source_matches = source == source_name or (source in ('itunes', 'apple') and source_name == 'itunes')
 
             matched = extra.get('matched_data', {}) if (is_discovered and source_matches) else {}
             artists_list = matched.get('artists', [])
@@ -359,5 +359,3 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
         import traceback
         traceback.print_exc()
         return deps.flask_jsonify({"success": False, "error": str(e)}), 500
-
-

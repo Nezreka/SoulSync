@@ -163,7 +163,7 @@ def test_get_wishlist_tracks_for_download_formats_modal_shape():
             "track_name": "Song One",
             "artist_name": "Artist One",
             "album_name": "Album One",
-            "provider": None,
+            "source": None,
             "spotify_data": {
                 "id": "sp-1",
                 "name": "Song One",

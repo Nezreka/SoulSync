@@ -243,7 +243,6 @@ def _normalize_track_match(track_item: Any, provider: str) -> dict:
         'preview_url': _extract_lookup_value(track_item, 'preview_url', default=None),
         'external_urls': _extract_lookup_value(track_item, 'external_urls', default={}) or {},
         'popularity': _extract_lookup_value(track_item, 'popularity', default=0) or 0,
-        'provider': provider,
         'source': provider,
     }
     if not track_data['image_url']:
@@ -612,7 +611,7 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
                         'bitrate': bitrate,
                         'matched': matched,
                         'match_id': matched_track_data['id'] if matched_track_data else None,
-                        'provider': best_source if matched else None,
+                        'source': best_source if matched else None,
                         'spotify_id': matched_track_data['id'] if matched_track_data else None,
                     }
 

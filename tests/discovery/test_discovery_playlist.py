@@ -270,7 +270,7 @@ def test_match_above_threshold_writes_extra_data():
     assert len(deps._db.extra_data_writes) == 1
     _, extra = deps._db.extra_data_writes[0]
     assert extra['discovered'] is True
-    assert extra['provider'] == 'spotify'
+    assert extra['source'] == 'spotify'
     assert extra['confidence'] == 0.92
     assert deps._db.cache_saves  # saved to cache
 
@@ -289,7 +289,7 @@ def test_match_below_threshold_falls_back_to_wing_it():
 
     assert len(deps._db.extra_data_writes) == 1
     _, extra = deps._db.extra_data_writes[0]
-    assert extra['provider'] == 'wing_it_fallback'
+    assert extra['source'] == 'wing_it_fallback'
     assert extra['wing_it_fallback'] is True
 
 

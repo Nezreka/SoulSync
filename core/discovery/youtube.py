@@ -349,7 +349,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                     if result.get('status_class') in ('found', 'wing-it') and result.get('matched_data'):
                         extra_data = {
                             'discovered': True,
-                            'provider': result.get('discovery_source', discovery_source),
+                            'source': result.get('discovery_source', discovery_source),
                             'confidence': result.get('confidence', 0),
                             'matched_data': result['matched_data'],
                         }
@@ -357,13 +357,13 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                             extra_data['manual_match'] = True
                         if result.get('wing_it_fallback'):
                             extra_data['wing_it_fallback'] = True
-                            extra_data['provider'] = 'wing_it_fallback'
+                            extra_data['source'] = 'wing_it_fallback'
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                     else:
                         extra_data = {
                             'discovered': False,
                             'discovery_attempted': True,
-                            'provider': discovery_source,
+                            'source': discovery_source,
                         }
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                 logger.info(f"Wrote discovery results to DB for {url_hash}")
