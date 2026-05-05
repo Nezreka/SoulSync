@@ -127,6 +127,27 @@ def test_configured_clients_excludes_unconfigured_sources():
     assert result['soulseek'] is configured
 
 
+def test_configured_clients_skips_clients_whose_is_configured_raises():
+    """Per JohnBaumb: configured_clients() has a try/except so a single
+    broken is_configured() call doesn't crash the whole iteration —
+    pin it so a future refactor can't quietly drop the guard. The
+    broken plugin is skipped; the rest still come back."""
+
+    class _BrokenIsConfigured(_FakeClient):
+        def is_configured(self):
+            raise RuntimeError("is_configured blew up")
+
+    broken = _BrokenIsConfigured()
+    healthy = _FakeClient(configured=True)
+    orch = _build_orchestrator(soulseek=healthy, youtube=broken)
+
+    result = orch.configured_clients()
+    # Healthy plugin still surfaces; broken one is silently skipped.
+    assert 'soulseek' in result
+    assert result['soulseek'] is healthy
+    assert 'youtube' not in result
+
+
 def test_reload_instances_dispatches_to_named_source():
     """Generic dispatch — caller passes source name instead of
     reaching for orch.hifi.reload_instances() directly."""
