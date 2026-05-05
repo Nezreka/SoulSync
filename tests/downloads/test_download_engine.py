@@ -120,6 +120,51 @@ def test_remove_record_returns_none_when_missing():
     assert engine.remove_record('qobuz', 'never-existed') is None
 
 
+def test_per_source_locks_dont_block_each_other():
+    """Per JohnBaumb: each source must have its own lock so a long-held
+    write on one source doesn't block writes on another. Pre-refactor
+    each client owned its own download lock; the engine has to match
+    that semantic.
+
+    Hold source-A's lock from one thread, then mutate source-B from
+    another thread. Source-B's mutation must complete promptly even
+    while source-A is locked.
+    """
+    engine = DownloadEngine()
+    engine.add_record('youtube', 'yt-1', {'state': 'InProgress'})
+    engine.add_record('tidal', 'td-1', {'state': 'InProgress'})
+
+    held = threading.Event()
+    release = threading.Event()
+    other_done = threading.Event()
+
+    def hold_youtube_lock():
+        with engine._source_lock('youtube'):
+            held.set()
+            release.wait(timeout=2.0)
+
+    def update_tidal_while_youtube_held():
+        held.wait(timeout=1.0)
+        engine.update_record('tidal', 'td-1', {'state': 'Completed, Succeeded'})
+        other_done.set()
+
+    holder = threading.Thread(target=hold_youtube_lock)
+    other = threading.Thread(target=update_tidal_while_youtube_held)
+    holder.start()
+    other.start()
+
+    # Tidal write must complete even though YouTube's lock is held.
+    assert other_done.wait(timeout=1.0), (
+        "Tidal mutation blocked by YouTube's lock — sources are not "
+        "independently shardable"
+    )
+
+    release.set()
+    holder.join()
+    other.join()
+    assert engine.get_record('tidal', 'td-1')['state'] == 'Completed, Succeeded'
+
+
 def test_remove_record_drops_empty_source_bucket():
     """Per JohnBaumb: nested layout makes per-source iteration
     O(source_records). Removing the last record for a source must

@@ -301,7 +301,7 @@ class BackgroundDownloadWorker:
         client used to hand-roll inside its thread worker.
 
         Uses ``update_record_unless_state`` so the check + write are
-        atomic under the engine's state_lock. Cin caught a race
+        atomic under the engine's per-source lock. Cin caught a race
         where a cancel landing between the read-snapshot + write
         could overwrite Cancelled back to Errored / Completed.
         """

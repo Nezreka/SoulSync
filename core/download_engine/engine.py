@@ -2,8 +2,8 @@
 
 Phase B scope: skeleton only. The engine exposes a place for
 plugins to register, a single ``active_downloads`` dict keyed by
-``(source, download_id)``, and a ``state_lock`` that guards mutations
-across the multi-threaded download worker pool.
+``(source, download_id)``, and per-source RLocks that guard mutations
+without serializing workers across different sources.
 
 Subsequent phases bolt more capability on top:
 - ``dispatch_download(plugin, target_id)`` (Phase C — replaces every
@@ -50,22 +50,31 @@ class DownloadEngine:
     so the engine can answer "which plugin owns this download" in
     O(1) without iterating every plugin).
 
-    Thread safety: every state mutation goes through ``state_lock``.
-    Read-only accessors (``get_record``, ``iter_records_for_source``)
-    take the lock briefly and return a SHALLOW COPY so the caller
-    can iterate without holding the lock. Callers that need to
-    mutate a record should use ``update_record`` which takes the
-    lock and applies the patch atomically.
+    Thread safety: per-source lock sharding. Each source gets its own
+    RLock — progress callbacks on Deezer don't block Tidal's worker
+    and vice versa, matching the pre-refactor behavior where each
+    client owned its own download lock. Read-only accessors
+    (``get_record``, ``iter_records_for_source``) take the source's
+    lock briefly and return a SHALLOW COPY so the caller can iterate
+    without holding the lock. Callers that need to mutate a record
+    should use ``update_record`` which takes the lock and applies the
+    patch atomically.
     """
 
     def __init__(self) -> None:
-        self.state_lock = threading.RLock()
         # Nested dict: source_name → {download_id → record}. Replaces
         # the original single-dict composite-key layout so
         # ``iter_records_for_source`` is O(source_records) instead of
-        # O(total_records). RLock so a plugin's worker callback can
-        # re-enter while holding the lock for its own update.
+        # O(total_records).
         self._records: Dict[str, Dict[str, DownloadRecord]] = {}
+        # Per-source RLocks. Each source gets its own so progress
+        # updates on one source never block writes on another. RLock
+        # so a plugin's worker callback can re-enter while holding the
+        # lock for its own update. Lazily created via ``_source_lock``;
+        # the meta-lock guards creation against the create-race window
+        # where two threads could both miss + both create.
+        self._source_locks: Dict[str, threading.RLock] = {}
+        self._source_locks_lock = threading.Lock()
         # Plugins that have registered with the engine. Source name
         # → plugin instance.
         self._plugins: Dict[str, Any] = {}
@@ -155,6 +164,18 @@ class DownloadEngine:
     def registered_sources(self) -> List[str]:
         return list(self._plugins.keys())
 
+    def _source_lock(self, source_name: str) -> threading.RLock:
+        """Return the per-source RLock, lazy-creating it on first use.
+        The meta-lock around the cache lookup closes the create-race
+        window where two threads both miss + both create a fresh lock.
+        """
+        with self._source_locks_lock:
+            lock = self._source_locks.get(source_name)
+            if lock is None:
+                lock = threading.RLock()
+                self._source_locks[source_name] = lock
+            return lock
+
     # ------------------------------------------------------------------
     # Active-downloads state — Phase B core surface
     # ------------------------------------------------------------------
@@ -163,7 +184,7 @@ class DownloadEngine:
         """Insert a fresh download record. Used by clients (today
         directly via their own dicts; Phase B2 routes them through
         here)."""
-        with self.state_lock:
+        with self._source_lock(source_name):
             source_bucket = self._records.setdefault(source_name, {})
             if download_id in source_bucket:
                 logger.warning("Replacing existing download record for %s/%s", source_name, download_id)
@@ -172,7 +193,7 @@ class DownloadEngine:
     def update_record(self, source_name: str, download_id: str, patch: DownloadRecord) -> None:
         """Apply a partial patch to an existing record. No-op if the
         record was already removed (e.g. cancelled mid-update)."""
-        with self.state_lock:
+        with self._source_lock(source_name):
             existing = self._records.get(source_name, {}).get(download_id)
             if existing is None:
                 return
@@ -189,10 +210,10 @@ class DownloadEngine:
         Used by the background download worker's ``_mark_terminal``
         to avoid the read-then-write race Cin flagged: a cancel
         landing between the snapshot and update could be overwritten
-        back to Errored / Completed. Holding ``state_lock`` across
+        back to Errored / Completed. Holding the source's lock across
         the check + write closes the window.
         """
-        with self.state_lock:
+        with self._source_lock(source_name):
             existing = self._records.get(source_name, {}).get(download_id)
             if existing is None:
                 return False
@@ -204,7 +225,7 @@ class DownloadEngine:
     def remove_record(self, source_name: str, download_id: str) -> Optional[DownloadRecord]:
         """Delete a record (cancellation cleanup). Returns the
         removed record or None if not found."""
-        with self.state_lock:
+        with self._source_lock(source_name):
             source_bucket = self._records.get(source_name)
             if not source_bucket:
                 return None
@@ -218,20 +239,21 @@ class DownloadEngine:
     def get_record(self, source_name: str, download_id: str) -> Optional[DownloadRecord]:
         """Return a SHALLOW COPY of the record. Caller mutations
         don't affect engine state — use ``update_record`` for that."""
-        with self.state_lock:
+        with self._source_lock(source_name):
             record = self._records.get(source_name, {}).get(download_id)
             return dict(record) if record is not None else None
 
     def iter_records_for_source(self, source_name: str) -> Iterator[DownloadRecord]:
         """Yield SHALLOW COPIES of every record owned by a source.
-        Holds the lock briefly to snapshot, then yields outside the
-        lock so callers can spend arbitrary time on each record.
+        Holds the source's lock briefly to snapshot, then yields
+        outside the lock so callers can spend arbitrary time on each
+        record.
 
         With the nested-dict layout this is O(source_records) — only
         touches the bucket for the requested source, not every record
         across every source.
         """
-        with self.state_lock:
+        with self._source_lock(source_name):
             source_bucket = self._records.get(source_name, {})
             snapshot = [dict(record) for record in source_bucket.values()]
         for record in snapshot:
