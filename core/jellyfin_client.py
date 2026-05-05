@@ -146,7 +146,10 @@ class JellyfinTrack:
             return self._client.get_album_by_id(self._album_id)
         return None
 
-class JellyfinClient:
+from core.media_server.contract import MediaServerClient
+
+
+class JellyfinClient(MediaServerClient):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None

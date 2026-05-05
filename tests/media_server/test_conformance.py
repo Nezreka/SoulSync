@@ -32,7 +32,7 @@ def _import_server_classes():
 def test_default_registry_registers_all_four_servers():
     """Smoke check that the foundation registry knows about every
     server SoulSync historically dispatched to."""
-    from core.media_server import build_default_registry
+    from core.media_server.registry import build_default_registry
 
     registry = build_default_registry()
     expected = {'plex', 'jellyfin', 'navidrome', 'soulsync'}
@@ -51,4 +51,22 @@ def test_server_class_has_all_required_methods(server_name):
     missing = [m for m in REQUIRED_METHODS if not hasattr(cls, m)]
     assert not missing, (
         f"{server_name} ({cls.__name__}) missing required methods: {missing}"
+    )
+
+
+@pytest.mark.parametrize('server_name', ['plex', 'jellyfin', 'navidrome', 'soulsync'])
+def test_server_class_explicitly_inherits_contract(server_name):
+    """Per Cin's standard from the download refactor: clients must
+    explicitly inherit ``MediaServerClient`` so the contract conformance
+    is obvious from reading the class declaration. Structural
+    typing alone (which would still pass `hasattr` checks) leaves
+    the contract invisible to anyone reading the code — drift in a
+    future client class wouldn't fail at the contract boundary."""
+    from core.media_server.contract import MediaServerClient
+
+    classes = _import_server_classes()
+    cls = classes[server_name]
+    assert issubclass(cls, MediaServerClient), (
+        f"{cls.__name__} must explicitly inherit MediaServerClient — "
+        f"structural typing isn't enough"
     )

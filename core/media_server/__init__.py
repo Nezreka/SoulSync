@@ -15,15 +15,19 @@ API, SoulSync's filesystem walk). The engine just routes by
 
 See ``docs/media-server-engine-refactor-plan.md`` for the full
 phased plan.
+
+Note: only ``MediaServerClient`` is re-exported here. The engine +
+registry are NOT — importing the registry triggers eager imports
+of every per-server client class, and those clients now inherit
+``MediaServerClient`` (Cin-1), so re-exporting them here would
+form a circular import the moment a client tried to resolve its
+base class. Import them directly from their submodules:
+    from core.media_server.engine import MediaServerEngine
+    from core.media_server.registry import build_default_registry
 """
 
 from core.media_server.contract import MediaServerClient
-from core.media_server.engine import MediaServerEngine
-from core.media_server.registry import MediaServerRegistry, build_default_registry
 
 __all__ = [
     "MediaServerClient",
-    "MediaServerEngine",
-    "MediaServerRegistry",
-    "build_default_registry",
 ]
