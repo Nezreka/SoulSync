@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def run_basic_soulseek_search(
     query: str,
-    soulseek_client,
+    download_orchestrator,
     run_async: Callable,
 ) -> list[dict]:
     """Search Soulseek for `query`, normalize albums + tracks to one sorted list.
@@ -22,7 +22,7 @@ def run_basic_soulseek_search(
     Returns dicts with `result_type` set to "album" or "track" and sorted by
     `quality_score` descending. Empty list on any failure (caller logs).
     """
-    tracks, albums = run_async(soulseek_client.search(query))
+    tracks, albums = run_async(download_orchestrator.search(query))
 
     processed_albums = []
     for album in albums:

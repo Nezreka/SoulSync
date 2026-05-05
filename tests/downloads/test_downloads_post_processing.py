@@ -49,7 +49,7 @@ class _Recorder:
 def _build_deps(
     *,
     config=None,
-    soulseek_client=None,
+    download_orchestrator=None,
     run_async=None,
     docker_resolve_path=None,
     extract_filename=None,
@@ -64,7 +64,7 @@ def _build_deps(
     rec = _Recorder()
     return pp.PostProcessDeps(
         config_manager=config or _FakeConfig(),
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         run_async=run_async or (lambda c: None),
         docker_resolve_path=docker_resolve_path or (lambda p: p),
         extract_filename=extract_filename or (lambda f: os.path.basename(f) if f else ''),
@@ -315,7 +315,7 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     monkeypatch.setattr(pp.os.path, 'exists', lambda p: p == '/downloads/Money.mp3')
 
     deps, rec = _build_deps(
-        soulseek_client=_FakeYTClient(),
+        download_orchestrator=_FakeYTClient(),
         run_async=lambda coro: coro,  # not async — direct call
     )
     pp.run_post_processing_worker('t1', 'b1', deps)

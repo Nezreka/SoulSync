@@ -53,14 +53,19 @@ class _FakeStreamClient:
 
 class _FakeSoulseek:
     def __init__(self, youtube=None, tidal=None, qobuz=None, hifi=None, deezer_dl=None, lidarr=None, results_per_query=None):
-        self.youtube = youtube
-        self.tidal = tidal
-        self.qobuz = qobuz
-        self.hifi = hifi
-        self.deezer_dl = deezer_dl
-        self.lidarr = lidarr
+        self._clients = {
+            'youtube': youtube,
+            'tidal': tidal,
+            'qobuz': qobuz,
+            'hifi': hifi,
+            'deezer_dl': deezer_dl,
+            'lidarr': lidarr,
+        }
         self._results = results_per_query or {}
         self.search_calls = []
+
+    def client(self, name):
+        return self._clients.get(name)
 
     async def search(self, query, timeout=15):
         self.search_calls.append(query)
@@ -164,7 +169,7 @@ def test_stream_finds_match_on_first_query():
     result = stream.stream_search_track(
         track_name='Money', artist_name='Pink Floyd', album_name=None,
         duration_ms=180000,
-        config_manager=cfg, soulseek_client=soul, matching_engine=engine,
+        config_manager=cfg, download_orchestrator=soul, matching_engine=engine,
         run_async=_run_async,
     )
     assert result is not None
@@ -185,7 +190,7 @@ def test_stream_walks_to_second_query_on_no_match():
     result = stream.stream_search_track(
         track_name='Money (Remastered)', artist_name='Pink Floyd', album_name=None,
         duration_ms=180000,
-        config_manager=cfg, soulseek_client=soul, matching_engine=engine,
+        config_manager=cfg, download_orchestrator=soul, matching_engine=engine,
         run_async=_run_async,
     )
     assert result is not None
@@ -204,7 +209,7 @@ def test_stream_returns_none_when_no_matches():
     result = stream.stream_search_track(
         track_name='Money', artist_name='Pink Floyd', album_name=None,
         duration_ms=180000,
-        config_manager=cfg, soulseek_client=soul, matching_engine=engine,
+        config_manager=cfg, download_orchestrator=soul, matching_engine=engine,
         run_async=_run_async,
     )
     assert result is None
@@ -212,7 +217,7 @@ def test_stream_returns_none_when_no_matches():
 
 def test_stream_falls_back_to_default_soulseek_when_no_direct_client():
     # Effective mode = 'youtube' (coerced from soulseek), but soul.youtube is None
-    # → code falls through to soulseek_client.search directly. Streaming-mode
+    # → code falls through to download_orchestrator.search directly. Streaming-mode
     # query gen → "Pink Floyd Money".
     soul = _FakeSoulseek(results_per_query={'Pink Floyd Money': ([object()], [])})
     cfg = _FakeConfig({
@@ -224,7 +229,7 @@ def test_stream_falls_back_to_default_soulseek_when_no_direct_client():
     result = stream.stream_search_track(
         track_name='Money', artist_name='Pink Floyd', album_name=None,
         duration_ms=180000,
-        config_manager=cfg, soulseek_client=soul, matching_engine=engine,
+        config_manager=cfg, download_orchestrator=soul, matching_engine=engine,
         run_async=_run_async,
     )
     assert result is not None
@@ -252,7 +257,7 @@ def test_stream_continues_past_per_query_exception():
     result = stream.stream_search_track(
         track_name='Money (Live)', artist_name='Pink Floyd', album_name=None,
         duration_ms=180000,
-        config_manager=cfg, soulseek_client=soul, matching_engine=engine,
+        config_manager=cfg, download_orchestrator=soul, matching_engine=engine,
         run_async=_run_async,
     )
     # First query raised, second succeeded
