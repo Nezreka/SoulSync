@@ -74,7 +74,10 @@ class PlexPlaylistInfo:
             tracks=tracks
         )
 
-class PlexClient:
+from core.media_server.contract import MediaServerClient
+
+
+class PlexClient(MediaServerClient):
     def __init__(self):
         self.server: Optional[PlexServer] = None
         self.music_library: Optional[MusicSection] = None

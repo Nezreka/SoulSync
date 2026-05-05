@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.media_server import MediaServerEngine, MediaServerRegistry
-from core.media_server.registry import ServerSpec
+from core.media_server.engine import MediaServerEngine
+from core.media_server.registry import MediaServerRegistry, ServerSpec
 
 
 class _FakeClient:
@@ -190,3 +190,107 @@ def test_is_library_scanning_returns_false_when_client_lacks_method(make_engine)
 def test_get_library_stats_returns_empty_dict_when_client_lacks_method(make_engine):
     engine = make_engine({'soulsync': _MinimalClient()}, active='soulsync')
     assert engine.get_library_stats() == {}
+
+
+# ---------------------------------------------------------------------------
+# Generic accessors (Cin's standard from the download refactor)
+# ---------------------------------------------------------------------------
+
+
+def test_configured_clients_only_returns_connected_servers(make_engine):
+    """Replaces the legacy per-server `if X and X.is_connected(): ...`
+    chains in web_server.py. Single call returns the dict."""
+    plex = _FakeClient('plex', connected=True)
+    jelly = _FakeClient('jellyfin', connected=False)
+    soulsync = _FakeClient('soulsync', connected=True)
+    engine = make_engine(
+        {'plex': plex, 'jellyfin': jelly, 'soulsync': soulsync},
+        active='plex',
+    )
+    result = engine.configured_clients()
+    assert set(result.keys()) == {'plex', 'soulsync'}
+    assert result['plex'] is plex
+    assert result['soulsync'] is soulsync
+
+
+def test_configured_clients_skips_clients_whose_is_connected_raises(make_engine):
+    """Defensive: a single broken is_connected() must not crash the
+    iteration. Healthy clients still come back."""
+    healthy = _FakeClient('plex', connected=True)
+    broken = _FakeClient('jellyfin')
+    broken.is_connected = MagicMock(side_effect=RuntimeError("boom"))
+    engine = make_engine({'plex': healthy, 'jellyfin': broken}, active='plex')
+    result = engine.configured_clients()
+    assert 'plex' in result
+    assert 'jellyfin' not in result
+
+
+def test_reload_config_dispatches_to_named_server(make_engine):
+    """Generic dispatch — caller passes server name instead of
+    reaching for plex_client.reload_config() directly."""
+
+    class _ReloadablePlex(_FakeClient):
+        def __init__(self):
+            super().__init__('plex')
+            self.reload_called = False
+
+        def reload_config(self):
+            self.reload_called = True
+
+    plex = _ReloadablePlex()
+    soulsync = _FakeClient('soulsync')  # No reload_config method
+    engine = make_engine({'plex': plex, 'soulsync': soulsync}, active='plex')
+
+    assert engine.reload_config('plex') is True
+    assert plex.reload_called is True
+
+
+def test_reload_config_skips_clients_without_method(make_engine):
+    """Servers that don't expose reload_config are skipped silently
+    (return True)."""
+    soulsync = _FakeClient('soulsync')
+    engine = make_engine({'soulsync': soulsync}, active='soulsync')
+    assert engine.reload_config('soulsync') is True
+
+
+def test_reload_config_with_no_args_reloads_every_server(make_engine):
+    """When called with no name, hits every registered server that
+    exposes reload_config."""
+
+    class _ReloadableClient(_FakeClient):
+        def __init__(self, name):
+            super().__init__(name)
+            self.reload_called = False
+
+        def reload_config(self):
+            self.reload_called = True
+
+    plex = _ReloadableClient('plex')
+    jelly = _ReloadableClient('jellyfin')
+    engine = make_engine({'plex': plex, 'jellyfin': jelly}, active='plex')
+
+    engine.reload_config()
+    assert plex.reload_called is True
+    assert jelly.reload_called is True
+
+
+# ---------------------------------------------------------------------------
+# Singleton factory (matches get_metadata_engine() / get_download_orchestrator())
+# ---------------------------------------------------------------------------
+
+
+def test_get_media_server_engine_returns_set_singleton(make_engine):
+    """When set_media_server_engine has been called (web_server.py
+    does this at boot), get_media_server_engine returns the installed
+    instance instead of building a fresh one with the default registry."""
+    from core.media_server.engine import (
+        get_media_server_engine,
+        set_media_server_engine,
+    )
+
+    engine = make_engine({'plex': _FakeClient('plex')}, active='plex')
+    set_media_server_engine(engine)
+    try:
+        assert get_media_server_engine() is engine
+    finally:
+        set_media_server_engine(None)

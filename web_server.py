@@ -608,13 +608,18 @@ except Exception as e:
 # ``engine.method()`` dispatch in place of the historic
 # ``if active_server == 'plex' / 'jellyfin' / ...`` chains.
 try:
-    from core.media_server import MediaServerEngine
+    from core.media_server.engine import MediaServerEngine, set_media_server_engine
     media_server_engine = MediaServerEngine(clients={
         'plex':      plex_client,
         'jellyfin':  jellyfin_client,
         'navidrome': navidrome_client,
         'soulsync':  soulsync_library_client,
     })
+    # Install as process-wide singleton so callers reaching via
+    # get_media_server_engine() see the same instance web_server.py
+    # constructs at boot. Matches the metadata + download engine
+    # patterns.
+    set_media_server_engine(media_server_engine)
     logger.info("  Media server engine initialized")
 except Exception as e:
     logger.error(f"  Media server engine failed to initialize: {e}")
