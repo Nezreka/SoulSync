@@ -79,7 +79,10 @@ def _decrypt_chunk(chunk: bytes, key: bytes) -> bytes:
             ) from exc
 
 
-class DeezerDownloadClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
     def __init__(self, download_path: str = None):

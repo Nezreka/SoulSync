@@ -86,7 +86,10 @@ DEFAULT_INSTANCES = [
 ]
 
 
-class HiFiClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class HiFiClient(DownloadSourcePlugin):
     """
     HiFi API client for searching and downloading lossless music.
     Uses public hifi-api instances (Tidal backend) — no auth required.

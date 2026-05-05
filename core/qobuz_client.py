@@ -104,7 +104,10 @@ QOBUZ_QUALITY_MAP = {
 }
 
 
-class QobuzClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class QobuzClient(DownloadSourcePlugin):
     """
     Qobuz download client using Qobuz REST API.
     Provides search, matching, and download capabilities as a drop-in alternative to Soulseek/YouTube/Tidal.

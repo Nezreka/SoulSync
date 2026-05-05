@@ -27,12 +27,17 @@ makes the implicit contract explicit so:
 
 from __future__ import annotations
 
-from typing import List, Optional, Protocol, Tuple, runtime_checkable
+from typing import TYPE_CHECKING, List, Optional, Protocol, Tuple, runtime_checkable
 
-# Soulseek client owns the canonical TrackResult / AlbumResult / DownloadStatus
-# dataclasses — every other source already imports from there. Keep it that way
-# until a future PR lifts those into a neutral location.
-from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+# Soulseek client owns the canonical TrackResult / AlbumResult /
+# DownloadStatus dataclasses — every other source already imports
+# from there. We only need them for type annotations on this
+# protocol; using TYPE_CHECKING avoids a circular import once the
+# clients themselves inherit from DownloadSourcePlugin (Cin's
+# review feedback — clients explicitly declare conformance instead
+# of relying on structural typing).
+if TYPE_CHECKING:
+    from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
 
 
 @runtime_checkable

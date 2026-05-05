@@ -91,7 +91,10 @@ class YouTubeSearchResult:
         self.parsed_artist = self.channel
 
 
-class YouTubeClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class YouTubeClient(DownloadSourcePlugin):
     """
     YouTube download client using yt-dlp.
     Provides search, matching, and download capabilities with full Spotify metadata integration.

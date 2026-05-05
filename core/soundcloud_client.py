@@ -82,7 +82,10 @@ def _sanitize_filename(name: str) -> str:
     return cleaned or 'soundcloud_track'
 
 
-class SoundcloudClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class SoundcloudClient(DownloadSourcePlugin):
     """SoundCloud download client built on yt-dlp's SoundCloud extractor.
 
     Mirrors the public surface of TidalDownloadClient / QobuzClient so the

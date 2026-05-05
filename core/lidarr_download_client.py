@@ -33,7 +33,10 @@ from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
 logger = get_logger("lidarr_client")
 
 
-class LidarrDownloadClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class LidarrDownloadClient(DownloadSourcePlugin):
     """Lidarr download client — uses Lidarr as a download source for Usenet/torrent content.
 
     Implements the same interface as SoulseekClient, QobuzClient, TidalDownloadClient

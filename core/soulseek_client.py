@@ -188,7 +188,10 @@ class DownloadStatus:
     time_remaining: Optional[int] = None
     file_path: Optional[str] = None
 
-class SoulseekClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
