@@ -20054,9 +20054,10 @@ def _get_tidal_download_client():
     """Get Tidal download client from the orchestrator, with helpful error if unavailable."""
     if not soulseek_client:
         raise RuntimeError("Download orchestrator not initialized — check startup logs for errors")
-    if not hasattr(soulseek_client, 'tidal') or not soulseek_client.tidal:
+    tidal = soulseek_client.client("tidal") if hasattr(soulseek_client, 'client') else None
+    if not tidal:
         raise RuntimeError("Tidal download client not available — ensure tidalapi is installed")
-    return soulseek_client.client("tidal")
+    return tidal
 
 @app.route('/api/tidal/download/auth/start', methods=['POST'])
 def tidal_download_auth_start():
@@ -21124,9 +21125,7 @@ def _get_metadata_fallback_client():
 def get_deezer_arl_status():
     """Check if Deezer ARL is configured and authenticated."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.client("deezer_dl")
+        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
         if deezer_dl and deezer_dl.is_authenticated():
             user_data = deezer_dl._user_data or {}
             return jsonify({
@@ -21143,9 +21142,7 @@ def get_deezer_arl_status():
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.client("deezer_dl")
+        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated. Configure your ARL token in Settings > Downloads.'}), 401
 
@@ -21173,9 +21170,7 @@ def get_deezer_arl_playlists():
 def get_deezer_arl_playlist_tracks(playlist_id):
     """Fetch full playlist with tracks via ARL (like /api/spotify/playlist/<id>)."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.client("deezer_dl")
+        deezer_dl = soulseek_client.client("deezer_dl") if soulseek_client and hasattr(soulseek_client, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 

@@ -152,7 +152,7 @@ def get_valid_candidates(results, spotify_track, query):
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing soulseek_client to avoid re-initializing (which accesses download_path filesystem)
-        quality_filtered_candidates = soulseek_client.soulseek.filter_results_by_quality_preference(initial_candidates)
+        quality_filtered_candidates = soulseek_client.client('soulseek').filter_results_by_quality_preference(initial_candidates)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),

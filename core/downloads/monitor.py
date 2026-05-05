@@ -254,7 +254,8 @@ class WebUIDownloadMonitor:
 
             # Get Soulseek downloads from API
             transfers_data = None
-            if soulseek_active and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
+            _slsk = soulseek_client.client('soulseek') if soulseek_client and hasattr(soulseek_client, 'client') else None
+            if soulseek_active and _slsk and _slsk.base_url:
                 transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
@@ -266,18 +267,15 @@ class WebUIDownloadMonitor:
                                     key = _make_context_key(username, file_info.get('filename', ''))
                                     live_transfers[key] = file_info
 
-            # Also get non-Soulseek downloads (YouTube/Tidal/Qobuz/HiFi/Deezer/Lidarr)
-            # Call each client directly to avoid redundant slskd API call through orchestrator
+            # Also get non-Soulseek downloads via the engine — single
+            # cross-source aggregation, no per-source iteration.
             try:
                 all_downloads = []
-                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr,
-                                   getattr(soulseek_client, 'soundcloud', None)]:
-                    if _dl_client:
-                        try:
-                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
-                        except Exception:
-                            pass
+                if soulseek_client and hasattr(soulseek_client, 'engine'):
+                    try:
+                        all_downloads = run_async(soulseek_client.engine.get_all_downloads())
+                    except Exception:
+                        pass
                 for download in all_downloads:
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility

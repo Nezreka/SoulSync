@@ -529,7 +529,7 @@ class QobuzClient(DownloadSourcePlugin):
         """Pull session state from config without making a network probe.
 
         SoulSync runs two ``QobuzClient`` instances side by side — one wired
-        through ``soulseek_client.qobuz`` for the auth-flow endpoints, and a
+        through ``soulseek_client.client('qobuz')`` for the auth-flow endpoints, and a
         second owned by the enrichment worker for thread safety. When the user
         logs in via ``/api/qobuz/auth/login`` or ``/api/qobuz/auth/token`` only
         the auth-flow instance's in-memory state is updated; the worker's

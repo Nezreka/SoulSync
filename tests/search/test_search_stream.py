@@ -53,14 +53,19 @@ class _FakeStreamClient:
 
 class _FakeSoulseek:
     def __init__(self, youtube=None, tidal=None, qobuz=None, hifi=None, deezer_dl=None, lidarr=None, results_per_query=None):
-        self.youtube = youtube
-        self.tidal = tidal
-        self.qobuz = qobuz
-        self.hifi = hifi
-        self.deezer_dl = deezer_dl
-        self.lidarr = lidarr
+        self._clients = {
+            'youtube': youtube,
+            'tidal': tidal,
+            'qobuz': qobuz,
+            'hifi': hifi,
+            'deezer_dl': deezer_dl,
+            'lidarr': lidarr,
+        }
         self._results = results_per_query or {}
         self.search_calls = []
+
+    def client(self, name):
+        return self._clients.get(name)
 
     async def search(self, query, timeout=15):
         self.search_calls.append(query)
