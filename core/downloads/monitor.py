@@ -33,7 +33,7 @@ _run_post_processing_worker = None
 _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
-soulseek_client = None
+download_orchestrator = None
 
 
 def init(
@@ -44,12 +44,12 @@ def init(
     start_next_batch_of_downloads,
     orphaned_download_keys,
     missing_download_executor_obj,
-    soulseek_client_obj,
+    download_orchestrator_obj,
 ):
     """Bind web_server-side helpers/globals so the class body can resolve them."""
     global _make_context_key, _on_download_completed, _download_track_worker
     global _run_post_processing_worker, _start_next_batch_of_downloads
-    global _orphaned_download_keys, missing_download_executor, soulseek_client
+    global _orphaned_download_keys, missing_download_executor, download_orchestrator
     _make_context_key = make_context_key
     _on_download_completed = on_download_completed
     _download_track_worker = download_track_worker
@@ -57,7 +57,7 @@ def init(
     _start_next_batch_of_downloads = start_next_batch_of_downloads
     _orphaned_download_keys = orphaned_download_keys
     missing_download_executor = missing_download_executor_obj
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
 
 
 class WebUIDownloadMonitor:
@@ -199,7 +199,7 @@ class WebUIDownloadMonitor:
                 if op[0] == 'cancel_download':
                     _, download_id, username = op
                     logger.debug(f"[Deferred] Cancelling download: {download_id} from {username}")
-                    run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+                    run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                     logger.debug(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
                     _, context_key = op
@@ -254,9 +254,9 @@ class WebUIDownloadMonitor:
 
             # Get Soulseek downloads from API
             transfers_data = None
-            _slsk = soulseek_client.client('soulseek') if soulseek_client and hasattr(soulseek_client, 'client') else None
+            _slsk = download_orchestrator.client('soulseek') if download_orchestrator and hasattr(download_orchestrator, 'client') else None
             if soulseek_active and _slsk and _slsk.base_url:
-                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+                transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     username = user_data.get('username', 'Unknown')
@@ -271,9 +271,9 @@ class WebUIDownloadMonitor:
             # cross-source aggregation, no per-source iteration.
             try:
                 all_downloads = []
-                if soulseek_client and hasattr(soulseek_client, 'engine'):
+                if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
-                        all_downloads = run_async(soulseek_client.engine.get_all_downloads())
+                        all_downloads = run_async(download_orchestrator.engine.get_all_downloads())
                     except Exception:
                         pass
                 for download in all_downloads:

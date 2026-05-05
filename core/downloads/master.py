@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 class MasterDeps:
     """Bundle of cross-cutting deps the master worker needs."""
     config_manager: Any
-    soulseek_client: Any
+    download_orchestrator: Any
     run_async: Callable[..., Any]
     mb_worker: Any
     mb_release_cache: dict
@@ -372,7 +372,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
                     logger.info(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
-                    slsk = deps.soulseek_client.client('soulseek') if hasattr(deps.soulseek_client, 'client') else deps.soulseek_client
+                    slsk = deps.download_orchestrator.client('soulseek') if hasattr(deps.download_orchestrator, 'client') else deps.download_orchestrator
 
                     # Try multiple query variations (banned keywords in artist/album name can return 0 results)
                     album_queries = [f"{artist_name} {album_name}"]

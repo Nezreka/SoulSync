@@ -10,7 +10,7 @@ from core.streaming import prepare as sp
 
 
 class _FakeSoulseek:
-    """Minimal soulseek_client stub for the stream-prep worker."""
+    """Minimal download_orchestrator stub for the stream-prep worker."""
 
     def __init__(self, *, download_id='dl-1', all_downloads=None):
         self._download_id = download_id
@@ -43,7 +43,7 @@ def _build_deps(
     state = state if state is not None else {}
     deps = sp.PrepareStreamDeps(
         config_manager=type('C', (), {'get': lambda self, k, d=None: d})(),
-        soulseek_client=soulseek or _FakeSoulseek(),
+        download_orchestrator=soulseek or _FakeSoulseek(),
         stream_lock=threading.Lock(),
         project_root=project_root,
         docker_resolve_path=lambda p: p,
@@ -107,7 +107,7 @@ def test_stream_folder_cleared_before_download(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_download_returns_none_marks_error(tmp_path):
-    """soulseek_client.download() returning None → state.error."""
+    """download_orchestrator.download() returning None → state.error."""
     sk = _FakeSoulseek(download_id=None)
     deps = _build_deps(soulseek=sk, project_root=str(tmp_path))
 

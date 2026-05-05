@@ -76,7 +76,7 @@ def _build_deps(
 ):
     rec = _Recorder()
     return tw.TaskWorkerDeps(
-        soulseek_client=soulseek or _FakeClient(),
+        download_orchestrator=soulseek or _FakeClient(),
         matching_engine=matching or _FakeMatchEngine(),
         run_async=_sync_run_async,
         try_source_reuse=try_source_reuse,
