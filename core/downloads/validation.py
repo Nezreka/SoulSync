@@ -89,7 +89,12 @@ def get_valid_candidates(results, spotify_track, query):
         # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
         expected_title_lower = (expected_title or '').lower()
         _version_keywords = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
-                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke']
+                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke',
+                             # Producer-tag noise common on SoundCloud — "type
+                             # beat" is an instrumental track produced in
+                             # someone's style, tagged with the artist name to
+                             # game search. NEVER the real song.
+                             'type beat']
         expected_is_version = any(kw in expected_title_lower for kw in _version_keywords)
 
         scored = []
