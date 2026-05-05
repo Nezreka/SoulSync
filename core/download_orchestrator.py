@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
-from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("download_orchestrator")
 

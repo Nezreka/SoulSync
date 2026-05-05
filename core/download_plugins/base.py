@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, List, Optional, Protocol, Tuple, runtime_check
 # review feedback — clients explicitly declare conformance instead
 # of relying on structural typing).
 if TYPE_CHECKING:
-    from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+    from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 
 
 @runtime_checkable

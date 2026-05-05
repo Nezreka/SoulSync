@@ -88,7 +88,7 @@ from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
-from core.download_orchestrator import DownloadOrchestrator
+from core.download_orchestrator import DownloadOrchestrator, set_download_orchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
@@ -605,6 +605,10 @@ except Exception as e:
 
 try:
     download_orchestrator = DownloadOrchestrator()
+    # Install as the process-wide singleton so callers reaching for
+    # get_download_orchestrator() see the same instance web_server.py
+    # constructs at boot. Matches Cin's metadata engine pattern.
+    set_download_orchestrator(download_orchestrator)
     logger.info("  Download orchestrator initialized")
 except Exception as e:
     logger.error(f"  Download orchestrator failed to initialize: {e}")
@@ -7798,7 +7802,7 @@ def download_selected_candidate(task_id):
                 batch['active_count'] = batch.get('active_count', 0) + 1
 
         # Build a TrackResult-like candidate object
-        from core.soulseek_client import TrackResult
+        from core.download_plugins.types import TrackResult
         candidate = TrackResult(
             username=username,
             filename=filename,

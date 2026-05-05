@@ -33,7 +33,7 @@ from core.matching_engine import MusicMatchingEngine
 from core.spotify_client import Track as SpotifyTrack
 
 # Import Soulseek data structures for drop-in replacement compatibility
-from core.soulseek_client import SearchResult, TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import SearchResult, TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("youtube_client")
 

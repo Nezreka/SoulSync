@@ -8,7 +8,7 @@ from config.settings import config_manager
 
 from core.spotify_client import Track as SpotifyTrack
 from core.plex_client import PlexTrackInfo
-from core.soulseek_client import TrackResult, AlbumResult
+from core.download_plugins.types import TrackResult, AlbumResult
 
 
 logger = get_logger("matching_engine")
