@@ -63,9 +63,11 @@ echo "   📄 Updating settings.py to current version..."
 cp /defaults/settings.py /app/config/settings.py
 chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 
-# Ensure all directories exist and have proper permissions
+# Ensure all directories exist with correct ownership.
+# Only the directory nodes themselves need chown here — the recursive chown
+# above already ran if UIDs changed, so avoid walking the whole tree every start.
 mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
-chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
 
 echo "✅ Configuration initialized successfully"
 
