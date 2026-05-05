@@ -899,8 +899,11 @@ class QobuzClient(DownloadSourcePlugin):
             logger.error(f"Invalid filename format: {filename}")
             return None
         if self._engine is None:
-            logger.error("Qobuz client has no engine reference — cannot dispatch download")
-            return None
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("Qobuz client has no engine reference — cannot dispatch download")
 
         track_id_str, display_name = filename.split('||', 1)
         try:

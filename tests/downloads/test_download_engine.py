@@ -320,6 +320,24 @@ def test_engine_get_all_downloads_aggregates_across_plugins():
     assert {r.id for r in result} == {'yt-1', 'td-1', 'td-2'}
 
 
+def test_engine_get_all_downloads_skips_excluded_sources():
+    """Per JohnBaumb: monitor pulls slskd transfers via the
+    transfers/downloads endpoint earlier in its loop, so engine
+    aggregation must skip soulseek to avoid double-fetching."""
+    engine = DownloadEngine()
+    sl_plugin = _FakePlugin('soulseek', downloads=[_FakeStatus('sl-1', 'soulseek')])
+    yt_plugin = _FakePlugin('youtube', downloads=[_FakeStatus('yt-1', 'youtube')])
+    td_plugin = _FakePlugin('tidal', downloads=[_FakeStatus('td-1', 'tidal')])
+    engine.register_plugin('soulseek', sl_plugin)
+    engine.register_plugin('youtube', yt_plugin)
+    engine.register_plugin('tidal', td_plugin)
+
+    result = _run_async(engine.get_all_downloads(exclude=('soulseek',)))
+    ids = {r.id for r in result}
+    assert ids == {'yt-1', 'td-1'}
+    assert 'sl-1' not in ids
+
+
 def test_engine_get_all_downloads_swallows_per_plugin_exceptions():
     """One plugin throwing must NOT take down the whole list — same
     defensive behavior as the legacy orchestrator (matched by

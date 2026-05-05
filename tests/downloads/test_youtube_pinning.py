@@ -77,14 +77,16 @@ def test_download_returns_none_for_invalid_filename_format(yt_client_with_engine
     assert result is None
 
 
-def test_download_returns_none_when_engine_not_wired():
-    """Defensive: client without engine reference can't dispatch.
-    In production this never happens (orchestrator wires engine
-    immediately) but the soft-fail keeps tests + dev paths safe."""
+def test_download_raises_when_engine_not_wired():
+    """Defensive: client without engine reference must raise so the
+    orchestrator's download_with_fallback surfaces the error and
+    moves on to the next source. Returning None silently would drop
+    the download with no user feedback (per JohnBaumb)."""
+    import pytest
     client = YouTubeClient.__new__(YouTubeClient)
     client._engine = None
-    result = _run_async(client.download('youtube', 'v||t', 0))
-    assert result is None
+    with pytest.raises(RuntimeError, match="engine reference"):
+        _run_async(client.download('youtube', 'v||t', 0))
 
 
 def test_download_returns_uuid_download_id_for_valid_filename(yt_client_with_engine):

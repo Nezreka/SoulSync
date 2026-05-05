@@ -335,8 +335,11 @@ class SoundcloudClient(DownloadSourcePlugin):
             logger.error(f"Missing SoundCloud track id or url in: {filename}")
             return None
         if self._engine is None:
-            logger.error("SoundCloud client has no engine reference — cannot dispatch download")
-            return None
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("SoundCloud client has no engine reference — cannot dispatch download")
 
         logger.info(f"Starting SoundCloud download: {display_name}")
 

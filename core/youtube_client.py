@@ -890,8 +890,11 @@ class YouTubeClient(DownloadSourcePlugin):
             logger.error(f"Invalid filename format: {filename}")
             return None
         if self._engine is None:
-            logger.error("YouTube client has no engine reference — cannot dispatch download")
-            return None
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("YouTube client has no engine reference — cannot dispatch download")
 
         video_id, title = filename.split('||', 1)
         youtube_url = f"https://www.youtube.com/watch?v={video_id}"

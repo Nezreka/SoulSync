@@ -48,12 +48,18 @@ def test_download_returns_none_when_not_authenticated(deezer_client_with_engine)
     assert result is None
 
 
-def test_download_returns_none_when_engine_not_wired():
+def test_download_raises_when_engine_not_wired():
+    """Defensive: client without engine reference must raise so the
+    orchestrator's download_with_fallback surfaces the error and
+    moves on to the next source. Returning None silently would drop
+    the download with no user feedback (per JohnBaumb)."""
+    import pytest
     client = DeezerDownloadClient.__new__(DeezerDownloadClient)
     client._engine = None
+    # Bypass auth gate so we exercise the engine check.
     client._authenticated = True
-    result = _run_async(client.download('deezer_dl', '12345||x', 0))
-    assert result is None
+    with pytest.raises(RuntimeError, match="engine reference"):
+        _run_async(client.download('deezer', 'v||t', 0))
 
 
 def test_download_track_id_stays_as_string(deezer_client_with_engine):
