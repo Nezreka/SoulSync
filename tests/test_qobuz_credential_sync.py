@@ -6,7 +6,7 @@ Settings showed "Connected: <username> (Active)" but underneath an error
 yellow even after a successful login.
 
 Root cause: SoulSync runs two QobuzClient instances side by side — one
-through ``soulseek_client.client('qobuz')`` for the auth-flow endpoints, and a
+through ``download_orchestrator.client('qobuz')`` for the auth-flow endpoints, and a
 second owned by the enrichment worker thread for thread safety. Login
 only updated the first instance's in-memory state. The dashboard's
 "configured" check (and the connection-test step) read the worker
