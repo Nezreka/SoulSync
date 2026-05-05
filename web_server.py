@@ -627,23 +627,17 @@ try:
 except Exception as e:
     logger.error(f"  Playlist sync service failed to initialize: {e}")
 
-# Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
-if soulseek_client:
-    if hasattr(soulseek_client, 'youtube'):
-         soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured YouTube client shutdown callback")
-    if hasattr(soulseek_client, 'tidal'):
-         soulseek_client.tidal.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured Tidal download client shutdown callback")
-    if hasattr(soulseek_client, 'qobuz'):
-         soulseek_client.qobuz.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured Qobuz client shutdown callback")
-    if hasattr(soulseek_client, 'hifi'):
-         soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured HiFi client shutdown callback")
-    if hasattr(soulseek_client, 'soundcloud') and soulseek_client.soundcloud:
-         soulseek_client.soundcloud.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured SoundCloud client shutdown callback")
+# Inject shutdown check callback into every download source that
+# accepts one. Generic dispatch via the registry — no per-source
+# attribute reaches needed.
+if soulseek_client and hasattr(soulseek_client, 'registry'):
+    for _src_name, _src_client in soulseek_client.registry.all_plugins():
+        if _src_client is not None and hasattr(_src_client, 'set_shutdown_check'):
+            try:
+                _src_client.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+                logger.info("  Configured %s client shutdown callback", _src_name)
+            except Exception as _exc:
+                logger.warning("  %s set_shutdown_check failed: %s", _src_name, _exc)
 
 # Initialize web scan manager for automatic post-download scanning
 try:
@@ -2459,7 +2453,7 @@ def get_cached_transfer_data():
 
             # First, get Soulseek downloads from API
             transfers_data = None
-            if not soulseek_known_down and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
+            if not soulseek_known_down and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.client("soulseek").base_url:
                 transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
@@ -2481,14 +2475,13 @@ def get_cached_transfer_data():
             # stays at 0 even when the underlying client knows the real percent.
             try:
                 all_downloads = []
-                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr,
-                                   getattr(soulseek_client, 'soundcloud', None)]:
-                    if _dl_client:
-                        try:
-                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
-                        except Exception:
-                            pass
+                # Generic dispatch — engine returns active downloads
+                # across every plugin in one call, no per-source iteration.
+                if soulseek_client and hasattr(soulseek_client, 'engine'):
+                    try:
+                        all_downloads = run_async(soulseek_client.engine.get_all_downloads())
+                    except Exception:
+                        pass
                 for download in all_downloads:
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
@@ -4152,7 +4145,7 @@ def handle_settings():
                 soulseek_client.reload_settings()
                 # Reload YouTube client settings (rate limiting, cookies)
                 if hasattr(soulseek_client, 'youtube'):
-                    soulseek_client.youtube.reload_settings()
+                    soulseek_client.client("youtube").reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
@@ -6816,7 +6809,7 @@ def enhanced_search_source(source_name):
 
     When the requested source's client isn't available (Spotify unauthed,
     Discogs missing token, Hydrabase disconnected, MusicBrainz import
-    failure, soulseek_client.youtube missing), returns plain JSON
+    failure, soulseek_client.client("youtube") missing), returns plain JSON
     `{"artists":[],"albums":[],"tracks":[],"available":false}` to match
     the original endpoint contract.
     """
@@ -7040,7 +7033,7 @@ def download_music_video():
             def _progress(pct):
                 _music_video_downloads[video_id]['progress'] = round(pct, 1)
 
-            final_path = soulseek_client.youtube.download_music_video(video_url, output_path, progress_callback=_progress)
+            final_path = soulseek_client.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
 
             if final_path and os.path.exists(final_path):
                 _music_video_downloads[video_id]['status'] = 'completed'
@@ -14155,7 +14148,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.hifi if soulseek_client else None,
+            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
         ),
     )
 
@@ -14260,7 +14253,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.hifi if soulseek_client else None,
+            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
         ),
     )
 
@@ -14384,7 +14377,7 @@ def _post_process_matched_download(context_key, context, file_path):
             genius_worker=genius_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
-            hifi_client=soulseek_client.hifi if soulseek_client else None,
+            hifi_client=soulseek_client.client("hifi") if soulseek_client else None,
         ),
     )
 
@@ -17084,7 +17077,7 @@ def _try_source_reuse(task_id, batch_id, track):
     # Sort by confidence, filter by quality preference
     candidates.sort(key=lambda c: c.confidence, reverse=True)
     _sr.info(f"Found {len(candidates)} candidates above 0.70, best={candidates[0].confidence:.3f} ({candidates[0].filename})")
-    slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+    slsk = soulseek_client.client("soulseek") if hasattr(soulseek_client, 'soulseek') else soulseek_client
     filtered = slsk.filter_results_by_quality_preference(candidates)
     if not filtered:
         _sr.info(f"Quality filter rejected all candidates for task {task_id}")
@@ -17164,7 +17157,7 @@ def _store_batch_source(batch_id, username, filename):
 
     try:
         # Access SoulseekClient directly (soulseek_client is DownloadOrchestrator)
-        slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+        slsk = soulseek_client.client("soulseek") if hasattr(soulseek_client, 'soulseek') else soulseek_client
         _sr.info(f"Browsing {username}:{folder_path}...")
         files = run_async(slsk.browse_user_directory(username, folder_path))
         if not files:
@@ -19732,7 +19725,7 @@ def get_discover_album(source, album_id):
 def hifi_status():
     """Check if HiFi API instances are reachable."""
     try:
-        hifi = soulseek_client.hifi
+        hifi = soulseek_client.client("hifi")
         available = hifi.is_available()
         version = hifi.get_version() if available else None
         return jsonify({
@@ -19757,7 +19750,7 @@ def soundcloud_status():
     try:
         sc = None
         if soulseek_client and hasattr(soulseek_client, 'soundcloud'):
-            sc = soulseek_client.soundcloud
+            sc = soulseek_client.client("soundcloud")
         if not sc:
             return jsonify({
                 "available": False,
@@ -19785,7 +19778,7 @@ def hifi_instances():
     """Check availability of all HiFi API instances."""
     import requests as req
     try:
-        hifi = soulseek_client.hifi
+        hifi = soulseek_client.client("hifi")
         instances = list(hifi._instances)
         results = []
         for url in instances:
@@ -19840,9 +19833,9 @@ def hifi_add_instance():
         added = db.add_hifi_instance(url, priority)
         if not added:
             return jsonify({'success': False, 'error': 'Instance already exists'}), 400
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if soulseek_client:
+            soulseek_client.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error adding HiFi instance: {e}")
@@ -19862,9 +19855,9 @@ def hifi_remove_instance():
         removed = db.remove_hifi_instance(url)
         if not removed:
             return jsonify({'success': False, 'error': 'Instance not found'}), 404
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if soulseek_client:
+            soulseek_client.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error removing HiFi instance: {e}")
@@ -19884,8 +19877,8 @@ def hifi_toggle_instance():
         from database.music_database import get_database
         db = get_database()
         db.toggle_hifi_instance(url, enabled)
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        if soulseek_client:
+            soulseek_client.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error toggling HiFi instance: {e}")
@@ -19905,9 +19898,9 @@ def hifi_reorder_instances():
         db = get_database()
         if not db.reorder_hifi_instances(urls):
             return jsonify({'success': False, 'error': 'One or more URLs not found'}), 400
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if soulseek_client:
+            soulseek_client.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error reordering HiFi instances: {e}")
@@ -20063,7 +20056,7 @@ def _get_tidal_download_client():
         raise RuntimeError("Download orchestrator not initialized — check startup logs for errors")
     if not hasattr(soulseek_client, 'tidal') or not soulseek_client.tidal:
         raise RuntimeError("Tidal download client not available — ensure tidalapi is installed")
-    return soulseek_client.tidal
+    return soulseek_client.client("tidal")
 
 @app.route('/api/tidal/download/auth/start', methods=['POST'])
 def tidal_download_auth_start():
@@ -20132,7 +20125,7 @@ def qobuz_auth_login():
         if not email or not password:
             return jsonify({"success": False, "error": "Email and password required"}), 400
 
-        qobuz = soulseek_client.qobuz
+        qobuz = soulseek_client.client("qobuz")
         result = qobuz.login(email, password)
 
         if result['status'] == 'success':
@@ -20155,7 +20148,7 @@ def qobuz_auth_token():
         if not token:
             return jsonify({"success": False, "error": "Auth token required"}), 400
 
-        qobuz = soulseek_client.qobuz
+        qobuz = soulseek_client.client("qobuz")
         result = qobuz.login_with_token(token)
 
         if result['status'] == 'success':
@@ -20172,7 +20165,7 @@ def qobuz_auth_token():
 def qobuz_auth_status():
     """Check if Qobuz client is authenticated."""
     try:
-        qobuz = soulseek_client.qobuz
+        qobuz = soulseek_client.client("qobuz")
         authenticated = qobuz.is_authenticated()
         user_info = {}
         if authenticated and qobuz.user_info:
@@ -20189,7 +20182,7 @@ def qobuz_auth_status():
 def qobuz_auth_logout():
     """Logout from Qobuz."""
     try:
-        soulseek_client.qobuz.logout()
+        soulseek_client.client("qobuz").logout()
         _sync_qobuz_credentials_to_worker()
         return jsonify({"success": True})
     except Exception as e:
@@ -21133,7 +21126,7 @@ def get_deezer_arl_status():
     try:
         deezer_dl = None
         if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+            deezer_dl = soulseek_client.client("deezer_dl")
         if deezer_dl and deezer_dl.is_authenticated():
             user_data = deezer_dl._user_data or {}
             return jsonify({
@@ -21152,7 +21145,7 @@ def get_deezer_arl_playlists():
     try:
         deezer_dl = None
         if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+            deezer_dl = soulseek_client.client("deezer_dl")
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated. Configure your ARL token in Settings > Downloads.'}), 401
 
@@ -21182,7 +21175,7 @@ def get_deezer_arl_playlist_tracks(playlist_id):
     try:
         deezer_dl = None
         if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+            deezer_dl = soulseek_client.client("deezer_dl")
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
@@ -27374,8 +27367,8 @@ def get_your_artists_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                          and soulseek_client.deezer_dl.is_authenticated())
+            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
+                          and soulseek_client.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
         except Exception:
@@ -27496,10 +27489,10 @@ def _fetch_and_match_liked_artists(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                  and soulseek_client.deezer_dl.is_authenticated()):
+            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
+                  and soulseek_client.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
-                artists = soulseek_client.deezer_dl.get_user_favorite_artists(limit=200)
+                artists = soulseek_client.client("deezer_dl").get_user_favorite_artists(limit=200)
             for a in artists:
                 database.upsert_liked_artist(
                     artist_name=a['name'], source_service='deezer',
@@ -27646,8 +27639,8 @@ def get_your_albums_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                          and soulseek_client.deezer_dl.is_authenticated())
+            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
+                          and soulseek_client.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
         except Exception:
@@ -27754,10 +27747,10 @@ def _fetch_liked_albums(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
                 albums = deezer_cl.get_user_favorite_albums(limit=500)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                  and soulseek_client.deezer_dl.is_authenticated()):
+            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.client("deezer_dl")
+                  and soulseek_client.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
-                albums = soulseek_client.deezer_dl.get_user_favorite_albums(limit=500)
+                albums = soulseek_client.client("deezer_dl").get_user_favorite_albums(limit=500)
             for a in albums:
                 database.upsert_liked_album(
                     album_name=a['album_name'], artist_name=a['artist_name'],

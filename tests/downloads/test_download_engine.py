@@ -513,3 +513,80 @@ def test_download_with_fallback_continues_past_exception():
         'youtube', 'v||t', 0, ['youtube', 'tidal'],
     ))
     assert result == 'td-id'
+
+
+# ---------------------------------------------------------------------------
+# Cin bug 1: alias resolution on cancel_download
+# ---------------------------------------------------------------------------
+
+
+def test_register_plugin_records_aliases():
+    """Aliases passed to register_plugin resolve to the canonical plugin
+    via get_plugin. Cin caught engine.cancel_download routing 'deezer_dl'
+    to soulseek because the alias never made it to the engine."""
+    engine = DownloadEngine()
+    deezer = _FakePlugin('deezer')
+    engine.register_plugin('deezer', deezer, aliases=('deezer_dl',))
+
+    assert engine.get_plugin('deezer') is deezer
+    assert engine.get_plugin('deezer_dl') is deezer
+
+
+def test_cancel_download_resolves_alias_to_canonical_plugin():
+    """The legacy 'deezer_dl' source_hint must route to the deezer
+    plugin, not fall through to soulseek. This was Cin's bug 1 —
+    cancel of a Deezer download silently no-op'd."""
+    engine = DownloadEngine()
+    soulseek = _FakePlugin('soulseek')
+    deezer = _FakePlugin('deezer')
+    engine.register_plugin('soulseek', soulseek)
+    engine.register_plugin('deezer', deezer, aliases=('deezer_dl',))
+
+    _run_async(engine.cancel_download('dl-1', 'deezer_dl', remove=False))
+    assert deezer.cancel_calls == [('dl-1', 'deezer_dl', False)]
+    assert soulseek.cancel_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Cin bug 3: atomic update_record_unless_state
+# ---------------------------------------------------------------------------
+
+
+def test_update_record_unless_state_applies_when_state_not_blocked():
+    engine = DownloadEngine()
+    engine.add_record('youtube', 'dl-1', {'state': 'InProgress, Downloading'})
+
+    applied = engine.update_record_unless_state(
+        'youtube', 'dl-1',
+        {'state': 'Completed, Succeeded', 'progress': 100.0},
+        skip_if_state_in=('Cancelled',),
+    )
+    assert applied is True
+    assert engine.get_record('youtube', 'dl-1')['state'] == 'Completed, Succeeded'
+    assert engine.get_record('youtube', 'dl-1')['progress'] == 100.0
+
+
+def test_update_record_unless_state_skips_when_state_blocked():
+    """A worker-thread terminal write must NOT clobber a Cancelled
+    state set by the user. Returns False so caller knows the patch
+    was skipped."""
+    engine = DownloadEngine()
+    engine.add_record('youtube', 'dl-1', {'state': 'Cancelled'})
+
+    applied = engine.update_record_unless_state(
+        'youtube', 'dl-1',
+        {'state': 'Completed, Succeeded'},
+        skip_if_state_in=('Cancelled',),
+    )
+    assert applied is False
+    assert engine.get_record('youtube', 'dl-1')['state'] == 'Cancelled'
+
+
+def test_update_record_unless_state_returns_false_for_missing_record():
+    engine = DownloadEngine()
+    applied = engine.update_record_unless_state(
+        'youtube', 'never-existed',
+        {'state': 'Completed, Succeeded'},
+        skip_if_state_in=('Cancelled',),
+    )
+    assert applied is False

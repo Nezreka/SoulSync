@@ -65,11 +65,15 @@ class DownloadEngine:
         # holding the lock for its own update.
         self._records: Dict[Tuple[str, str], DownloadRecord] = {}
         # Plugins that have registered with the engine. Source name
-        # → plugin instance. The engine itself doesn't use plugins
-        # until later phases, but holding the references here keeps
-        # plugin lookup local to the engine instead of forcing every
-        # caller to also touch the registry.
+        # → plugin instance.
         self._plugins: Dict[str, Any] = {}
+        # Alias → canonical-name map. Lets engine resolve legacy
+        # source-name strings (e.g. ``'deezer_dl'`` for Deezer) to
+        # the canonical key in ``_plugins``. Cin's review caught
+        # that engine.cancel_download(source_hint='deezer_dl')
+        # silently fell through to Soulseek because alias resolution
+        # only existed at the registry, not on the engine.
+        self._aliases: Dict[str, str] = {}
         # Background download worker — lives on the engine because
         # it owns the cross-source state the worker mutates. Lazy
         # import keeps the engine module standalone.
@@ -80,10 +84,16 @@ class DownloadEngine:
     # Plugin registration
     # ------------------------------------------------------------------
 
-    def register_plugin(self, source_name: str, plugin: Any) -> None:
+    def register_plugin(self, source_name: str, plugin: Any,
+                        aliases: Tuple[str, ...] = ()) -> None:
         """Register a plugin under its canonical source name. Called
         once per source by the orchestrator after the registry's
         ``initialize`` builds the client instances.
+
+        ``aliases`` is the list of legacy source-name strings that
+        should resolve to this plugin (e.g. ``'deezer_dl'`` for
+        Deezer). Without alias resolution the engine couldn't route
+        cancel/lookup calls that came in with the legacy name.
 
         If the plugin exposes ``set_engine(engine)``, the engine
         passes a self-reference so the plugin can dispatch into
@@ -101,6 +111,8 @@ class DownloadEngine:
         if source_name in self._plugins:
             logger.warning("Plugin %s already registered with engine — overwriting", source_name)
         self._plugins[source_name] = plugin
+        for alias in aliases:
+            self._aliases[alias] = source_name
 
         # Apply the plugin's rate-limit policy BEFORE set_engine so
         # set_engine callbacks can override per-source if they need
@@ -120,7 +132,23 @@ class DownloadEngine:
                 )
 
     def get_plugin(self, source_name: str) -> Optional[Any]:
-        return self._plugins.get(source_name)
+        """Return the plugin instance for the given source name.
+        Resolves through aliases — e.g. ``get_plugin('deezer_dl')``
+        returns the same instance as ``get_plugin('deezer')``."""
+        if source_name in self._plugins:
+            return self._plugins[source_name]
+        canonical = self._aliases.get(source_name)
+        if canonical:
+            return self._plugins.get(canonical)
+        return None
+
+    def _resolve_canonical(self, source_name: str) -> Optional[str]:
+        """Return the canonical source name for an input that may be
+        an alias. Returns None if the input matches neither a
+        canonical name nor an alias."""
+        if source_name in self._plugins:
+            return source_name
+        return self._aliases.get(source_name)
 
     def registered_sources(self) -> List[str]:
         return list(self._plugins.keys())
@@ -147,6 +175,29 @@ class DownloadEngine:
             if existing is None:
                 return
             existing.update(patch)
+
+    def update_record_unless_state(self, source_name: str, download_id: str,
+                                   patch: DownloadRecord,
+                                   skip_if_state_in: Tuple[str, ...] = ()) -> bool:
+        """Atomically check the record's state and apply ``patch`` only
+        if the current state is NOT in ``skip_if_state_in``. Returns
+        True if the patch was applied, False if it was skipped (or
+        the record didn't exist).
+
+        Used by the background download worker's ``_mark_terminal``
+        to avoid the read-then-write race Cin flagged: a cancel
+        landing between the snapshot and update could be overwritten
+        back to Errored / Completed. Holding ``state_lock`` across
+        the check + write closes the window.
+        """
+        with self.state_lock:
+            existing = self._records.get((source_name, download_id))
+            if existing is None:
+                return False
+            if existing.get('state') in skip_if_state_in:
+                return False
+            existing.update(patch)
+            return True
 
     def remove_record(self, source_name: str, download_id: str) -> Optional[DownloadRecord]:
         """Delete a record (cancellation cleanup). Returns the
@@ -226,23 +277,31 @@ class DownloadEngine:
                               source_hint: Optional[str] = None,
                               remove: bool = False) -> bool:
         """Cancel a download. ``source_hint`` is the source name (or
-        legacy username string like ``'deezer_dl'``) — when provided,
-        routes directly to that plugin. When omitted, every plugin
-        is asked in turn until one accepts the cancel."""
+        legacy alias like ``'deezer_dl'``, or a real Soulseek peer
+        username) — when provided, routes directly to that plugin.
+        When omitted, every plugin is asked in turn until one accepts.
+
+        Cin's review caught a bug here: legacy alias strings like
+        ``'deezer_dl'`` weren't resolved to the canonical ``'deezer'``
+        plugin name, so the cancel silently fell through to Soulseek.
+        Resolution now goes through ``_resolve_canonical`` first.
+        """
         # Direct routing when the caller knows the source.
         if source_hint:
-            # Streaming source names ARE the username. Soulseek
-            # uses a real peer username (anything not in our plugin
-            # registry), so route those to the soulseek plugin.
-            target_plugin = self._plugins.get(source_hint)
-            if target_plugin is not None and source_hint != 'soulseek':
-                try:
-                    return await target_plugin.cancel_download(
-                        download_id, source_hint, remove,
-                    )
-                except Exception as exc:
-                    logger.debug("%s cancel_download failed: %s", source_hint, exc)
-                    return False
+            canonical = self._resolve_canonical(source_hint)
+            # Streaming source names (or aliases) resolve to a
+            # registered plugin. Anything else (real Soulseek peer
+            # name not in our registry) routes to Soulseek.
+            if canonical and canonical != 'soulseek':
+                target_plugin = self._plugins.get(canonical)
+                if target_plugin is not None:
+                    try:
+                        return await target_plugin.cancel_download(
+                            download_id, source_hint, remove,
+                        )
+                    except Exception as exc:
+                        logger.debug("%s cancel_download failed: %s", canonical, exc)
+                        return False
             soulseek = self._plugins.get('soulseek')
             if soulseek is not None:
                 try:
