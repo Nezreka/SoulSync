@@ -91,9 +91,21 @@ def _build_deps(
     artist_detail=None,
     wishlist=None,
     fallback_client=None,
+    fallback_source=None,
     profile_id=1,
     quality_tier=('mp3_320', 4),
 ):
+    # Default source mirrors the runtime helper: 'spotify' when a Spotify
+    # client is wired, otherwise 'itunes'. Tests override via the
+    # ``fallback_source`` kwarg when they need a specific source name.
+    if fallback_source is None:
+        fallback_source = 'spotify' if spotify is not None else 'itunes'
+    # When primary is Spotify, the Spotify client serves both the direct
+    # lookup AND the search match — so the fallback_client doubles as the
+    # primary search client. Other sources use whatever fallback_client
+    # the test passes in.
+    if fallback_client is None and fallback_source == 'spotify':
+        fallback_client = spotify
     deps = aq.ArtistQualityDeps(
         spotify_client=spotify,
         matching_engine=matching_engine or _FakeMatchingEngine(),
@@ -102,6 +114,7 @@ def _build_deps(
         get_current_profile_id=lambda: profile_id,
         get_quality_tier_from_extension=lambda fp: quality_tier,
         get_metadata_fallback_client=lambda: fallback_client,
+        get_metadata_fallback_source=lambda: fallback_source,
     )
     return deps
 
@@ -240,6 +253,85 @@ def test_fallback_source_when_spotify_none():
     assert md['album']['images'] == [{'url': 'http://it', 'height': 600, 'width': 600}]
 
 
+def test_dispatches_through_primary_source_not_spotify_specific():
+    """Architectural pin: when the user's primary metadata source is
+    Discogs (or any non-Spotify source), the enhance flow searches
+    THAT source's client, not Spotify. Pre-fix the flow had a
+    hardcoded Spotify-direct → Spotify-search → iTunes-fallback chain
+    that ignored the user's actual configured primary source.
+    """
+    discogs_track = _SpotifyTrack(id='dc-1', name='Track One',
+                                   artists=['Artist Name'])
+    discogs_track.track_number = 1
+    discogs_track.disc_number = 1
+    discogs_track.album = 'Album X'
+    discogs_calls = []
+
+    class _DiscogsStub:
+        def search_tracks(self, q, limit=5):
+            discogs_calls.append(q)
+            return [discogs_track]
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        wishlist=wishlist,
+        fallback_client=_DiscogsStub(),
+        fallback_source='discogs',
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+
+    # Discogs (the configured primary) was the one searched; match queued.
+    assert discogs_calls, "Primary source (Discogs) was not searched"
+    assert payload['enhanced_count'] == 1
+    assert wishlist.added[0]['spotify_track_data']['id'] == 'dc-1'
+
+
+def test_spotify_direct_lookup_not_used_when_spotify_not_primary():
+    """Architectural pin: even if the user has Spotify configured AND a
+    track has a stored spotify_track_id, the direct-lookup optimization
+    only runs when Spotify is the ACTIVE primary source. Otherwise it
+    must search the active primary instead.
+    """
+    spotify_calls = []
+
+    class _SpotifyStub:
+        def get_track_details(self, tid):
+            spotify_calls.append(('details', tid))
+            return None
+        def search_tracks(self, q, limit=5):
+            spotify_calls.append(('search', q))
+            return []
+
+    discogs_track = _SpotifyTrack(id='dc-1', name='Track One',
+                                   artists=['Artist Name'])
+    discogs_track.track_number = 1
+    discogs_track.disc_number = 1
+    discogs_track.album = 'Album X'
+
+    class _DiscogsStub:
+        def search_tracks(self, q, limit=5):
+            return [discogs_track]
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=_SpotifyStub(),
+        artist_detail=_artist_with_track(spotify_tid='sp-stored'),
+        wishlist=wishlist,
+        fallback_client=_DiscogsStub(),
+        fallback_source='discogs',
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+
+    # Spotify direct lookup must NOT be invoked when primary is discogs.
+    assert ('details', 'sp-stored') not in spotify_calls
+    # Discogs match was queued instead.
+    assert payload['enhanced_count'] == 1
+
+
 # ---------------------------------------------------------------------------
 # Failure modes
 # ---------------------------------------------------------------------------
@@ -266,21 +358,123 @@ def test_track_with_no_file_path_marked_failed():
 
 
 def test_no_match_anywhere_marked_failed():
-    """No Spotify match AND no fallback match → failed reason 'No Spotify or fallback match'."""
+    """No primary-source match → failed reason names the source so the
+    user knows which one returned nothing."""
     spotify = _FakeSpotify(track_details=None, search_results=[])
-    fallback = type('FB', (), {
-        'search_tracks': lambda self, q, limit=5: [],
-    })()
     deps = _build_deps(
         spotify=spotify,
         artist_detail=_artist_with_track(),
-        fallback_client=fallback,
     )
 
     payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
 
     assert payload['failed_count'] == 1
-    assert 'No Spotify or fallback match' in payload['failed_tracks'][0]['reason']
+    reason = payload['failed_tracks'][0]['reason']
+    assert 'No usable spotify match' in reason
+    assert 'connect another metadata source' in reason
+
+
+def test_no_match_without_spotify_uses_source_specific_reason():
+    """When Spotify isn't connected and the active primary (e.g. iTunes)
+    finds nothing, the failure reason names iTunes specifically. Discord
+    case: user with no Spotify / Deezer saw enhance silently produce
+    'unknown artist - unknown album - unknown track' wishlist entries
+    instead of a clear failure."""
+    fallback = type('FB', (), {
+        'search_tracks': lambda self, q, limit=5: [],
+    })()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        fallback_client=fallback,
+        fallback_source='itunes',
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['failed_count'] == 1
+    reason = payload['failed_tracks'][0]['reason']
+    assert 'No usable itunes match' in reason
+    assert 'connect another metadata source' in reason
+
+
+def test_fallback_match_with_empty_artist_rejected():
+    """Per the user-reported bug: an iTunes match that clears the 0.7
+    confidence threshold but has empty/missing artists is rejected
+    instead of producing a wishlist entry with empty artist field
+    (which the wishlist payload normalizer happily accepts and the
+    UI then displays as 'unknown artist')."""
+    fallback_track = _SpotifyTrack(id='it-empty', name='Track One',
+                                    artists=[],  # empty artists list
+                                    image_url='')
+    fallback_track.track_number = 1
+    fallback_track.disc_number = 1
+    fallback_track.album = 'Album X'
+    fallback = type('FB', (), {
+        'search_tracks': lambda self, q, limit=5: [fallback_track],
+    })()
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        wishlist=wishlist,
+        fallback_client=fallback,
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+
+    # No wishlist entry with empty fields — match was rejected.
+    assert payload['enhanced_count'] == 0
+    assert payload['failed_count'] == 1
+    assert wishlist.added == []
+
+
+def test_fallback_match_with_empty_album_rejected():
+    """Empty album field on iTunes match → reject (was producing
+    'unknown album' wishlist entries)."""
+    fallback_track = _SpotifyTrack(id='it-no-album', name='Track One',
+                                    artists=['Artist Name'])
+    fallback_track.track_number = 1
+    fallback_track.disc_number = 1
+    fallback_track.album = ''  # empty
+    fallback = type('FB', (), {
+        'search_tracks': lambda self, q, limit=5: [fallback_track],
+    })()
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        wishlist=wishlist,
+        fallback_client=fallback,
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['enhanced_count'] == 0
+    assert payload['failed_count'] == 1
+    assert wishlist.added == []
+
+
+def test_fallback_match_with_empty_name_rejected():
+    """Empty title on iTunes match → reject."""
+    fallback_track = _SpotifyTrack(id='it-no-name', name='',
+                                    artists=['Artist Name'])
+    fallback_track.track_number = 1
+    fallback_track.disc_number = 1
+    fallback_track.album = 'Album X'
+    fallback = type('FB', (), {
+        'search_tracks': lambda self, q, limit=5: [fallback_track],
+    })()
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        wishlist=wishlist,
+        fallback_client=fallback,
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['enhanced_count'] == 0
+    assert payload['failed_count'] == 1
+    assert wishlist.added == []
 
 
 # ---------------------------------------------------------------------------
