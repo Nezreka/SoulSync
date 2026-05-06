@@ -4,7 +4,6 @@ from plexapi.audio import Track as PlexTrack, Album as PlexAlbum, Artist as Plex
 from plexapi.playlist import Playlist as PlexPlaylist
 from plexapi.exceptions import PlexApiException, NotFound
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 import requests
 from datetime import datetime, timedelta
 import re
@@ -12,69 +11,14 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 import threading
 
-logger = get_logger("plex_client")
-
-@dataclass
-class PlexTrackInfo:
-    id: str
-    title: str
-    artist: str
-    album: str
-    duration: int
-    track_number: Optional[int] = None
-    year: Optional[int] = None
-    rating: Optional[float] = None
-    
-    @classmethod
-    def from_plex_track(cls, track: PlexTrack) -> 'PlexTrackInfo':
-        # Gracefully handle tracks that might be missing artist or album metadata in Plex
-        try:
-            artist_title = track.artist().title if track.artist() else "Unknown Artist"
-        except (NotFound, AttributeError):
-            artist_title = "Unknown Artist"
-            
-        try:
-            album_title = track.album().title if track.album() else "Unknown Album"
-        except (NotFound, AttributeError):
-            album_title = "Unknown Album"
-
-        return cls(
-            id=str(track.ratingKey),
-            title=track.title,
-            artist=artist_title,
-            album=album_title,
-            duration=track.duration,
-            track_number=track.trackNumber,
-            year=track.year,
-            rating=track.userRating
-        )
-
-@dataclass
-class PlexPlaylistInfo:
-    id: str
-    title: str
-    description: Optional[str]
-    duration: int
-    leaf_count: int
-    tracks: List[PlexTrackInfo]
-    
-    @classmethod
-    def from_plex_playlist(cls, playlist: PlexPlaylist) -> 'PlexPlaylistInfo':
-        tracks = []
-        for item in playlist.items():
-            if isinstance(item, PlexTrack):
-                tracks.append(PlexTrackInfo.from_plex_track(item))
-        
-        return cls(
-            id=str(playlist.ratingKey),
-            title=playlist.title,
-            description=playlist.summary,
-            duration=playlist.duration,
-            leaf_count=playlist.leafCount,
-            tracks=tracks
-        )
-
+# Shared dataclasses live in the neutral media_server package now —
+# every server client used to define a near-identical XTrackInfo /
+# XPlaylistInfo. Lifted to one canonical type so consumers (matching
+# engine, sync service, etc.) get a single import.
+from core.media_server.types import TrackInfo, PlaylistInfo
 from core.media_server.contract import MediaServerClient
+
+logger = get_logger("plex_client")
 
 
 class PlexClient(MediaServerClient):
@@ -271,7 +215,7 @@ class PlexClient(MediaServerClient):
         """Check if both server is connected AND music library is selected."""
         return self.server is not None and self.music_library is not None
     
-    def get_all_playlists(self) -> List[PlexPlaylistInfo]:
+    def get_all_playlists(self) -> List[PlaylistInfo]:
         if not self.ensure_connection():
             logger.error("Not connected to Plex server")
             return []
@@ -281,7 +225,7 @@ class PlexClient(MediaServerClient):
         try:
             for playlist in self.server.playlists():
                 if getattr(playlist, 'playlistType', None) == 'audio':
-                    playlist_info = PlexPlaylistInfo.from_plex_playlist(playlist)
+                    playlist_info = PlaylistInfo.from_plex_playlist(playlist)
                     playlists.append(playlist_info)
 
             logger.info(f"Retrieved {len(playlists)} audio playlists")
@@ -291,14 +235,14 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error fetching playlists: {e}")
             return []
     
-    def get_playlist_by_name(self, name: str) -> Optional[PlexPlaylistInfo]:
+    def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         if not self.ensure_connection():
             return None
         
         try:
             playlist = self.server.playlist(name)
             if getattr(playlist, 'playlistType', None) == 'audio':
-                return PlexPlaylistInfo.from_plex_playlist(playlist)
+                return PlaylistInfo.from_plex_playlist(playlist)
             return None
             
         except NotFound:
@@ -314,14 +258,14 @@ class PlexClient(MediaServerClient):
             return False
         
         try:
-            # Handle both PlexTrackInfo objects and actual Plex track objects
+            # Handle both TrackInfo objects and actual Plex track objects
             plex_tracks = []
             for track in tracks:
                 if hasattr(track, 'ratingKey'):
                     # This is already a Plex track object
                     plex_tracks.append(track)
                 elif hasattr(track, '_original_plex_track'):
-                    # This is a PlexTrackInfo object with stored original track reference
+                    # This is a TrackInfo object with stored original track reference
                     original_track = track._original_plex_track
                     if original_track is not None:
                         plex_tracks.append(original_track)
@@ -329,7 +273,7 @@ class PlexClient(MediaServerClient):
                     else:
                         logger.warning(f"Stored track reference is None for: {track.title} by {track.artist}")
                 elif hasattr(track, 'title'):
-                    # Fallback: This is a PlexTrackInfo object, need to find the actual track
+                    # Fallback: This is a TrackInfo object, need to find the actual track
                     plex_track = self._find_track(track.title, track.artist, track.album)
                     if plex_track:
                         plex_tracks.append(plex_track)
@@ -451,7 +395,7 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error copying playlist '{source_name}' to '{target_name}': {e}")
             return False
 
-    def update_playlist(self, playlist_name: str, tracks: List[PlexTrackInfo]) -> bool:
+    def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
         if not self.ensure_connection():
             return False
         
@@ -522,7 +466,7 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error searching for track '{title}' by '{artist}': {e}")
             return None
     
-    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[PlexTrackInfo]:
+    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[TrackInfo]:
         """
         Searches for tracks using an efficient, multi-stage "early exit" strategy.
         It stops and returns results as soon as candidates are found.
@@ -557,7 +501,7 @@ class PlexClient(MediaServerClient):
             # --- Early Exit: If Stage 1 found results, stop here ---
             if candidate_tracks:
                 logger.info(f"Found {len(candidate_tracks)} candidates in Stage 1. Exiting early.")
-                tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                tracks = [TrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
                 # Store references to original tracks for playlist creation
                 for i, track_info in enumerate(tracks):
                     if i < len(candidate_tracks):
@@ -576,7 +520,7 @@ class PlexClient(MediaServerClient):
             # --- Early Exit: If Stage 2 found results, stop here ---
             if candidate_tracks:
                 logger.info(f"Found {len(candidate_tracks)} candidates in Stage 2. Exiting early.")
-                tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+                tracks = [TrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
                 # Store references to original tracks for playlist creation
                 for i, track_info in enumerate(tracks):
                     if i < len(candidate_tracks):
@@ -590,7 +534,7 @@ class PlexClient(MediaServerClient):
             # Removed to prevent false positives where tracks with same title 
             # but different artists are incorrectly matched
             
-            tracks = [PlexTrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
+            tracks = [TrackInfo.from_plex_track(track) for track in candidate_tracks[:limit]]
     
             # Store references to original tracks for playlist creation
             for i, track_info in enumerate(tracks):
