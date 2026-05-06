@@ -28,8 +28,8 @@ beautifulsoup4==4.14.3
 # System monitoring
 psutil==7.2.2
 
-# YouTube support
-yt-dlp==2026.3.17
+# YouTube support -- unpinned; yt-dlp must track upstream releases to stay functional
+yt-dlp>=2026.3.17
 
 # Lyrics support
 lrclibapi==0.3.1
