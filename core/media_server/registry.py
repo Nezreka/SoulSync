@@ -3,11 +3,17 @@
 Single source of truth for which servers exist, what their canonical
 names are, and which client class implements each. Replaces the
 historic web_server.py pattern of holding 4 separate client globals
-+ 33 hand-maintained ``if active_server == 'plex' / 'jellyfin' / ...``
-dispatch sites.
+that every dispatch site reached individually.
 
-Adding a new server (e.g. Subsonic, Emby) becomes one ``register``
-call here + the new client class. Web server dispatch stays put.
+Server-specific dispatch chains in web_server.py (playlist add /
+remove / replace, per-server metadata sync, etc.) still hand-branch
+on ``active_server == X`` because the work each server does at those
+sites is genuinely different — but they reach the per-server CLIENT
+through ``engine.client(name)`` (which goes through this registry)
+instead of separate globals.
+
+Adding a new server (Subsonic / Emby) = one ``register`` call here +
+the new client class.
 """
 
 from __future__ import annotations

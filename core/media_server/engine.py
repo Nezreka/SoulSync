@@ -233,7 +233,7 @@ class MediaServerEngine:
             try:
                 return client.get_recently_added_albums(max_results)
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "%s get_recently_added_albums raised: %s",
                     self.active_server, exc,
                 )
@@ -256,7 +256,7 @@ class MediaServerEngine:
                 if not hasattr(client, 'is_connected') or client.is_connected():
                     result[name] = client
             except Exception as exc:
-                logger.debug("%s is_connected raised in configured_clients: %s", name, exc)
+                logger.warning("%s is_connected raised in configured_clients: %s", name, exc)
         return result
 
     def reload_config(self, name: Optional[str] = None) -> bool:
