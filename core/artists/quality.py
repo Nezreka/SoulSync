@@ -56,12 +56,13 @@ Returns `(payload_dict, http_status_code)` so the route wrapper can
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger(__name__)
+from utils.logging_config import get_logger
+
+logger = get_logger('artists.quality')
 
 
 @dataclass
