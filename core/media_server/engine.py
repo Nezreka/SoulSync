@@ -1,33 +1,40 @@
-"""MediaServerEngine — central dispatch for media server operations.
+"""MediaServerEngine — central registry-backed access to media server clients.
 
-Replaces the *uniform-shape* dispatch chains in web_server.py
-(``is_connected``, ``get_all_artists``, etc. — anything where every
-server returns the same shape and the only branching was on
-``active_server == X``). Each such operation is now one
-``engine.method()`` call that:
+Honest scope: the engine OWNS the per-server client instances and
+exposes a small set of generic accessors so callers don't need
+per-server attribute reaches. Most actual cross-server dispatch in
+web_server.py (playlist add / remove / replace, per-server metadata
+sync, deep scan with server-specific cache strategies) is genuinely
+different per server and stays explicit in the call site — the
+engine just provides the canonical client lookup so those sites
+reach via ``engine.client(name)`` instead of separate globals.
 
-1. Reads the ``server.active`` config to find the current target.
-2. Looks up the registered client.
-3. Calls the corresponding method (with safe per-server fallbacks
-   for methods that don't exist on every client — e.g. SoulSync
-   has no library-scan API).
+Surface:
+- ``client(name)`` / ``active_client()`` — name → client lookup
+- ``active_server`` — config-driven active server name
+- ``is_connected()`` — only cross-server dispatch with real callers
+  today (dashboard status indicators); kept as the canonical example
+- ``configured_clients()`` — replaces the legacy per-server
+  ``if X and X.is_connected()`` chains in web_server.py
+- ``reload_config(name=None)`` — generic dispatch instead of
+  per-client reload calls
 
-Server-specific dispatch sites (Plex's raw playlist API, Jellyfin /
-Navidrome client methods returning different shapes) stay explicit
-in web_server.py per the "lift what's truly shared" standard. They
-reach individual clients via ``engine.client(name)`` rather than
-the per-server globals — same generic-accessor pattern as the
-download orchestrator.
+Per-method engine wrappers for ``get_all_artists`` / ``search_tracks``
+/ ``trigger_library_scan`` / etc. were on an earlier draft but had no
+production callers — every consumer reaches the active client directly
+through ``sync_service._get_active_media_client()`` or
+``engine.client(name)`` and calls the per-server method itself. Cut
+per the "no premature abstraction" standard.
 
-Engine itself is constructed once during web_server.py init and
-held as a process-wide singleton via
-``set_media_server_engine`` / ``get_media_server_engine``, mirroring
-the metadata + download engine factory shape.
+Engine is constructed once during web_server.py init and held as a
+process-wide singleton via ``set_media_server_engine`` /
+``get_media_server_engine``, mirroring the metadata + download
+engine factory shape.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
@@ -92,7 +99,8 @@ class MediaServerEngine:
         self._resolve_active = active_server_resolver
 
     # ------------------------------------------------------------------
-    # Direct client access (backward-compat for source-specific reaches)
+    # Client lookup — generic accessors that replace per-server
+    # attribute reaches in callers.
     # ------------------------------------------------------------------
 
     def client(self, name: str) -> Optional[MediaServerClient]:
@@ -111,13 +119,12 @@ class MediaServerEngine:
         """The client for the currently-active server."""
         return self.registry.get(self.active_server)
 
-    # ------------------------------------------------------------------
-    # Cross-server dispatch — required methods (always present)
-    # ------------------------------------------------------------------
-
     def is_connected(self) -> bool:
         """Active server's connection state. False if no active
-        client (registered but failed to initialize)."""
+        client (registered but failed to initialize). The dashboard
+        status indicators + endpoint guards rely on this — the only
+        cross-server dispatch wrapper kept on the engine because it
+        actually has callers."""
         client = self.active_client()
         if client is None:
             return False
@@ -126,124 +133,6 @@ class MediaServerEngine:
         except Exception as exc:
             logger.warning("%s is_connected raised: %s", self.active_server, exc)
             return False
-
-    def ensure_connection(self) -> bool:
-        """Re-auth or reconnect the active server. Returns True if
-        usable after the call."""
-        client = self.active_client()
-        if client is None:
-            return False
-        try:
-            return client.ensure_connection()
-        except Exception as exc:
-            logger.warning("%s ensure_connection raised: %s", self.active_server, exc)
-            return False
-
-    def get_all_artists(self) -> List[Any]:
-        """Active server's full artist list. Empty list if not
-        connected or call fails."""
-        client = self.active_client()
-        if client is None:
-            return []
-        try:
-            return client.get_all_artists()
-        except Exception as exc:
-            logger.warning("%s get_all_artists raised: %s", self.active_server, exc)
-            return []
-
-    def get_all_album_ids(self) -> set:
-        """Active server's album-ID set. Empty set if not connected
-        or call fails."""
-        client = self.active_client()
-        if client is None:
-            return set()
-        try:
-            return client.get_all_album_ids()
-        except Exception as exc:
-            logger.warning("%s get_all_album_ids raised: %s", self.active_server, exc)
-            return set()
-
-    # ------------------------------------------------------------------
-    # Optional methods — engine routes if the client implements them,
-    # returns a safe default otherwise (mirrors the legacy web_server.py
-    # branches that special-cased SoulSync / Navidrome).
-    # ------------------------------------------------------------------
-
-    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[Any]:
-        """Search the active server's library. Returns empty list
-        for servers that don't implement search_tracks (SoulSync
-        standalone reads filesystem; no live search API)."""
-        client = self.active_client()
-        if client is None or not hasattr(client, 'search_tracks'):
-            return []
-        try:
-            return client.search_tracks(title, artist, limit)
-        except Exception as exc:
-            logger.warning("%s search_tracks raised: %s", self.active_server, exc)
-            return []
-
-    def trigger_library_scan(self) -> bool:
-        """Trigger a server-side library scan. No-op (returns True)
-        for SoulSync standalone — filesystem walks happen in-process."""
-        client = self.active_client()
-        if client is None:
-            return False
-        if not hasattr(client, 'trigger_library_scan'):
-            return True
-        try:
-            return client.trigger_library_scan()
-        except Exception as exc:
-            logger.warning("%s trigger_library_scan raised: %s", self.active_server, exc)
-            return False
-
-    def is_library_scanning(self) -> bool:
-        """True if the active server is currently scanning. Always
-        False for SoulSync standalone."""
-        client = self.active_client()
-        if client is None or not hasattr(client, 'is_library_scanning'):
-            return False
-        try:
-            return client.is_library_scanning()
-        except Exception as exc:
-            logger.warning("%s is_library_scanning raised: %s", self.active_server, exc)
-            return False
-
-    def get_library_stats(self) -> Dict[str, int]:
-        """Counts of artists / albums / tracks. Default empty dict
-        if the server doesn't implement (SoulSync standalone)."""
-        client = self.active_client()
-        if client is None or not hasattr(client, 'get_library_stats'):
-            return {}
-        try:
-            return client.get_library_stats()
-        except Exception as exc:
-            logger.warning("%s get_library_stats raised: %s", self.active_server, exc)
-            return {}
-
-    def get_recently_added_albums(self, max_results: int = 400) -> List[Any]:
-        """Recently-added albums view. Plex uses a different name;
-        engine routes to whichever method the active server has."""
-        client = self.active_client()
-        if client is None:
-            return []
-        # Plex uses recentlyAdded() on the music library object, not
-        # a top-level method. SoulSync, Jellyfin, Navidrome all
-        # expose get_recently_added_albums directly.
-        if hasattr(client, 'get_recently_added_albums'):
-            try:
-                return client.get_recently_added_albums(max_results)
-            except Exception as exc:
-                logger.warning(
-                    "%s get_recently_added_albums raised: %s",
-                    self.active_server, exc,
-                )
-                return []
-        return []
-
-    # ------------------------------------------------------------------
-    # Generic accessors — replace per-server attribute reaches in
-    # callers (Cin's standard from the download refactor).
-    # ------------------------------------------------------------------
 
     def configured_clients(self) -> Dict[str, MediaServerClient]:
         """Return ``{name: client}`` for every server that's both

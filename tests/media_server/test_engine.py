@@ -107,20 +107,9 @@ def test_is_connected_routes_to_active_client(make_engine):
     assert engine.is_connected() is True  # follows plex
 
 
-def test_get_all_album_ids_returns_active_clients_set(make_engine):
-    plex = _FakeClient('plex')
-    plex._album_ids = {'p-1', 'p-2'}
-    jelly = _FakeClient('jellyfin')
-    jelly._album_ids = {'j-1'}
-    engine = make_engine({'plex': plex, 'jellyfin': jelly}, active='plex')
-    assert engine.get_all_album_ids() == {'p-1', 'p-2'}
-    engine = make_engine({'plex': plex, 'jellyfin': jelly}, active='jellyfin')
-    assert engine.get_all_album_ids() == {'j-1'}
-
-
-def test_engine_returns_safe_defaults_when_active_client_failed_to_init(make_engine):
+def test_engine_is_connected_returns_false_when_active_client_failed_to_init():
     """When the active client failed to initialize (registry stored
-    None), the engine returns safe defaults instead of raising."""
+    None), the engine returns False instead of raising."""
     registry = MediaServerRegistry()
     registry.register(ServerSpec(
         name='broken',
@@ -131,65 +120,18 @@ def test_engine_returns_safe_defaults_when_active_client_failed_to_init(make_eng
     engine = MediaServerEngine(registry=registry, active_server_resolver=lambda: 'broken')
 
     assert engine.is_connected() is False
-    assert engine.get_all_artists() == []
-    assert engine.get_all_album_ids() == set()
-    assert engine.search_tracks('t', 'a') == []
-    assert engine.trigger_library_scan() is False
-    assert engine.is_library_scanning() is False
+    assert engine.active_client() is None
 
 
-def test_engine_swallows_per_method_exceptions(make_engine):
-    """A method that raises must NOT propagate to the dispatch
-    site — engine returns the safe default instead, mirroring the
-    legacy web_server.py defensive try/except chains."""
+def test_is_connected_swallows_exception_from_client(make_engine):
+    """If the client's is_connected raises, engine returns False
+    instead of propagating — dashboard status indicators stay
+    responsive even if a server is misbehaving."""
     plex = _FakeClient('plex')
     plex.is_connected = MagicMock(side_effect=RuntimeError("boom"))
-    plex.get_all_album_ids = MagicMock(side_effect=RuntimeError("boom"))
     engine = make_engine({'plex': plex}, active='plex')
 
     assert engine.is_connected() is False
-    assert engine.get_all_album_ids() == set()
-
-
-# ---------------------------------------------------------------------------
-# Optional-method dispatch (engine returns safe default when missing)
-# ---------------------------------------------------------------------------
-
-
-class _MinimalClient:
-    """Stand-in for SoulSync standalone — only the required methods,
-    NO optional methods. Used to assert engine routes around missing
-    optional methods with safe defaults."""
-
-    def is_connected(self): return True
-    def ensure_connection(self): return True
-    def get_all_artists(self): return []
-    def get_all_album_ids(self): return set()
-
-
-def test_search_tracks_returns_empty_when_client_lacks_method(make_engine):
-    """SoulSync standalone has no search_tracks — engine returns
-    [] instead of raising AttributeError."""
-    engine = make_engine({'soulsync': _MinimalClient()}, active='soulsync')
-    assert engine.search_tracks('t', 'a') == []
-
-
-def test_trigger_library_scan_returns_true_when_client_lacks_method(make_engine):
-    """SoulSync has no trigger_library_scan (filesystem walks
-    happen in-process). Engine no-ops with True so callers don't
-    treat it as a failure."""
-    engine = make_engine({'soulsync': _MinimalClient()}, active='soulsync')
-    assert engine.trigger_library_scan() is True
-
-
-def test_is_library_scanning_returns_false_when_client_lacks_method(make_engine):
-    engine = make_engine({'soulsync': _MinimalClient()}, active='soulsync')
-    assert engine.is_library_scanning() is False
-
-
-def test_get_library_stats_returns_empty_dict_when_client_lacks_method(make_engine):
-    engine = make_engine({'soulsync': _MinimalClient()}, active='soulsync')
-    assert engine.get_library_stats() == {}
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +248,7 @@ def test_engine_with_empty_clients_dict_is_safe_to_use():
     full engine init raises — preserves the resilience the per-server
     globals had pre-refactor (each one had its own try/except so engine
     failure didn't take down dispatch sites). Pin the contract: empty
-    engine still answers safely on every method instead of raising."""
+    engine still answers safely on every accessor instead of raising."""
     registry = MediaServerRegistry()
     registry.register(ServerSpec(
         name='plex', factory=lambda: _FakeClient('plex'), display_name='Plex',
@@ -320,11 +262,10 @@ def test_engine_with_empty_clients_dict_is_safe_to_use():
     # client(name) returns None for every server — engine doesn't crash.
     assert engine.client('plex') is None
     assert engine.client('jellyfin') is None
-    # Cross-server methods return safe defaults instead of raising.
+    # Active-client lookup + is_connected gracefully handle the empty
+    # case without raising.
+    assert engine.active_client() is None
     assert engine.is_connected() is False
-    assert engine.get_all_artists() == []
-    assert engine.get_all_album_ids() == set()
-    assert engine.search_tracks('t', 'a') == []
     # configured_clients() returns empty dict cleanly.
     assert engine.configured_clients() == {}
 
