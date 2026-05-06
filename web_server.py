@@ -18100,6 +18100,12 @@ def get_server_playlist_tracks(playlist_id):
                         raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
                     except Exception:
                         pass
+                if not raw_playlist:
+                    logger.warning(
+                        f"[ServerPlaylistTracks] Plex playlist not found by "
+                        f"id={playlist_id} or name='{playlist_name}' — "
+                        f"compare view will show every source track as Find & Add"
+                    )
                 if raw_playlist:
                     if not playlist_name:
                         playlist_name = raw_playlist.title
@@ -18446,11 +18452,25 @@ def server_playlist_add_track(playlist_id):
         active_server = config_manager.get_active_media_server()
 
         if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback — Plex deletes + recreates playlists
+            # on edit so the rating key the frontend cached can be stale.
+            # The GET tracks endpoint uses the same lookup chain.
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] add-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
-            new_item = media_server_engine.client('plex').server.fetchItem(int(track_id))
+
+            new_item = plex_server.fetchItem(int(track_id))
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
