@@ -39,8 +39,7 @@ class SyncDeps:
     """Bundle of cross-cutting deps the sync worker needs."""
     config_manager: Any
     sync_service: Any
-    plex_client: Any
-    jellyfin_client: Any
+    media_server_engine: Any
     automation_engine: Any
     run_async: Callable[..., Any]
     record_sync_history_start: Callable
@@ -227,8 +226,9 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
             
         # Check sync service components
         logger.info(f"   spotify_client: {sync_service.spotify_client is not None}")
-        logger.info(f"   deps.plex_client: {sync_service.plex_client is not None}")
-        logger.info(f"   deps.jellyfin_client: {sync_service.jellyfin_client is not None}")
+        _ms_engine = getattr(sync_service, '_engine', None)
+        logger.info(f"   plex_client: {(_ms_engine.client('plex') if _ms_engine else None) is not None}")
+        logger.info(f"   jellyfin_client: {(_ms_engine.client('jellyfin') if _ms_engine else None) is not None}")
         
         # Check media server connection before starting
         from config.settings import config_manager
@@ -404,11 +404,12 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
             try:
                 active_server = deps.config_manager.get_active_media_server()
                 logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")
-                if active_server == 'plex' and deps.plex_client:
-                    ok = deps.plex_client.set_playlist_image(playlist_name, playlist_image_url)
+                _engine = deps.media_server_engine
+                if active_server == 'plex' and _engine and _engine.client('plex'):
+                    ok = _engine.client('plex').set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
-                elif active_server in ('jellyfin', 'emby') and deps.jellyfin_client:
-                    ok = deps.jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
+                elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
+                    ok = _engine.client('jellyfin').set_playlist_image(playlist_name, playlist_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 # Navidrome doesn't support custom playlist images
             except Exception as img_err:

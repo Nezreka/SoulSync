@@ -190,7 +190,10 @@ class SoulSyncArtist:
         return self._albums
 
 
-class SoulSyncClient:
+from core.media_server.contract import MediaServerClient
+
+
+class SoulSyncClient(MediaServerClient):
     """Filesystem-based media server client for standalone SoulSync operation.
 
     Scans the Transfer folder recursively, reads audio file tags, and
