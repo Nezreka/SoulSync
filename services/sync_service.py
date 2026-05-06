@@ -5,7 +5,7 @@ from datetime import datetime
 from utils.logging_config import get_logger
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.media_server.types import TrackInfo
-from core.soulseek_client import SoulseekClient
+from core.download_orchestrator import DownloadOrchestrator
 from core.matching_engine import MusicMatchingEngine, MatchResult
 
 logger = get_logger("sync_service")
@@ -42,7 +42,7 @@ class SyncProgress:
     failed_tracks: int = 0
 
 class PlaylistSyncService:
-    def __init__(self, spotify_client: SpotifyClient, soulseek_client: SoulseekClient, media_server_engine=None):
+    def __init__(self, spotify_client: SpotifyClient, download_orchestrator: DownloadOrchestrator, media_server_engine=None):
         """Initialize the sync service.
 
         ``media_server_engine`` is the central MediaServerEngine that owns
@@ -51,10 +51,14 @@ class PlaylistSyncService:
         / navidrome_client) — all media-server access now goes through
         ``self._engine.client(name)`` so swapping the active server doesn't
         need a service rebuild.
+
+        ``download_orchestrator`` (formerly ``soulseek_client``) is the
+        DownloadOrchestrator that owns the per-source download clients —
+        rename + retype landed via the download refactor PR.
         """
         self.spotify_client = spotify_client
         self._engine = media_server_engine
-        self.soulseek_client = soulseek_client
+        self.download_orchestrator = download_orchestrator
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
@@ -648,7 +652,7 @@ class PlaylistSyncService:
                 query = self.matching_engine.generate_download_query(match_result.spotify_track)
                 logger.info(f"Attempting to download: {query}")
                 
-                download_id = await self.soulseek_client.search_and_download_best(query, expected_track=match_result.spotify_track)
+                download_id = await self.download_orchestrator.search_and_download_best(query, expected_track=match_result.spotify_track)
                 
                 if download_id:
                     downloaded_count += 1

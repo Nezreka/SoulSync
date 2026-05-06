@@ -42,31 +42,31 @@ _TERMINAL_STATUSES = {
 }
 
 
-def cancel_single_download(soulseek_client, run_async: Callable,
+def cancel_single_download(download_orchestrator, run_async: Callable,
                             download_id: str, username: str) -> bool:
     """Cancel one specific slskd download (with `remove=True`)."""
-    return run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+    return run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
 
 
-def cancel_all_active(soulseek_client, run_async: Callable,
+def cancel_all_active(download_orchestrator, run_async: Callable,
                        sweep_callback: Callable[[], None]) -> tuple[bool, str]:
     """Cancel every active slskd download, clear the resulting ones, sweep dirs.
 
     Returns `(success, message)` so the route can map to the right HTTP shape.
     """
-    cancel_success = run_async(soulseek_client.cancel_all_downloads())
+    cancel_success = run_async(download_orchestrator.cancel_all_downloads())
     if not cancel_success:
         return False, "Failed to cancel active downloads."
 
-    run_async(soulseek_client.clear_all_completed_downloads())
+    run_async(download_orchestrator.clear_all_completed_downloads())
     sweep_callback()
     return True, "All downloads cancelled and cleared."
 
 
-def clear_finished_active(soulseek_client, run_async: Callable,
+def clear_finished_active(download_orchestrator, run_async: Callable,
                            sweep_callback: Callable[[], None]) -> bool:
     """Clear all terminal transfers from slskd, sweep dirs on success."""
-    success = run_async(soulseek_client.clear_all_completed_downloads())
+    success = run_async(download_orchestrator.clear_all_completed_downloads())
     if success:
         sweep_callback()
     return success

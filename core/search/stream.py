@@ -96,7 +96,7 @@ def stream_search_track(
     album_name: Optional[str],
     duration_ms: int,
     config_manager,
-    soulseek_client,
+    download_orchestrator,
     matching_engine,
     run_async: Callable,
 ) -> Optional[dict]:
@@ -118,15 +118,9 @@ def stream_search_track(
 
     queries = _build_stream_queries(track_name, artist_name, effective_mode)
 
-    stream_clients = {
-        'youtube': soulseek_client.youtube,
-        'tidal': soulseek_client.tidal,
-        'qobuz': soulseek_client.qobuz,
-        'hifi': soulseek_client.hifi,
-        'deezer_dl': soulseek_client.deezer_dl,
-        'lidarr': soulseek_client.lidarr,
-    }
-    stream_client = stream_clients.get(effective_mode)
+    # Map mode name to canonical registry name (legacy 'deezer_dl'
+    # alias resolves to 'deezer' via the orchestrator's registry).
+    stream_client = download_orchestrator.client(effective_mode)
     use_direct_client = stream_client is not None
 
     max_peer_queue = config_manager.get('soulseek.max_peer_queue', 0) or 0
@@ -137,7 +131,7 @@ def stream_search_track(
             if use_direct_client:
                 tracks_result, _ = run_async(stream_client.search(query, timeout=15))
             else:
-                tracks_result, _ = run_async(soulseek_client.search(query, timeout=15))
+                tracks_result, _ = run_async(download_orchestrator.search(query, timeout=15))
 
             if not tracks_result:
                 logger.info(f"No results for query '{query}', trying next...")

@@ -26,7 +26,7 @@ def register_routes(bp):
             spotify = ctx.get("spotify_client")
             spotify_ok = bool(spotify and spotify.is_authenticated())
 
-            soulseek = ctx.get("soulseek_client")
+            soulseek = ctx.get("download_orchestrator")
             soulseek_ok = bool(soulseek)
 
             hydrabase = ctx.get("hydrabase_client")
