@@ -407,9 +407,14 @@ class DatabaseUpdateWorker:
                 logger.error(f"Could not connect to {self.server_type} server — check URL, credentials, and network (Docker users: use container name or host.docker.internal instead of host IP)")
                 return []
             
-            # Check for music library (Plex-specific check)
-            if self.server_type == "plex" and not self.media_client.music_library:
-                logger.error("No music library found in Plex")
+            # Check for music library (Plex-specific check). Routes
+            # through ``is_fully_configured`` so all-libraries mode (in
+            # which ``music_library`` is None but ``_all_libraries_mode``
+            # is True) counts as configured. Pre-fix this bailed out on
+            # the bare music_library None check, silently aborting the
+            # deep scan for any all-libraries-mode user.
+            if self.server_type == "plex" and not self.media_client.is_fully_configured():
+                logger.error("No music library configured in Plex")
                 return []
             
             # Check if database has enough content for incremental updates (server-specific)
@@ -1084,24 +1089,31 @@ class DatabaseUpdateWorker:
             return []
     
     def _get_recent_albums_plex(self) -> List:
-        """Get recently added and updated albums from Plex"""
+        """Get recently added and updated albums from Plex.
+
+        Routes through ``PlexClient.get_recently_added_albums`` and
+        ``get_recently_updated_albums`` so the all-libraries mode union
+        works (pre-fix this reached ``self.media_client.music_library.X``
+        directly which crashed when music_library is None in all-
+        libraries mode).
+        """
         all_recent_content = []
-        
+
         try:
-            # Get recently added albums (up to 400 to catch more recent content)  
-            try:
-                recently_added = self.media_client.music_library.recentlyAdded(libtype='album', maxresults=400)
+            # Get recently added albums (up to 400 to catch more recent content)
+            recently_added = self.media_client.get_recently_added_albums(maxresults=400, libtype='album')
+            if recently_added:
                 all_recent_content.extend(recently_added)
                 logger.info(f"Found {len(recently_added)} recently added albums")
-            except:
-                # Fallback to general recently added
-                recently_added = self.media_client.music_library.recentlyAdded(maxresults=400)
-                all_recent_content.extend(recently_added)
-                logger.info(f"Found {len(recently_added)} recently added items (mixed types)")
-            
+            else:
+                # Fallback to mixed-type recents.
+                recently_added = self.media_client.get_recently_added_albums(maxresults=400, libtype=None)
+                all_recent_content.extend(recently_added or [])
+                logger.info(f"Found {len(recently_added or [])} recently added items (mixed types)")
+
             # Get recently updated albums (catches metadata corrections)
             try:
-                recently_updated = self.media_client.music_library.search(sort='updatedAt:desc', libtype='album', limit=400)
+                recently_updated = self.media_client.get_recently_updated_albums(limit=400)
                 # Remove duplicates (items that are both recently added and updated)
                 added_keys = {getattr(item, 'ratingKey', None) for item in all_recent_content}
                 unique_updated = [item for item in recently_updated if getattr(item, 'ratingKey', None) not in added_keys]

@@ -3638,14 +3638,24 @@ async function loadPlexMusicLibraries() {
             // Clear existing options
             selector.innerHTML = '';
 
-            // Add options for each library
+            // Add options for each library. ``value`` is the canonical
+            // identifier the backend expects (real libraries: title;
+            // synthetic "All Libraries" entry: the sentinel string).
+            // ``title`` stays the human-readable label.
             data.libraries.forEach(library => {
                 const option = document.createElement('option');
-                option.value = library.title;
+                const optionValue = library.value || library.title;
+                option.value = optionValue;
                 option.textContent = library.title;
 
-                // Mark the currently selected library
-                if (library.title === data.current || library.title === data.selected) {
+                // Pre-select match: compare ``value`` against the saved
+                // DB pref (``data.selected``) AND ``title`` against the
+                // live-active library name (``data.current``). Covers
+                // both the sentinel case and the legacy single-library
+                // case.
+                if (optionValue === data.selected
+                        || library.title === data.current
+                        || library.title === data.selected) {
                     option.selected = true;
                 }
 
