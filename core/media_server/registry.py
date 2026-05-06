@@ -73,6 +73,15 @@ class MediaServerRegistry:
                 self._init_failures.append(spec.display_name)
                 self._instances[spec.name] = None
 
+    def set_instance(self, name: str, instance: Optional[MediaServerClient]) -> None:
+        """Stash a pre-built client instance into the registry without
+        running the spec's factory. Used by callers (web_server.py at
+        boot) that already constructed the per-server clients and want
+        the engine to wrap those exact instances rather than build new
+        ones. Replaces the old pattern of reaching into ``_instances``
+        directly from the engine."""
+        self._instances[name] = instance
+
     @property
     def init_failures(self) -> List[str]:
         return list(self._init_failures)

@@ -581,13 +581,23 @@ except Exception as e:
 
 def _safe_init_media_client(factory, name):
     """Build a media-server client, capturing per-server init failures
-    so one broken server doesn't take the engine down with it."""
+    so one broken server doesn't take the engine down with it.
+
+    Logs the exception class so the boot log distinguishes config errors
+    (ConnectionError, AuthenticationError) from genuine import / dependency
+    failures — the broad ``Exception`` catch is intentional (any failure
+    on this code path means the user can't use that server, and we want
+    the other three to keep working) but the log makes the cause
+    diagnosable."""
     try:
         instance = factory()
         logger.info(f"  {name} client initialized")
         return instance
     except Exception as exc:
-        logger.error(f"  {name} client failed to initialize: {exc}")
+        logger.error(
+            f"  {name} client failed to initialize: {type(exc).__name__}: {exc}",
+            exc_info=True,
+        )
         return None
 
 
