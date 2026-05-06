@@ -7669,7 +7669,7 @@ async function submitEnhanceQuality() {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="enhance-spinner"></span>Processing...';
     }
-    if (footerInfo) footerInfo.textContent = 'Matching tracks to Spotify and adding to wishlist...';
+    if (footerInfo) footerInfo.textContent = 'Matching tracks across metadata sources and adding to wishlist...';
 
     try {
         const resp = await fetch(`/api/library/artist/${_enhanceArtistId}/enhance`, {
