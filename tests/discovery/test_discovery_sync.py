@@ -35,6 +35,15 @@ class _FakeMediaClient:
         return self._connected
 
 
+class _FakeMediaServerEngine:
+    """Stand-in for MediaServerEngine — only the bits SyncDeps needs."""
+    def __init__(self, plex=None, jellyfin=None, navidrome=None):
+        self._clients = {'plex': plex, 'jellyfin': jellyfin, 'navidrome': navidrome}
+
+    def client(self, name):
+        return self._clients.get(name)
+
+
 class _FakeSyncService:
     def __init__(self, *, media_client=None, server_type='plex',
                  sync_result=None, raise_on_sync=None,
@@ -44,8 +53,12 @@ class _FakeSyncService:
         self._sync_result = sync_result or _FakeSyncResult()
         self._raise_on_sync = raise_on_sync
         self.spotify_client = object() if spotify_client else None
-        self.plex_client = object() if plex_client else None
-        self.jellyfin_client = object() if jellyfin_client else None
+        # The sync_service exposes the engine so the discovery worker
+        # can introspect per-server clients via self._engine.client(name).
+        self._engine = _FakeMediaServerEngine(
+            plex=object() if plex_client else None,
+            jellyfin=object() if jellyfin_client else None,
+        )
         self.progress_callback = None
         self.progress_playlist_name = None
         self.cleared_callbacks = []
@@ -130,8 +143,10 @@ def _build_deps(
     return ds.SyncDeps(
         config_manager=config or _FakeConfig(),
         sync_service=sync_service or _FakeSyncService(media_client=_FakeMediaClient()),
-        plex_client=plex or _FakePlex(),
-        jellyfin_client=jellyfin or _FakeJellyfin(),
+        media_server_engine=_FakeMediaServerEngine(
+            plex=plex or _FakePlex(),
+            jellyfin=jellyfin or _FakeJellyfin(),
+        ),
         automation_engine=automation or _FakeAutomationEngine(),
         run_async=run_async or _run_async_sync,
         record_sync_history_start=record_sync_history_start or (lambda **kw: None),

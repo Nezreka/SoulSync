@@ -570,7 +570,7 @@ IS_SHUTTING_DOWN = False
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
-spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = media_server_engine = None
 
 try:
     spotify_client = get_spotify_client()
@@ -578,30 +578,63 @@ try:
 except Exception as e:
     logger.error(f"  Spotify client failed to initialize: {e}")
 
-try:
-    plex_client = PlexClient()
-    logger.info("  Plex client initialized")
-except Exception as e:
-    logger.error(f"  Plex client failed to initialize: {e}")
 
-try:
-    jellyfin_client = JellyfinClient()
-    logger.info("  Jellyfin client initialized")
-except Exception as e:
-    logger.error(f"  Jellyfin client failed to initialize: {e}")
+def _safe_init_media_client(factory, name):
+    """Build a media-server client, capturing per-server init failures
+    so one broken server doesn't take the engine down with it.
 
-try:
-    navidrome_client = NavidromeClient()
-    logger.info("  Navidrome client initialized")
-except Exception as e:
-    logger.error(f"  Navidrome client failed to initialize: {e}")
+    Logs the exception class so the boot log distinguishes config errors
+    (ConnectionError, AuthenticationError) from genuine import / dependency
+    failures — the broad ``Exception`` catch is intentional (any failure
+    on this code path means the user can't use that server, and we want
+    the other three to keep working) but the log makes the cause
+    diagnosable."""
+    try:
+        instance = factory()
+        logger.info(f"  {name} client initialized")
+        return instance
+    except Exception as exc:
+        logger.error(
+            f"  {name} client failed to initialize: {type(exc).__name__}: {exc}",
+            exc_info=True,
+        )
+        return None
 
+
+# Build the MediaServerEngine. The engine OWNS the per-server client
+# instances — no separate web_server.py globals (Cin's standard from
+# the download refactor: drop redundant access paths). All callers go
+# through media_server_engine.client('<name>').
 try:
+    from core.media_server.engine import MediaServerEngine, set_media_server_engine
     from core.soulsync_client import SoulSyncClient
-    soulsync_library_client = SoulSyncClient()
-    logger.info("  SoulSync library client initialized")
+    media_server_engine = MediaServerEngine(clients={
+        'plex':      _safe_init_media_client(PlexClient, "Plex"),
+        'jellyfin':  _safe_init_media_client(JellyfinClient, "Jellyfin"),
+        'navidrome': _safe_init_media_client(NavidromeClient, "Navidrome"),
+        'soulsync':  _safe_init_media_client(SoulSyncClient, "SoulSync library"),
+    })
+    # Install as process-wide singleton so callers reaching via
+    # get_media_server_engine() see the same instance web_server.py
+    # constructs at boot. Matches the metadata + download engine
+    # patterns.
+    set_media_server_engine(media_server_engine)
+    logger.info("  Media server engine initialized")
 except Exception as e:
-    logger.error(f"  SoulSync library client failed to initialize: {e}")
+    logger.error(f"  Media server engine failed to initialize: {e}", exc_info=True)
+    # Fallback: empty engine so downstream `engine.client('plex')`
+    # returns None instead of AttributeError'ing on a None engine
+    # global. Pre-refactor each per-server client global had its own
+    # try/except so engine failure didn't take down dispatch sites;
+    # this preserves that resilience. If the fallback ALSO fails
+    # (e.g. the import itself broke), media_server_engine stays as
+    # the None initialized at the top of the module.
+    try:
+        from core.media_server.engine import MediaServerEngine, set_media_server_engine
+        media_server_engine = MediaServerEngine(clients={})
+        set_media_server_engine(media_server_engine)
+    except Exception as fallback_exc:
+        logger.error(f"  Empty-engine fallback also failed: {fallback_exc}", exc_info=True)
 
 try:
     download_orchestrator = DownloadOrchestrator()
@@ -626,7 +659,7 @@ except Exception as e:
     logger.error(f"  Matching engine failed to initialize: {e}")
 
 try:
-    sync_service = PlaylistSyncService(spotify_client, plex_client, download_orchestrator, jellyfin_client, navidrome_client)
+    sync_service = PlaylistSyncService(spotify_client, download_orchestrator, media_server_engine=media_server_engine)
     logger.info("  Playlist sync service initialized")
 except Exception as e:
     logger.error(f"  Playlist sync service failed to initialize: {e}")
@@ -645,13 +678,7 @@ if download_orchestrator and hasattr(download_orchestrator, 'registry'):
 
 # Initialize web scan manager for automatic post-download scanning
 try:
-    media_clients = {
-        'plex_client': plex_client,
-        'jellyfin_client': jellyfin_client,
-        'navidrome_client': navidrome_client,
-        'soulsync_library_client': soulsync_library_client,
-    }
-    web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
+    web_scan_manager = WebScanManager(media_server_engine, delay_seconds=60)
     logger.info("  Web scan manager initialized")
 except Exception as e:
     logger.error(f"  Web scan manager failed to initialize: {e}")
@@ -3461,23 +3488,14 @@ def get_status():
 
         metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
-        # Test media server - use EXISTING instances (they have internal caching)
-        # Media server clients already cache connection checks internally
+        # Test media server — engine reads active_server config + dispatches
+        # to the right client (with internal connection caching). Engine
+        # returns False safely if the active client is None / not registered.
         if current_time - _status_cache_timestamps['media_server'] > STATUS_CACHE_TTL:
             media_server_start = time.time()
-            media_server_status = False
-            if active_server == "plex" and plex_client:
-                # Use existing instance - has 30s internal connection cache
-                media_server_status = plex_client.is_connected()
-            elif active_server == "jellyfin" and jellyfin_client:
-                # Use existing instance - has internal connection caching
-                media_server_status = jellyfin_client.is_connected()
-            elif active_server == "navidrome" and navidrome_client:
-                # Use existing instance
-                media_server_status = navidrome_client.is_connected()
-            elif active_server == "soulsync":
-                # Standalone mode — always connected if Transfer folder exists
-                media_server_status = soulsync_library_client.is_connected() if soulsync_library_client else False
+            media_server_status = (
+                media_server_engine.is_connected() if media_server_engine else False
+            )
             media_server_response_time = (time.time() - media_server_start) * 1000
             _status_cache['media_server'] = {
                 'connected': media_server_status,
@@ -4142,12 +4160,12 @@ def handle_settings():
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
-            if plex_client:
-                plex_client.server = None
-            if jellyfin_client:
-                jellyfin_client.reload_config()
-            if navidrome_client:
-                navidrome_client.reload_config()
+            if media_server_engine.client('plex'):
+                media_server_engine.client('plex').server = None
+            if media_server_engine.client('jellyfin'):
+                media_server_engine.client('jellyfin').reload_config()
+            if media_server_engine.client('navidrome'):
+                media_server_engine.client('navidrome').reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
             if download_orchestrator:
                 download_orchestrator.reload_settings()
@@ -5111,8 +5129,8 @@ def clear_plex_library_preference():
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         db.set_preference('plex_music_library', '')
-        if plex_client:
-            plex_client.music_library = None
+        if media_server_engine.client('plex'):
+            media_server_engine.client('plex').music_library = None
         return jsonify({"success": True, "message": "Plex library preference cleared."})
     except Exception as e:
         logger.error(f"Error clearing Plex library preference: {e}")
@@ -5123,7 +5141,7 @@ def clear_plex_library_preference():
 def get_plex_music_libraries():
     """Get list of all available music libraries from Plex"""
     try:
-        libraries = plex_client.get_available_music_libraries()
+        libraries = media_server_engine.client('plex').get_available_music_libraries()
 
         # Get currently selected library
         from database.music_database import MusicDatabase
@@ -5132,8 +5150,8 @@ def get_plex_music_libraries():
 
         # Get the currently active library name
         current_library = None
-        if plex_client.music_library:
-            current_library = plex_client.music_library.title
+        if media_server_engine.client('plex').music_library:
+            current_library = media_server_engine.client('plex').music_library.title
 
         return jsonify({
             "success": True,
@@ -5155,7 +5173,7 @@ def select_plex_music_library():
         if not library_name:
             return jsonify({"success": False, "error": "No library name provided"}), 400
 
-        success = plex_client.set_music_library_by_name(library_name)
+        success = media_server_engine.client('plex').set_music_library_by_name(library_name)
 
         if success:
             add_activity_item("", "Library Selected", f"Plex music library set to: {library_name}", "Now")
@@ -5171,7 +5189,7 @@ def select_plex_music_library():
 def get_jellyfin_users():
     """Get list of Jellyfin users that have music libraries"""
     try:
-        users = jellyfin_client.get_available_users()
+        users = media_server_engine.client('jellyfin').get_available_users()
 
         # Get currently selected user
         from database.music_database import MusicDatabase
@@ -5180,9 +5198,9 @@ def get_jellyfin_users():
 
         # Determine the current user name from user_id
         current_user = None
-        if jellyfin_client.user_id:
+        if media_server_engine.client('jellyfin').user_id:
             for u in users:
-                if u['id'] == jellyfin_client.user_id:
+                if u['id'] == media_server_engine.client('jellyfin').user_id:
                     current_user = u['name']
                     break
 
@@ -5206,7 +5224,7 @@ def select_jellyfin_user():
         if not username:
             return jsonify({"success": False, "error": "No username provided"}), 400
 
-        success = jellyfin_client.set_user_by_name(username)
+        success = media_server_engine.client('jellyfin').set_user_by_name(username)
 
         if success:
             add_activity_item("", "User Selected", f"Jellyfin user set to: {username}", "Now")
@@ -5222,7 +5240,7 @@ def select_jellyfin_user():
 def get_jellyfin_music_libraries():
     """Get list of all available music libraries from Jellyfin"""
     try:
-        libraries = jellyfin_client.get_available_music_libraries()
+        libraries = media_server_engine.client('jellyfin').get_available_music_libraries()
 
         # Get currently selected library
         from database.music_database import MusicDatabase
@@ -5231,10 +5249,10 @@ def get_jellyfin_music_libraries():
 
         # Get the currently active library name (match Plex behavior)
         current_library = None
-        if jellyfin_client.music_library_id:
+        if media_server_engine.client('jellyfin').music_library_id:
             # Look up library name from ID
             for lib in libraries:
-                if lib['key'] == jellyfin_client.music_library_id:
+                if lib['key'] == media_server_engine.client('jellyfin').music_library_id:
                     current_library = lib['title']
                     break
 
@@ -5258,7 +5276,7 @@ def select_jellyfin_music_library():
         if not library_name:
             return jsonify({"success": False, "error": "No library name provided"}), 400
 
-        success = jellyfin_client.set_music_library_by_name(library_name)
+        success = media_server_engine.client('jellyfin').set_music_library_by_name(library_name)
 
         if success:
             add_activity_item("", "Library Selected", f"Jellyfin music library set to: {library_name}", "Now")
@@ -5274,19 +5292,19 @@ def select_jellyfin_music_library():
 def get_navidrome_music_folders():
     """Get list of available music folders from Navidrome"""
     try:
-        if not navidrome_client:
+        if not media_server_engine.client('navidrome'):
             return jsonify({"success": False, "error": "Navidrome client not configured"}), 400
 
-        folders = navidrome_client.get_music_folders()
+        folders = media_server_engine.client('navidrome').get_music_folders()
 
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         selected_folder = db.get_preference('navidrome_music_folder')
 
         current_folder = None
-        if navidrome_client.music_folder_id:
+        if media_server_engine.client('navidrome').music_folder_id:
             for f in folders:
-                if f['key'] == navidrome_client.music_folder_id:
+                if f['key'] == media_server_engine.client('navidrome').music_folder_id:
                     current_folder = f['title']
                     break
 
@@ -5307,7 +5325,7 @@ def select_navidrome_music_folder():
         data = request.get_json()
         folder_name = data.get('folder_name', '')
 
-        success = navidrome_client.set_music_folder_by_name(folder_name)
+        success = media_server_engine.client('navidrome').set_music_folder_by_name(folder_name)
 
         if success:
             if folder_name:
@@ -6868,7 +6886,7 @@ def enhanced_search_library_check():
         data = request.get_json() or {}
         result = _search_library_check.check_library_presence(
             database=get_database(),
-            plex_client=plex_client,
+            plex_client=media_server_engine.client('plex') if media_server_engine else None,
             config_manager=config_manager,
             profile_id=get_current_profile_id(),
             albums=data.get('albums', []),
@@ -8035,9 +8053,9 @@ def test_automation_workflow():
         results['media_clients'] = {'active_server': active_server}
 
         for client_name, client in [
-            ('plex', plex_client),
-            ('jellyfin', jellyfin_client),
-            ('navidrome', navidrome_client)
+            ('plex', media_server_engine.client('plex')),
+            ('jellyfin', media_server_engine.client('jellyfin')),
+            ('navidrome', media_server_engine.client('navidrome'))
         ]:
             try:
                 is_connected = client.is_connected() if client else False
@@ -9295,15 +9313,9 @@ def get_artist_enhanced_detail(artist_id):
             if album.get('thumb_url'):
                 album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
 
-        # Include server type for sync option
+        # Include server type for sync option — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
 
         return jsonify(result)
@@ -9551,13 +9563,7 @@ def get_track_tag_preview(track_id):
 
         # Include server type so frontend can offer server sync option
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
@@ -9658,15 +9664,9 @@ def get_batch_tag_preview():
 
             results.append(entry)
 
-        # Server type info
+        # Server type info — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
@@ -10817,7 +10817,7 @@ def _sync_tracks_to_server(track_rows, server_type):
                 if track_data.get('year'):
                     metadata['year'] = track_data['year']
                 if metadata:
-                    success = plex_client.update_track_metadata(str(track_data['id']), metadata)
+                    success = media_server_engine.client('plex').update_track_metadata(str(track_data['id']), metadata)
                     if success:
                         result['synced'] += 1
                     else:
@@ -10832,7 +10832,7 @@ def _sync_tracks_to_server(track_rows, server_type):
     elif server_type == 'jellyfin':
         # Jellyfin: just trigger a library scan once after all file writes
         try:
-            success = jellyfin_client.trigger_library_scan()
+            success = media_server_engine.client('jellyfin').trigger_library_scan()
             if success:
                 result['synced'] = len(track_rows)
             else:
@@ -10860,8 +10860,8 @@ def _resolve_library_file_path(file_path):
     # Also check the media server's music library path (handles Docker↔host path mismatch)
     library_dirs = set()
     try:
-        if plex_client and plex_client.server and plex_client.music_library:
-            for loc in plex_client.music_library.locations:
+        if media_server_engine.client('plex') and media_server_engine.client('plex').server and media_server_engine.client('plex').music_library:
+            for loc in media_server_engine.client('plex').music_library.locations:
                 library_dirs.add(loc)
     except Exception:
         pass
@@ -11533,9 +11533,9 @@ def redownload_search_metadata(track_id):
         if thumb_url and not thumb_url.startswith('http'):
             _ab = ''
             _at = ''
-            if plex_client and plex_client.server:
-                _ab = getattr(plex_client.server, '_baseurl', '') or ''
-                _at = getattr(plex_client.server, '_token', '') or ''
+            if media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
             if not _ab:
                 _pc = config_manager.get_plex_config()
                 _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -11826,12 +11826,12 @@ def sync_artist_library(artist_id):
 
         if server_source:
             media_client = None
-            if server_source == 'plex' and plex_client and plex_client.server:
-                media_client = plex_client
-            elif server_source == 'jellyfin' and jellyfin_client:
-                media_client = jellyfin_client
-            elif server_source == 'navidrome' and navidrome_client:
-                media_client = navidrome_client
+            if server_source == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                media_client = media_server_engine.client('plex')
+            elif server_source == 'jellyfin' and media_server_engine.client('jellyfin'):
+                media_client = media_server_engine.client('jellyfin')
+            elif server_source == 'navidrome' and media_server_engine.client('navidrome'):
+                media_client = media_server_engine.client('navidrome')
 
             if media_client:
                 try:
@@ -15114,11 +15114,11 @@ def _run_db_update_task(full_refresh, server_type):
     media_client = None
 
     if server_type == "plex":
-        media_client = plex_client
+        media_client = media_server_engine.client('plex')
     elif server_type == "jellyfin":
-        media_client = jellyfin_client
+        media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
-        media_client = navidrome_client
+        media_client = media_server_engine.client('navidrome')
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -15160,11 +15160,11 @@ def _run_deep_scan_task(server_type):
     media_client = None
 
     if server_type == "plex":
-        media_client = plex_client
+        media_client = media_server_engine.client('plex')
     elif server_type == "jellyfin":
-        media_client = jellyfin_client
+        media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
-        media_client = navidrome_client
+        media_client = media_server_engine.client('navidrome')
     elif server_type == "soulsync":
         # SoulSync standalone deep scan: find untracked files → move to Staging,
         # remove stale DB records where files no longer exist on disk
@@ -18037,10 +18037,10 @@ def get_server_playlists():
             return jsonify({"success": False, "error": "No media server configured"}), 400
 
         playlists_data = []
-        if active_server == 'plex' and plex_client and plex_client.is_connected():
+        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').is_connected():
             # Use raw Plex API to get playlist metadata without fetching all tracks
             try:
-                raw_playlists = plex_client.server.playlists()
+                raw_playlists = media_server_engine.client('plex').server.playlists()
                 logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
                 for playlist in raw_playlists:
                     if getattr(playlist, 'playlistType', None) == 'audio':
@@ -18053,22 +18053,22 @@ def get_server_playlists():
             except Exception as e:
                 logger.error(f"[ServerPlaylists] Error fetching Plex playlists: {e}", exc_info=True)
                 return jsonify({"success": False, "error": f"Plex error: {str(e)}"}), 500
-        elif active_server == 'jellyfin' and jellyfin_client and jellyfin_client.is_connected():
-            for pl in jellyfin_client.get_all_playlists():
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin') and media_server_engine.client('jellyfin').is_connected():
+            for pl in media_server_engine.client('jellyfin').get_all_playlists():
                 playlists_data.append({
                     'id': pl.id,
                     'name': pl.title,
                     'track_count': pl.leaf_count,
                 })
-        elif active_server == 'navidrome' and navidrome_client and navidrome_client.is_connected():
-            for pl in navidrome_client.get_all_playlists():
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome') and media_server_engine.client('navidrome').is_connected():
+            for pl in media_server_engine.client('navidrome').get_all_playlists():
                 playlists_data.append({
                     'id': pl.id,
                     'name': pl.title,
                     'track_count': pl.leaf_count,
                 })
         else:
-            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={plex_client is not None}, jellyfin_client={jellyfin_client is not None}, navidrome_client={navidrome_client is not None}")
+            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={media_server_engine.client('plex') is not None}, jellyfin_client={media_server_engine.client('jellyfin') is not None}, navidrome_client={media_server_engine.client('navidrome') is not None}")
             return jsonify({"success": False, "error": f"{active_server} not connected"}), 400
 
         return jsonify({"success": True, "server_type": active_server, "playlists": playlists_data})
@@ -18086,24 +18086,30 @@ def get_server_playlist_tracks(playlist_id):
 
         # Get tracks from server
         server_tracks = []
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
             try:
                 # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
                 raw_playlist = None
                 try:
-                    raw_playlist = plex_client.server.fetchItem(int(playlist_id))
+                    raw_playlist = media_server_engine.client('plex').server.fetchItem(int(playlist_id))
                 except Exception:
                     pass
                 if not raw_playlist and playlist_name:
                     try:
-                        raw_playlist = plex_client.server.playlist(playlist_name)
+                        raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
                     except Exception:
                         pass
+                if not raw_playlist:
+                    logger.warning(
+                        f"[ServerPlaylistTracks] Plex playlist not found by "
+                        f"id={playlist_id} or name='{playlist_name}' — "
+                        f"compare view will show every source track as Find & Add"
+                    )
                 if raw_playlist:
                     if not playlist_name:
                         playlist_name = raw_playlist.title
-                    plex_base = getattr(plex_client.server, '_baseurl', '') or ''
-                    plex_token = getattr(plex_client.server, '_token', '') or ''
+                    plex_base = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                    plex_token = getattr(media_server_engine.client('plex').server, '_token', '') or ''
                     if not plex_base:
                         # Fallback: get from config
                         _pc = config_manager.get_plex_config()
@@ -18128,9 +18134,9 @@ def get_server_playlist_tracks(playlist_id):
                         })
             except Exception as e:
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and jellyfin_client:
-            tracks = jellyfin_client.get_playlist_tracks(playlist_id)
-            jf_base = jellyfin_client.base_url or ''
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+            jf_base = media_server_engine.client('jellyfin').base_url or ''
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
@@ -18145,8 +18151,8 @@ def get_server_playlist_tracks(playlist_id):
                     'duration': t.duration,
                     'thumb': thumb,
                 })
-        elif active_server == 'navidrome' and navidrome_client:
-            tracks = navidrome_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 # Navidrome cover art via Subsonic API
@@ -18171,9 +18177,9 @@ def get_server_playlist_tracks(playlist_id):
             # Build server art URL prefix for resolving relative thumb paths
             _art_prefix = ''
             _art_suffix = ''
-            if active_server == 'plex' and plex_client and plex_client.server:
-                _ab = getattr(plex_client.server, '_baseurl', '') or ''
-                _at = getattr(plex_client.server, '_token', '') or ''
+            if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
                 if not _ab:
                     _pc = config_manager.get_plex_config()
                     _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -18356,11 +18362,22 @@ def server_playlist_replace_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
-            # Use raw Plex API - fetch playlist directly
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] replace-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found on server"}), 404
 
             # Build new track list with replacement
@@ -18368,7 +18385,7 @@ def server_playlist_replace_track(playlist_id):
             replaced = False
             for item in raw_playlist.items():
                 if str(item.ratingKey) == str(old_track_id) and not replaced:
-                    new_item = plex_client.server.fetchItem(int(new_track_id))
+                    new_item = media_server_engine.client('plex').server.fetchItem(int(new_track_id))
                     if new_item:
                         new_tracks.append(new_item)
                         replaced = True
@@ -18381,13 +18398,13 @@ def server_playlist_replace_track(playlist_id):
                 # Delete old and recreate directly (avoid update_playlist's backup logic)
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_tracks)
+                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -18400,12 +18417,12 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                jellyfin_client.update_playlist(playlist_name, new_track_objs)
+                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -18418,7 +18435,7 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
@@ -18444,12 +18461,26 @@ def server_playlist_add_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback — Plex deletes + recreates playlists
+            # on edit so the rating key the frontend cached can be stale.
+            # The GET tracks endpoint uses the same lookup chain.
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] add-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
-            new_item = plex_client.server.fetchItem(int(track_id))
+
+            new_item = plex_server.fetchItem(int(track_id))
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
@@ -18476,22 +18507,22 @@ def server_playlist_add_track(playlist_id):
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track added"})
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             return jsonify({"success": True, "message": "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -18515,10 +18546,22 @@ def server_playlist_remove_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
 
             # Rebuild without the target track
@@ -18529,26 +18572,26 @@ def server_playlist_remove_track(playlist_id):
             raw_playlist.delete()
             if new_items:
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_items)
+                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_items)
                 return jsonify({"success": True, "message": "Track removed", "new_playlist_id": str(new_pl.ratingKey)})
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
             if len(new_ids) == len(current_tracks):
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track removed"})
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
             if len(new_ids) == len(current_tracks):
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             return jsonify({"success": True, "message": "Track removed"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -18572,9 +18615,9 @@ def library_search_tracks():
         # Build thumb URL resolver for this server
         _art_prefix = ''
         _art_suffix = ''
-        if active_server == 'plex' and plex_client and plex_client.server:
-            _ab = getattr(plex_client.server, '_baseurl', '') or ''
-            _at = getattr(plex_client.server, '_token', '') or ''
+        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+            _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+            _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
             if not _ab:
                 _pc = config_manager.get_plex_config()
                 _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -23251,8 +23294,7 @@ def _build_sync_deps():
     return _discovery_sync.SyncDeps(
         config_manager=config_manager,
         sync_service=sync_service,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
+        media_server_engine=media_server_engine,
         automation_engine=automation_engine,
         run_async=run_async,
         record_sync_history_start=_record_sync_history_start,
@@ -23384,12 +23426,12 @@ def test_database_access():
         
         # Test media clients 
         logger.info("   Media clients status:")
-        logger.info(f"     plex_client: {plex_client is not None}")
-        if plex_client:
-            logger.info(f"     plex_client.is_connected(): {plex_client.is_connected()}")
-        logger.info(f"     jellyfin_client: {jellyfin_client is not None}")
-        if jellyfin_client:
-            logger.info(f"     jellyfin_client.is_connected(): {jellyfin_client.is_connected()}")
+        logger.info(f"     media_server_engine.client('plex'): {media_server_engine.client('plex') is not None}")
+        if media_server_engine.client('plex'):
+            logger.info(f"     media_server_engine.client('plex').is_connected(): {media_server_engine.client('plex').is_connected()}")
+        logger.info(f"     media_server_engine.client('jellyfin'): {media_server_engine.client('jellyfin') is not None}")
+        if media_server_engine.client('jellyfin'):
+            logger.info(f"     media_server_engine.client('jellyfin').is_connected(): {media_server_engine.client('jellyfin').is_connected()}")
         
         return jsonify({
             "success": True, 
@@ -23398,8 +23440,8 @@ def test_database_access():
                 "database_initialized": db is not None,
                 "database_stats": stats,
                 "active_server": active_server,
-                "plex_connected": plex_client.is_connected() if plex_client else False,
-                "jellyfin_connected": jellyfin_client.is_connected() if jellyfin_client else False,
+                "plex_connected": media_server_engine.client('plex').is_connected() if media_server_engine.client('plex') else False,
+                "jellyfin_connected": media_server_engine.client('jellyfin').is_connected() if media_server_engine.client('jellyfin') else False,
             }
         })
         
@@ -29118,17 +29160,17 @@ def start_metadata_update():
         
         # Get appropriate media client - Support all three servers
         if active_server == "jellyfin":
-            media_client = jellyfin_client
+            media_client = media_server_engine.client('jellyfin')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Jellyfin client not available", "Now")
                 return jsonify({"success": False, "error": "Jellyfin client not available"}), 400
         elif active_server == "navidrome":
-            media_client = navidrome_client
+            media_client = media_server_engine.client('navidrome')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Navidrome client not available", "Now")
                 return jsonify({"success": False, "error": "Navidrome client not available"}), 400
         else:  # plex
-            media_client = plex_client
+            media_client = media_server_engine.client('plex')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Plex client not available", "Now")
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
@@ -32833,9 +32875,7 @@ try:
     listening_stats_worker = ListeningStatsWorker(
         database=listening_stats_db,
         config_manager=config_manager,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
-        navidrome_client=navidrome_client,
+        media_server_engine=media_server_engine,
     )
     listening_stats_worker.start()
     logger.info("Listening stats worker initialized and started")

@@ -1,33 +1,19 @@
 import requests
 import time
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 from datetime import datetime
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
 
+# Shared dataclasses live in the neutral media_server package — every
+# server client used to define a near-identical XTrackInfo /
+# XPlaylistInfo. Lifted to one canonical type so consumers (matching
+# engine, sync service) get a single import.
+from core.media_server.types import TrackInfo, PlaylistInfo
+
 logger = get_logger("jellyfin_client")
 
-@dataclass
-class JellyfinTrackInfo:
-    id: str
-    title: str
-    artist: str
-    album: str
-    duration: int
-    track_number: Optional[int] = None
-    year: Optional[int] = None
-    rating: Optional[float] = None
-
-@dataclass 
-class JellyfinPlaylistInfo:
-    id: str
-    title: str
-    description: Optional[str]
-    duration: int
-    leaf_count: int
-    tracks: List[JellyfinTrackInfo]
 
 class JellyfinArtist:
     """Wrapper class to mimic Plex artist object interface"""
@@ -146,7 +132,10 @@ class JellyfinTrack:
             return self._client.get_album_by_id(self._album_id)
         return None
 
-class JellyfinClient:
+from core.media_server.contract import MediaServerClient
+
+
+class JellyfinClient(MediaServerClient):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
@@ -1201,7 +1190,7 @@ class JellyfinClient:
             
         return stats
     
-    def get_all_playlists(self) -> List[JellyfinPlaylistInfo]:
+    def get_all_playlists(self) -> List[PlaylistInfo]:
         """Get all playlists from Jellyfin server"""
         if not self.ensure_connection():
             return []
@@ -1218,7 +1207,7 @@ class JellyfinClient:
             
             playlists = []
             for item in response.get('Items', []):
-                playlist_info = JellyfinPlaylistInfo(
+                playlist_info = PlaylistInfo(
                     id=item.get('Id', ''),
                     title=item.get('Name', 'Unknown Playlist'),
                     description=item.get('Overview'),
@@ -1235,7 +1224,7 @@ class JellyfinClient:
             logger.error(f"Error getting playlists from Jellyfin: {e}")
             return []
     
-    def get_playlist_by_name(self, name: str) -> Optional[JellyfinPlaylistInfo]:
+    def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         """Get a specific playlist by name"""
         playlists = self.get_all_playlists()
         for playlist in playlists:
