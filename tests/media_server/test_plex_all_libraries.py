@@ -155,12 +155,16 @@ def test_get_all_album_ids_uses_server_search_in_all_libraries_mode():
 
 def test_get_library_stats_unions_across_sections_in_all_libraries_mode():
     """All-libraries stats sum totals across every music section via
-    server-wide search calls."""
+    server-wide search calls. Artists / albums use distinct names so
+    dedup doesn't collapse them — separate test pins the dedup path."""
     server = MagicMock()
+    distinct_artists = [_fake_artist(f'Artist {i}', rating_key=str(i), leaf_count=i + 1) for i in range(5)]
+    distinct_albums = [_fake_album(f'Album {i}', parent=f'Artist {i}', rating_key=str(100 + i), leaf_count=i + 1) for i in range(12)]
+    distinct_tracks = [MagicMock(ratingKey=str(1000 + i)) for i in range(87)]
     server.library.search.side_effect = [
-        [MagicMock()] * 5,   # artists
-        [MagicMock()] * 12,  # albums
-        [MagicMock()] * 87,  # tracks
+        distinct_artists,
+        distinct_albums,
+        distinct_tracks,
     ]
     client = _make_client(server=server, all_libraries_mode=True, music_library=None)
 
@@ -377,3 +381,164 @@ def test_get_music_library_locations_dedupes_overlapping_paths():
 
     assert locations.count('/data/shared') == 1
     assert '/data/userTwo' in locations
+
+
+# ---------------------------------------------------------------------------
+# Cross-section dedup (only active in all-libraries mode)
+# ---------------------------------------------------------------------------
+
+
+def _fake_artist(name, rating_key, leaf_count):
+    a = MagicMock()
+    a.title = name
+    a.ratingKey = rating_key
+    a.leafCount = leaf_count
+    return a
+
+
+def _fake_album(title, parent, rating_key, leaf_count):
+    a = MagicMock()
+    a.title = title
+    a.parentTitle = parent
+    a.ratingKey = rating_key
+    a.leafCount = leaf_count
+    return a
+
+
+def test_dedupe_artists_keeps_canonical_with_higher_track_count():
+    """Pin: same-name artists across sections collapse to one — the
+    one with the higher leafCount wins. Plex Home users with overlapping
+    music tastes (both have Drake) shouldn't see "Drake" twice in
+    SoulSync's library."""
+    server = MagicMock()
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    drake_a = _fake_artist('Drake', rating_key='1', leaf_count=12)
+    drake_b = _fake_artist('Drake', rating_key='2', leaf_count=87)  # canonical
+    kendrick = _fake_artist('Kendrick Lamar', rating_key='3', leaf_count=40)
+
+    deduped = client._dedupe_artists([drake_a, drake_b, kendrick])
+
+    names = sorted(a.title for a in deduped)
+    assert names == ['Drake', 'Kendrick Lamar']
+    drake_picked = next(a for a in deduped if a.title == 'Drake')
+    assert drake_picked.ratingKey == '2'  # higher leafCount wins
+
+
+def test_dedupe_artists_case_insensitive_match():
+    """Pin: dedup matches lowercased name so "Drake" + "drake" + "DRAKE"
+    collapse together."""
+    server = MagicMock()
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+    a1 = _fake_artist('Drake', rating_key='1', leaf_count=10)
+    a2 = _fake_artist('drake', rating_key='2', leaf_count=20)
+    a3 = _fake_artist('DRAKE', rating_key='3', leaf_count=5)
+
+    deduped = client._dedupe_artists([a1, a2, a3])
+
+    assert len(deduped) == 1
+    assert deduped[0].ratingKey == '2'  # canonical = highest count
+
+
+def test_dedupe_artists_noop_in_single_library_mode():
+    """Pin: dedup is bypassed entirely in single-library mode — the
+    input list comes back unchanged. Single-section users get zero
+    behavior change from the dedup logic."""
+    server = MagicMock()
+    section = MagicMock()
+    client = _make_client(server=server, music_library=section, all_libraries_mode=False)
+
+    drake_a = _fake_artist('Drake', rating_key='1', leaf_count=12)
+    drake_b = _fake_artist('Drake', rating_key='2', leaf_count=87)
+
+    result = client._dedupe_artists([drake_a, drake_b])
+
+    assert len(result) == 2
+    assert result == [drake_a, drake_b]
+
+
+def test_dedupe_albums_groups_by_artist_and_title():
+    """Pin: album dedup keys on (artist, title) so two artists with
+    same album title (e.g. self-titled) stay separate."""
+    server = MagicMock()
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    drake_self_a = _fake_album('Drake', parent='Drake', rating_key='1', leaf_count=15)
+    drake_self_b = _fake_album('Drake', parent='Drake', rating_key='2', leaf_count=15)
+    weeknd_drake = _fake_album('Drake', parent='The Weeknd', rating_key='3', leaf_count=8)  # different artist
+
+    deduped = client._dedupe_albums([drake_self_a, drake_self_b, weeknd_drake])
+
+    assert len(deduped) == 2
+    artists = sorted(a.parentTitle for a in deduped)
+    assert artists == ['Drake', 'The Weeknd']
+
+
+def test_get_all_artists_dedupes_in_all_libraries_mode():
+    """Pin: ``get_all_artists`` (the public listing) returns deduped
+    list in all-libraries mode."""
+    server = MagicMock()
+    drake_a = _fake_artist('Drake', rating_key='1', leaf_count=12)
+    drake_b = _fake_artist('Drake', rating_key='2', leaf_count=87)
+    server.library.search.return_value = [drake_a, drake_b]
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    result = client.get_all_artists()
+
+    assert len(result) == 1
+    assert result[0].ratingKey == '2'
+
+
+def test_get_all_artist_ids_does_NOT_dedupe_critical_for_removal_detection():
+    """CRITICAL pin: ``get_all_artist_ids`` returns the RAW ratingKey
+    set, even in all-libraries mode. Removal detection compares this
+    set against DB-linked ratingKeys to decide what's been removed —
+    deduping here would falsely report non-canonical ratingKeys as
+    "removed" and prune library tracks pointing at them."""
+    server = MagicMock()
+    drake_a = _fake_artist('Drake', rating_key='1', leaf_count=12)
+    drake_b = _fake_artist('Drake', rating_key='2', leaf_count=87)
+    server.library.search.return_value = [drake_a, drake_b]
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    ids = client.get_all_artist_ids()
+
+    # Both ratingKeys returned, NOT deduped.
+    assert ids == {'1', '2'}
+
+
+def test_get_all_album_ids_does_NOT_dedupe_critical_for_removal_detection():
+    """Same critical pin for albums."""
+    server = MagicMock()
+    alb_a = _fake_album('Take Care', parent='Drake', rating_key='10', leaf_count=15)
+    alb_b = _fake_album('Take Care', parent='Drake', rating_key='20', leaf_count=15)
+    server.library.search.return_value = [alb_a, alb_b]
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    ids = client.get_all_album_ids()
+
+    assert ids == {'10', '20'}
+
+
+def test_get_library_stats_uses_deduped_counts_for_artists_albums():
+    """Pin: stats reflect the deduped counts users see in the library
+    list. Tracks stay raw — same track in two sections is two files."""
+    server = MagicMock()
+    drake_a = _fake_artist('Drake', rating_key='1', leaf_count=12)
+    drake_b = _fake_artist('Drake', rating_key='2', leaf_count=87)
+    kendrick = _fake_artist('Kendrick Lamar', rating_key='3', leaf_count=40)
+    alb_a = _fake_album('Take Care', parent='Drake', rating_key='10', leaf_count=15)
+    alb_b = _fake_album('Take Care', parent='Drake', rating_key='20', leaf_count=15)
+    track1 = MagicMock(ratingKey=100)
+    track2 = MagicMock(ratingKey=101)
+    track3 = MagicMock(ratingKey=102)
+    server.library.search.side_effect = [
+        [drake_a, drake_b, kendrick],   # artist call → 3 raw → 2 deduped
+        [alb_a, alb_b],                 # album call → 2 raw → 1 deduped
+        [track1, track2, track3],       # track call → 3 raw, no dedup
+    ]
+    client = _make_client(server=server, all_libraries_mode=True, music_library=None)
+
+    stats = client.get_library_stats()
+
+    assert stats == {'artists': 2, 'albums': 1, 'tracks': 3}

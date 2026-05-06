@@ -371,6 +371,74 @@ class PlexClient(MediaServerClient):
         if self.music_library:
             return self.music_library.searchArtists(title=title, limit=limit)
         return []
+
+    # ------------------------------------------------------------------
+    # Cross-section dedup. Applied ONLY in all-libraries mode and ONLY
+    # at the listing/stats layer. Never apply to ratingKey enumeration
+    # (``get_all_artist_ids`` / ``get_all_album_ids``) — removal
+    # detection compares those sets against DB-linked ratingKeys and
+    # deduping would falsely prune library tracks pointing at the
+    # non-canonical ratingKey. Single-library mode is a no-op fast
+    # path so the dedup code path never touches it.
+    # ------------------------------------------------------------------
+
+    def _dedupe_artists(self, artists: List[PlexArtist]) -> List[PlexArtist]:
+        """Collapse same-name artists across sections to a single
+        canonical entry (the one with the higher track count). Returns
+        the input unchanged in single-library mode and when there's
+        nothing to dedup."""
+        if not self._all_libraries_mode or not artists:
+            return artists
+        by_name: Dict[str, PlexArtist] = {}
+        for a in artists:
+            name_key = (getattr(a, 'title', '') or '').strip().lower()
+            if not name_key:
+                # Untitled artist — keep as-is, can't dedup blindly.
+                by_name[f'__nokey_{getattr(a, "ratingKey", id(a))}'] = a
+                continue
+            existing = by_name.get(name_key)
+            if existing is None:
+                by_name[name_key] = a
+                continue
+            try:
+                existing_count = getattr(existing, 'leafCount', 0) or 0
+                new_count = getattr(a, 'leafCount', 0) or 0
+                if new_count > existing_count:
+                    by_name[name_key] = a
+            except Exception:
+                pass
+        return list(by_name.values())
+
+    def _dedupe_albums(self, albums: List[PlexAlbum]) -> List[PlexAlbum]:
+        """Collapse same-album-by-same-artist across sections to a
+        single canonical entry. Group key is (artist_lower, title_lower);
+        canonical = higher track count. No-op in single-library mode."""
+        if not self._all_libraries_mode or not albums:
+            return albums
+        by_key: Dict[tuple, PlexAlbum] = {}
+        for alb in albums:
+            title = (getattr(alb, 'title', '') or '').strip().lower()
+            if not title:
+                by_key[('__nokey__', getattr(alb, 'ratingKey', id(alb)))] = alb
+                continue
+            artist = ''
+            try:
+                artist = (getattr(alb, 'parentTitle', '') or '').strip().lower()
+            except Exception:
+                pass
+            key = (artist, title)
+            existing = by_key.get(key)
+            if existing is None:
+                by_key[key] = alb
+                continue
+            try:
+                existing_count = getattr(existing, 'leafCount', 0) or 0
+                new_count = getattr(alb, 'leafCount', 0) or 0
+                if new_count > existing_count:
+                    by_key[key] = alb
+            except Exception:
+                pass
+        return list(by_key.values())
     
     def get_all_playlists(self) -> List[PlaylistInfo]:
         if not self.ensure_connection():
@@ -720,9 +788,13 @@ class PlexClient(MediaServerClient):
             return {}
 
         try:
+            # Apply dedup to artist + album counts so stats match what
+            # the user actually sees in the library list (deduped). Tracks
+            # stay raw — same track in two sections means two distinct
+            # files / Plex entries, not a logical duplicate.
             return {
-                'artists': len(self._all_artists()),
-                'albums': len(self._all_albums()),
+                'artists': len(self._dedupe_artists(self._all_artists())),
+                'albums': len(self._dedupe_albums(self._all_albums())),
                 'tracks': len(self._all_tracks())
             }
         except Exception as e:
@@ -868,14 +940,27 @@ class PlexClient(MediaServerClient):
             return {}
 
     def get_all_artists(self) -> List[PlexArtist]:
-        """Get all artists from the music library"""
+        """Get all artists from the music library.
+
+        In all-libraries mode, dedupes same-name artists across
+        sections (canonical = higher track count) so the library list
+        doesn't show "Drake" twice when Drake is in two sections.
+        Single-library mode is unaffected — dedup helper is a no-op.
+        """
         if not self.ensure_connection() or not self._can_query():
             logger.error("Not connected to Plex server or no music library")
             return []
 
         try:
-            artists = self._all_artists()
-            logger.info(f"Found {len(artists)} artists in Plex library")
+            raw = self._all_artists()
+            artists = self._dedupe_artists(raw)
+            if len(raw) != len(artists):
+                logger.info(
+                    f"Found {len(raw)} artists across all music sections "
+                    f"({len(artists)} unique after cross-section dedup)"
+                )
+            else:
+                logger.info(f"Found {len(artists)} artists in Plex library")
             return artists
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")
