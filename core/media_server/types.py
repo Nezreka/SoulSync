@@ -1,19 +1,21 @@
 """Shared dataclasses for the media-server contract.
 
-Plex / Jellyfin / Navidrome / SoulSync clients all surfaced near-
-identical ``XTrackInfo`` and ``XPlaylistInfo`` shapes (id, title,
-artist, album, duration, track_number, year, optional rating)
-because every consumer needed the same shape downstream. The
-per-server class names were a copy-paste artifact, not a real
-contract difference.
+Plex / Jellyfin / Navidrome clients all surfaced near-identical
+``XTrackInfo`` and ``XPlaylistInfo`` shapes (id, title, artist,
+album, duration, track_number, year, optional rating) because every
+consumer needed the same shape downstream. The per-server class
+names were a copy-paste artifact, not a real contract difference.
 
-This module owns the canonical types. Per-server constructors live
-on the unified class as classmethods (``TrackInfo.from_plex_track``,
-``TrackInfo.from_jellyfin_dict``, ``TrackInfo.from_navidrome_dict``)
-— same pattern Cin used for ``Album.from_spotify_dict`` etc. on the
-metadata engine. Heavy server SDK types (``PlexTrack``, dict
-shapes) imported under TYPE_CHECKING so this module stays
-import-light.
+This module owns the canonical types. Plex's existing classmethod
+constructors (``TrackInfo.from_plex_track``,
+``PlaylistInfo.from_plex_playlist``) live here. Jellyfin and
+Navidrome currently construct ``TrackInfo`` inline at their call
+sites — lifting those into matching ``from_jellyfin_dict`` /
+``from_navidrome_dict`` classmethods is a clean followup but isn't
+needed for the dataclass unification this module ships.
+
+Heavy server SDK types (``PlexTrack``) imported under TYPE_CHECKING
+so this module stays import-light.
 """
 
 from __future__ import annotations

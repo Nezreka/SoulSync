@@ -1,29 +1,25 @@
 """Canonical contract for media server clients.
 
-Narrow on purpose. Only declares the methods the orchestrator
-dispatches generically across all servers. Server-specific extras
-(Plex's `set_music_library_by_name`, Jellyfin's user picker,
-Navidrome's music folder filter, SoulSync's filesystem rescan)
-stay on the underlying client and are accessed through the
-registry's typed accessor — same pattern as the download
-plugin contract.
+Narrow on purpose. Protocol body declares ONLY the methods every
+registered client actually implements today — keeps the static
+contract honest. Server-specific extras (Plex's
+``set_music_library_by_name``, Jellyfin's user picker, Navidrome's
+music folder filter, SoulSync's filesystem rescan) and methods that
+most-but-not-all servers implement (``search_tracks`` on Plex /
+Navidrome but not Jellyfin; ``get_recently_added_albums`` on
+Jellyfin / Navidrome / SoulSync but not Plex) stay off the Protocol
+and are reached through ``engine.client(name)`` directly.
 
-Every required method must be implemented by every registered
-client. Optional methods have default no-op implementations so
-servers without that capability (e.g. Navidrome's metadata
-writeback stubs, SoulSync's playlist sync N/A) don't have to
-declare a no-op explicitly.
-
-The contract is a Protocol (structural typing) rather than an
-ABC — existing PlexClient / JellyfinClient / NavidromeClient /
+The contract is a Protocol (structural typing) rather than an ABC —
+existing PlexClient / JellyfinClient / NavidromeClient /
 SoulSyncClient grew the same shape independently because every
-caller needed the same calls. This file just makes the implicit
-contract explicit.
+caller needed the same four calls. This file just makes that
+implicit contract explicit + the conformance test pins it.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, List, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -31,14 +27,13 @@ class MediaServerClient(Protocol):
     """Structural contract every media server client must satisfy.
 
     ``runtime_checkable`` lets ``isinstance(client, MediaServerClient)``
-    work for the conformance test, but it ONLY checks method names —
-    not signatures. The conformance test in
-    ``tests/media_server/test_conformance.py`` does the deeper
-    signature check.
+    work, but it ONLY checks method names — not signatures. The
+    conformance test in ``tests/media_server/test_conformance.py``
+    does the deeper class-level check via REQUIRED_METHODS.
     """
 
     # ------------------------------------------------------------------
-    # Connection / lifecycle
+    # Connection / lifecycle — required, every server implements
     # ------------------------------------------------------------------
 
     def is_connected(self) -> bool:
@@ -53,7 +48,7 @@ class MediaServerClient(Protocol):
         ...
 
     # ------------------------------------------------------------------
-    # Library reads (required — every server must support these)
+    # Library reads — required, every server implements
     # ------------------------------------------------------------------
 
     def get_all_artists(self) -> List[Any]:
@@ -68,51 +63,12 @@ class MediaServerClient(Protocol):
         format is server-native — caller doesn't introspect."""
         ...
 
-    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[Any]:
-        """Search the server's library for tracks matching the title
-        + artist. Used by playlist sync, download matching, and the
-        general search UI. Each item is a server-specific TrackInfo
-        wrapper."""
-        ...
-
-    def get_recently_added_albums(self, max_results: int = 400) -> List[Any]:
-        """Recently-added view — used by the Discover page +
-        watchlist scanner. Sorted by add timestamp descending."""
-        ...
-
-    # ------------------------------------------------------------------
-    # Library writes — scan triggers
-    # ------------------------------------------------------------------
-
-    def trigger_library_scan(self) -> bool:
-        """Ask the server to scan its music library. Some servers
-        (SoulSync standalone) walk the filesystem themselves; some
-        (Plex / Jellyfin / Navidrome) hit a server-side scan API."""
-        ...
-
-    def is_library_scanning(self) -> bool:
-        """True if a scan is currently running. Polled by the
-        scan-progress UI."""
-        ...
-
-    def get_library_stats(self) -> Dict[str, int]:
-        """Counts of artists / albums / tracks. Used by the
-        dashboard system-stats card."""
-        ...
-
 
 # ---------------------------------------------------------------------------
-# Required + optional method names — used by the conformance tests to
-# check structural conformance without the proxy weight of dataclasses.
+# Required method set — pinned by the conformance test. Mirrors the
+# Protocol body exactly so static + runtime contracts can't drift.
 # ---------------------------------------------------------------------------
 
-# Conservative requirement set — only methods every one of the four
-# servers actually implements today. Audited by the conformance test.
-# Other methods (search_tracks, trigger_library_scan, etc.) exist on
-# most servers but not all (e.g. SoulSync has no library scan API
-# because it walks the filesystem directly). Phase B's engine
-# adapters handle those with per-server fallback rather than forcing
-# every client to declare a no-op stub.
 REQUIRED_METHODS = {
     'is_connected',
     'ensure_connection',
@@ -120,29 +76,35 @@ REQUIRED_METHODS = {
     'get_all_album_ids',
 }
 
-# Methods declared on the protocol but NOT enforced — the
-# conformance test does NOT fail if a client lacks one. Engine
-# adapters route around the gaps. Listed here so future contributors
-# know what the engine expects to find when present.
-OPTIONAL_METHODS = {
+# Methods that exist on SOME servers but NOT all, listed here for
+# discoverability. The conformance test does NOT enforce these. Callers
+# that need one reach the per-server client directly via
+# ``engine.client(name).<method>`` rather than going through the engine,
+# since the engine has no uniform safe-default that fits every method.
+#
+# Coverage today (audited 2026-05):
+#   search_tracks: Plex ✓, Navidrome ✓, Jellyfin ✗, SoulSync ✗
+#   get_recently_added_albums: Jellyfin ✓, Navidrome ✓, SoulSync ✓, Plex ✗ (uses recentlyAdded() on music library)
+#   trigger_library_scan / is_library_scanning: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗ (filesystem walks in-process)
+#   get_library_stats: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗
+#   create_playlist / update_playlist / get_all_playlists / etc: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗
+#   update_artist_*, update_album_poster, update_track_metadata: Plex ✓, Jellyfin partial, Navidrome stubs, SoulSync ✗
+KNOWN_PER_SERVER_METHODS = (
     'search_tracks',
     'get_recently_added_albums',
     'trigger_library_scan',
     'is_library_scanning',
     'get_library_stats',
-    # Playlist sync (Plex / Jellyfin / Navidrome implement; SoulSync no-op)
     'create_playlist',
     'update_playlist',
     'copy_playlist',
     'get_all_playlists',
     'get_playlist_by_name',
-    # Analytics
     'get_play_history',
     'get_track_play_counts',
-    # Metadata writeback (Plex full support; Jellyfin partial; Navidrome stubs; SoulSync N/A)
     'update_artist_genres',
     'update_artist_poster',
     'update_album_poster',
     'update_artist_biography',
     'update_track_metadata',
-}
+)
