@@ -9411,6 +9411,7 @@ def _build_artist_quality_deps():
         get_current_profile_id=get_current_profile_id,
         get_quality_tier_from_extension=_get_quality_tier_from_extension,
         get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_metadata_fallback_source=_get_metadata_fallback_source,
     )
 
 
