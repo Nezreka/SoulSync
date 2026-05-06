@@ -11,6 +11,12 @@ Supports eight modes:
 - Deezer Only: Deezer downloads via ARL authentication
 - SoundCloud Only: Anonymous SoundCloud downloads (DJ mixes, removed/exclusive tracks)
 - Hybrid: Try primary source first, fallback to others
+
+The orchestrator dispatches through ``core.download_plugins.registry``
+instead of hardcoded per-source ``[self.soulseek, self.youtube, ...]``
+lists. External callers reach individual clients via the generic
+``orchestrator.client('<name>')`` accessor (alias-aware), not direct
+attribute access.
 """
 
 import asyncio
@@ -19,14 +25,9 @@ from pathlib import Path
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
-from core.soulseek_client import SoulseekClient, TrackResult, AlbumResult, DownloadStatus
-from core.youtube_client import YouTubeClient
-from core.tidal_download_client import TidalDownloadClient
-from core.qobuz_client import QobuzClient
-from core.hifi_client import HiFiClient
-from core.deezer_download_client import DeezerDownloadClient
-from core.lidarr_download_client import LidarrDownloadClient
-from core.soundcloud_client import SoundcloudClient
+from core.download_engine import DownloadEngine
+from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("download_orchestrator")
 
@@ -39,19 +40,31 @@ class DownloadOrchestrator:
     Routes requests to the appropriate client(s) based on configured mode.
     """
 
-    def __init__(self):
-        """Initialize orchestrator with all clients.
-        Each client is initialized independently — one failing client doesn't prevent others from working."""
-        self._init_failures = []
+    def __init__(self, registry: Optional[DownloadPluginRegistry] = None,
+                 engine: Optional[DownloadEngine] = None):
+        """Initialize orchestrator with a plugin registry. Each plugin
+        is built and registered independently — one failing plugin
+        doesn't prevent others from working. The ``registry`` arg
+        exists so tests can inject a registry with mock plugins; in
+        production callers leave it None and get the default.
 
-        self.soulseek = self._safe_init('Soulseek', SoulseekClient)
-        self.youtube = self._safe_init('YouTube', YouTubeClient)
-        self.tidal = self._safe_init('Tidal', TidalDownloadClient)
-        self.qobuz = self._safe_init('Qobuz', QobuzClient)
-        self.hifi = self._safe_init('HiFi', HiFiClient)
-        self.deezer_dl = self._safe_init('Deezer', DeezerDownloadClient)
-        self.lidarr = self._safe_init('Lidarr', LidarrDownloadClient)
-        self.soundcloud = self._safe_init('SoundCloud', SoundcloudClient)
+        ``engine`` is the cross-source state owner. Phase B introduces
+        it as a held reference; it isn't on any code path yet — Phase
+        C/D/E/F migrate behavior into it incrementally.
+        """
+        self.registry = registry if registry is not None else build_default_registry()
+        self.registry.initialize()
+        self._init_failures = self.registry.init_failures
+
+        # Engine — owns cross-source state, threading, search retry,
+        # rate-limits, fallback. Built in subsequent phases. For Phase
+        # B it's just an empty registry of plugins so future phases
+        # can route through it without further orchestrator changes.
+        self.engine = engine if engine is not None else DownloadEngine()
+        for source_name, plugin in self.registry.all_plugins():
+            spec = self.registry.get_spec(source_name)
+            aliases = spec.aliases if spec else ()
+            self.engine.register_plugin(source_name, plugin, aliases=aliases)
 
         if self._init_failures:
             logger.warning(f"Download clients failed to initialize: {', '.join(self._init_failures)}")
@@ -71,15 +84,6 @@ class DownloadOrchestrator:
                 self.hybrid_secondary,
             )
 
-    def _safe_init(self, name, cls):
-        """Initialize a download client, returning None on failure instead of crashing."""
-        try:
-            return cls()
-        except Exception as e:
-            logger.error(f"{name} download client failed to initialize: {e}")
-            self._init_failures.append(name)
-            return None
-
     def reload_settings(self):
         """Reload settings from config (call after settings change)"""
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -88,20 +92,28 @@ class DownloadOrchestrator:
         self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
-        if self.soulseek:
-            self.soulseek._setup_client()
+        soulseek = self.client('soulseek')
+        if soulseek:
+            soulseek._setup_client()
             logger.info("Soulseek client config reloaded")
 
         # Reconnect Deezer if ARL changed
         deezer_arl = config_manager.get('deezer_download.arl', '')
-        if deezer_arl and self.deezer_dl:
-            self.deezer_dl.reconnect(deezer_arl)
-            self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+        deezer_dl = self.client('deezer_dl')
+        if deezer_arl and deezer_dl:
+            deezer_dl.reconnect(deezer_arl)
+            deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
-        # Reload download path for all clients that cache it
+        # Reload download path for all clients that cache it.
+        # Soulseek owns the path config and is reloaded above; every
+        # other source mirrors that path so files all land in one
+        # tree. Sources without a `download_path` attribute (e.g.
+        # Lidarr — pulls into Lidarr's own tree) silently skip.
         new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
-        for client in [self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.soundcloud]:
-            if client and hasattr(client, 'download_path') and client.download_path != new_path:
+        for name, client in self.registry.all_plugins():
+            if name == 'soulseek':
+                continue
+            if hasattr(client, 'download_path') and client.download_path != new_path:
                 client.download_path = new_path
                 client.download_path.mkdir(parents=True, exist_ok=True)
                 # YouTube also caches path in yt-dlp opts
@@ -111,11 +123,61 @@ class DownloadOrchestrator:
 
         logger.info(f"Download Orchestrator settings reloaded - Mode: {self.mode}")
 
-    def _client(self, name):
-        """Get a client by name, returning None if not initialized."""
-        return {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal,
-                'qobuz': self.qobuz, 'hifi': self.hifi, 'deezer_dl': self.deezer_dl,
-                'lidarr': self.lidarr, 'soundcloud': self.soundcloud}.get(name)
+    def client(self, name):
+        """Generic accessor for a download source client by name.
+
+        Cin's review feedback: external callers should reach into
+        per-source clients via this method (``orch.client('hifi')``)
+        instead of attribute access (``orch.hifi``). Resolves both
+        canonical names (``deezer``) and legacy aliases (``deezer_dl``)
+        via the registry. Returns None if the source isn't registered
+        or failed to initialize.
+        """
+        return self.registry.get(name)
+
+    # Internal alias kept for legacy callers inside this file.
+    _client = client
+
+    def configured_clients(self) -> dict:
+        """Return ``{source_name: client}`` for every download source
+        that's both initialized AND reports is_configured() == True.
+
+        Replaces the legacy per-source iteration pattern Cin called
+        out — `if hasattr(orch, 'soulseek') and orch.soulseek and
+        orch.soulseek.is_configured(): download_clients['soulseek']
+        = orch.soulseek` repeated for each source.
+        """
+        result = {}
+        for name, client in self.registry.all_plugins():
+            try:
+                if not hasattr(client, 'is_configured') or client.is_configured():
+                    result[name] = client
+            except Exception as exc:
+                logger.debug("%s is_configured raised: %s", name, exc)
+        return result
+
+    def reload_instances(self, source: str = None) -> bool:
+        """Reload a source's instance config (e.g. HiFi instance list,
+        Qobuz session restore). Generic dispatch — caller passes the
+        source name instead of reaching for ``orch.hifi.reload_instances()``.
+
+        When ``source`` is None, reloads every source that has a
+        ``reload_instances`` method.
+        """
+        sources = [source] if source else list(self.registry.names())
+        ok = True
+        for name in sources:
+            client = self.client(name)
+            if client is None:
+                continue
+            if not hasattr(client, 'reload_instances'):
+                continue
+            try:
+                client.reload_instances()
+            except Exception as exc:
+                logger.warning("%s reload_instances failed: %s", name, exc)
+                ok = False
+        return ok
 
     def is_configured(self) -> bool:
         """
@@ -132,12 +194,18 @@ class DownloadOrchestrator:
         return False
 
     def get_source_status(self) -> dict:
-        """Return configured status for each download source."""
-        return {name: (c.is_configured() if c else False)
-                for name, c in [('soulseek', self.soulseek), ('youtube', self.youtube),
-                                ('tidal', self.tidal), ('qobuz', self.qobuz),
-                                ('hifi', self.hifi), ('deezer_dl', self.deezer_dl),
-                                ('lidarr', self.lidarr), ('soundcloud', self.soundcloud)]}
+        """Return configured status for each download source.
+
+        Keys preserve the legacy ``deezer_dl`` alias used by the
+        frontend status indicators and per-source dispatch strings,
+        so callers reading specific keys keep working unchanged.
+        """
+        status = {}
+        for name in self.registry.names():
+            client = self.registry.get(name)
+            key = 'deezer_dl' if name == 'deezer' else name
+            status[key] = client.is_configured() if client else False
+        return status
 
     async def check_connection(self) -> bool:
         """
@@ -149,7 +217,7 @@ class DownloadOrchestrator:
         if client and self.mode != 'hybrid':
             return await client.check_connection()
         elif self.mode == 'hybrid':
-            sources_to_check = self.hybrid_order if self.hybrid_order else ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud']
+            sources_to_check = self.hybrid_order if self.hybrid_order else self.registry.names()
             results = {}
             for source in sources_to_check:
                 client = self._client(source)
@@ -168,77 +236,62 @@ class DownloadOrchestrator:
 
         return False
 
+    def _normalize_source_name(self, name: str) -> Optional[str]:
+        """Convert a possibly-aliased source name (e.g. legacy
+        ``'deezer_dl'``) to the canonical registry name (``'deezer'``).
+        Returns None if the input matches neither a canonical name
+        nor an alias.
+
+        Cin's review caught a bug where legacy alias values from
+        config (hybrid_order containing ``'deezer_dl'``) silently
+        dropped Deezer from hybrid mode because the canonical-name
+        membership check rejected the alias.
+        """
+        spec = self.registry.get_spec(name) if name else None
+        return spec.name if spec else None
+
+    def _resolve_source_chain(self) -> List[str]:
+        """Order the configured sources for hybrid mode. Prefers
+        ``hybrid_order`` config; falls back to legacy
+        primary/secondary pair when no order set. Normalizes alias
+        names through the registry so legacy ``deezer_dl`` config
+        values resolve correctly to the canonical ``deezer`` plugin."""
+        if self.hybrid_order:
+            chain = []
+            seen = set()
+            for raw in self.hybrid_order:
+                canonical = self._normalize_source_name(raw)
+                if canonical and canonical not in seen:
+                    chain.append(canonical)
+                    seen.add(canonical)
+            return chain
+        primary = self._normalize_source_name(self.hybrid_primary) or 'soulseek'
+        secondary = self._normalize_source_name(self.hybrid_secondary) or 'soulseek'
+        if secondary == primary:
+            secondary = next(
+                (name for name in self.registry.names() if name != primary),
+                'soulseek',
+            )
+        chain = [primary, secondary]
+        if not chain:
+            chain = ['soulseek']
+        return chain
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
-        """
-        Search for tracks using configured source(s).
-
-        Args:
-            query: Search query
-            timeout: Search timeout (for Soulseek)
-            progress_callback: Progress callback (for Soulseek)
-
-        Returns:
-            Tuple of (track_results, album_results)
-        """
-        source_names = {'soulseek': 'Soulseek', 'youtube': 'YouTube', 'tidal': 'Tidal',
-                        'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer', 'lidarr': 'Lidarr',
-                        'soundcloud': 'SoundCloud'}
-
+        """Search for tracks using configured source(s). Single-source
+        modes route directly; hybrid mode delegates to
+        ``engine.search_with_fallback`` which tries the chain in order."""
         if self.mode != 'hybrid':
             client = self._client(self.mode)
             if not client:
-                logger.error(f"{source_names.get(self.mode, self.mode)} client not available (failed to initialize)")
+                logger.error(f"{self.registry.display_name(self.mode)} client not available (failed to initialize)")
                 return [], []
-            logger.info(f"Searching {source_names.get(self.mode, self.mode)}: {query}")
+            logger.info(f"Searching {self.registry.display_name(self.mode)}: {query}")
             return await client.search(query, timeout, progress_callback)
 
-        elif self.mode == 'hybrid':
-            clients = {name: self._client(name) for name in source_names}
-
-            # Build ordered source list: prefer hybrid_order, fall back to legacy primary/secondary
-            if self.hybrid_order:
-                source_order = [s for s in self.hybrid_order if s in clients]
-            else:
-                primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
-                secondary = self.hybrid_secondary if self.hybrid_secondary in clients else 'soulseek'
-                if secondary == primary:
-                    secondary = next((name for name in clients if name != primary), 'soulseek')
-                source_order = [primary, secondary]
-
-            if not source_order:
-                source_order = ['soulseek']
-
-            logger.info(f"Hybrid search ({' → '.join(source_order)}): {query}")
-
-            # Try each source in priority order (skip unconfigured/unavailable ones)
-            for i, source_name in enumerate(source_order):
-                client = clients.get(source_name)
-                if not client:
-                    logger.info(f"Skipping {source_name} (not available)")
-                    continue
-                if hasattr(client, 'is_configured') and not client.is_configured():
-                    logger.info(f"Skipping {source_name} (not configured)")
-                    continue
-
-                try:
-                    if i == 0:
-                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
-                    else:
-                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
-
-                    tracks, albums = await client.search(query, timeout, progress_callback)
-                    if tracks:
-                        logger.info(f"{source_name} found {len(tracks)} tracks")
-                        return (tracks, albums)
-                except Exception as e:
-                    logger.warning(f"{source_name} search failed: {e}")
-
-            # Nothing found from any source
-            logger.warning(f"Hybrid search: all sources ({', '.join(source_order)}) found nothing for: {query}")
-            return ([], [])
-
-        # Fallback: empty results
-        return ([], [])
+        chain = self._resolve_source_chain()
+        logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
+        return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
     async def search_and_download_best(self, query: str, expected_track=None) -> Optional[str]:
         """
@@ -316,7 +369,8 @@ class DownloadOrchestrator:
         elif is_streaming:
             filtered_results = tracks
         else:
-            filtered_results = self.soulseek.filter_results_by_quality_preference(tracks) if self.soulseek else tracks
+            soulseek = self.client('soulseek')
+            filtered_results = soulseek.filter_results_by_quality_preference(tracks) if soulseek else tracks
 
         if not filtered_results:
             logger.warning(f"No suitable quality results found for: {query}")
@@ -339,105 +393,47 @@ class DownloadOrchestrator:
         Download a track using the appropriate client.
 
         Args:
-            username: Username (or "youtube" for YouTube)
-            filename: Filename or YouTube video ID
+            username: Source-name string for streaming sources
+                (e.g. ``'youtube'``, ``'tidal'``, ``'deezer_dl'``)
+                OR the actual slskd peer username for Soulseek.
+            filename: Filename / video ID / track ID encoding (source-specific)
             file_size: File size estimate
 
         Returns:
             download_id: Unique download ID for tracking
         """
-        # Detect which client to use based on username
-        source_map = {'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz,
-                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl, 'lidarr': self.lidarr,
-                      'soundcloud': self.soundcloud}
-        source_names = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz',
-                        'hifi': 'HiFi', 'deezer_dl': 'Deezer', 'lidarr': 'Lidarr',
-                        'soundcloud': 'SoundCloud'}
-
-        if username in source_map:
-            client = source_map[username]
+        # Streaming sources are dispatched by name match; anything
+        # unrecognized falls through to Soulseek (peer username case).
+        spec = self.registry.get_spec(username) if username else None
+        if spec is not None and spec.name != 'soulseek':
+            client = self.registry.get(spec.name)
             if not client:
-                raise RuntimeError(f"{source_names[username]} download client not available (failed to initialize)")
-            logger.info(f"Downloading from {source_names[username]}: {filename}")
+                raise RuntimeError(f"{spec.display_name} download client not available (failed to initialize)")
+            logger.info(f"Downloading from {spec.display_name}: {filename}")
             return await client.download(username, filename, file_size)
-        else:
-            if not self.soulseek:
-                raise RuntimeError("Soulseek client not available (failed to initialize)")
-            logger.info(f"Downloading from Soulseek: {filename}")
-            return await self.soulseek.download(username, filename, file_size)
+
+        soulseek = self.registry.get('soulseek')
+        if not soulseek:
+            raise RuntimeError("Soulseek client not available (failed to initialize)")
+        logger.info(f"Downloading from Soulseek: {filename}")
+        return await soulseek.download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """
-        Get all active downloads from all sources.
-
-        Returns:
-            List of DownloadStatus objects
-        """
-        # Get downloads from all available sources
-        all_downloads = []
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr, self.soundcloud]:
-            if client:
-                try:
-                    all_downloads.extend(await client.get_all_downloads())
-                except Exception:
-                    pass
-        return all_downloads
+        """Aggregated view across every source. Delegates to the
+        engine, which iterates registered plugins."""
+        return await self.engine.get_all_downloads()
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """
-        Get status of a specific download.
-
-        Args:
-            download_id: Download ID to query
-
-        Returns:
-            DownloadStatus object or None if not found
-        """
-        # Try each source until we find the download
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr, self.soundcloud]:
-            if not client:
-                continue
-            try:
-                status = await client.get_download_status(download_id)
-                if status:
-                    return status
-            except Exception:
-                pass
-
-        return None
+        """Find a download by id across every source. Delegates to
+        the engine."""
+        return await self.engine.get_download_status(download_id)
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        """
-        Cancel an active download.
-
-        Args:
-            download_id: Download ID to cancel
-            username: Username hint (optional)
-            remove: Whether to remove from active downloads
-
-        Returns:
-            True if cancelled successfully
-        """
-        # If username is provided, route directly to that source
-        source_map = {'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz,
-                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl, 'lidarr': self.lidarr,
-                      'soundcloud': self.soundcloud}
-        if username in source_map:
-            client = source_map[username]
-            return await client.cancel_download(download_id, username, remove) if client else False
-        elif username:
-            return await self.soulseek.cancel_download(download_id, username, remove) if self.soulseek else False
-
-        # Otherwise, try all available sources
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr, self.soundcloud]:
-            if not client:
-                continue
-            try:
-                if await client.cancel_download(download_id, username, remove):
-                    return True
-            except Exception:
-                pass
-        return False
+        """Cancel an active download. Delegates to the engine, which
+        handles source-hint routing (streaming source name → direct
+        plugin, unknown name → Soulseek as peer username, no hint →
+        try every plugin)."""
+        return await self.engine.cancel_download(download_id, username, remove)
 
     async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
         """
@@ -452,40 +448,16 @@ class DownloadOrchestrator:
             True if successful
         """
         # This is Soulseek-specific, so only call on Soulseek client
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             return False
-        return await self.soulseek.signal_download_completion(download_id, username, remove)
+        return await soulseek.signal_download_completion(download_id, username, remove)
 
     async def clear_all_completed_downloads(self) -> bool:
-        """
-        Clear all completed downloads from both sources.
-
-        Returns:
-            True if successful
-        """
-        results = []
-        for name, client in [
-            ("soulseek", self.soulseek),
-            ("youtube", self.youtube),
-            ("tidal", self.tidal),
-            ("qobuz", self.qobuz),
-            ("hifi", self.hifi),
-            ("deezer_dl", self.deezer_dl),
-            ("lidarr", self.lidarr),
-            ("soundcloud", self.soundcloud),
-        ]:
-            if not client:
-                continue
-            if hasattr(client, "is_configured") and not client.is_configured():
-                logger.debug("Skipping %s clear_all_completed_downloads (not configured)", name)
-                continue
-            try:
-                results.append(await client.clear_all_completed_downloads())
-            except Exception as exc:
-                logger.warning("%s clear_all_completed_downloads failed: %s", name, exc)
-                results.append(False)
-
-        return all(results) if results else True
+        """Clear completed downloads from every source. Delegates
+        to the engine, which skips unconfigured plugins and treats
+        per-plugin failures as False (not an exception)."""
+        return await self.engine.clear_all_completed_downloads()
 
     # ===== Soulseek-specific methods (for backwards compatibility) =====
     # These are internal methods that some parts of the codebase use directly
@@ -503,9 +475,10 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             raise RuntimeError("Soulseek client not available (failed to initialize)")
-        return await self.soulseek._make_request(method, endpoint, **kwargs)
+        return await soulseek._make_request(method, endpoint, **kwargs)
 
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs):
         """
@@ -520,9 +493,10 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
-        if not self.soulseek:
+        soulseek = self.client('soulseek')
+        if not soulseek:
             raise RuntimeError("Soulseek client not available (failed to initialize)")
-        return await self.soulseek._make_direct_request(method, endpoint, **kwargs)
+        return await soulseek._make_direct_request(method, endpoint, **kwargs)
 
     async def clear_all_searches(self) -> bool:
         """
@@ -531,7 +505,8 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.clear_all_searches() if self.soulseek else True
+        soulseek = self.client('soulseek')
+        return await soulseek.clear_all_searches() if soulseek else True
 
     async def maintain_search_history_with_buffer(self, keep_searches: int = 50, trigger_threshold: int = 200) -> bool:
         """
@@ -544,15 +519,54 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold) if self.soulseek else True
+        soulseek = self.client('soulseek')
+        return await soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold) if soulseek else True
 
     async def cancel_all_downloads(self) -> bool:
-        """Cancel and remove all downloads from all sources."""
+        """Cancel and remove all downloads from all sources.
+
+        Note: YouTube is intentionally excluded from this loop in the
+        legacy implementation — preserved here. (yt-dlp downloads
+        run as detached subprocesses and don't share the
+        ``cancel_all_downloads`` semantics the streaming sources
+        use.) Sources without ``cancel_all_downloads`` fall back to
+        ``clear_all_completed_downloads``.
+        """
         ok = True
-        for client in [self.soulseek, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr, self.soundcloud]:
-            if client:
-                try:
-                    await client.cancel_all_downloads() if hasattr(client, 'cancel_all_downloads') else await client.clear_all_completed_downloads()
-                except Exception:
-                    ok = False
+        for name, client in self.registry.all_plugins():
+            if name == 'youtube':
+                continue
+            try:
+                await client.cancel_all_downloads() if hasattr(client, 'cancel_all_downloads') else await client.clear_all_completed_downloads()
+            except Exception:
+                ok = False
         return ok
+
+
+# ---------------------------------------------------------------------------
+# Singleton accessor — mirrors Cin's metadata engine pattern
+# (``get_metadata_engine()``). Callers that don't need a custom
+# registry use this instead of instantiating DownloadOrchestrator
+# directly. web_server.py constructs the singleton at startup and
+# exposes it via the ``download_orchestrator`` global.
+# ---------------------------------------------------------------------------
+
+_default_orchestrator: Optional['DownloadOrchestrator'] = None
+
+
+def get_download_orchestrator() -> 'DownloadOrchestrator':
+    """Return (lazily creating) the process-wide DownloadOrchestrator
+    singleton. Mirrors the ``get_metadata_engine()`` pattern Cin used
+    for the metadata engine refactor."""
+    global _default_orchestrator
+    if _default_orchestrator is None:
+        _default_orchestrator = DownloadOrchestrator()
+    return _default_orchestrator
+
+
+def set_download_orchestrator(orchestrator: 'DownloadOrchestrator') -> None:
+    """Set the process-wide singleton. Used by web_server.py at boot
+    to install the orchestrator it constructs as the default for
+    callers that grab via ``get_download_orchestrator()``."""
+    global _default_orchestrator
+    _default_orchestrator = orchestrator

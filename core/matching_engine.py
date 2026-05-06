@@ -8,7 +8,10 @@ from config.settings import config_manager
 
 from core.spotify_client import Track as SpotifyTrack
 from core.media_server.types import TrackInfo
-from core.soulseek_client import TrackResult, AlbumResult
+# TrackResult / AlbumResult moved out of core.soulseek_client into the
+# neutral download_plugins package (download PR's Gap 1 lift). Import
+# from the new location.
+from core.download_plugins.types import TrackResult, AlbumResult
 
 
 logger = get_logger("matching_engine")

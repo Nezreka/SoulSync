@@ -54,7 +54,7 @@ class PostProcessDeps:
     always live (no caching of pre-init Spotify clients etc).
     """
     config_manager: Any
-    soulseek_client: Any
+    download_orchestrator: Any
     run_async: Callable
     docker_resolve_path: Callable[[str], str]
     extract_filename: Callable[[str], str]
@@ -196,7 +196,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 # Query the download orchestrator for the status which contains the real file path
                 # CRITICAL FIX: Use the actual download_id designated by the client, not the internal task_id
                 actual_download_id = task.get('download_id') or task_id
-                status = deps.run_async(deps.soulseek_client.get_download_status(actual_download_id))
+                status = deps.run_async(deps.download_orchestrator.get_download_status(actual_download_id))
                 if status and status.file_path:
                     real_path = status.file_path
                     if os.path.exists(real_path):

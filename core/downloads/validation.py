@@ -1,7 +1,7 @@
 """Soulseek/streaming candidate validation — lifted from web_server.py.
 
 Body is byte-identical to the original. ``matching_engine`` and
-``soulseek_client`` are injected via init() because both are
+``download_orchestrator`` are injected via init() because both are
 constructed in web_server.py and referenced by name throughout
 the body.
 """
@@ -14,14 +14,51 @@ logger = logging.getLogger(__name__)
 
 # Injected at runtime via init().
 matching_engine = None
-soulseek_client = None
+download_orchestrator = None
 
 
-def init(matching_engine_obj, soulseek_client_obj):
+def init(matching_engine_obj, download_orchestrator_obj):
     """Bind the matching engine and download orchestrator from web_server."""
-    global matching_engine, soulseek_client
+    global matching_engine, download_orchestrator
     matching_engine = matching_engine_obj
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
+
+
+def filter_soundcloud_previews(results, expected_track):
+    """Drop SoundCloud preview snippets so they never reach the cache,
+    the modal, or the auto-download attempt.
+
+    SoundCloud serves a ~30s preview clip for tracks gated behind Go+ /
+    login. yt-dlp accepts the preview as the download payload, the
+    integrity check catches the truncated file, but the user just sees
+    "all candidates failed" with previews still listed in the modal
+    (and clickable for manual retry, which downloads another preview).
+
+    Filter at every spot raw search results enter the task: validation
+    scoring, modal-cache fallback when validation drops everything,
+    and the not-found raw-results cache. Keep candidates that genuinely
+    are short (intros, sound effects) when the expected track is also
+    short.
+    """
+    if not results or not expected_track:
+        return results
+    expected_ms = getattr(expected_track, 'duration_ms', 0) or 0
+    if expected_ms <= 0:
+        return results
+    expected_secs = expected_ms / 1000.0
+    if expected_secs <= 60:
+        return results
+
+    def _is_preview(r):
+        if getattr(r, 'username', None) != 'soundcloud':
+            return False
+        cand_ms = getattr(r, 'duration', None) or 0
+        if cand_ms <= 0:
+            return False
+        cand_secs = cand_ms / 1000.0
+        return cand_secs < 35 or cand_secs < expected_secs * 0.5
+
+    return [r for r in results if not _is_preview(r)]
 
 
 def get_valid_candidates(results, spotify_track, query):
@@ -30,6 +67,13 @@ def get_valid_candidates(results, spotify_track, query):
     Soulseek search results against a Spotify track to find the best, most
     accurate download candidates.
     """
+    if not results:
+        return []
+
+    # Pre-filter: drop SoundCloud preview snippets when expected
+    # duration is non-trivially long. Same helper is also applied at
+    # the modal-cache fallback path so previews never reach the UI.
+    results = filter_soundcloud_previews(results, spotify_track)
     if not results:
         return []
 
@@ -45,7 +89,12 @@ def get_valid_candidates(results, spotify_track, query):
         # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
         expected_title_lower = (expected_title or '').lower()
         _version_keywords = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
-                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke']
+                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke',
+                             # Producer-tag noise common on SoundCloud — "type
+                             # beat" is an instrumental track produced in
+                             # someone's style, tagged with the artist name to
+                             # game search. NEVER the real song.
+                             'type beat']
         expected_is_version = any(kw in expected_title_lower for kw in _version_keywords)
 
         scored = []
@@ -151,8 +200,8 @@ def get_valid_candidates(results, spotify_track, query):
         quality_filtered_candidates = initial_candidates
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
-        # Use existing soulseek_client to avoid re-initializing (which accesses download_path filesystem)
-        quality_filtered_candidates = soulseek_client.soulseek.filter_results_by_quality_preference(initial_candidates)
+        # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
+        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(initial_candidates)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
