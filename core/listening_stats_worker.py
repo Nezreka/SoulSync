@@ -19,13 +19,17 @@ logger = get_logger("listening_stats_worker")
 class ListeningStatsWorker:
     """Background worker that polls media servers for play data."""
 
-    def __init__(self, database, config_manager, plex_client=None,
-                 jellyfin_client=None, navidrome_client=None):
+    def __init__(self, database, config_manager, media_server_engine=None):
+        """Initialize the worker.
+
+        ``media_server_engine`` owns the per-server clients (Plex /
+        Jellyfin / Navidrome). The worker resolves the active server's
+        client through ``self._engine.client(name)`` instead of holding
+        per-server kwargs.
+        """
         self.db = database
         self.config_manager = config_manager
-        self.plex_client = plex_client
-        self.jellyfin_client = jellyfin_client
-        self.navidrome_client = navidrome_client
+        self._engine = media_server_engine
 
         # Worker state
         self.running = False
@@ -145,13 +149,11 @@ class ListeningStatsWorker:
         logger.info(f"Polling {active_server} for listening data...")
         self.current_item = f"Polling {active_server}..."
 
-        client = None
-        if active_server == 'plex' and self.plex_client:
-            client = self.plex_client
-        elif active_server == 'jellyfin' and self.jellyfin_client:
-            client = self.jellyfin_client
-        elif active_server == 'navidrome' and self.navidrome_client:
-            client = self.navidrome_client
+        client = self._engine.client(active_server) if self._engine else None
+        # SoulSync standalone has no listening data; only the three
+        # streaming servers contribute. Mirror the legacy guard here.
+        if active_server not in ('plex', 'jellyfin', 'navidrome'):
+            client = None
 
         if not client:
             logger.warning(f"No client available for active server: {active_server}")

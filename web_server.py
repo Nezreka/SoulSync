@@ -570,7 +570,7 @@ IS_SHUTTING_DOWN = False
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
-spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
     spotify_client = get_spotify_client()
@@ -578,42 +578,31 @@ try:
 except Exception as e:
     logger.error(f"  Spotify client failed to initialize: {e}")
 
-try:
-    plex_client = PlexClient()
-    logger.info("  Plex client initialized")
-except Exception as e:
-    logger.error(f"  Plex client failed to initialize: {e}")
 
-try:
-    jellyfin_client = JellyfinClient()
-    logger.info("  Jellyfin client initialized")
-except Exception as e:
-    logger.error(f"  Jellyfin client failed to initialize: {e}")
+def _safe_init_media_client(factory, name):
+    """Build a media-server client, capturing per-server init failures
+    so one broken server doesn't take the engine down with it."""
+    try:
+        instance = factory()
+        logger.info(f"  {name} client initialized")
+        return instance
+    except Exception as exc:
+        logger.error(f"  {name} client failed to initialize: {exc}")
+        return None
 
-try:
-    navidrome_client = NavidromeClient()
-    logger.info("  Navidrome client initialized")
-except Exception as e:
-    logger.error(f"  Navidrome client failed to initialize: {e}")
 
-try:
-    from core.soulsync_client import SoulSyncClient
-    soulsync_library_client = SoulSyncClient()
-    logger.info("  SoulSync library client initialized")
-except Exception as e:
-    logger.error(f"  SoulSync library client failed to initialize: {e}")
-
-# Build the MediaServerEngine on top of the per-client globals above.
-# Engine wraps the same instances — no double-init. Provides
-# ``engine.method()`` dispatch in place of the historic
-# ``if active_server == 'plex' / 'jellyfin' / ...`` chains.
+# Build the MediaServerEngine. The engine OWNS the per-server client
+# instances — no separate web_server.py globals (Cin's standard from
+# the download refactor: drop redundant access paths). All callers go
+# through media_server_engine.client('<name>').
 try:
     from core.media_server.engine import MediaServerEngine, set_media_server_engine
+    from core.soulsync_client import SoulSyncClient
     media_server_engine = MediaServerEngine(clients={
-        'plex':      plex_client,
-        'jellyfin':  jellyfin_client,
-        'navidrome': navidrome_client,
-        'soulsync':  soulsync_library_client,
+        'plex':      _safe_init_media_client(PlexClient, "Plex"),
+        'jellyfin':  _safe_init_media_client(JellyfinClient, "Jellyfin"),
+        'navidrome': _safe_init_media_client(NavidromeClient, "Navidrome"),
+        'soulsync':  _safe_init_media_client(SoulSyncClient, "SoulSync library"),
     })
     # Install as process-wide singleton so callers reaching via
     # get_media_server_engine() see the same instance web_server.py
@@ -644,7 +633,7 @@ except Exception as e:
     logger.error(f"  Matching engine failed to initialize: {e}")
 
 try:
-    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, media_server_engine.client('navidrome'))
+    sync_service = PlaylistSyncService(spotify_client, soulseek_client, media_server_engine=media_server_engine)
     logger.info("  Playlist sync service initialized")
 except Exception as e:
     logger.error(f"  Playlist sync service failed to initialize: {e}")
@@ -669,13 +658,7 @@ if soulseek_client:
 
 # Initialize web scan manager for automatic post-download scanning
 try:
-    media_clients = {
-        'plex_client': plex_client,
-        'jellyfin_client': jellyfin_client,
-        'navidrome_client': navidrome_client,
-        'soulsync_library_client': soulsync_library_client,
-    }
-    web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
+    web_scan_manager = WebScanManager(media_server_engine, delay_seconds=60)
     logger.info("  Web scan manager initialized")
 except Exception as e:
     logger.error(f"  Web scan manager failed to initialize: {e}")
@@ -6879,7 +6862,7 @@ def enhanced_search_library_check():
         data = request.get_json() or {}
         result = _search_library_check.check_library_presence(
             database=get_database(),
-            plex_client=plex_client,
+            plex_client=media_server_engine.client('plex') if media_server_engine else None,
             config_manager=config_manager,
             profile_id=get_current_profile_id(),
             albums=data.get('albums', []),
@@ -23266,8 +23249,7 @@ def _build_sync_deps():
     return _discovery_sync.SyncDeps(
         config_manager=config_manager,
         sync_service=sync_service,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
+        media_server_engine=media_server_engine,
         automation_engine=automation_engine,
         run_async=run_async,
         record_sync_history_start=_record_sync_history_start,
@@ -32848,9 +32830,7 @@ try:
     listening_stats_worker = ListeningStatsWorker(
         database=listening_stats_db,
         config_manager=config_manager,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
-        navidrome_client=navidrome_client,
+        media_server_engine=media_server_engine,
     )
     listening_stats_worker.start()
     logger.info("Listening stats worker initialized and started")
