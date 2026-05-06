@@ -18364,10 +18364,21 @@ def server_playlist_replace_track(playlist_id):
         active_server = config_manager.get_active_media_server()
 
         if active_server == 'plex' and media_server_engine.client('plex'):
-            # Use raw Plex API - fetch playlist directly
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] replace-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found on server"}), 404
 
             # Build new track list with replacement
@@ -18537,9 +18548,21 @@ def server_playlist_remove_track(playlist_id):
         active_server = config_manager.get_active_media_server()
 
         if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
             except Exception:
+                pass
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception:
+                    pass
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
 
             # Rebuild without the target track
