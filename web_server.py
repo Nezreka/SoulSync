@@ -9435,7 +9435,6 @@ def _build_artist_quality_deps():
         return sources
 
     return _artists_quality.ArtistQualityDeps(
-        spotify_client=spotify_client,
         matching_engine=matching_engine,
         get_database=get_database,
         get_wishlist_service=_get_ws,

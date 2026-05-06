@@ -6,19 +6,24 @@ the user's selected tracks, finds the best metadata match against the
 configured primary source, and queues high-quality re-downloads on the
 wishlist with `source_type='enhance'`.
 
-Per-track flow (source-agnostic):
+Per-track flow:
 
 1. Resolve the existing track via the artist's full detail map (built up
    front from `database.get_artist_full_detail`).
 2. Read current quality tier from the file extension.
 3. Build `matched_track_data` for the wishlist entry, in priority order:
-   - Direct Spotify lookup via stored `spotify_track_id` (only when
-     Spotify is the active primary source — Spotify exposes
-     `get_track_details(id)` returning rich raw data; other sources
-     don't have an equivalent stored-ID-to-track API today).
-   - Search match against the primary metadata source (Spotify /
-     iTunes / Deezer / Discogs / Hydrabase — whichever the user has
-     configured as their primary). Confidence threshold is 0.7.
+   - **Direct lookup using stored source IDs** — for every source the
+     user has configured, if the library track has the corresponding
+     stored ID (`spotify_track_id` / `deezer_id` / `itunes_track_id` /
+     `soul_id`), call `client.get_track_details(stored_id)` and convert
+     the result to the wishlist payload. First success wins; the user's
+     configured primary source is tried first. Mirrors what Download
+     Discography does — stable IDs straight to the source's API, no
+     fuzzy text matching.
+   - **Multi-source parallel text search fallback** — if no stored ID
+     resolved, run the shared `core.metadata.multi_source_search`
+     against every configured source in parallel and pick the best
+     cross-source match (auto-accept threshold 0.7).
 4. Validate the match has non-empty title, album, and artists. Reject
    matches with empty fields — those propagated as
    "unknown artist - unknown album - unknown track" wishlist entries
@@ -29,17 +34,21 @@ Per-track flow (source-agnostic):
    original file path, format tier, bitrate, and artist name.
 6. Tally `enhanced_count` / `failed_count` / per-track failure reasons.
 
-The flow originally had Spotify-only logic for steps 1 and 2 with iTunes
-hardcoded as the only fallback. That broke for users with neither
-Spotify nor Deezer connected — iTunes returned sparse / no matches and
-the failure mode was silent. The Track Redownload modal had been doing
-parallel multi-source search across every configured source the whole
-time; enhance now uses the same shared module
-(``core.metadata.multi_source_search``) so both endpoints dispatch
-identically. Spotify keeps its direct-lookup fast-path optimization
-(only Spotify exposes ``get_track_details(id)`` returning a rich
-wishlist-shaped payload); when that doesn't fire, the multi-source
-parallel search picks the cross-source best match.
+The flow originally had Spotify-only logic with an iTunes search-only
+fallback. Two failure modes drove the rewrite:
+
+- Users with neither Spotify nor Deezer connected got silent failures
+  ("unknown artist - unknown album - unknown track" wishlist entries)
+  because iTunes's text search returned junk matches with empty fields
+  that cleared the 0.7 confidence threshold.
+- Library tracks with messy tags ("Title (Live)", featured artists in
+  the artist field, etc.) failed fuzzy text search even when a perfect
+  stored ID was available — Download Discography had no such problem
+  because it resolves albums by stable ID.
+
+Direct-lookup-via-stored-ID matches the Download Discography contract
+for every source where we have an ID column. Text search is only the
+fallback now.
 
 Returns `(payload_dict, http_status_code)` so the route wrapper can
 `jsonify()` and return.
@@ -58,17 +67,17 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ArtistQualityDeps:
     """Bundle of cross-cutting deps the artist quality enhancement needs."""
-    spotify_client: Any
     matching_engine: Any
     get_database: Callable[[], Any]
     get_wishlist_service: Callable[[], Any]
     get_current_profile_id: Callable[[], int]
     get_quality_tier_from_extension: Callable
     # Returns ``[(source_name, client), ...]`` for every metadata source
-    # the user has configured (not just the active primary). The Track
-    # Redownload modal already searches multi-source in parallel —
-    # Enhance Quality now matches that contract via the shared
-    # ``core.metadata.multi_source_search`` module.
+    # the user has configured. Powers both the direct-lookup fast path
+    # (resolves stored source IDs straight from each source's API,
+    # like Download Discography) and the multi-source parallel text
+    # search fallback (shared with Track Redownload via
+    # ``core.metadata.multi_source_search``).
     get_metadata_search_sources: Callable[[], list]
 
 
@@ -142,100 +151,189 @@ def _build_payload_from_track(track_obj) -> dict:
     }
 
 
-def _spotify_direct_lookup(spotify_client, spotify_tid: str,
-                           fallback_artist_name: str,
-                           fallback_album_name: str,
-                           fallback_title: str) -> Optional[dict]:
-    """Spotify-only direct-lookup optimization. Spotify's
-    ``get_track_details(id)`` returns rich `raw_data` already in the
-    wishlist payload shape; other sources don't have an equivalent
-    stored-ID-to-track API today, so we fall through to search for
-    them.
+# Map metadata source name → DB column on the ``tracks`` table that
+# stores that source's native track ID. Used to drive the direct-lookup
+# fast path: when a library track has a stored ID for source X and the
+# user has source X configured, skip fuzzy text search and resolve
+# straight from X's API. Mirrors what Download Discography does — stable
+# IDs all the way, no fuzzy text matching.
+#
+# Discogs is release-based and has no per-track ID column; not listed
+# here, so direct lookup never tries Discogs (search-fallback still
+# runs for Discogs as one of the parallel sources).
+_STORED_ID_COLUMNS = {
+    'spotify': 'spotify_track_id',
+    'deezer': 'deezer_id',
+    'itunes': 'itunes_track_id',
+    'hydrabase': 'soul_id',
+}
+
+
+def _enhanced_to_wishlist_payload(enhanced: dict,
+                                   fallback_title: str,
+                                   fallback_artist: str,
+                                   fallback_album: str) -> Optional[dict]:
+    """Convert a ``get_track_details`` enhanced-shape dict to the
+    Spotify-shape wishlist payload.
+
+    Every metadata source's ``get_track_details`` returns the same
+    "enhanced" intermediate shape (top-level ``id``, ``name``,
+    ``artists`` as a list of strings, ``album.artists`` as strings),
+    documented and pinned across spotify_client / itunes_client /
+    deezer_client / hydrabase_client. The wishlist downstream expects
+    Spotify's native shape (``artists`` as ``[{'name': ...}]``), so
+    this helper does the conversion in one place.
+
+    Spotify's ``raw_data`` field is already in wishlist shape (the
+    raw Spotify API response), so we return it as-is when detected,
+    preserving full ``album.images`` and ``external_urls`` that the
+    enhanced top-level fields drop. Other sources' ``raw_data`` is
+    in source-native shape and gets ignored.
     """
-    try:
-        track_details = spotify_client.get_track_details(spotify_tid)
-        if not track_details:
-            return None
-        if track_details.get('raw_data'):
-            return track_details['raw_data']
-        # Enhanced format — rebuild with images
-        album_data = track_details.get('album', {})
-        album_images = []
-        if album_data.get('id'):
-            try:
-                full_album = spotify_client.get_album(album_data['id'])
-                if full_album and full_album.get('images'):
-                    album_images = full_album['images']
-            except Exception:
-                pass
-        return {
-            'id': spotify_tid,
-            'name': track_details.get('name', fallback_title),
-            'artists': [
-                {'name': a}
-                for a in track_details.get('artists', [fallback_artist_name])
-            ],
-            'album': {
-                'id': album_data.get('id', ''),
-                'name': album_data.get('name', fallback_album_name),
-                'album_type': album_data.get('album_type', 'album'),
-                'release_date': album_data.get('release_date', ''),
-                'total_tracks': album_data.get('total_tracks', 1),
-                'artists': [
-                    {'name': a}
-                    for a in album_data.get('artists', [fallback_artist_name])
-                ],
-                'images': album_images,
-            },
-            'duration_ms': track_details.get('duration_ms', 0),
-            'track_number': track_details.get('track_number', 1),
-            'disc_number': track_details.get('disc_number', 1),
-            'popularity': 0,
-            'preview_url': None,
-            'external_urls': {},
-        }
-    except Exception as exc:
-        logger.error(f"[Enhance] Spotify direct lookup failed for {spotify_tid}: {exc}")
+    if not enhanced:
         return None
+    raw = enhanced.get('raw_data')
+    if isinstance(raw, dict):
+        raw_artists = raw.get('artists')
+        if (isinstance(raw_artists, list) and raw_artists
+                and isinstance(raw_artists[0], dict)):
+            return raw
+
+    artists = enhanced.get('artists') or [fallback_artist]
+    album_data = enhanced.get('album') or {}
+    album_artists = album_data.get('artists') or artists
+
+    def _to_dict_artists(seq):
+        return [a if isinstance(a, dict) else {'name': a} for a in seq]
+
+    image_url = enhanced.get('image_url') or ''
+    album_images_field = album_data.get('images')
+    if isinstance(album_images_field, list) and album_images_field:
+        album_images = album_images_field
+    elif image_url:
+        album_images = [{'url': image_url, 'height': 600, 'width': 600}]
+    else:
+        album_images = []
+
+    return {
+        'id': str(enhanced.get('id', '')),
+        'name': enhanced.get('name') or fallback_title,
+        'artists': _to_dict_artists(artists),
+        'album': {
+            'id': str(album_data.get('id', '')),
+            'name': album_data.get('name') or fallback_album,
+            'album_type': album_data.get('album_type', 'album'),
+            'release_date': album_data.get('release_date', ''),
+            'total_tracks': album_data.get('total_tracks', 1),
+            'artists': _to_dict_artists(album_artists),
+            'images': album_images,
+        },
+        'duration_ms': enhanced.get('duration_ms', 0),
+        'track_number': enhanced.get('track_number', 1),
+        'disc_number': enhanced.get('disc_number', 1),
+        'popularity': enhanced.get('popularity', 0),
+        'preview_url': enhanced.get('preview_url'),
+        'external_urls': enhanced.get('external_urls', {}),
+    }
 
 
-# Minimum match-score threshold for accepting a match without user
-# confirmation. Mirrors the legacy single-source threshold the enhance
+def _try_direct_lookup_all_sources(track: dict,
+                                    sources: list,
+                                    preferred_source: Optional[str],
+                                    title: str,
+                                    artist_name: str,
+                                    album_title: str
+                                    ) -> tuple:
+    """Try direct ID-based lookup on every source where the library
+    track has a stored ID. Returns ``(payload, source_name)`` on first
+    success, or ``(None, None)`` if no source has a stored ID with a
+    successful lookup.
+
+    Mirrors what Download Discography does — stable IDs straight to the
+    source's API, no fuzzy text matching. Avoids the failure mode where
+    library text tags don't match the source's canonical title (the
+    Discord report case: track tagged "Title (Live)" and source has
+    "Title" → fuzzy search misses, but stored ID resolves directly).
+
+    Preferred source attempted first when present in ``sources``,
+    typically the user's configured primary metadata source — so a
+    Deezer-primary user gets Deezer art / album shape on the wishlist
+    entry instead of whichever source happened to have a stored ID
+    first in iteration order.
+    """
+    def _priority(entry):
+        name = entry[0]
+        return 0 if name == preferred_source else 1
+    ordered = sorted(sources, key=_priority)
+
+    for source_name, client in ordered:
+        column = _STORED_ID_COLUMNS.get(source_name)
+        if not column:
+            continue
+        stored_id = track.get(column)
+        if not stored_id:
+            continue
+        if not hasattr(client, 'get_track_details'):
+            continue
+        try:
+            enhanced = client.get_track_details(str(stored_id))
+        except Exception as exc:
+            logger.error(
+                f"[Enhance] {source_name} direct lookup failed for "
+                f"ID {stored_id}: {exc}"
+            )
+            continue
+        if not enhanced:
+            continue
+        payload = _enhanced_to_wishlist_payload(
+            enhanced, title, artist_name, album_title,
+        )
+        if _has_complete_metadata(payload):
+            logger.info(
+                f"[Enhance] Direct lookup matched: {source_name} "
+                f"ID {stored_id} → '{payload.get('name')}'"
+            )
+            return payload, source_name
+
+    return None, None
+
+
+# Minimum match-score threshold for accepting a search-fallback match
+# without user confirmation. Mirrors the legacy threshold the enhance
 # flow has always used.
 _AUTO_ACCEPT_SCORE_THRESHOLD = 0.7
-
-
-def _try_upgrade_to_rich_payload(client: Any, track_id: str) -> Optional[dict]:
-    """Spotify-only optimization — ``get_track_details(id)`` returns
-    rich raw_data already in the wishlist payload shape. Other sources
-    don't expose this; caller falls back to ``_build_payload_from_track``.
-    """
-    if not hasattr(client, 'get_track_details'):
-        return None
-    try:
-        details = client.get_track_details(track_id)
-        if details and details.get('raw_data'):
-            return details['raw_data']
-    except Exception:
-        pass
-    return None
 
 
 def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
     """Add selected tracks to wishlist for quality enhancement re-download.
 
-    Per-track flow now mirrors the Track Redownload modal: searches every
-    configured metadata source in parallel via the shared
-    ``core.metadata.multi_source_search`` module, picks the best cross-source
-    match if it clears the auto-accept threshold, validates the match
-    has non-empty fields, and queues the wishlist payload.
+    Per-track flow:
 
-    Pre-refactor this was Spotify-only with an iTunes fallback —
-    Discogs / Hydrabase / Deezer-primary users got far worse coverage
-    than redownload despite both flows asking the same question
-    ("find me the metadata for this library track").
+    1. **Direct lookup using stored source IDs** (mirrors what Download
+       Discography does — stable IDs straight to the source's API, no
+       fuzzy text matching). For each source the user has configured,
+       if the library track has the corresponding stored ID
+       (``spotify_track_id`` / ``deezer_id`` / ``itunes_track_id`` /
+       ``soul_id``), call ``client.get_track_details(stored_id)`` and
+       convert to wishlist payload. First success wins; preferred
+       source (user's configured primary) tried first.
+
+    2. **Multi-source parallel text search fallback** (via the shared
+       ``core.metadata.multi_source_search`` module — same code path
+       Track Redownload uses) for tracks with no stored IDs / lookup
+       misses.
+
+    3. **Validation**: reject matches with empty title / album / artists
+       so the user sees a clear failure instead of an "unknown artist"
+       wishlist entry.
+
+    Pre-refactor: only Spotify had a direct-lookup fast path; everything
+    else went through fuzzy text search. Discogs / Hydrabase / Deezer-
+    primary users got far worse coverage than Download Discography
+    despite both flows asking the same question.
     """
     from core.metadata.multi_source_search import TrackQuery, search_all_sources
+    from core.metadata.registry import get_primary_source
 
     try:
         if not track_ids:
@@ -262,9 +360,17 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
                 track['_album_id'] = album.get('id')
                 track_lookup[tid] = track
 
-        # Resolve every configured metadata source up front — the same
-        # parallel multi-source search the Track Redownload modal uses.
+        # Resolve every configured metadata source up front.
         search_sources = deps.get_metadata_search_sources()
+
+        # User's configured primary source — direct-lookup tries this
+        # first so Deezer-primary users get Deezer payloads on the
+        # wishlist entry (correct cover art / album shape) even when
+        # other sources also have stored IDs for the same track.
+        try:
+            preferred_source = get_primary_source()
+        except Exception:
+            preferred_source = None
 
         enhanced_count = 0
         failed_count = 0
@@ -293,23 +399,16 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
             matched_track_data = None
             chosen_source = None
 
-            # 1. Spotify-only direct-lookup optimization. If Spotify is
-            # configured AND we have a stored Spotify ID, fast path
-            # straight to the rich raw payload (no search required).
-            if deps.spotify_client:
-                spotify_tid = track.get('spotify_track_id')
-                if spotify_tid:
-                    matched_track_data = _spotify_direct_lookup(
-                        deps.spotify_client, spotify_tid,
-                        artist_name, album_title, title,
-                    )
-                    if matched_track_data:
-                        chosen_source = 'spotify'
+            # 1. Direct lookup via every stored source ID — like Download
+            # Discography. Stable IDs, no fuzzy text matching.
+            if search_sources:
+                matched_track_data, chosen_source = _try_direct_lookup_all_sources(
+                    track, search_sources, preferred_source,
+                    title, artist_name, album_title,
+                )
 
-            # 2. Multi-source parallel search across every configured
-            # metadata source. Picks the highest-scoring match across
-            # all sources (Spotify / iTunes / Deezer / Discogs /
-            # Hydrabase — whichever the user has configured).
+            # 2. Multi-source parallel text search fallback — for tracks
+            # with no stored IDs / lookup misses.
             if not matched_track_data and search_sources:
                 try:
                     track_query = TrackQuery(
@@ -325,18 +424,7 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
                         chosen_source = multi_result.best_match['source']
                         best_track_obj = multi_result.best_track()
                         if best_track_obj:
-                            # Try Spotify's rich-payload upgrade first; fall
-                            # back to building from the source-native Track.
-                            client = next(
-                                (c for n, c in search_sources if n == chosen_source),
-                                None,
-                            )
-                            if client:
-                                matched_track_data = _try_upgrade_to_rich_payload(
-                                    client, str(best_track_obj.id),
-                                )
-                            if not matched_track_data:
-                                matched_track_data = _build_payload_from_track(best_track_obj)
+                            matched_track_data = _build_payload_from_track(best_track_obj)
                 except Exception as exc:
                     logger.error(f"[Enhance] Multi-source search failed for {title}: {exc}")
 

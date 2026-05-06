@@ -114,8 +114,14 @@ def _build_deps(
         search_sources = (
             [(fallback_source, fallback_client)] if fallback_client else []
         )
+        # Mirror web_server._resolve_search_sources: Spotify is always
+        # added to the source list when a Spotify client is configured,
+        # alongside whatever else the user has connected. Tests passing
+        # ``spotify=`` get Spotify in the source list automatically so
+        # the direct-lookup fast path can find it.
+        if spotify is not None and not any(name == 'spotify' for name, _ in search_sources):
+            search_sources = [('spotify', spotify)] + list(search_sources)
     deps = aq.ArtistQualityDeps(
-        spotify_client=spotify,
         matching_engine=matching_engine or _FakeMatchingEngine(),
         get_database=lambda: _FakeDatabase(artist_detail=artist_detail),
         get_wishlist_service=lambda: wishlist or _FakeWishlist(),
@@ -126,7 +132,9 @@ def _build_deps(
     return deps
 
 
-def _artist_with_track(*, track_id='t1', file_path='/file.mp3', spotify_tid=None):
+def _artist_with_track(*, track_id='t1', file_path='/file.mp3',
+                       spotify_tid=None, deezer_tid=None, itunes_tid=None,
+                       soul_id=None):
     return {
         'success': True,
         'artist': {'name': 'Artist Name'},
@@ -138,6 +146,9 @@ def _artist_with_track(*, track_id='t1', file_path='/file.mp3', spotify_tid=None
                 'title': 'Track One',
                 'file_path': file_path,
                 'spotify_track_id': spotify_tid,
+                'deezer_id': deezer_tid,
+                'itunes_track_id': itunes_tid,
+                'soul_id': soul_id,
                 'track_number': 1,
                 'duration': 180000,
                 'bitrate': 320,
@@ -188,12 +199,17 @@ def test_spotify_direct_lookup_via_track_id_uses_raw_data():
 
 
 def test_spotify_direct_lookup_enhanced_format_rebuilds_payload():
-    """Track details without raw_data → rebuild payload with album images via get_album."""
-    enhanced = {'name': 'Track One', 'artists': ['Artist Name'],
+    """Track details without raw_data → rebuild wishlist-shape payload
+    from the enhanced top-level fields. Spotify enhanced shape returns
+    ``artists`` as a list of strings; the converter normalizes to
+    Spotify's wishlist shape (``[{'name': ...}]``). Album images stay
+    empty when the source doesn't surface them on the enhanced dict —
+    the wishlist re-download fetches art at download time."""
+    enhanced = {'id': 'sp-stored', 'name': 'Track One',
+                'artists': ['Artist Name'],
                 'album': {'id': 'alb-id', 'name': 'Album X'},
                 'duration_ms': 180000, 'track_number': 1, 'disc_number': 1}
-    full_album = {'images': [{'url': 'http://art'}]}
-    spotify = _FakeSpotify(track_details=enhanced, album=full_album)
+    spotify = _FakeSpotify(track_details=enhanced)
     wishlist = _FakeWishlist()
     deps = _build_deps(
         spotify=spotify,
@@ -205,7 +221,12 @@ def test_spotify_direct_lookup_enhanced_format_rebuilds_payload():
 
     assert payload['enhanced_count'] == 1
     md = wishlist.added[0]['spotify_track_data']
-    assert md['album']['images'] == [{'url': 'http://art'}]
+    assert md['id'] == 'sp-stored'
+    assert md['name'] == 'Track One'
+    # Enhanced format: artists normalized from [str] → [{'name': str}].
+    assert md['artists'] == [{'name': 'Artist Name'}]
+    assert md['album']['name'] == 'Album X'
+    assert md['album']['artists'] == [{'name': 'Artist Name'}]
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +234,15 @@ def test_spotify_direct_lookup_enhanced_format_rebuilds_payload():
 # ---------------------------------------------------------------------------
 
 def test_spotify_search_fallback_when_no_stored_id():
-    """No spotify_track_id → search via matching_engine, pick best match."""
-    track = _SpotifyTrack(name='Track One', artists=['Artist Name'])
-    raw = {'id': 'sp-search', 'name': 'Track One', 'artists': [{'name': 'Artist Name'}],
-           'album': {'name': 'Album X'}}
-    spotify = _FakeSpotify(track_details={'raw_data': raw}, search_results=[track])
+    """No spotify_track_id → multi-source text search runs, builds
+    wishlist payload from the source-native Track object via
+    ``_build_payload_from_track`` (not ``get_track_details`` — search
+    results already carry enough Track-shape fields, no extra API call
+    needed)."""
+    track = _SpotifyTrack(id='sp-search', name='Track One',
+                           artists=['Artist Name'])
+    track.album = 'Album X'
+    spotify = _FakeSpotify(search_results=[track])
     wishlist = _FakeWishlist()
     deps = _build_deps(
         spotify=spotify,
@@ -228,7 +253,11 @@ def test_spotify_search_fallback_when_no_stored_id():
     payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
 
     assert payload['enhanced_count'] == 1
-    assert wishlist.added[0]['spotify_track_data'] == raw
+    md = wishlist.added[0]['spotify_track_data']
+    assert md['id'] == 'sp-search'
+    assert md['name'] == 'Track One'
+    assert md['artists'] == [{'name': 'Artist Name'}]
+    assert md['album']['name'] == 'Album X'
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +374,204 @@ def test_spotify_direct_lookup_runs_as_fast_path_then_falls_back():
     # Fast path returned None → multi-source search ran → Discogs won.
     assert payload['enhanced_count'] == 1
     assert wishlist.added[0]['spotify_track_data']['id'] == 'dc-1'
+
+
+# ---------------------------------------------------------------------------
+# Direct-lookup-by-stored-ID (priority 1) — applies to every source
+# with a stored ID column, not just Spotify
+# ---------------------------------------------------------------------------
+
+def test_direct_lookup_via_deezer_id_skips_text_search():
+    """Library track has stored deezer_id + Deezer is configured →
+    enhance fast-paths via deezer_client.get_track_details(id) and skips
+    fuzzy text search entirely. Mirrors what Download Discography does
+    (stable IDs, no fuzzy matching). Pre-fix Deezer-primary users went
+    through text search even when the deezer_id was already on the row.
+    """
+    deezer_calls = []
+    enhanced_dict = {
+        'id': '12345', 'name': 'Track One',
+        'artists': ['Artist Name'],
+        'album': {'id': 'alb-1', 'name': 'Album X'},
+        'duration_ms': 180000, 'track_number': 1, 'disc_number': 1,
+    }
+
+    class _DeezerStub:
+        def get_track_details(self, tid):
+            deezer_calls.append(('details', tid))
+            return enhanced_dict
+        def search_tracks(self, q, limit=10):
+            deezer_calls.append(('search', q))
+            return []
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(deezer_tid='12345'),
+        wishlist=wishlist,
+        fallback_client=_DeezerStub(),
+        fallback_source='deezer',
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+
+    assert payload['enhanced_count'] == 1
+    # Direct-lookup ran, text search did NOT (fast path skipped it).
+    assert ('details', '12345') in deezer_calls
+    assert not any(call[0] == 'search' for call in deezer_calls)
+    md = wishlist.added[0]['spotify_track_data']
+    assert md['id'] == '12345'
+    assert md['artists'] == [{'name': 'Artist Name'}]
+
+
+def test_direct_lookup_via_itunes_id_skips_text_search():
+    """Stored itunes_track_id triggers iTunes direct lookup. Same
+    contract as Spotify / Deezer — get_track_details called, search
+    not."""
+    itunes_calls = []
+    enhanced_dict = {
+        'id': 'it-9001', 'name': 'Track One',
+        'artists': ['Artist Name'],
+        'album': {'id': 'alb-it', 'name': 'Album X'},
+        'duration_ms': 180000,
+    }
+
+    class _ItunesStub:
+        def get_track_details(self, tid):
+            itunes_calls.append(('details', tid))
+            return enhanced_dict
+        def search_tracks(self, q, limit=10):
+            itunes_calls.append(('search', q))
+            return []
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(itunes_tid='it-9001'),
+        wishlist=wishlist,
+        fallback_client=_ItunesStub(),
+        fallback_source='itunes',
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+
+    assert payload['enhanced_count'] == 1
+    assert ('details', 'it-9001') in itunes_calls
+    assert not any(call[0] == 'search' for call in itunes_calls)
+
+
+def test_direct_lookup_prefers_user_primary_source():
+    """Track has stored IDs on multiple sources; user's configured
+    primary source is tried first. Pin: a Deezer-primary user with
+    both spotify_track_id and deezer_id stored gets the Deezer payload
+    (correct cover art / album shape for their setup), not whichever
+    source happened to come first in registry order.
+    """
+    spotify_calls = []
+    deezer_calls = []
+
+    spotify_enhanced = {
+        'id': 'sp-1', 'name': 'Track One',
+        'artists': ['Artist Name'],
+        'album': {'id': 'sp-alb', 'name': 'Album X'},
+    }
+    deezer_enhanced = {
+        'id': 'dz-1', 'name': 'Track One',
+        'artists': ['Artist Name'],
+        'album': {'id': 'dz-alb', 'name': 'Album X'},
+    }
+
+    class _SpotifyStub:
+        def get_track_details(self, tid):
+            spotify_calls.append(tid)
+            return spotify_enhanced
+
+    class _DeezerStub:
+        def get_track_details(self, tid):
+            deezer_calls.append(tid)
+            return deezer_enhanced
+
+    # Patch get_primary_source to return 'deezer' so we don't depend
+    # on the test-runner's actual config.
+    import core.metadata.registry as registry_mod
+    original = registry_mod.get_primary_source
+    registry_mod.get_primary_source = lambda **kw: 'deezer'
+    try:
+        wishlist = _FakeWishlist()
+        deps = _build_deps(
+            spotify=_SpotifyStub(),
+            artist_detail=_artist_with_track(
+                spotify_tid='sp-stored', deezer_tid='dz-stored',
+            ),
+            wishlist=wishlist,
+            fallback_client=_DeezerStub(),
+            fallback_source='deezer',
+        )
+        payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    finally:
+        registry_mod.get_primary_source = original
+
+    assert payload['enhanced_count'] == 1
+    # Deezer (primary) tried first and won — Spotify never queried.
+    assert deezer_calls == ['dz-stored']
+    assert spotify_calls == []
+    md = wishlist.added[0]['spotify_track_data']
+    assert md['id'] == 'dz-1'
+
+
+def test_direct_lookup_falls_through_to_text_search_when_no_stored_ids():
+    """Track has ZERO stored source IDs → direct lookup yields nothing
+    → falls through to multi-source text search. Pin the contract:
+    direct-lookup is best-effort, not required."""
+    text_search_track = _SpotifyTrack(id='dz-search', name='Track One',
+                                       artists=['Artist Name'])
+    text_search_track.album = 'Album X'
+
+    class _DeezerStub:
+        def get_track_details(self, tid):
+            raise AssertionError("should not be called — no stored ID")
+        def search_tracks(self, q, limit=10):
+            return [text_search_track]
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),  # no stored IDs
+        wishlist=wishlist,
+        fallback_client=_DeezerStub(),
+        fallback_source='deezer',
+    )
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['enhanced_count'] == 1
+    assert wishlist.added[0]['spotify_track_data']['id'] == 'dz-search'
+
+
+def test_direct_lookup_failure_falls_through_to_text_search():
+    """Stored ID exists but direct lookup returns None (network blip,
+    catalog removal, etc.) → flow falls through to text search rather
+    than hard-failing. Pin: direct-lookup miss is non-fatal."""
+    text_search_track = _SpotifyTrack(id='dz-search', name='Track One',
+                                       artists=['Artist Name'])
+    text_search_track.album = 'Album X'
+
+    class _DeezerStub:
+        def get_track_details(self, tid):
+            return None  # direct lookup miss
+        def search_tracks(self, q, limit=10):
+            return [text_search_track]
+
+    wishlist = _FakeWishlist()
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(deezer_tid='9999'),
+        wishlist=wishlist,
+        fallback_client=_DeezerStub(),
+        fallback_source='deezer',
+    )
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['enhanced_count'] == 1
+    # Text-search winner used.
+    assert wishlist.added[0]['spotify_track_data']['id'] == 'dz-search'
 
 
 # ---------------------------------------------------------------------------
