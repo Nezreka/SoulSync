@@ -294,3 +294,68 @@ def test_get_media_server_engine_returns_set_singleton(make_engine):
         assert get_media_server_engine() is engine
     finally:
         set_media_server_engine(None)
+
+
+# ---------------------------------------------------------------------------
+# Empty-engine fallback (web_server.py boot resilience)
+# ---------------------------------------------------------------------------
+
+
+def test_engine_with_empty_clients_dict_is_safe_to_use():
+    """web_server.py falls back to ``MediaServerEngine(clients={})`` if
+    full engine init raises — preserves the resilience the per-server
+    globals had pre-refactor (each one had its own try/except so engine
+    failure didn't take down dispatch sites). Pin the contract: empty
+    engine still answers safely on every method instead of raising."""
+    registry = MediaServerRegistry()
+    registry.register(ServerSpec(
+        name='plex', factory=lambda: _FakeClient('plex'), display_name='Plex',
+    ))
+    engine = MediaServerEngine(
+        registry=registry,
+        clients={},  # No pre-built clients passed.
+        active_server_resolver=lambda: 'plex',
+    )
+
+    # client(name) returns None for every server — engine doesn't crash.
+    assert engine.client('plex') is None
+    assert engine.client('jellyfin') is None
+    # Cross-server methods return safe defaults instead of raising.
+    assert engine.is_connected() is False
+    assert engine.get_all_artists() == []
+    assert engine.get_all_album_ids() == set()
+    assert engine.search_tracks('t', 'a') == []
+    # configured_clients() returns empty dict cleanly.
+    assert engine.configured_clients() == {}
+
+
+# ---------------------------------------------------------------------------
+# Registry encapsulation (engine reaches via public set_instance,
+# not the private _instances dict)
+# ---------------------------------------------------------------------------
+
+
+def test_engine_uses_registry_set_instance_not_private_attr():
+    """Engine constructor with ``clients=`` must hand instances off
+    via the registry's public ``set_instance(name, client)`` method
+    rather than reaching into ``registry._instances`` directly. Pin
+    by giving the registry a ``set_instance`` spy and verifying the
+    engine calls it."""
+    plex = _FakeClient('plex')
+    registry = MediaServerRegistry()
+    registry.register(ServerSpec(
+        name='plex', factory=lambda: _FakeClient('plex'), display_name='Plex',
+    ))
+    set_instance_calls = []
+    original = registry.set_instance
+    def _spy(name, client):
+        set_instance_calls.append((name, client))
+        original(name, client)
+    registry.set_instance = _spy
+
+    MediaServerEngine(
+        registry=registry,
+        clients={'plex': plex},
+        active_server_resolver=lambda: 'plex',
+    )
+    assert ('plex', plex) in set_instance_calls

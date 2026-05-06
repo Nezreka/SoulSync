@@ -1,9 +1,10 @@
 """MediaServerEngine — central dispatch for media server operations.
 
-Replaces the historic 33+ ``if active_server == 'plex' / 'jellyfin' /
-'navidrome' / 'soulsync'`` chains in ``web_server.py``. Each
-operation web_server.py used to dispatch by hand becomes a single
-``engine.method()`` call here that:
+Replaces the *uniform-shape* dispatch chains in web_server.py
+(``is_connected``, ``get_all_artists``, etc. — anything where every
+server returns the same shape and the only branching was on
+``active_server == X``). Each such operation is now one
+``engine.method()`` call that:
 
 1. Reads the ``server.active`` config to find the current target.
 2. Looks up the registered client.
@@ -11,14 +12,17 @@ operation web_server.py used to dispatch by hand becomes a single
    for methods that don't exist on every client — e.g. SoulSync
    has no library-scan API).
 
-Per-server client objects stay accessible via ``engine.client(name)``
-so any caller that needs a Plex-specific method (e.g.
-``set_music_library_by_name`` for the settings page) keeps working
-through ``engine.client('plex').set_music_library_by_name(...)``.
+Server-specific dispatch sites (Plex's raw playlist API, Jellyfin /
+Navidrome client methods returning different shapes) stay explicit
+in web_server.py per the "lift what's truly shared" standard. They
+reach individual clients via ``engine.client(name)`` rather than
+the per-server globals — same generic-accessor pattern as the
+download orchestrator.
 
 Engine itself is constructed once during web_server.py init and
-held as a module-level singleton, mirroring the existing pattern
-for the per-server client globals.
+held as a process-wide singleton via
+``set_media_server_engine`` / ``get_media_server_engine``, mirroring
+the metadata + download engine factory shape.
 """
 
 from __future__ import annotations
@@ -69,15 +73,16 @@ class MediaServerEngine:
         if clients is not None:
             # Wrap pre-built instances (production case from web_server.py
             # init). Skip registry.initialize() — we already have the
-            # instances, just stash them in the registry's slots so
-            # registry.get(name) works.
+            # instances, hand them off via the registry's public
+            # set_instance(name, client) method so internal storage stays
+            # encapsulated.
             for name, client in clients.items():
-                self.registry._instances[name] = client
+                self.registry.set_instance(name, client)
             # Mark any registered-but-not-supplied as failed init so
             # active_client() returns None for them.
-            for name in self.registry._specs:
-                if name not in self.registry._instances:
-                    self.registry._instances[name] = None
+            for name in self.registry.names():
+                if self.registry.get(name) is None and name not in clients:
+                    self.registry.set_instance(name, None)
         else:
             self.registry.initialize()
 
@@ -119,7 +124,7 @@ class MediaServerEngine:
         try:
             return client.is_connected()
         except Exception as exc:
-            logger.debug("%s is_connected raised: %s", self.active_server, exc)
+            logger.warning("%s is_connected raised: %s", self.active_server, exc)
             return False
 
     def ensure_connection(self) -> bool:
@@ -131,7 +136,7 @@ class MediaServerEngine:
         try:
             return client.ensure_connection()
         except Exception as exc:
-            logger.debug("%s ensure_connection raised: %s", self.active_server, exc)
+            logger.warning("%s ensure_connection raised: %s", self.active_server, exc)
             return False
 
     def get_all_artists(self) -> List[Any]:
@@ -143,7 +148,7 @@ class MediaServerEngine:
         try:
             return client.get_all_artists()
         except Exception as exc:
-            logger.debug("%s get_all_artists raised: %s", self.active_server, exc)
+            logger.warning("%s get_all_artists raised: %s", self.active_server, exc)
             return []
 
     def get_all_album_ids(self) -> set:
@@ -155,7 +160,7 @@ class MediaServerEngine:
         try:
             return client.get_all_album_ids()
         except Exception as exc:
-            logger.debug("%s get_all_album_ids raised: %s", self.active_server, exc)
+            logger.warning("%s get_all_album_ids raised: %s", self.active_server, exc)
             return set()
 
     # ------------------------------------------------------------------
@@ -174,7 +179,7 @@ class MediaServerEngine:
         try:
             return client.search_tracks(title, artist, limit)
         except Exception as exc:
-            logger.debug("%s search_tracks raised: %s", self.active_server, exc)
+            logger.warning("%s search_tracks raised: %s", self.active_server, exc)
             return []
 
     def trigger_library_scan(self) -> bool:
@@ -188,7 +193,7 @@ class MediaServerEngine:
         try:
             return client.trigger_library_scan()
         except Exception as exc:
-            logger.debug("%s trigger_library_scan raised: %s", self.active_server, exc)
+            logger.warning("%s trigger_library_scan raised: %s", self.active_server, exc)
             return False
 
     def is_library_scanning(self) -> bool:
@@ -200,7 +205,7 @@ class MediaServerEngine:
         try:
             return client.is_library_scanning()
         except Exception as exc:
-            logger.debug("%s is_library_scanning raised: %s", self.active_server, exc)
+            logger.warning("%s is_library_scanning raised: %s", self.active_server, exc)
             return False
 
     def get_library_stats(self) -> Dict[str, int]:
@@ -212,7 +217,7 @@ class MediaServerEngine:
         try:
             return client.get_library_stats()
         except Exception as exc:
-            logger.debug("%s get_library_stats raised: %s", self.active_server, exc)
+            logger.warning("%s get_library_stats raised: %s", self.active_server, exc)
             return {}
 
     def get_recently_added_albums(self, max_results: int = 400) -> List[Any]:
