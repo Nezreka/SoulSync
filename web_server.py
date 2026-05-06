@@ -612,7 +612,17 @@ try:
     logger.info("  Media server engine initialized")
 except Exception as e:
     logger.error(f"  Media server engine failed to initialize: {e}")
-    media_server_engine = None
+    # Fallback: empty engine so downstream `engine.client('plex')`
+    # returns None instead of AttributeError'ing on a None engine
+    # global. Pre-refactor each per-server client global was its own
+    # try/except so engine failure didn't take down dispatch sites;
+    # this preserves that resilience.
+    try:
+        from core.media_server.engine import MediaServerEngine, set_media_server_engine
+        media_server_engine = MediaServerEngine(clients={})
+        set_media_server_engine(media_server_engine)
+    except Exception:
+        media_server_engine = None
 
 try:
     soulseek_client = DownloadOrchestrator()
