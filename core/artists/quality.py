@@ -32,10 +32,14 @@ Per-track flow (source-agnostic):
 The flow originally had Spotify-only logic for steps 1 and 2 with iTunes
 hardcoded as the only fallback. That broke for users with neither
 Spotify nor Deezer connected — iTunes returned sparse / no matches and
-the failure mode was silent. Now everything dispatches through the
-configured primary source via ``deps.get_metadata_fallback_client()``
-(which respects `metadata.fallback_source` in config). Spotify keeps
-its direct-lookup optimization; everything else goes through search.
+the failure mode was silent. The Track Redownload modal had been doing
+parallel multi-source search across every configured source the whole
+time; enhance now uses the same shared module
+(``core.metadata.multi_source_search``) so both endpoints dispatch
+identically. Spotify keeps its direct-lookup fast-path optimization
+(only Spotify exposes ``get_track_details(id)`` returning a rich
+wishlist-shaped payload); when that doesn't fire, the multi-source
+parallel search picks the cross-source best match.
 
 Returns `(payload_dict, http_status_code)` so the route wrapper can
 `jsonify()` and return.
@@ -60,8 +64,12 @@ class ArtistQualityDeps:
     get_wishlist_service: Callable[[], Any]
     get_current_profile_id: Callable[[], int]
     get_quality_tier_from_extension: Callable
-    get_metadata_fallback_client: Callable[[], Any]
-    get_metadata_fallback_source: Callable[[], str]
+    # Returns ``[(source_name, client), ...]`` for every metadata source
+    # the user has configured (not just the active primary). The Track
+    # Redownload modal already searches multi-source in parallel —
+    # Enhance Quality now matches that contract via the shared
+    # ``core.metadata.multi_source_search`` module.
+    get_metadata_search_sources: Callable[[], list]
 
 
 def _has_complete_metadata(payload: Optional[dict]) -> bool:
@@ -191,79 +199,44 @@ def _spotify_direct_lookup(spotify_client, spotify_tid: str,
         return None
 
 
-def _search_match(client, matching_engine, title: str, artist_name: str,
-                  album_title: str) -> Optional[dict]:
-    """Search the configured primary source for a track matching
-    title + artist. Confidence threshold 0.7; album-tracks get a
-    small bonus over singles. Returns a wishlist payload built from
-    the best match, or None if nothing clears threshold.
+# Minimum match-score threshold for accepting a match without user
+# confirmation. Mirrors the legacy single-source threshold the enhance
+# flow has always used.
+_AUTO_ACCEPT_SCORE_THRESHOLD = 0.7
 
-    Source-agnostic — works for any client implementing
-    ``search_tracks(query, limit)`` returning Track-shaped objects.
+
+def _try_upgrade_to_rich_payload(client: Any, track_id: str) -> Optional[dict]:
+    """Spotify-only optimization — ``get_track_details(id)`` returns
+    rich raw_data already in the wishlist payload shape. Other sources
+    don't expose this; caller falls back to ``_build_payload_from_track``.
     """
-    if not client:
+    if not hasattr(client, 'get_track_details'):
         return None
-
-    temp_track = type('TempTrack', (), {
-        'name': title, 'artists': [artist_name], 'album': album_title,
-    })()
     try:
-        queries = matching_engine.generate_download_queries(temp_track)
+        details = client.get_track_details(track_id)
+        if details and details.get('raw_data'):
+            return details['raw_data']
     except Exception:
-        return None
-
-    best = None
-    best_conf = 0.0
-    for query in queries[:3]:
-        try:
-            results = client.search_tracks(query, limit=5)
-        except Exception:
-            continue
-        if not results:
-            continue
-        for cand in results:
-            artist_conf = max(
-                (matching_engine.similarity_score(
-                    matching_engine.normalize_string(artist_name),
-                    matching_engine.normalize_string(a),
-                ) for a in (cand.artists or [artist_name])),
-                default=0,
-            )
-            title_conf = matching_engine.similarity_score(
-                matching_engine.normalize_string(title),
-                matching_engine.normalize_string(cand.name),
-            )
-            combined = artist_conf * 0.5 + title_conf * 0.5
-            # Small bonus for album tracks over singles.
-            album_type = getattr(cand, 'album_type', None) or ''
-            if album_type == 'album':
-                combined += 0.02
-            elif album_type == 'ep':
-                combined += 0.01
-            if combined > best_conf and combined >= 0.7:
-                best_conf = combined
-                best = cand
-        if best_conf >= 0.9:
-            break
-
-    if not best:
-        return None
-
-    # Spotify search returns a richer dict via get_track_details — try
-    # to upgrade the match if the search-results client exposes that.
-    if hasattr(client, 'get_track_details'):
-        try:
-            full_details = client.get_track_details(best.id)
-            if full_details and full_details.get('raw_data'):
-                return full_details['raw_data']
-        except Exception:
-            pass
-
-    return _build_payload_from_track(best)
+        pass
+    return None
 
 
 def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
-    """Add selected tracks to wishlist for quality enhancement re-download."""
+    """Add selected tracks to wishlist for quality enhancement re-download.
+
+    Per-track flow now mirrors the Track Redownload modal: searches every
+    configured metadata source in parallel via the shared
+    ``core.metadata.multi_source_search`` module, picks the best cross-source
+    match if it clears the auto-accept threshold, validates the match
+    has non-empty fields, and queues the wishlist payload.
+
+    Pre-refactor this was Spotify-only with an iTunes fallback —
+    Discogs / Hydrabase / Deezer-primary users got far worse coverage
+    than redownload despite both flows asking the same question
+    ("find me the metadata for this library track").
+    """
+    from core.metadata.multi_source_search import TrackQuery, search_all_sources
+
     try:
         if not track_ids:
             return {"success": False, "error": "No track IDs provided"}, 400
@@ -289,11 +262,9 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
                 track['_album_id'] = album.get('id')
                 track_lookup[tid] = track
 
-        # Resolve the primary metadata source ONCE up front. All matching
-        # routes through this. Replaces the legacy hardcoded
-        # Spotify-direct → Spotify-search → iTunes-fallback chain.
-        primary_source = deps.get_metadata_fallback_source()
-        primary_client = deps.get_metadata_fallback_client()
+        # Resolve every configured metadata source up front — the same
+        # parallel multi-source search the Track Redownload modal uses.
+        search_sources = deps.get_metadata_search_sources()
 
         enhanced_count = 0
         failed_count = 0
@@ -320,47 +291,81 @@ def enhance_artist_quality(artist_id, track_ids, deps: ArtistQualityDeps):
             album_title = track.get('_album_title', '')
 
             matched_track_data = None
+            chosen_source = None
 
-            # 1. Spotify-only direct-lookup optimization. Other sources
-            # don't have a stored-ID-to-track API today.
-            if primary_source == 'spotify' and deps.spotify_client:
+            # 1. Spotify-only direct-lookup optimization. If Spotify is
+            # configured AND we have a stored Spotify ID, fast path
+            # straight to the rich raw payload (no search required).
+            if deps.spotify_client:
                 spotify_tid = track.get('spotify_track_id')
                 if spotify_tid:
                     matched_track_data = _spotify_direct_lookup(
                         deps.spotify_client, spotify_tid,
                         artist_name, album_title, title,
                     )
+                    if matched_track_data:
+                        chosen_source = 'spotify'
 
-            # 2. Search match against the primary source (works for any
-            # source that implements search_tracks — Spotify, iTunes,
-            # Deezer, Discogs, Hydrabase).
-            if not matched_track_data:
+            # 2. Multi-source parallel search across every configured
+            # metadata source. Picks the highest-scoring match across
+            # all sources (Spotify / iTunes / Deezer / Discogs /
+            # Hydrabase — whichever the user has configured).
+            if not matched_track_data and search_sources:
                 try:
-                    matched_track_data = _search_match(
-                        primary_client, deps.matching_engine,
-                        title, artist_name, album_title,
+                    track_query = TrackQuery(
+                        title=title,
+                        artist=artist_name,
+                        album=album_title,
+                        duration_ms=track.get('duration', 0) or 0,
+                        spotify_track_id=track.get('spotify_track_id'),
+                        deezer_id=track.get('deezer_id'),
                     )
+                    multi_result = search_all_sources(track_query, search_sources)
+                    if multi_result.best_match and multi_result.best_match['score'] >= _AUTO_ACCEPT_SCORE_THRESHOLD:
+                        chosen_source = multi_result.best_match['source']
+                        best_track_obj = multi_result.best_track()
+                        if best_track_obj:
+                            # Try Spotify's rich-payload upgrade first; fall
+                            # back to building from the source-native Track.
+                            client = next(
+                                (c for n, c in search_sources if n == chosen_source),
+                                None,
+                            )
+                            if client:
+                                matched_track_data = _try_upgrade_to_rich_payload(
+                                    client, str(best_track_obj.id),
+                                )
+                            if not matched_track_data:
+                                matched_track_data = _build_payload_from_track(best_track_obj)
                 except Exception as exc:
-                    logger.error(f"[Enhance] {primary_source} search failed for {title}: {exc}")
+                    logger.error(f"[Enhance] Multi-source search failed for {title}: {exc}")
 
             # 3. Reject matches with empty / missing core fields.
             if not _has_complete_metadata(matched_track_data):
                 if matched_track_data:
                     logger.warning(
-                        f"[Enhance] {primary_source} match for '{title}' rejected — "
+                        f"[Enhance] {chosen_source} match for '{title}' rejected — "
                         f"empty title / album / artists (would render as 'unknown')"
                     )
                 matched_track_data = None
 
             if not matched_track_data:
                 failed_count += 1
+                source_list = ', '.join(name for name, _ in (search_sources or []))
+                if not source_list:
+                    reason = (
+                        'No metadata source configured — connect Spotify / '
+                        'iTunes / Deezer / Discogs / Hydrabase to enable enhance'
+                    )
+                else:
+                    reason = (
+                        f'No usable match across {source_list} — '
+                        f'try connecting an additional metadata source'
+                    )
                 failed_tracks.append({
                     'track_id': track_id,
                     'title': title,
-                    'reason': (
-                        f'No usable {primary_source} match — '
-                        f'connect another metadata source for better coverage'
-                    ),
+                    'reason': reason,
                 })
                 continue
 

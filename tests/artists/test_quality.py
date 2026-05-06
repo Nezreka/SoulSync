@@ -92,20 +92,28 @@ def _build_deps(
     wishlist=None,
     fallback_client=None,
     fallback_source=None,
+    search_sources=None,
     profile_id=1,
     quality_tier=('mp3_320', 4),
 ):
-    # Default source mirrors the runtime helper: 'spotify' when a Spotify
-    # client is wired, otherwise 'itunes'. Tests override via the
-    # ``fallback_source`` kwarg when they need a specific source name.
-    if fallback_source is None:
-        fallback_source = 'spotify' if spotify is not None else 'itunes'
-    # When primary is Spotify, the Spotify client serves both the direct
-    # lookup AND the search match — so the fallback_client doubles as the
-    # primary search client. Other sources use whatever fallback_client
-    # the test passes in.
-    if fallback_client is None and fallback_source == 'spotify':
-        fallback_client = spotify
+    """Build deps for tests.
+
+    ``search_sources`` is the new contract — list of ``(name, client)``
+    pairs the multi-source search dispatches across. For convenience,
+    ``fallback_client`` + ``fallback_source`` are still supported and
+    auto-translate to a single-source list when ``search_sources``
+    isn't passed (preserves the older test ergonomics).
+    """
+    if search_sources is None:
+        # Default: build a single-source list from fallback_client +
+        # fallback_source, mirroring the legacy single-source contract.
+        if fallback_source is None:
+            fallback_source = 'spotify' if spotify is not None else 'itunes'
+        if fallback_client is None and fallback_source == 'spotify':
+            fallback_client = spotify
+        search_sources = (
+            [(fallback_source, fallback_client)] if fallback_client else []
+        )
     deps = aq.ArtistQualityDeps(
         spotify_client=spotify,
         matching_engine=matching_engine or _FakeMatchingEngine(),
@@ -113,8 +121,7 @@ def _build_deps(
         get_wishlist_service=lambda: wishlist or _FakeWishlist(),
         get_current_profile_id=lambda: profile_id,
         get_quality_tier_from_extension=lambda fp: quality_tier,
-        get_metadata_fallback_client=lambda: fallback_client,
-        get_metadata_fallback_source=lambda: fallback_source,
+        get_metadata_search_sources=lambda: list(search_sources),
     )
     return deps
 
@@ -289,11 +296,18 @@ def test_dispatches_through_primary_source_not_spotify_specific():
     assert wishlist.added[0]['spotify_track_data']['id'] == 'dc-1'
 
 
-def test_spotify_direct_lookup_not_used_when_spotify_not_primary():
-    """Architectural pin: even if the user has Spotify configured AND a
-    track has a stored spotify_track_id, the direct-lookup optimization
-    only runs when Spotify is the ACTIVE primary source. Otherwise it
-    must search the active primary instead.
+def test_spotify_direct_lookup_runs_as_fast_path_then_falls_back():
+    """Architectural pin: Spotify direct-lookup is a fast-path
+    optimization, NOT a primary-source gate. When the user has Spotify
+    configured AND a stored spotify_track_id, direct lookup runs first
+    regardless of which other sources are wired. If it returns nothing,
+    the multi-source parallel search runs and the cross-source best
+    match wins (in this test, Discogs).
+
+    This pins the post-refactor behavior — pre-refactor direct lookup
+    was gated on Spotify being the active primary source, which broke
+    enhance for users without Spotify primary even when they had a
+    stored Spotify ID.
     """
     spotify_calls = []
 
@@ -301,7 +315,7 @@ def test_spotify_direct_lookup_not_used_when_spotify_not_primary():
         def get_track_details(self, tid):
             spotify_calls.append(('details', tid))
             return None
-        def search_tracks(self, q, limit=5):
+        def search_tracks(self, q, limit=10):
             spotify_calls.append(('search', q))
             return []
 
@@ -312,7 +326,7 @@ def test_spotify_direct_lookup_not_used_when_spotify_not_primary():
     discogs_track.album = 'Album X'
 
     class _DiscogsStub:
-        def search_tracks(self, q, limit=5):
+        def search_tracks(self, q, limit=10):
             return [discogs_track]
 
     wishlist = _FakeWishlist()
@@ -326,10 +340,11 @@ def test_spotify_direct_lookup_not_used_when_spotify_not_primary():
 
     payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
 
-    # Spotify direct lookup must NOT be invoked when primary is discogs.
-    assert ('details', 'sp-stored') not in spotify_calls
-    # Discogs match was queued instead.
+    # Fast path was attempted (Spotify configured + stored ID present).
+    assert ('details', 'sp-stored') in spotify_calls
+    # Fast path returned None → multi-source search ran → Discogs won.
     assert payload['enhanced_count'] == 1
+    assert wishlist.added[0]['spotify_track_data']['id'] == 'dc-1'
 
 
 # ---------------------------------------------------------------------------
@@ -358,8 +373,8 @@ def test_track_with_no_file_path_marked_failed():
 
 
 def test_no_match_anywhere_marked_failed():
-    """No primary-source match → failed reason names the source so the
-    user knows which one returned nothing."""
+    """No source returns a usable match → failed reason lists the
+    sources that were searched so user knows what was tried."""
     spotify = _FakeSpotify(track_details=None, search_results=[])
     deps = _build_deps(
         spotify=spotify,
@@ -370,13 +385,14 @@ def test_no_match_anywhere_marked_failed():
 
     assert payload['failed_count'] == 1
     reason = payload['failed_tracks'][0]['reason']
-    assert 'No usable spotify match' in reason
-    assert 'connect another metadata source' in reason
+    assert 'No usable match across' in reason
+    assert 'spotify' in reason
+    assert 'try connecting an additional metadata source' in reason
 
 
-def test_no_match_without_spotify_uses_source_specific_reason():
-    """When Spotify isn't connected and the active primary (e.g. iTunes)
-    finds nothing, the failure reason names iTunes specifically. Discord
+def test_no_match_without_spotify_lists_searched_sources():
+    """When Spotify isn't connected and the configured sources find
+    nothing, the failure reason lists every searched source. Discord
     case: user with no Spotify / Deezer saw enhance silently produce
     'unknown artist - unknown album - unknown track' wishlist entries
     instead of a clear failure."""
@@ -393,8 +409,23 @@ def test_no_match_without_spotify_uses_source_specific_reason():
     payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
     assert payload['failed_count'] == 1
     reason = payload['failed_tracks'][0]['reason']
-    assert 'No usable itunes match' in reason
-    assert 'connect another metadata source' in reason
+    assert 'No usable match across' in reason
+    assert 'itunes' in reason
+
+
+def test_no_match_with_no_sources_configured_prompts_setup():
+    """User with literally zero metadata sources configured gets a
+    clear prompt to connect one — instead of a generic 'no match'."""
+    deps = _build_deps(
+        spotify=None,
+        artist_detail=_artist_with_track(),
+        search_sources=[],
+    )
+
+    payload, _ = aq.enhance_artist_quality('artist-1', ['t1'], deps)
+    assert payload['failed_count'] == 1
+    reason = payload['failed_tracks'][0]['reason']
+    assert 'No metadata source configured' in reason
 
 
 def test_fallback_match_with_empty_artist_rejected():

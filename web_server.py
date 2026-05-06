@@ -9403,6 +9403,37 @@ def _build_artist_quality_deps():
     """Build the ArtistQualityDeps bundle from web_server.py globals on each call."""
     from core.wishlist_service import get_wishlist_service as _get_ws
 
+    def _resolve_search_sources():
+        """Mirror the Track Redownload modal's source list. Every
+        configured metadata source contributes to the parallel multi-source
+        search — Spotify (only when authenticated), iTunes, Deezer, plus
+        Discogs / Hydrabase when configured."""
+        sources = []
+        if spotify_client and spotify_client.is_authenticated():
+            sources.append(('spotify', spotify_client))
+        try:
+            sources.append(('itunes', _get_itunes_client()))
+        except Exception:
+            pass
+        try:
+            sources.append(('deezer', _get_deezer_client()))
+        except Exception:
+            pass
+        # Discogs needs an explicit token; only include when configured.
+        try:
+            _discogs_token = config_manager.get('discogs.token', '')
+            if _discogs_token:
+                sources.append(('discogs', _get_discogs_client(_discogs_token)))
+        except Exception:
+            pass
+        # Hydrabase only when connected (dev-mode + active client).
+        try:
+            if hydrabase_client and hydrabase_client.is_connected():
+                sources.append(('hydrabase', hydrabase_client))
+        except Exception:
+            pass
+        return sources
+
     return _artists_quality.ArtistQualityDeps(
         spotify_client=spotify_client,
         matching_engine=matching_engine,
@@ -9410,8 +9441,7 @@ def _build_artist_quality_deps():
         get_wishlist_service=_get_ws,
         get_current_profile_id=get_current_profile_id,
         get_quality_tier_from_extension=_get_quality_tier_from_extension,
-        get_metadata_fallback_client=_get_metadata_fallback_client,
-        get_metadata_fallback_source=_get_metadata_fallback_source,
+        get_metadata_search_sources=_resolve_search_sources,
     )
 
 
@@ -11558,21 +11588,16 @@ def redownload_search_metadata(track_id):
             'thumb_url': thumb_url,
         }
 
-        # Search all available metadata sources in parallel
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from difflib import SequenceMatcher
+        # Search all available metadata sources in parallel via the
+        # shared module — same code path the Enhance Quality flow uses
+        # so both endpoints have identical scoring + per-source query
+        # optimization + current-match flagging.
+        from core.metadata.multi_source_search import (
+            TrackQuery,
+            search_all_sources,
+        )
 
-        def _score_metadata_match(result):
-            """Score a metadata result against the current track."""
-            title_sim = SequenceMatcher(None, track_title.lower(), (result.get('name') or '').lower()).ratio()
-            artist_sim = SequenceMatcher(None, artist_name.lower(), (result.get('artist') or '').lower()).ratio()
-            dur_diff = abs((row['duration'] or 0) - (result.get('duration_ms') or 0))
-            dur_score = max(0, 1 - dur_diff / 30000) if row['duration'] else 0.5
-            return round((title_sim * 0.5 + artist_sim * 0.35 + dur_score * 0.15), 3)
-
-        metadata_results = {}
         sources_to_search = []
-
         if spotify_client and spotify_client.is_authenticated():
             sources_to_search.append(('spotify', spotify_client))
         try:
@@ -11584,65 +11609,23 @@ def redownload_search_metadata(track_id):
         except Exception as e:
             logger.debug(f"Deezer client not available for redownload search: {e}")
 
-        # Build source-optimized queries
-        deezer_query = f'artist:"{artist_name}" track:"{clean_title}"'
-
-        def _search_source(source_name, client):
-            try:
-                # Deezer works best with structured artist:/track: queries
-                search_q = deezer_query if source_name == 'deezer' else query
-                logger.info(f"[Redownload] Searching {source_name} for: {search_q}")
-                track_objs = client.search_tracks(search_q, limit=10)
-                # If no results, try plain query as fallback
-                if not track_objs and search_q != query:
-                    track_objs = client.search_tracks(query, limit=10)
-                # Last resort: title only
-                if not track_objs and clean_title != query:
-                    track_objs = client.search_tracks(clean_title, limit=10)
-                logger.info(f"[Redownload] {source_name} returned {len(track_objs)} results")
-                results = []
-                for t in track_objs:
-                    r = {
-                        'id': str(t.id),
-                        'name': t.name,
-                        'artist': ', '.join(t.artists) if t.artists else '',
-                        'album': t.album or '',
-                        'duration_ms': t.duration_ms or 0,
-                        'image_url': t.image_url or '',
-                        'is_current_match': False,
-                    }
-                    # Flag current match
-                    if source_name == 'spotify' and row['spotify_track_id'] and str(t.id) == str(row['spotify_track_id']):
-                        r['is_current_match'] = True
-                    elif source_name == 'deezer' and row['deezer_id'] and str(t.id) == str(row['deezer_id']):
-                        r['is_current_match'] = True
-                    r['match_score'] = _score_metadata_match(r)
-                    results.append(r)
-                results.sort(key=lambda x: (-int(x['is_current_match']), -x['match_score']))
-                return source_name, results
-            except Exception as e:
-                logger.error(f"[Redownload] Metadata search failed for {source_name}: {e}", exc_info=True)
-                return source_name, []
-
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {pool.submit(_search_source, name, client): name for name, client in sources_to_search}
-            for future in as_completed(futures):
-                source_name, results = future.result()
-                metadata_results[source_name] = results
-
-        # Find best overall match
-        best_match = None
-        for source, results in metadata_results.items():
-            if results:
-                top = results[0]
-                if not best_match or top['match_score'] > best_match['score']:
-                    best_match = {'source': source, 'index': 0, 'score': top['match_score']}
+        track_query = TrackQuery(
+            title=track_title,
+            artist=artist_name,
+            album=row['album_title'] or '',
+            duration_ms=row['duration'] or 0,
+            spotify_track_id=row['spotify_track_id'],
+            deezer_id=row['deezer_id'],
+        )
+        result = search_all_sources(
+            track_query, sources_to_search, clean_title=clean_title,
+        )
 
         return jsonify({
             "success": True,
             "current_track": current_track,
-            "metadata_results": metadata_results,
-            "best_match": best_match,
+            "metadata_results": result.metadata_results,
+            "best_match": result.best_match,
         })
     except Exception as e:
         logger.error(f"Error in redownload metadata search: {e}", exc_info=True)
