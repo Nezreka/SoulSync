@@ -45,11 +45,16 @@ logger = get_logger("media_server.engine")
 
 
 class MediaServerEngine:
-    """Single entry point for cross-server library operations.
+    """Registry-backed access to the per-server media clients.
 
-    The engine knows which server is "active" via the
-    ``server.active`` config + falls back to direct dispatch for
-    server-specific calls via ``engine.client(name)``.
+    Owns the per-server client instances + a small set of generic
+    accessors (``client(name)`` / ``active_client()`` /
+    ``configured_clients()`` / ``reload_config(name)``) so call sites
+    don't reach for separate per-server globals. The one cross-server
+    dispatch wrapper kept on the engine — ``is_connected()`` —
+    backs the dashboard status indicators that have multiple call
+    sites; everything else dispatches per-server in the call site
+    itself, reaching the relevant client through ``engine.client(name)``.
     """
 
     def __init__(
@@ -138,11 +143,15 @@ class MediaServerEngine:
         """Return ``{name: client}`` for every server that's both
         registered AND reports ``is_connected() == True``. Replaces
         the legacy per-server `if X and X.is_connected(): ...`
-        chains in web_server.py."""
+        chains in web_server.py.
+
+        ``is_connected`` is in REQUIRED_METHODS, so every client the
+        registry yields here implements it — no hasattr guard needed.
+        """
         result: Dict[str, MediaServerClient] = {}
         for name, client in self.registry.all_clients():
             try:
-                if not hasattr(client, 'is_connected') or client.is_connected():
+                if client.is_connected():
                     result[name] = client
             except Exception as exc:
                 logger.warning("%s is_connected raised in configured_clients: %s", name, exc)
