@@ -570,7 +570,7 @@ IS_SHUTTING_DOWN = False
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
-spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = media_server_engine = None
 
 try:
     spotify_client = get_spotify_client()
@@ -621,18 +621,20 @@ try:
     set_media_server_engine(media_server_engine)
     logger.info("  Media server engine initialized")
 except Exception as e:
-    logger.error(f"  Media server engine failed to initialize: {e}")
+    logger.error(f"  Media server engine failed to initialize: {e}", exc_info=True)
     # Fallback: empty engine so downstream `engine.client('plex')`
     # returns None instead of AttributeError'ing on a None engine
-    # global. Pre-refactor each per-server client global was its own
+    # global. Pre-refactor each per-server client global had its own
     # try/except so engine failure didn't take down dispatch sites;
-    # this preserves that resilience.
+    # this preserves that resilience. If the fallback ALSO fails
+    # (e.g. the import itself broke), media_server_engine stays as
+    # the None initialized at the top of the module.
     try:
         from core.media_server.engine import MediaServerEngine, set_media_server_engine
         media_server_engine = MediaServerEngine(clients={})
         set_media_server_engine(media_server_engine)
-    except Exception:
-        media_server_engine = None
+    except Exception as fallback_exc:
+        logger.error(f"  Empty-engine fallback also failed: {fallback_exc}", exc_info=True)
 
 try:
     download_orchestrator = DownloadOrchestrator()

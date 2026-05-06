@@ -21,8 +21,7 @@ so this module stays import-light.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     # plexapi types — only loaded when type-checking; runtime
@@ -34,12 +33,13 @@ if TYPE_CHECKING:
 
 @dataclass
 class TrackInfo:
-    """Canonical track-shape returned by every media server client.
+    """Canonical track-shape returned by media server clients.
 
-    All four servers (Plex, Jellyfin, Navidrome, SoulSync standalone)
-    used to define their own near-identical ``XTrackInfo`` dataclass.
-    Lifted to one canonical type here so consumers (matching engine,
-    sync service, library scanners) get a single import.
+    Plex, Jellyfin, and Navidrome each defined their own near-identical
+    ``XTrackInfo`` dataclass (SoulSync standalone uses richer per-track
+    wrappers and doesn't surface this exact shape). Lifted to one
+    canonical type here so consumers (matching engine, sync service,
+    library scanners) get a single import.
     """
 
     id: str
