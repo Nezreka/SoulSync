@@ -8627,6 +8627,58 @@ def get_artist_discography(artist_id):
         from core.metadata.lookup import MetadataLookupOptions
         from core.metadata_service import get_artist_discography as _get_artist_discography
 
+        # Server-side per-source ID resolution. Look up the library row
+        # by ANY of the IDs the frontend might send: library DB id,
+        # spotify_artist_id, itunes_artist_id, deezer_id, or
+        # musicbrainz_id. Once matched, pull every stored provider ID
+        # and dispatch the right ID to each source via
+        # ``artist_source_ids``. Mirrors what the watchlist scanner
+        # already does.
+        #
+        # Without this, the frontend's ID choice fully decides which
+        # source can answer correctly:
+        #   - sends DB id 194687 → Deezer accepts (wrong: it's a real
+        #     Deezer ID for a different artist)
+        #   - sends Spotify ID `1bDWGdIC...` → Deezer rejects → falls
+        #     back to fuzzy name search → may pick wrong artist
+        # With server-side resolution, every source gets its OWN stored
+        # ID regardless of which one the URL carries.
+        artist_source_ids = {}
+        try:
+            _db = get_database()
+            _conn = _db._get_connection()
+            try:
+                _cur = _conn.cursor()
+                _cur.execute("""
+                    SELECT spotify_artist_id, itunes_artist_id,
+                           deezer_id, musicbrainz_id
+                    FROM artists
+                    WHERE id = ?
+                       OR spotify_artist_id = ?
+                       OR itunes_artist_id = ?
+                       OR deezer_id = ?
+                       OR musicbrainz_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                _row = _cur.fetchone()
+                if _row:
+                    if _row['spotify_artist_id']:
+                        artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
+                    if _row['itunes_artist_id']:
+                        artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
+                    if _row['deezer_id']:
+                        artist_source_ids['deezer'] = str(_row['deezer_id'])
+                    if _row['musicbrainz_id']:
+                        artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
+                    logger.info(
+                        f"Discography: resolved per-source IDs for artist_id={artist_id} → "
+                        f"{artist_source_ids}"
+                    )
+            finally:
+                _conn.close()
+        except Exception as _id_exc:
+            logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+
         discography = _get_artist_discography(
             artist_id,
             artist_name=artist_name,
@@ -8636,6 +8688,7 @@ def get_artist_discography(artist_id):
                 skip_cache=False,
                 max_pages=0,
                 limit=50,
+                artist_source_ids=artist_source_ids or None,
             ),
         )
 
