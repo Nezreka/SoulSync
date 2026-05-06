@@ -4,10 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from utils.logging_config import get_logger
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
-from core.plex_client import PlexClient
 from core.media_server.types import TrackInfo
-from core.jellyfin_client import JellyfinClient
-from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
 from core.matching_engine import MusicMatchingEngine, MatchResult
 
