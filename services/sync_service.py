@@ -44,17 +44,31 @@ class SyncProgress:
     failed_tracks: int = 0
 
 class PlaylistSyncService:
-    def __init__(self, spotify_client: SpotifyClient, plex_client: PlexClient, soulseek_client: SoulseekClient, jellyfin_client: JellyfinClient = None, navidrome_client = None):
+    def __init__(self, spotify_client: SpotifyClient, soulseek_client: SoulseekClient, media_server_engine=None):
+        """Initialize the sync service.
+
+        ``media_server_engine`` is the central MediaServerEngine that owns
+        the per-server clients (Plex / Jellyfin / Navidrome / SoulSync).
+        Replaces the legacy per-server kwargs (plex_client / jellyfin_client
+        / navidrome_client) — all media-server access now goes through
+        ``self._engine.client(name)`` so swapping the active server doesn't
+        need a service rebuild.
+        """
         self.spotify_client = spotify_client
-        self.plex_client = plex_client
-        self.jellyfin_client = jellyfin_client
-        self.navidrome_client = navidrome_client
+        self._engine = media_server_engine
         self.soulseek_client = soulseek_client
         self.progress_callbacks = {}  # Playlist-specific progress callbacks
         self.syncing_playlists = set()  # Track multiple syncing playlists
         self._cancelled = False
         self.matching_engine = MusicMatchingEngine()
-    
+
+    def _media_client(self, name: str):
+        """Resolve a per-server client through the engine, or None when the
+        engine isn't wired (defensive — every production path passes one)."""
+        if self._engine is None:
+            return None
+        return self._engine.client(name)
+
     def _get_active_media_client(self, profile_id=None):
         """Get the active media client based on config settings.
 
@@ -68,26 +82,27 @@ class PlaylistSyncService:
             active_server = config_manager.get_active_media_server()
 
             if active_server == "jellyfin":
-                if not self.jellyfin_client:
+                client = self._media_client('jellyfin')
+                if not client:
                     logger.error("Jellyfin client not provided to sync service")
                     return None, "jellyfin"
-                # Apply per-profile Jellyfin library if set
                 if profile_id:
-                    self._apply_profile_library(profile_id, 'jellyfin', self.jellyfin_client)
-                return self.jellyfin_client, "jellyfin"
+                    self._apply_profile_library(profile_id, 'jellyfin', client)
+                return client, "jellyfin"
             elif active_server == "navidrome":
-                if not self.navidrome_client:
+                client = self._media_client('navidrome')
+                if not client:
                     logger.error("Navidrome client not provided to sync service")
                     return None, "navidrome"
-                return self.navidrome_client, "navidrome"
+                return client, "navidrome"
             else:  # Default to Plex
-                # Apply per-profile Plex library if set
-                if profile_id:
-                    self._apply_profile_library(profile_id, 'plex', self.plex_client)
-                return self.plex_client, "plex"
+                client = self._media_client('plex')
+                if profile_id and client:
+                    self._apply_profile_library(profile_id, 'plex', client)
+                return client, "plex"
         except Exception as e:
             logger.error(f"Error determining active media server: {e}")
-            return self.plex_client, "plex"  # Fallback to Plex
+            return self._media_client('plex'), "plex"  # Fallback to Plex
     
     def _apply_profile_library(self, profile_id, server_type, client):
         """Apply per-profile library selection to a media client if configured."""
