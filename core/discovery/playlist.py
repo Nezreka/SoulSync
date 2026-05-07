@@ -196,8 +196,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             current_item=track_name,
                             log_line=f'{track_name} → {cached_match.get("name", "?")} (cache)', log_type='success')
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("discovery cache lookup failed: %s", e)
 
                 # Step 2: Generate search queries
                 try:
@@ -252,8 +252,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             if match and confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = match
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("extended discovery search failed: %s", e)
 
                 # Step 4: Store results
                 if best_match and best_confidence >= min_confidence:
@@ -290,8 +290,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             if _raw:
                                 track_number = _raw.get('track_number')
                                 disc_number = _raw.get('disc_number')
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("metadata cache lookup for album enrichment failed: %s", e)
 
                     matched_data = {
                         'id': best_match.id if hasattr(best_match, 'id') else '',
@@ -323,8 +323,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             best_confidence, matched_data,
                             track_name, artist_name
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("save discovery cache match failed: %s", e)
 
                     logger.info(f"[{i+1}/{len(undiscovered_tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
                     deps.update_automation_progress(automation_id,
@@ -366,8 +366,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     'failed_count': str(total_failed),
                     'skipped_count': str(total_skipped),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("discovery_completed emit failed: %s", e)
 
         logger.error(f"Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
         deps.update_automation_progress(automation_id, status='finished', progress=100,
