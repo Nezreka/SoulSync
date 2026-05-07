@@ -579,8 +579,8 @@ class RepairWorker:
         if self._on_job_start:
             try:
                 self._on_job_start(job_id, job.display_name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("on_job_start callback failed: %s", e)
 
         # Record job start
         run_id = self._record_job_start(job_id)
@@ -590,8 +590,8 @@ class RepairWorker:
             if self._on_job_progress:
                 try:
                     self._on_job_progress(job_id, **kwargs)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("on_job_progress callback failed: %s", e)
 
         # Build context
         context = JobContext(
@@ -636,8 +636,8 @@ class RepairWorker:
             try:
                 status = 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished'
                 self._on_job_finish(job_id, status, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("on_job_finish callback failed: %s", e)
 
         logger.info(
             "Job %s complete: scanned=%d fixed=%d findings=%d errors=%d (%.1fs)",
@@ -1164,8 +1164,8 @@ class RepairWorker:
                     audio = MutagenFile(resolved)
                     if audio:
                         _, total_tracks = _read_track_number_tag(audio)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read total_tracks tag from file: %s", e)
             total_tracks = int(total_tracks or 0)
             _fix_track_number_tag(resolved, int(correct_num), total_tracks)
 
@@ -1185,8 +1185,8 @@ class RepairWorker:
                         cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                        (new_path, resolved))
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to update DB file_path after rename: %s", e)
                 finally:
                     if conn:
                         conn.close()
@@ -1544,8 +1544,8 @@ class RepairWorker:
                             if not os.path.exists(d):
                                 try:
                                     shutil.move(s, d)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("Failed to move sidecar %s: %s", s, e)
 
                     # Clean up empty dirs
                     self._cleanup_empty_parents(resolved)
@@ -1652,8 +1652,8 @@ class RepairWorker:
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to remove wrong file %s: %s", resolved, e)
             if track_id:
                 try:
                     conn = self.db._get_connection()
@@ -1661,8 +1661,8 @@ class RepairWorker:
                     cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
                     conn.commit()
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to delete wrong track row from DB: %s", e)
             return {'success': True, 'action': 'redownload',
                     'message': f'Added "{expected_title}" to wishlist, removed wrong file'}
 
@@ -2389,8 +2389,8 @@ class RepairWorker:
                 album_thumb = album_row[2]
                 album_track_count = album_row[3]
                 spotify_album_id = album_row[4] if len(album_row) > 4 else None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load album metadata for retag: %s", e)
         finally:
             if conn_meta:
                 conn_meta.close()
@@ -2529,8 +2529,8 @@ class RepairWorker:
                     if not os.path.exists(sidecar_dst):
                         try:
                             shutil.move(sidecar_src, sidecar_dst)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Failed to move sidecar %s: %s", sidecar_src, e)
 
             # Update DB file path
             conn = None
@@ -2550,8 +2550,8 @@ class RepairWorker:
                         cursor.execute(
                             "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
                             (dst, '%/' + escaped))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Suffix-match DB path update failed: %s", e)
                 conn.commit()
             except Exception as e:
                 logger.debug("DB path update failed for %s: %s", src, e)
@@ -2646,8 +2646,8 @@ class RepairWorker:
                 if os.path.exists(out_path):
                     try:
                         os.remove(out_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to remove out_path after ffmpeg failure: %s", e)
                 return {'success': False, 'error': f'ffmpeg conversion failed: {proc.stderr[:200] if proc.stderr else "unknown error"}'}
 
             # Update QUALITY tag
@@ -2664,8 +2664,8 @@ class RepairWorker:
                         from mutagen.mp4 import MP4FreeForm
                         audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
                     audio.save()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to write QUALITY tag on lossy copy: %s", e)
 
             # Embed cover art from source FLAC
             if codec in ('opus', 'aac'):
@@ -2697,8 +2697,8 @@ class RepairWorker:
                                 fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
                                 dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
                                 dest_audio.save()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to embed cover art in lossy copy: %s", e)
 
             # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
             delete_original = False
@@ -2724,8 +2724,8 @@ class RepairWorker:
                             )
                             conn.commit()
                             conn.close()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Failed to update DB path after lossy conversion: %s", e)
                         return {'success': True, 'action': 'converted_and_deleted',
                                 'message': f'Converted to {quality_label} and deleted original'}
                 except Exception as e:
@@ -2738,8 +2738,8 @@ class RepairWorker:
             if os.path.exists(out_path):
                 try:
                     os.remove(out_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to remove out_path after timeout: %s", e)
             return {'success': False, 'error': 'Conversion timed out (120s)'}
         except Exception as e:
             return {'success': False, 'error': f'Conversion error: {e}'}
