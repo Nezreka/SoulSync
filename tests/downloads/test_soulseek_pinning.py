@@ -256,3 +256,94 @@ def test_cancel_download_returns_false_when_username_lookup_fails(configured_cli
                       AsyncMock(return_value=[])):
         result = _run_async(configured_client.cancel_download('missing-id', None))
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# HTTP timeout config (issue #499 — prevent worker thread deadlock)
+# ---------------------------------------------------------------------------
+
+
+def test_default_timeout_constant_has_bounded_values():
+    """Pin issue #499 fix: the module-level timeout config is defined
+    with a hard ceiling so an unresponsive slskd can't wedge the
+    download worker thread permanently. Any future change that drops
+    or unbounds the timeout would re-introduce the
+    'downloads stop after 2-3 hours' deadlock."""
+    from core.soulseek_client import _SLSKD_DEFAULT_TIMEOUT
+    import aiohttp
+
+    assert isinstance(_SLSKD_DEFAULT_TIMEOUT, aiohttp.ClientTimeout)
+    # Total timeout must be set and bounded — prevents infinite hang.
+    assert _SLSKD_DEFAULT_TIMEOUT.total is not None
+    assert _SLSKD_DEFAULT_TIMEOUT.total > 0
+    assert _SLSKD_DEFAULT_TIMEOUT.total <= 300, (
+        f"Total timeout {_SLSKD_DEFAULT_TIMEOUT.total}s exceeds 5min "
+        "ceiling — slskd metadata calls should never legitimately take this long"
+    )
+    # Connect timeout bounded — TCP connect to slskd should be fast.
+    assert _SLSKD_DEFAULT_TIMEOUT.connect is not None
+    assert _SLSKD_DEFAULT_TIMEOUT.connect <= 60
+
+
+def test_make_request_returns_none_on_timeout(configured_client):
+    """Pin: when the slskd HTTP call times out (asyncio.TimeoutError),
+    ``_make_request`` returns None rather than raising. The download
+    worker thread unblocks; the caller treats None as a normal failure
+    and the batch's stuck-detection later marks the task not_found.
+    Pre-fix this raised → propagated up the call stack → eventually
+    the worker thread died but only after wedging the executor pool."""
+
+    async def _raise_timeout(*args, **kwargs):
+        raise asyncio.TimeoutError("simulated slskd hang")
+
+    # Patch aiohttp.ClientSession to return a session whose request()
+    # context manager raises TimeoutError on entry.
+    class _StubSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+
+        def request(self, *args, **kwargs):
+            class _Cm:
+                async def __aenter__(self_inner):
+                    raise asyncio.TimeoutError("simulated slskd hang")
+                async def __aexit__(self_inner, *args):
+                    return None
+            return _Cm()
+
+        async def close(self):
+            return None
+
+    with patch('aiohttp.ClientSession', return_value=_StubSession()):
+        result = _run_async(configured_client._make_request('GET', 'transfers/downloads'))
+
+    assert result is None, "Timeout must return None, not raise"
+
+
+def test_make_direct_request_returns_none_on_timeout(configured_client):
+    """Same pin for ``_make_direct_request`` (the non-/api/v0/ helper).
+    Both code paths are used by different slskd endpoints — neither
+    can be allowed to wedge."""
+
+    class _StubSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+
+        def request(self, *args, **kwargs):
+            class _Cm:
+                async def __aenter__(self_inner):
+                    raise asyncio.TimeoutError("simulated slskd hang")
+                async def __aexit__(self_inner, *args):
+                    return None
+            return _Cm()
+
+        async def close(self):
+            return None
+
+    with patch('aiohttp.ClientSession', return_value=_StubSession()):
+        result = _run_async(configured_client._make_direct_request('GET', 'health'))
+
+    assert result is None
