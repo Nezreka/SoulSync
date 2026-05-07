@@ -24342,6 +24342,55 @@ div.artist-hero-badge {
     font-variant-numeric: tabular-nums;
 }
 
+/* Per-row wishlist button — only shown on metadata-source rows
+   (Spotify / Deezer). Last.fm rows show the playcount instead. */
+.hero-top-track-download {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: all 0.2s;
+}
+.hero-top-track:hover .hero-top-track-download {
+    opacity: 1;
+}
+.hero-top-track-download:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-rgb));
+    transform: scale(1.1);
+}
+
+/* Footer "Download All" button on the top-tracks sidebar — only shown
+   when metadata-source provided downloadable tracks. */
+.hero-top-tracks-download-all {
+    margin-top: 12px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.08);
+    color: rgb(var(--accent-rgb));
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.hero-top-tracks-download-all:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .artist-hero-section {

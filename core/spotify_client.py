@@ -1754,6 +1754,31 @@ class SpotifyClient:
             return None
 
     @rate_limited
+    def get_artist_top_tracks(self, artist_id: str, country: str = 'US', limit: int = 10) -> List[Dict[str, Any]]:
+        """Return up to 10 top tracks for an artist (Spotify caps the response at 10).
+
+        Spotify's `artist_top_tracks` endpoint always returns ~10 tracks for the given
+        market regardless of any limit param. The `limit` argument here is honored as
+        a UI-side trim only — it never reduces the number of API calls. Tracks come
+        back in Spotify's standard track-object shape (id, name, artists, album, ...)
+        so the rest of the pipeline can consume them unchanged.
+        """
+        if not artist_id:
+            return []
+        if not self.is_spotify_authenticated():
+            return []
+        try:
+            result = self.sp.artist_top_tracks(artist_id, country=country)
+        except Exception as e:
+            _detect_and_set_rate_limit(e, 'get_artist_top_tracks')
+            logger.warning(f"Spotify artist_top_tracks failed for {artist_id}: {e}")
+            return []
+        if not result:
+            return []
+        tracks = result.get('tracks', []) or []
+        return tracks[:max(1, int(limit or 10))]
+
+    @rate_limited
     def get_artists_batch(self, artist_ids: List[str]) -> Dict[str, Dict]:
         """Get multiple artists, using cache where possible, batch API for misses.
         Returns dict keyed by artist_id → artist data dict."""

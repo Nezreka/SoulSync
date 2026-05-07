@@ -599,6 +599,74 @@ class DeezerClient:
 
         return result
 
+    def get_artist_top_tracks(self, artist_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Return the artist's top tracks in Spotify-compatible dict format.
+
+        Wraps Deezer's `/artist/{id}/top?limit=N`. Returns dicts with the same
+        shape Spotify's `artist_top_tracks` produces — id, name, artists, album
+        (with album_type / total_tracks / release_date / images), duration_ms,
+        track_number, disc_number — so callers don't need to branch on source.
+        """
+        if not artist_id:
+            return []
+        try:
+            limit = max(1, min(int(limit or 10), 100))
+        except (TypeError, ValueError):
+            limit = 10
+
+        data = self._api_get(f'artist/{artist_id}/top', {'limit': limit})
+        if not data or 'data' not in data:
+            return []
+
+        tracks = []
+        for track_data in data['data']:
+            if not isinstance(track_data, dict):
+                continue
+            artist_data = track_data.get('artist') or {}
+            album_data = track_data.get('album') or {}
+
+            # Build images list from any cover sizes Deezer returned for the album
+            images = []
+            if isinstance(album_data, dict):
+                for size_key, dim in [('cover_xl', 1000), ('cover_big', 500),
+                                       ('cover_medium', 250), ('cover_small', 56)]:
+                    if album_data.get(size_key):
+                        images.append({'url': album_data[size_key], 'height': dim, 'width': dim})
+
+            # Deezer `/artist/{id}/top` results don't include record_type on the
+            # nested album object; we don't have a track-count to infer from
+            # either. Default 'album' so the path-builder template variable
+            # always has something to substitute (existing behavior elsewhere).
+            album_payload = {
+                'id': str(album_data.get('id', '')) if isinstance(album_data, dict) else '',
+                'name': album_data.get('title', '') if isinstance(album_data, dict) else '',
+                'album_type': 'album',
+                'images': images,
+                'release_date': '',
+                'total_tracks': 0,
+                'artists': [{'name': artist_data.get('name', '')}] if isinstance(artist_data, dict) else [],
+            }
+
+            tracks.append({
+                'id': str(track_data.get('id', '')),
+                'name': track_data.get('title', ''),
+                'artists': [{
+                    'id': str(artist_data.get('id', '')) if isinstance(artist_data, dict) else '',
+                    'name': artist_data.get('name', '') if isinstance(artist_data, dict) else '',
+                }],
+                'album': album_payload,
+                'duration_ms': (track_data.get('duration') or 0) * 1000,  # Deezer is seconds
+                'popularity': track_data.get('rank', 0),
+                'preview_url': track_data.get('preview'),
+                'external_urls': {'deezer': track_data['link']} if track_data.get('link') else {},
+                'track_number': track_data.get('track_position'),
+                'disc_number': track_data.get('disk_number', 1),
+                'explicit': bool(track_data.get('explicit_lyrics', False)),
+                '_source': 'deezer',
+            })
+
+        return tracks
+
     def get_artist_info(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """Get full artist details — returns Spotify-compatible dict (metadata source interface).
 
