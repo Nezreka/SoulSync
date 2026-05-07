@@ -525,8 +525,8 @@ class HydrabaseClient:
                 for album in albums:
                     if album.image_url:
                         return album.image_url
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("get artist image from albums failed: %s", e)
         return None
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:

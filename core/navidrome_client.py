@@ -922,8 +922,8 @@ class NavidromeClient(MediaServerClient):
                 if target_playlist:
                     self._make_request('deletePlaylist', {'id': target_playlist.id})
                     logger.info(f"Deleted existing backup playlist '{target_name}'")
-            except Exception:
-                pass  # Target doesn't exist, which is fine
+            except Exception as e:
+                logger.debug("backup playlist precheck: %s", e)
 
             # Create new playlist with copied tracks
             try:

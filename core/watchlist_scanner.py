@@ -2745,8 +2745,8 @@ class WatchlistScanner:
                                 if release_date_str and len(release_date_str) >= 10:
                                     release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                     is_new = (datetime.now() - release_date).days <= 30
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("album release_date parse failed: %s", e)
 
                             for track in tracks:
                                 try:
@@ -2778,8 +2778,8 @@ class WatchlistScanner:
                                                         synth_pop += 15
                                                     elif age_days <= 365:
                                                         synth_pop += 5
-                                            except Exception:
-                                                pass
+                                            except Exception as e:
+                                                logger.debug("synthetic popularity age calc failed: %s", e)
                                         if similar_artist.occurrence_count >= 3:
                                             synth_pop += 10
                                         elif similar_artist.occurrence_count >= 2:
@@ -2902,8 +2902,8 @@ class WatchlistScanner:
                                 if release_date_str and len(release_date_str) >= 10:
                                     release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                     is_new = (datetime.now() - release_date).days <= 30
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("album release_date parse failed: %s", e)
 
                             for track in tracks:
                                 try:
@@ -3107,8 +3107,8 @@ class WatchlistScanner:
                                     release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
                                     days_old = (datetime.now() - release_date).days
                                     is_new = days_old <= 30
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("new-release date parse: %s", e)
 
                             # Add each track to discovery pool
                             for track in tracks:
@@ -3214,8 +3214,8 @@ class WatchlistScanner:
                     elif profile['avg_daily_plays'] > 20:
                         days_lookback = 21   # Heavy listener — keep it fresh
                     logger.info(f"Recent albums window: {days_lookback} days (avg {profile['avg_daily_plays']:.1f} plays/day)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("listening profile lookback adjust failed: %s", e)
             cutoff_date = datetime.now() - timedelta(days=days_lookback)
             discovery_sources = self._discovery_source_priority()
             if not discovery_sources:
@@ -3498,8 +3498,8 @@ class WatchlistScanner:
                             _artist_genre_cache[_row[0].lower()] = {g.strip().lower() for g in _row[1].split(',') if g.strip()}
                     _conn.close()
                     logger.debug(f"Built genre cache for {len(_artist_genre_cache)} artists")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist genre cache build failed: %s", e)
 
             logger.info(f"Curating playlists for sources: {sources_to_process}")
 
@@ -3552,8 +3552,8 @@ class WatchlistScanner:
                                     if release_date_str and len(release_date_str) >= 10:
                                         release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                         days_old = (datetime.now() - release_date).days
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("release-date parse: %s", e)
 
                                 for track in album_data['tracks'].get('items', []):
                                     track_id = track.get('id')
@@ -3760,8 +3760,8 @@ class WatchlistScanner:
                     _wa_list = self.database.get_watchlist_artists(profile_id=profile_id)
                     for _wa in _wa_list:
                         _wa_id_to_name[str(_wa.id)] = (_wa.artist_name or '').lower()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("watchlist artist id-to-name map failed: %s", e)
 
                 all_similar = self.database.get_top_similar_artists(limit=200, profile_id=profile_id)
 

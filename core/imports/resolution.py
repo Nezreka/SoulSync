@@ -407,8 +407,8 @@ def get_single_track_import_context(
                                     'genres',
                                     default=[],
                                 ) or []
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("override artist genres: %s", e)
                     return payload
             except Exception as exc:
                 logger.debug("Override track lookup failed on %s for %s: %s", chosen_source, override_id, exc)
@@ -461,8 +461,8 @@ def get_single_track_import_context(
                         'genres',
                         default=[],
                     ) or []
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("artist genres lookup: %s", e)
         return payload
 
     return _build_single_import_fallback_context(title, artist, source_priority)

@@ -215,8 +215,8 @@ def finalize_auto_wishlist_completion(
                 'tracks_found': str(tracks_added),
                 'tracks_failed': str(total_failed - tracks_added),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("emit wishlist_processing_completed failed: %s", e)
 
     return completion_summary
 

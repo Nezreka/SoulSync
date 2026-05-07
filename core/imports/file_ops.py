@@ -362,8 +362,8 @@ def downsample_hires_flac(final_path, context):
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("cleanup downsample temp: %s", _e)
     return None
 
 
@@ -468,8 +468,8 @@ def create_lossy_copy(final_path):
         if os.path.exists(out_path):
             try:
                 os.remove(out_path)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("cleanup lossy copy artifact: %s", _e)
         return None
     except subprocess.TimeoutExpired:
         logger.warning(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")

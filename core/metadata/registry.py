@@ -278,8 +278,8 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
         if client and client.is_connected():
             if not require_enabled or bool(_dev_mode_enabled_provider()):
                 return client
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("hydrabase client lookup: %s", e)
 
     if allow_fallback:
         return get_itunes_client()
@@ -394,8 +394,8 @@ def get_client_for_source(
             client = get_spotify_client(client_factory=spotify_client_factory)
             if client and client.is_spotify_authenticated():
                 return client
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("spotify client get_for_source: %s", e)
         return None
 
     if source == "deezer":

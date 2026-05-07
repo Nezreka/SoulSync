@@ -176,8 +176,8 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
                             artist_image = images[0].get('url') if images else None
                         elif hasattr(artist_info, 'image_url'):
                             artist_image = artist_info.image_url
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist image resolve: %s", e)
             else:
                 # No pre-resolved ID — search by name
                 try:
@@ -224,8 +224,8 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
                         cursor.execute("SELECT title FROM albums WHERE artist_id = ?", (ar['id'],))
                         for alb_row in cursor.fetchall():
                             owned_titles.add((alb_row['title'] or '').strip().lower())
-            except Exception:
-                pass  # Non-critical — owned badges just won't show
+            except Exception as e:
+                logger.debug("owned-titles lookup: %s", e)
 
             # Build release list
             releases = []
@@ -256,8 +256,8 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
             if cache and releases:
                 try:
                     cache.store_entity(source_name, 'artist_discography', cache_key, result)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("cache discography write: %s", e)
 
             return result
 

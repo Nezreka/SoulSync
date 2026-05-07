@@ -507,7 +507,7 @@ class ListeningStatsWorker:
             if conn:
                 try:
                     conn.close()
-                except Exception:
+                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
 
     def _resolve_db_track_id(self, title, artist):

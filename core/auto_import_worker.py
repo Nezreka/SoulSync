@@ -596,8 +596,8 @@ class AutoImportWorker:
                     # Keep weak AcoustID result as fallback
                     if fp_result2 and (not result or fp_result2.get('identification_confidence', 0) > result.get('identification_confidence', 0)):
                         result = fp_result2
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("acoustid fingerprint fallback failed: %s", e)
 
         # If we have good tag data (artist + title), prefer tag-based identification
         # over a weak metadata/AcoustID result — tags from post-processed files are reliable
@@ -1100,8 +1100,8 @@ class AutoImportWorker:
             if folder_artist and folder_artist.lower() != artist_name.lower():
                 logger.info(f"[Auto-Import] Parent folder artist '{folder_artist}' differs from tag artist '{artist_name}' — using folder artist")
                 artist_name = folder_artist
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("folder artist override failed: %s", e)
         release_date = identification.get('release_date', '') or album_data.get('release_date', '')
 
         # Compute total discs
@@ -1202,8 +1202,8 @@ class AutoImportWorker:
                     'completed_tracks': str(processed),
                     'failed_tracks': str(len(errors)),
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("automation emit failed: %s", e)
 
         return processed > 0
 

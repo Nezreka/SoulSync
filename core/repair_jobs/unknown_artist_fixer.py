@@ -496,8 +496,8 @@ class UnknownArtistFixerJob(RepairJob):
                             if not os.path.exists(sidecar_dst):
                                 try:
                                     shutil.move(sidecar_src, sidecar_dst)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("move sidecar file: %s", e)
 
                     # Also move cover.jpg from old album folder
                     cover_src = os.path.join(src_dir, 'cover.jpg')
@@ -505,8 +505,8 @@ class UnknownArtistFixerJob(RepairJob):
                     if os.path.isfile(cover_src) and not os.path.exists(cover_dst):
                         try:
                             shutil.copy2(cover_src, cover_dst)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("copy cover.jpg: %s", e)
 
                     # Clean up empty directories
                     parent = os.path.dirname(current_norm)

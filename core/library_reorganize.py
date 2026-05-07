@@ -506,7 +506,7 @@ def load_album_and_tracks(db, album_id):
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
 
@@ -938,8 +938,8 @@ class _RunContext:
             return
         try:
             self.on_progress(updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("progress emit failed: %s", e)
 
     def record_error(self, track_id, title, message, kind: str = 'skipped') -> None:
         with self.state_lock:
@@ -1185,8 +1185,8 @@ def reorganize_album(
             return
         try:
             on_progress(updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("reorganize progress callback failed: %s", e)
 
     # Load album + tracks
     album_data, tracks = load_album_and_tracks(db, album_id)
@@ -1329,7 +1329,7 @@ def reorganize_album(
         try:
             if os.path.isdir(staging_album_dir):
                 shutil.rmtree(staging_album_dir, ignore_errors=True)
-        except Exception:
+        except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
             pass
 
         # Best-effort cleanup of source directories. For each touched dir
@@ -1343,14 +1343,14 @@ def reorganize_album(
                 if _has_remaining_audio(src_dir):
                     continue
                 _delete_album_sidecars(src_dir)
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
         if cleanup_empty_dir_fn:
             for src_dir in src_dirs_touched:
                 try:
                     cleanup_empty_dir_fn(src_dir)
-                except Exception:
+                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
 
         # Prune empty *destination* siblings — e.g. when a previous

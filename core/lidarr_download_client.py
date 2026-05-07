@@ -490,8 +490,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 try:
                     self._api_delete(f'album/{lidarr_album_id}', params={'deleteFiles': 'false'})
                     logger.debug(f"Cleaned up album {lidarr_album_id} from Lidarr")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Lidarr album cleanup failed: %s", e)
 
         except Exception as e:
             logger.error(f"Lidarr download thread failed: {e}")

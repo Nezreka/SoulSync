@@ -51,8 +51,8 @@ def _build_version_string():
             result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
             if result.returncode == 0:
                 sha = result.stdout.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("git rev-parse failed: %s", e)
     if sha:
         return f"{_SOULSYNC_BASE_VERSION}+{sha[:7]}"
     return _SOULSYNC_BASE_VERSION
@@ -387,8 +387,8 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
-        except Exception:
-            pass  # DB error — don't block requests, use the session value
+        except Exception as e:
+            logger.debug("profile session validate: %s", e)
 
     g.profile_id = pid
 
@@ -415,8 +415,8 @@ def _log_slow_request(response):
                 response.status_code,
                 elapsed_ms,
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("slow request log failed: %s", e)
 
     return response
 
@@ -515,8 +515,8 @@ def check_download_permission():
         profile = get_database().get_profile(pid)
         if profile and not profile.get('can_download', True):
             return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
-    except Exception:
-        pass  # DB error — don't block
+    except Exception as e:
+        logger.debug("download permission check: %s", e)
     return None
 
 # --- Docker Helper Functions ---
@@ -1249,8 +1249,8 @@ def _register_automation_handlers():
                                     'added': str(added_count),
                                     'removed': str(removed_count),
                                 })
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("playlist_synced automation emit failed: %s", e)
                     else:
                         logger.warning(f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
                         _update_automation_progress(auto_id,
@@ -1397,8 +1397,8 @@ def _register_automation_handlers():
                     'status': 'skipped',
                     'reason': f'All {len(tracks_json)} tracks unchanged since last sync',
                 }
-        except Exception:
-            pass  # If we can't read last status, just run the sync
+        except Exception as e:
+            logger.debug("mirror sync last-status read: %s", e)
 
         _update_automation_progress(auto_id, progress=50,
             phase=f'Syncing "{pl["name"]}"',
@@ -1855,8 +1855,8 @@ def _register_automation_handlers():
                 elif os.path.isdir(fp):
                     _shutil.rmtree(fp)
                     removed += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("quarantine entry purge failed: %s", e)
         _update_automation_progress(automation_id,
             log_line=f'Removed {removed} quarantined items', log_type='success' if removed > 0 else 'info')
         return {'status': 'completed', 'removed': str(removed)}
@@ -1961,8 +1961,8 @@ def _register_automation_handlers():
         while len(existing) > max_backups:
             try:
                 os.remove(existing.pop(0))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("rolling backup cleanup failed: %s", e)
         _update_automation_progress(automation_id,
             log_line=f'Backup created: {size_mb}MB ({os.path.basename(backup_path)})', log_type='success')
         return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
@@ -2101,8 +2101,8 @@ def _register_automation_handlers():
                     elif os.path.isdir(fp):
                         _shutil.rmtree(fp)
                         q_removed += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("quarantine entry purge failed: %s", e)
         steps.append(f'Quarantine: removed {q_removed} items')
         _update_automation_progress(automation_id,
             log_line=f'Quarantine: removed {q_removed} items', log_type='success' if q_removed else 'info')
@@ -2166,8 +2166,8 @@ def _register_automation_handlers():
                     for hidden in entries:
                         try:
                             os.remove(os.path.join(dirpath, hidden))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("hidden file cleanup failed: %s", e)
                     try:
                         os.rmdir(dirpath)
                         s_removed += 1
@@ -2515,8 +2515,8 @@ def get_cached_transfer_data():
                         all_downloads = run_async(
                             download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("get_all_downloads failed: %s", e)
                 for download in all_downloads:
                     key = _make_context_key(download.username, download.filename)
                     # Convert DownloadStatus to transfer dict format
@@ -2974,13 +2974,13 @@ def _atexit_save_history():
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 def _atexit_shutdown():
     try:
         _shutdown_runtime_components()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 
@@ -3446,8 +3446,8 @@ def _get_enrichment_status():
             if key == 'spotify_enrichment':
                 try:
                     svc_data['daily_budget'] = worker._get_daily_budget_info()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify daily budget read failed: %s", e)
 
             services[key] = svc_data
         else:
@@ -4176,8 +4176,8 @@ def handle_settings():
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
-            except Exception:
-                pass  # Keep existing tidal_client if re-init fails
+            except Exception as e:
+                logger.debug("tidal client re-init: %s", e)
             # Reload enrichment worker clients for key-based services
             if lastfm_worker:
                 lastfm_worker._init_client()
@@ -4205,8 +4205,8 @@ def handle_settings():
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
             try:
                 data['_source_status'] = download_orchestrator.get_source_status()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("download source status read failed: %s", e)
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -4330,8 +4330,8 @@ def hydrabase_connect():
             if _hydrabase_ws:
                 try:
                     _hydrabase_ws.close()
-                except:
-                    pass
+                except Exception as _e:
+                    logger.debug("hydrabase connect-existing close: %s", _e)
             ws = websocket.create_connection(
                 url,
                 header={"x-api-key": api_key},
@@ -4356,8 +4356,8 @@ def hydrabase_disconnect():
         if _hydrabase_ws:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug("hydrabase disconnect close: %s", e)
             _hydrabase_ws = None
     config_manager.set('hydrabase.auto_connect', False)
     # Only disable dev mode if not using Hydrabase as a regular fallback source
@@ -4428,8 +4428,8 @@ def hydrabase_send():
         with _hydrabase_lock:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as _e:
+                logger.debug("hydrabase send close: %s", _e)
             _hydrabase_ws = None
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -6118,8 +6118,8 @@ def deezer_callback():
             try:
                 json_data = resp.json()
                 access_token = json_data.get('access_token')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("deezer token json parse failed: %s", e)
 
         if not access_token:
             return f"<h1>No Access Token</h1><p>Deezer response: {resp.text[:200]}</p>", 400
@@ -7451,8 +7451,8 @@ def get_download_status():
                                                 if transfer_id:
                                                     try:
                                                         run_async(download_orchestrator.cancel_download(str(transfer_id), username, remove=True))
-                                                    except Exception:
-                                                        pass
+                                                    except Exception as e:
+                                                        logger.debug("orphan transfer cancel failed: %s", e)
                                                 _orphaned_download_keys.discard(context_key)
                                             continue  # Skip normal post-processing either way
 
@@ -8475,8 +8475,8 @@ def get_artist_detail(artist_id):
                         except Exception:
                             enrichment_coverage[svc] = 0
                     enrichment_coverage['total_tracks'] = total
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment coverage build failed: %s", e)
 
         response_data = {
             "success": True,
@@ -8780,8 +8780,8 @@ def get_artist_discography(artist_id):
                         if not artist_info.get('genres') and lib['genres']:
                             try:
                                 artist_info['genres'] = json.loads(lib['genres'])
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("genres json parse failed: %s", e)
                         # Last.fm enrichment
                         if lib.get('lastfm_bio'):
                             artist_info['lastfm_bio'] = lib['lastfm_bio']
@@ -8792,8 +8792,8 @@ def get_artist_discography(artist_id):
                         if lib.get('lastfm_tags'):
                             try:
                                 artist_info['lastfm_tags'] = json.loads(lib['lastfm_tags']) if isinstance(lib['lastfm_tags'], str) else lib['lastfm_tags']
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("lastfm_tags json parse failed: %s", e)
                         if lib.get('lastfm_url'):
                             artist_info['lastfm_url'] = lib['lastfm_url']
                         if lib.get('genius_url'):
@@ -9475,25 +9475,25 @@ def _build_artist_quality_deps():
             sources.append(('spotify', spotify_client))
         try:
             sources.append(('itunes', _get_itunes_client()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("itunes client init failed: %s", e)
         try:
             sources.append(('deezer', _get_deezer_client()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deezer client init failed: %s", e)
         # Discogs needs an explicit token; only include when configured.
         try:
             _discogs_token = config_manager.get('discogs.token', '')
             if _discogs_token:
                 sources.append(('discogs', _get_discogs_client(_discogs_token)))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("discogs client init failed: %s", e)
         # Hydrabase only when connected (dev-mode + active client).
         try:
             if hydrabase_client and hydrabase_client.is_connected():
                 sources.append(('hydrabase', hydrabase_client))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("hydrabase client check failed: %s", e)
         return sources
 
     return _artists_quality.ArtistQualityDeps(
@@ -10958,8 +10958,8 @@ def _resolve_library_file_path(file_path):
         if plex and plex.server:
             for loc in plex.get_music_library_locations():
                 library_dirs.add(loc)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("plex library locations lookup failed: %s", e)
 
     # Check user-configured music library paths (Settings > Library)
     try:
@@ -10970,8 +10970,8 @@ def _resolve_library_file_path(file_path):
                     resolved_p = docker_resolve_path(p.strip())
                     if resolved_p:
                         library_dirs.add(resolved_p)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library music paths read failed: %s", e)
 
     path_parts = file_path.replace('\\', '/').split('/')
 
@@ -11462,8 +11462,8 @@ def library_delete_track(track_id):
                                 try:
                                     os.remove(sidecar)
                                     logger.info(f"Deleted sidecar file: {sidecar}")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("sidecar removal failed: %s", e)
                     except Exception as e:
                         logger.warning(f"Failed to delete file: {e}")
                         file_error = str(e)
@@ -12023,8 +12023,8 @@ def library_delete_album(album_id):
                                 if os.path.exists(sidecar):
                                     try:
                                         os.remove(sidecar)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug("sidecar removal failed: %s", e)
                         except Exception as e:
                             logger.warning(f"Failed to delete track file: {e}")
                             files_failed += 1
@@ -12042,8 +12042,8 @@ def library_delete_album(album_id):
                                 if os.path.isdir(album_dir) and not os.listdir(album_dir):
                                     os.rmdir(album_dir)
                                     logger.info(f"Removed empty album directory: {album_dir}")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("empty album dir cleanup failed: %s", e)
 
             # Delete all tracks belonging to this album
             cursor.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
@@ -13197,8 +13197,8 @@ def _sweep_empty_download_directories():
                     for hidden in entries:
                         try:
                             os.remove(os.path.join(dirpath, hidden))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("hidden file cleanup failed: %s", e)
                     os.rmdir(dirpath)
                     removed += 1
                 except OSError:
@@ -14010,8 +14010,8 @@ def _apply_path_template(template: str, context: dict) -> str:
                     resolved = _get_itunes_client().resolve_primary_artist(itunes_artist_id)
                     if resolved and resolved != album_artist_value:
                         album_artist_value = resolved
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("itunes primary artist resolve failed: %s", e)
     # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
     # "CD02" etc. when the album has 2+ discs, empty string otherwise.
     # Empty output collapses gracefully via the trailing double-dash cleanup
@@ -14491,8 +14491,8 @@ def _get_current_commit_sha():
         result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("git rev-parse failed: %s", e)
     return None
 
 _current_commit_sha = _get_current_commit_sha()
@@ -14809,8 +14809,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 'total_albums': str(total_albums),
                 'total_tracks': str(total_tracks),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library_updated automation emit failed: %s", e)
 
     # Invalidate sync match cache (track IDs may have changed)
     try:
@@ -14818,8 +14818,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         cleared = inv_db.invalidate_sync_match_cache()
         if cleared:
             logger.info(f"Cleared {cleared} sync match cache entries after database update")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("sync match cache invalidation failed: %s", e)
 
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
@@ -14950,8 +14950,8 @@ def _run_soulsync_full_refresh():
                             INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
                             VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         """, (artist_id, artist_name))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("soulsync artist insert failed: %s", e)
 
                     for album_name, tracks in albums.items():
                         album_key = f"{artist_name.lower()}::{album_name.lower()}"
@@ -14970,8 +14970,8 @@ def _run_soulsync_full_refresh():
                                 INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                             """, (album_id, artist_id, album_name, year, len(tracks)))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("soulsync album insert failed: %s", e)
 
                         # Insert tracks
                         for file_path, tags in tracks:
@@ -15761,8 +15761,8 @@ def backup_database_endpoint():
         try:
             with open(meta_path, 'w') as mf:
                 json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
-        except Exception:
-            pass  # Non-critical — backup still works without metadata
+        except Exception as e:
+            logger.debug("backup meta sidecar write: %s", e)
         # Rolling cleanup
         existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
         # Filter out .meta.json files from the backup list
@@ -15774,8 +15774,8 @@ def backup_database_endpoint():
                 # Also remove sidecar if present
                 if os.path.exists(removed + '.meta.json'):
                     os.remove(removed + '.meta.json')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("rolling backup cleanup failed: %s", e)
         return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15809,8 +15809,8 @@ def list_backups_endpoint():
                     with open(meta_path, 'r') as mf:
                         meta = json.load(mf)
                     entry['version'] = meta.get('version')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("backup metadata read failed: %s", e)
             backups.append(entry)
         db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2) if os.path.exists(db_path) else 0
         return jsonify({
@@ -15838,8 +15838,8 @@ def delete_backup_endpoint(filename):
         if os.path.exists(meta_path):
             try:
                 os.remove(meta_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("backup sidecar removal failed: %s", e)
         return jsonify({"success": True, "deleted": filename})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15865,8 +15865,8 @@ def restore_backup_endpoint(filename):
                 with open(meta_path, 'r') as mf:
                     meta = json.load(mf)
                 backup_version = meta.get('version')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("backup version metadata read failed: %s", e)
 
         version_warning = None
         # Compare base versions only (strip +commit suffix) to avoid false mismatches
@@ -15898,8 +15898,8 @@ def restore_backup_endpoint(filename):
         try:
             with open(safety_path + '.meta.json', 'w') as mf:
                 json.dump({"version": SOULSYNC_VERSION, "created": safety_ts}, mf)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("safety backup metadata write failed: %s", e)
 
         # Restore using SQLite backup API (handles concurrent access safely)
         from database.music_database import close_database, get_database
@@ -18140,13 +18140,13 @@ def get_server_playlist_tracks(playlist_id):
                 raw_playlist = None
                 try:
                     raw_playlist = media_server_engine.client('plex').server.fetchItem(int(playlist_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("plex playlist fetchItem failed: %s", e)
                 if not raw_playlist and playlist_name:
                     try:
                         raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("plex playlist by-name lookup failed: %s", e)
                 if not raw_playlist:
                     logger.warning(
                         f"[ServerPlaylistTracks] Plex playlist not found by "
@@ -18417,13 +18417,13 @@ def server_playlist_replace_track(playlist_id):
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
             if not raw_playlist and playlist_name:
                 try:
                     raw_playlist = plex_server.playlist(playlist_name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
             if not raw_playlist:
                 logger.warning(f"[ServerPlaylist] replace-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found on server"}), 404
@@ -18517,13 +18517,13 @@ def server_playlist_add_track(playlist_id):
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
             if not raw_playlist and playlist_name:
                 try:
                     raw_playlist = plex_server.playlist(playlist_name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
             if not raw_playlist:
                 logger.warning(f"[ServerPlaylist] add-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
@@ -18601,13 +18601,13 @@ def server_playlist_remove_track(playlist_id):
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
             if not raw_playlist and playlist_name:
                 try:
                     raw_playlist = plex_server.playlist(playlist_name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
             if not raw_playlist:
                 logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
@@ -20747,8 +20747,8 @@ def _pause_enrichment_workers(label='discovery'):
                 worker.pause()
                 was_running[name] = True
                 logger.warning(f"Paused {name} enrichment worker during {label}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment worker pause failed: %s", e)
     return was_running
 
 
@@ -20765,8 +20765,8 @@ def _resume_enrichment_workers(was_running, label='discovery'):
             if was_running.get(name) and worker:
                 worker.resume()
                 logger.info(f"Resumed {name} enrichment worker after {label}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment worker resume failed: %s", e)
 
 
 def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discovery_results, discovery_source, profile_id=1):
@@ -24764,8 +24764,8 @@ def add_to_watchlist():
                     elif row['discogs_id']:
                         artist_id = row['discogs_id']
                         source = 'discogs'
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist artist source lookup failed: %s", e)
         if not source:
             fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
@@ -24845,16 +24845,16 @@ def add_to_watchlist():
             try:
                 pid = get_current_profile_id()
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist count emit failed: %s", e)
             try:
                 if automation_engine:
                     automation_engine.emit('watchlist_artist_added', {
                         'artist': artist_name,
                         'artist_id': str(artist_id),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist_artist_added emit failed: %s", e)
             _artmap_cache_invalidate(get_current_profile_id())
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
         else:
@@ -24882,16 +24882,16 @@ def remove_from_watchlist():
             try:
                 pid = get_current_profile_id()
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist count emit failed: %s", e)
             try:
                 if automation_engine:
                     automation_engine.emit('watchlist_artist_removed', {
                         'artist': data.get('artist_name', str(artist_id)),
                         'artist_id': str(artist_id),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist_artist_removed emit failed: %s", e)
             _artmap_cache_invalidate(get_current_profile_id())
             return jsonify({"success": True, "message": "Removed artist from watchlist"})
         else:
@@ -25033,8 +25033,8 @@ def watchlist_all_unwatched_library_artists():
                 if artist.get('image_url'):
                     try:
                         database.update_watchlist_artist_image(artist_id, artist['image_url'])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("watchlist artist image update failed: %s", e)
 
         total_unwatched = len(unwatched_artists)
         message_parts = [f"Added {added} artist{'s' if added != 1 else ''} to watchlist"]
@@ -25193,8 +25193,8 @@ def start_watchlist_scan():
                 try:
                     if config_manager.get('discogs.token', ''):
                         providers_to_backfill.append('discogs')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("discogs token backfill check failed: %s", e)
                 for _bf_provider in providers_to_backfill:
                     try:
                         logger.debug(f"Checking for missing {_bf_provider} IDs in watchlist...")
@@ -25357,8 +25357,8 @@ def start_watchlist_scan():
                 # Clear one-time rescan cutoff after full scan cycle
                 try:
                     scanner._clear_rescan_cutoff()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("scanner rescan cutoff clear failed: %s", e)
 
                 # Always reset flag when scan completes (success or error)
                 with watchlist_timer_lock:
@@ -26195,8 +26195,8 @@ def enrich_similar_artists():
                                 aid, fallback_source,
                                 image_url=img_url, genres=genres, popularity=0
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("similar artist enrichment failed: %s", e)
 
         cached_count = len(enriched) - len([aid for aid in uncached_ids if aid in enriched])
         api_count = len([aid for aid in uncached_ids if aid in enriched])
@@ -26363,10 +26363,10 @@ def get_discover_recent_releases():
                         if album_id:
                             try:
                                 database.update_discovery_recent_album_cover(album_id, cover)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                logger.debug("recent album cover update failed: %s", e)
+                except Exception as e:
+                    logger.debug("recent album cover fetch failed: %s", e)
 
         # Filter out blacklisted artists
         blacklisted = database.get_discovery_blacklist_names()
@@ -26500,8 +26500,8 @@ def get_discover_because_you_listen_to():
                     if row and row[0]:
                         artist_image = fix_artist_image_url(row[0])
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist image lookup failed: %s", e)
 
                 sections.append({
                     'artist_name': artist_name,
@@ -26686,8 +26686,8 @@ def resolve_cache_album():
                     if results:
                         r = results[0]
                         return jsonify({'success': True, 'entity_id': str(r.id), 'source': _get_metadata_fallback_source()})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("fallback album search failed: %s", e)
 
             return jsonify({'success': False, 'error': 'Album not found in cache'})
     except Exception as e:
@@ -27002,8 +27002,8 @@ def get_seasonal_playlist(season_key):
                         try:
                             import json
                             track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("track_data_json parse: %s", e)
                     tracks.append(track_dict)
                 else:
                     # Try discovery_pool as fallback (filtered by source)
@@ -27029,8 +27029,8 @@ def get_seasonal_playlist(season_key):
                             try:
                                 import json
                                 track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("discovery track_data_json parse: %s", e)
                         tracks.append(track_dict)
 
         config = SEASONAL_CONFIG[season_key]
@@ -27435,8 +27435,8 @@ def get_your_artists_sources():
         try:
             if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
                 connected.append('tidal')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("tidal auth check failed: %s", e)
         # Last.fm
         if config_manager.get('lastfm.api_key', '') and config_manager.get('lastfm.session_key', ''):
             connected.append('lastfm')
@@ -27448,8 +27448,8 @@ def get_your_artists_sources():
                           and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deezer auth check failed: %s", e)
 
         return jsonify({"success": True, "enabled": enabled, "connected": connected})
     except Exception as e:
@@ -27711,8 +27711,8 @@ def get_your_albums_sources():
         try:
             if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
                 connected.append('tidal')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("tidal auth check failed: %s", e)
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
@@ -27720,8 +27720,8 @@ def get_your_albums_sources():
                           and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deezer auth check failed: %s", e)
 
         # Discogs: counts as "connected" when a personal access token is
         # configured. Username comes from /oauth/identity at fetch time;
@@ -27729,8 +27729,8 @@ def get_your_albums_sources():
         try:
             if config_manager.get('discogs.token', ''):
                 connected.append('discogs')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("discogs token check failed: %s", e)
 
         return jsonify({"success": True, "enabled": enabled, "connected": connected})
     except Exception as e:
@@ -27913,8 +27913,8 @@ def get_your_artist_info(artist_id):
                     'lastfm_playcount': r.get('lastfm_playcount', 0),
                 })
                 return jsonify(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("library artist lookup failed: %s", e)
 
         # 2. Try metadata cache
         try:
@@ -27935,8 +27935,8 @@ def get_your_artist_info(artist_id):
                     'followers': cached.get('followers', {}).get('total', 0) if isinstance(cached.get('followers'), dict) else cached.get('followers', 0),
                 })
                 return jsonify(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("metadata cache lookup failed: %s", e)
 
         # 3. Try Spotify API directly (genres, image, followers)
         try:
@@ -31402,8 +31402,8 @@ def mirror_playlist_endpoint():
                     'source': source,
                     'track_count': str(len(tracks)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("mirrored_playlist_created emit failed: %s", e)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
     except Exception as e:
@@ -31577,8 +31577,8 @@ def fix_discovery_pool_track():
                     cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                     row['track_name'], row['artist_name']
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("discovery cache match save failed: %s", e)
 
         return jsonify({"success": True})
     except Exception as e:
@@ -32002,8 +32002,8 @@ def playlist_explorer_album_tracks(album_id):
         if cache and tracks:
             try:
                 cache.store_entity(source_name, 'album_tracks', cache_key, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album_tracks cache store failed: %s", e)
 
         return jsonify(result)
     except Exception as e:
@@ -32212,8 +32212,8 @@ def start_oauth_callback_servers():
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     self.wfile.write(f'<h1>Internal Server Error</h1><p>{str(e)}</p>'.encode())
-                except Exception:
-                    pass  # Connection already broken, nothing more we can do
+                except Exception as _e:
+                    _oauth_logger.debug("oauth response write: %s", _e)
 
         def log_message(self, format, *args):
             pass  # Suppress BaseHTTPRequestHandler access logs (we use our own logger)
@@ -33153,8 +33153,8 @@ try:
             state['log'].append({'type': 'success' if status == 'finished' else 'error', 'text': summary})
             try:
                 socketio.emit('repair:progress', {job_id: dict(state)})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("repair progress emit failed: %s", e)
 
     repair_worker.register_progress_callbacks(_repair_job_start, _repair_job_progress, _repair_job_finish)
     # Store refs for WebSocket push loop
@@ -33639,8 +33639,8 @@ def import_staging_hints():
                         if album:
                             key = (album.strip(), (artist or '').strip())
                             tag_albums[key] = tag_albums.get(key, 0) + 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("tag read failed: %s", e)
 
         # Build search queries, prioritizing tag-based hints (more specific)
         queries = []
@@ -33796,8 +33796,8 @@ def import_album_process():
                         'completed_tracks': str(processed),
                         'failed_tracks': str(len(errors)),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album import automation emit failed: %s", e)
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -33960,8 +33960,8 @@ def import_singles_process():
                         'completed_tracks': str(processed),
                         'failed_tracks': str(len(errors)),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("singles import automation emit failed: %s", e)
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -34147,8 +34147,8 @@ def _build_status_payload():
             for t in download_tasks.values():
                 if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
                     active_dl_count += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("active download count failed: %s", e)
 
     return {
         'metadata_source': metadata_status['metadata_source'],
@@ -34193,8 +34193,8 @@ def _hydrabase_reconnect_loop():
                 if _hydrabase_ws is not None and _hydrabase_ws.connected:
                     _consecutive_failures = 0
                     continue
-            except Exception:
-                pass  # Socket in bad state — treat as disconnected
+            except Exception as e:
+                logger.debug("hydrabase socket check: %s", e)
 
             # Disconnected with auto_connect enabled — try to reconnect
             # Back off: 30s, 60s, 120s, max 300s between attempts
@@ -34208,8 +34208,8 @@ def _hydrabase_reconnect_loop():
                     if _hydrabase_ws:
                         try:
                             _hydrabase_ws.close()
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("hydrabase reconnect close: %s", e)
                     ws = websocket.create_connection(
                         hydra_cfg['url'],
                         header={"x-api-key": hydra_cfg['api_key']},
@@ -34224,8 +34224,8 @@ def _hydrabase_reconnect_loop():
                     logger.error(f"[Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
                 elif _consecutive_failures == 4:
                     logger.error("[Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
-        except Exception:
-            pass  # Don't crash the monitor loop
+        except Exception as e:
+            logger.debug("hydrabase monitor loop: %s", e)
 
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""
@@ -34368,8 +34368,8 @@ def _has_active_downloads():
             for batch_data in download_batches.values():
                 if batch_data.get('phase') not in ('complete', 'error', 'cancelled', None):
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("active downloads check failed: %s", e)
     return False
 
 
@@ -34403,8 +34403,8 @@ def _spotify_resume_pre_check():
     try:
         if _spotify_rate_limited():
             return (429, 'Cannot resume while Spotify is rate limited')
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("spotify rate-limit pre-check failed: %s", e)
     return None
 
 
@@ -34511,8 +34511,8 @@ def _emit_rate_monitor_loop():
                         }
                         if svc_key == 'spotify' and enr.get('daily_budget'):
                             entry['worker']['daily_budget'] = enr['daily_budget']
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("enrichment worker status build failed: %s", e)
 
             # Add Spotify rate limit state
             try:
@@ -34522,8 +34522,8 @@ def _emit_rate_monitor_loop():
                     payload['spotify']['rate_limited'] = True
                     payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
                     payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("spotify rate-limit status read failed: %s", e)
 
             socketio.emit('rate-monitor:update', payload)
         except Exception as e:
@@ -34763,8 +34763,8 @@ def _emit_sync_progress_loop():
                         socketio.emit('sync:progress', {
                             'playlist_id': pid, **state
                         }, room=f'sync:{pid}')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("sync progress emit failed: %s", e)
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
@@ -34801,8 +34801,8 @@ def _emit_discovery_progress_loop():
                             'complete': state.get('phase') == 'discovered',
                         }
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("discovery progress emit failed: %s", e)
             except Exception as e:
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
@@ -34945,8 +34945,8 @@ def start_runtime_services():
                 logger.info("Automation engine started")
                 try:
                     automation_engine.emit('app_started', {})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("app_started emit failed: %s", e)
             except AttributeError as e:
                 logger.error(f"Automation engine failed to start: {e}")
                 logger.info("   If using Docker, check that your volume mount is /app/data (not /app/database)")

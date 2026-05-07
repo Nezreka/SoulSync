@@ -380,8 +380,8 @@ class iTunesClient:
             for raw in cached_results:
                 try:
                     tracks.append(Track.from_itunes_track(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Track.from_itunes_track cache parse: %s", e)
             if tracks:
                 return tracks
 
@@ -569,8 +569,8 @@ class iTunesClient:
             for raw in cached_results:
                 try:
                     albums.append(Album.from_itunes_album(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Album.from_itunes_album cache parse: %s", e)
             if albums:
                 return albums
 
@@ -893,8 +893,8 @@ class iTunesClient:
             for item in results:
                 if item.get('wrapperType') == 'artist' and item.get('artistName'):
                     return item['artistName']
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("itunes lookup artistId %s: %s", artist_id, e)
         return None
 
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
@@ -911,8 +911,8 @@ class iTunesClient:
             for raw in cached_results:
                 try:
                     artists.append(Artist.from_itunes_artist(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Artist.from_itunes_artist cache parse: %s", e)
             if artists:
                 return artists
 

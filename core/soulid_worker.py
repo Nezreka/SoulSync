@@ -280,8 +280,8 @@ class SoulIDWorker:
             if conn:
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("rollback failed: %s", _e)
             return 0
         finally:
             if conn:
@@ -533,8 +533,8 @@ class SoulIDWorker:
             if conn:
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("rollback failed: %s", _e)
             return 0
         finally:
             if conn:
@@ -595,8 +595,8 @@ class SoulIDWorker:
             if conn:
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("rollback failed: %s", _e)
             return 0
         finally:
             if conn:
@@ -634,8 +634,8 @@ class SoulIDWorker:
             if conn:
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("rollback failed: %s", _e)
         finally:
             if conn:
                 conn.close()

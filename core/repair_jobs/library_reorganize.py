@@ -337,8 +337,8 @@ class LibraryReorganizeJob(RepairJob):
         if context.config_manager:
             try:
                 active_server = context.config_manager.get_active_media_server()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("active media server lookup: %s", e)
         try:
             conn = context.db._get_connection()
             try:
@@ -399,7 +399,7 @@ class LibraryReorganizeJob(RepairJob):
             if conn:
                 try:
                     conn.close()
-                except Exception:
+                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
 
     def _get_setting(self, context: JobContext, key: str, default):

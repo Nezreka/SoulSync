@@ -124,8 +124,8 @@ class TidalWorker:
         authenticated = False
         try:
             authenticated = self.client.is_authenticated()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("tidal auth status check: %s", e)
 
         return {
             'enabled': True,
@@ -176,8 +176,8 @@ class TidalWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null-id item type lookup: %s", e)
                     continue
 
 

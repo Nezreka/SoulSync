@@ -171,8 +171,8 @@ def get_image_dimensions(data: bytes):
                     return w, h
                 length = struct.unpack(">H", data[i + 2 : i + 4])[0]
                 i += 2 + length
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("parse JPEG dimensions failed: %s", e)
     return None, None
 
 
