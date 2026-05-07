@@ -1555,11 +1555,25 @@ async function loadRepairJobs() {
                     flowParts.push('<span class="repair-flow-badge autofix">Auto-fix</span>');
                 }
             }
-            // Show pending findings count
-            const findingsCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
-            if (findingsCount > 0) {
+            // Badge: prefer the CURRENT pending count from the API
+            // (matches what the Findings tab actually shows); fall
+            // back to the historical ``findings_created`` from the
+            // last run when pending = 0 but the last scan did find
+            // something — that way users still see a hint that a scan
+            // happened recently. Without this, a scan that finds 372
+            // duplicates and then has them all bulk-fixed shows
+            // "372 findings" on the badge while the Findings tab
+            // Pending filter is empty, which reads as a bug.
+            const pendingCount = job.pending_findings_count || 0;
+            const lastScanCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
+            if (pendingCount > 0) {
                 flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
-                flowParts.push(`<span class="repair-flow-badge findings">${findingsCount} finding${findingsCount !== 1 ? 's' : ''}</span>`);
+                flowParts.push(`<span class="repair-flow-badge findings">${pendingCount} pending</span>`);
+            } else if (lastScanCount > 0) {
+                // Show historical count with a clear "found in last scan"
+                // qualifier so users don't expect them on the Pending tab.
+                flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+                flowParts.push(`<span class="repair-flow-badge findings findings-historical">${lastScanCount} found in last scan</span>`);
             }
 
             // Build meta parts
