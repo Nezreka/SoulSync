@@ -430,8 +430,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         if cached and cached.get('release_date'):
                             album_release_dates[aid] = cached['release_date']
                             continue
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
                 try:
                     time.sleep(0.3)  # Respect rate limits
@@ -443,10 +443,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         if cache:
                             try:
                                 cache.store_entity('deezer', 'album', aid, a_data)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                logger.debug("cache store_entity album release_date: %s", e)
+                except Exception as e:
+                    logger.debug("fetch deezer album release_date %s: %s", aid, e)
 
             tracks = []
             for i, t in enumerate(raw_tracks, start=1):
