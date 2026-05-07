@@ -265,8 +265,8 @@ def execute_retag(group_id, album_id, deps: RetagDeps):
                                 try:
                                     os.remove(old_cover)
                                     logger.warning("[Retag] Removed orphaned cover.jpg from old directory")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("remove orphaned cover failed: %s", e)
 
                     # Cleanup old empty directories
                     transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))

@@ -531,8 +531,8 @@ class AutomationEngine:
         if self._history_record_fn:
             try:
                 self._history_record_fn(automation_id, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("history record failed: %s", e)
 
     # --- Schedule Execution (timer-based) ---
 
@@ -673,8 +673,8 @@ class AutomationEngine:
                     delay = self._calc_delay_seconds(trigger_config)
                     if delay:
                         next_run_str = _utc_after(delay)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("next run calc failed: %s", e)
 
         last_result = json.dumps(result) if result else None
         self.db.update_automation_run(automation_id, next_run=next_run_str, error=error, last_result=last_result)
@@ -682,8 +682,8 @@ class AutomationEngine:
         if self._history_record_fn:
             try:
                 self._history_record_fn(automation_id, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("history record failed: %s", e)
 
         if self._running:
             self.schedule_automation(automation_id)

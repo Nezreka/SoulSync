@@ -545,8 +545,8 @@ class PlaylistSyncService:
                                     spotify_id, me.clean_title(original_title), me.clean_artist(artist_name),
                                     active_server, db_track.id, db_track.title, confidence
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("save sync match cache failed: %s", e)
                         
                         # Fetch the actual track object from active media server using the database track ID
                         try:

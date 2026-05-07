@@ -434,8 +434,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                     try:
                         os.remove(file_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("delete quarantine fallback: %s", e)
 
                 context['_bitdepth_rejected'] = True
                 with matched_context_lock:
@@ -562,8 +562,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                     try:
                         os.remove(file_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("delete quarantine fallback: %s", e)
 
                 context['_bitdepth_rejected'] = True
                 with matched_context_lock:

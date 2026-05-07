@@ -3186,8 +3186,8 @@ class BeatportUnifiedScraper:
                     except Exception:
                         continue
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("parse release tracks failed: %s", e)
 
         return tracks
 

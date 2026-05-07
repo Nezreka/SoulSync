@@ -95,8 +95,8 @@ def build_runner(
         def _cleanup_empty(src_dir):
             try:
                 cleanup_empty_directories_fn(transfer_dir, os.path.join(src_dir, '_'))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("cleanup empty dirs failed: %s", e)
 
         def _on_progress(updates):
             try:

@@ -201,8 +201,8 @@ class SeasonalDiscoveryService:
                     val = row[0] if isinstance(row, tuple) else row['value']
                     if val in ('northern', 'southern'):
                         return val
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("read hemisphere metadata failed: %s", e)
         return 'northern'
 
     def get_current_season(self) -> Optional[str]:

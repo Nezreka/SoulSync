@@ -320,8 +320,8 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                     from core.spotify_client import _upgrade_spotify_image_url
 
                     art_url = _upgrade_spotify_image_url(art_url)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("upgrade spotify image url failed: %s", e)
             elif art_url and "mzstatic.com" in art_url:
                 art_url = re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
             if not art_url:

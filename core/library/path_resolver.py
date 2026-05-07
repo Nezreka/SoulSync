@@ -83,8 +83,8 @@ def _collect_base_dirs(
                 candidates.append(_docker_resolve_path(transfer_cfg))
             if download_cfg:
                 candidates.append(_docker_resolve_path(download_cfg))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("soulseek paths read failed: %s", e)
 
     # Plex-reported library locations (handles "Plex scanned at /music but
     # SoulSync mounts at /library" cases).
@@ -96,8 +96,8 @@ def _collect_base_dirs(
                 for loc in getattr(music_library, "locations", []) or []:
                     if loc:
                         candidates.append(loc)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("plex locations read failed: %s", e)
 
     # User-configured library music paths (Settings → Library → Music Paths).
     if config_manager is not None:
@@ -107,8 +107,8 @@ def _collect_base_dirs(
                 for p in music_paths:
                     if isinstance(p, str) and p.strip():
                         candidates.append(_docker_resolve_path(p.strip()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("music paths read failed: %s", e)
 
     # De-duplicate while preserving order, drop empties / non-existent dirs.
     seen: set[str] = set()

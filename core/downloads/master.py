@@ -296,8 +296,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     })
                 if track_results:
                     db_sh.update_sync_history_track_results(batch_id, json.dumps(track_results))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("update sync_history track results failed: %s", e)
 
             is_auto_batch = False
             with tasks_lock:
