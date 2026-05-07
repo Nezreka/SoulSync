@@ -2054,11 +2054,73 @@ class WatchlistScanner:
                 title_variations.append(base_title)
             
             unique_title_variations = list(dict.fromkeys(title_variations))
-            
+
             # Search for each artist with each title variation
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
+            # Provider-neutral external-ID short-circuit: before doing
+            # title+artist+album fuzzy comparison, ask the library if any
+            # row carries a matching external ID (Spotify, Deezer, iTunes,
+            # Tidal, Qobuz, MusicBrainz, AudioDB, Hydrabase, ISRC). When
+            # the library has stale album metadata for an existing file
+            # (e.g. file tagged on the wrong album by an old import), the
+            # fuzzy block declares the track missing and re-downloads it
+            # on every scan — but the file's external IDs unambiguously
+            # identify it as the same recording. See plan-watchlist-id-
+            # match.md for the reported scenario.
+            try:
+                from core.library.track_identity import (
+                    extract_external_ids,
+                    find_library_track_by_external_id,
+                    find_provenance_by_external_id,
+                )
+                import os as _os_local
+                # Pass the configured primary source as a hint so the
+                # extractor can disambiguate raw Spotify / iTunes API
+                # responses that don't carry a provider / source field
+                # of their own (Deezer / Discogs / Hydrabase clients
+                # already tag tracks with _source).
+                try:
+                    _source_hint = get_primary_source()
+                except Exception:
+                    _source_hint = None
+                source_ids = extract_external_ids(track, source_hint=_source_hint)
+                if source_ids:
+                    matched = find_library_track_by_external_id(
+                        self.database,
+                        external_ids=source_ids,
+                        server_source=active_server,
+                    )
+                    if matched is not None:
+                        logger.info(
+                            f"[ExtID Match] Track found in library by external ID: "
+                            f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                            f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                        )
+                        return False  # Track exists in library
+
+                    # Second-tier fallback: provenance table. Catches the
+                    # window between "SoulSync downloaded the file" and
+                    # "media-server scan + sync populated the tracks row
+                    # with IDs". File still has to exist on disk —
+                    # otherwise a user who deleted a file would never get
+                    # it back.
+                    prov = find_provenance_by_external_id(
+                        self.database, external_ids=source_ids,
+                    )
+                    if prov is not None:
+                        prov_path = prov.get('file_path')
+                        if prov_path and _os_local.path.exists(prov_path):
+                            logger.info(
+                                f"[Provenance Match] Track found in download provenance: "
+                                f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                                f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                            )
+                            return False
+            except Exception as ext_id_err:
+                logger.debug(f"External-ID match probe failed (falling through to fuzzy): {ext_id_err}")
 
             for artist_name in artists_to_search:
                 for query_title in unique_title_variations:
@@ -2683,8 +2745,8 @@ class WatchlistScanner:
                                 if release_date_str and len(release_date_str) >= 10:
                                     release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                     is_new = (datetime.now() - release_date).days <= 30
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("album release_date parse failed: %s", e)
 
                             for track in tracks:
                                 try:
@@ -2716,8 +2778,8 @@ class WatchlistScanner:
                                                         synth_pop += 15
                                                     elif age_days <= 365:
                                                         synth_pop += 5
-                                            except Exception:
-                                                pass
+                                            except Exception as e:
+                                                logger.debug("synthetic popularity age calc failed: %s", e)
                                         if similar_artist.occurrence_count >= 3:
                                             synth_pop += 10
                                         elif similar_artist.occurrence_count >= 2:
@@ -2840,8 +2902,8 @@ class WatchlistScanner:
                                 if release_date_str and len(release_date_str) >= 10:
                                     release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                     is_new = (datetime.now() - release_date).days <= 30
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("album release_date parse failed: %s", e)
 
                             for track in tracks:
                                 try:
@@ -3045,8 +3107,8 @@ class WatchlistScanner:
                                     release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
                                     days_old = (datetime.now() - release_date).days
                                     is_new = days_old <= 30
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("new-release date parse: %s", e)
 
                             # Add each track to discovery pool
                             for track in tracks:
@@ -3152,8 +3214,8 @@ class WatchlistScanner:
                     elif profile['avg_daily_plays'] > 20:
                         days_lookback = 21   # Heavy listener — keep it fresh
                     logger.info(f"Recent albums window: {days_lookback} days (avg {profile['avg_daily_plays']:.1f} plays/day)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("listening profile lookback adjust failed: %s", e)
             cutoff_date = datetime.now() - timedelta(days=days_lookback)
             discovery_sources = self._discovery_source_priority()
             if not discovery_sources:
@@ -3436,8 +3498,8 @@ class WatchlistScanner:
                             _artist_genre_cache[_row[0].lower()] = {g.strip().lower() for g in _row[1].split(',') if g.strip()}
                     _conn.close()
                     logger.debug(f"Built genre cache for {len(_artist_genre_cache)} artists")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist genre cache build failed: %s", e)
 
             logger.info(f"Curating playlists for sources: {sources_to_process}")
 
@@ -3490,8 +3552,8 @@ class WatchlistScanner:
                                     if release_date_str and len(release_date_str) >= 10:
                                         release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                         days_old = (datetime.now() - release_date).days
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("release-date parse: %s", e)
 
                                 for track in album_data['tracks'].get('items', []):
                                     track_id = track.get('id')
@@ -3698,8 +3760,8 @@ class WatchlistScanner:
                     _wa_list = self.database.get_watchlist_artists(profile_id=profile_id)
                     for _wa in _wa_list:
                         _wa_id_to_name[str(_wa.id)] = (_wa.artist_name or '').lower()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("watchlist artist id-to-name map failed: %s", e)
 
                 all_similar = self.database.get_top_similar_artists(limit=200, profile_id=profile_id)
 

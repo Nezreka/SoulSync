@@ -471,7 +471,7 @@ function initializeWebSocket() {
 
 function handleServiceStatusUpdate(data) {
     // Cache for library status card
-    _lastServiceStatus = data;
+    _lastStatusPayload = data;
 
     if (typeof syncSpotifySettingsAuthState === 'function') {
         syncSpotifySettingsAuthState(data?.spotify || null);
@@ -484,11 +484,11 @@ function handleServiceStatusUpdate(data) {
     }
 
     // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('spotify', data.spotify);
+    updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateServiceStatus('media-server', data.media_server);
     updateServiceStatus('soulseek', data.soulseek);
 
-    updateSidebarServiceStatus('spotify', data.spotify);
+    updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -881,8 +881,12 @@ const API = {
     }
 };
 
-// Track last service status for library card (used by websocket handler in core + artists)
-let _lastServiceStatus = null;
+// Track the last `/status` payload (shared service snapshot used across the UI)
+let _lastStatusPayload = null;
 let _isSoulsyncStandalone = false;  // Global flag: true when no media server (sync buttons hidden)
+
+function getActiveMetadataSource() {
+    return _lastStatusPayload?.metadata_source?.source || 'spotify';
+}
 
 // ===============================

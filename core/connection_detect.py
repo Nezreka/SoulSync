@@ -79,9 +79,9 @@ def run_detection(server_type):
                 api_response = requests.get(api_url, timeout=1)
                 if api_response.status_code == 200 and 'MediaContainer' in api_response.text:
                     return f"http://{ip}:{port}"
-                    
-        except:
-            pass
+
+        except Exception as e:
+            logger.debug("plex probe %s: %s", ip, e)
         return None
 
     def test_jellyfin_server(ip, port=8096):
@@ -101,9 +101,9 @@ def run_detection(server_type):
             web_response = requests.get(web_url, timeout=1)
             if web_response.status_code == 200 and 'jellyfin' in web_response.text.lower():
                 return f"http://{ip}:{port}"
-                
-        except:
-            pass
+
+        except Exception as e:
+            logger.debug("jellyfin probe %s: %s", ip, e)
         return None
 
     def test_slskd_server(ip, port=5030):
@@ -117,8 +117,8 @@ def run_detection(server_type):
             if response.status_code in [200, 401]:
                 return f"http://{ip}:{port}"
 
-        except:
-            pass
+        except Exception as e:
+            logger.debug("slskd probe %s: %s", ip, e)
         return None
 
     def test_navidrome_server(ip, port=4533):
@@ -140,8 +140,8 @@ def run_detection(server_type):
                     # Check for Subsonic/Navidrome API response structure
                     if 'subsonic-response' in data:
                         return f"http://{ip}:{port}"
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("navidrome json parse: %s", e)
 
             # Also try the web interface
             web_url = f"http://{ip}:{port}/"
@@ -149,8 +149,8 @@ def run_detection(server_type):
             if web_response.status_code == 200 and 'navidrome' in web_response.text.lower():
                 return f"http://{ip}:{port}"
 
-        except:
-            pass
+        except Exception as e:
+            logger.debug("navidrome probe %s: %s", ip, e)
         return None
 
     try:

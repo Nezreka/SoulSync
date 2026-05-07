@@ -271,7 +271,7 @@ class DuplicateDetectorJob(RepairJob):
                 if context.create_finding:
                     try:
                         group.sort(key=lambda t: (t['bitrate'] or 0), reverse=True)
-                        context.create_finding(
+                        inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='duplicate_tracks',
                             severity='info',
@@ -295,7 +295,10 @@ class DuplicateDetectorJob(RepairJob):
                                 'artist_thumb_url': group[0].get('artist_thumb_url'),
                             }
                         )
-                        result.findings_created += 1
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
                     except Exception as e:
                         logger.debug("Error creating duplicate finding: %s", e)
                         result.errors += 1

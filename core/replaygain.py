@@ -7,9 +7,12 @@ Tag writing uses mutagen directly to stay consistent with the rest of the codeba
 Supported formats: MP3, FLAC, OGG Vorbis, Opus, M4A/MP4
 """
 
+import logging
 import re
 import subprocess
 from typing import Optional, Tuple, Dict
+
+logger = logging.getLogger(__name__)
 
 # ReplayGain 2.0 reference level (EBU R128)
 RG_REFERENCE_LUFS = -18.0
@@ -75,18 +78,48 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
 
     stderr = result.stderr
 
-    # Parse integrated loudness: "    I:         -18.3 LUFS"
-    lufs_match = re.search(r'I:\s+([-\d.]+)\s+LUFS', stderr)
-    # Parse true peak: "    Peak:\s+([-\d.]+) dBFS" (may appear per-channel; take max)
-    peak_matches = re.findall(r'Peak:\s+([-\d.]+)\s+dBFS', stderr)
+    # ebur128 emits two kinds of output:
+    #   (a) Per-window progress lines like
+    #       "[Parsed_ebur128_0 @ ...] t: 0.5 ... I: -70.0 LUFS ..."
+    #       — the "I:" here is the PARTIAL integrated loudness up to that
+    #       window. The very first window of nearly any track is silent
+    #       (intro fade-in / encoder padding) and reads ~-70 LUFS.
+    #   (b) A final "Summary:" block like:
+    #         Summary:
+    #           Integrated loudness:
+    #             I:         -14.3 LUFS
+    #           ...
+    #           True peak:
+    #             Peak:        -0.4 dBFS
+    #
+    # The OLD code used ``re.search('I:\s+...')`` which returned the FIRST
+    # match — i.e. the first per-window partial reading. For nearly every
+    # track that came back as ~-70 LUFS, producing gain = -18 - (-70) =
+    # +52.00 dB on EVERY track. (User report: "all tracks seem to get
+    # the same track_gain ... +52.00 dB".)
+    #
+    # Fix: anchor parsing to the Summary block so we always read the
+    # final integrated value, never a per-window partial.
+    summary_idx = stderr.rfind('Summary:')
+    if summary_idx >= 0:
+        summary_block = stderr[summary_idx:]
+        lufs_values = re.findall(r'I:\s+([-\d.]+)\s+LUFS', summary_block)
+        peak_matches = re.findall(r'Peak:\s+([-\d.]+)\s+dBFS', summary_block)
+    else:
+        # No Summary block in the output (truncated / unexpected ffmpeg
+        # version). Defensive fallback to the LAST per-window reading,
+        # which is at least closer to the final integrated value than
+        # the first window (which is always silence).
+        lufs_values = re.findall(r'I:\s+([-\d.]+)\s+LUFS', stderr)
+        peak_matches = re.findall(r'Peak:\s+([-\d.]+)\s+dBFS', stderr)
 
-    if not lufs_match:
+    if not lufs_values:
         raise RuntimeError(
             f"Could not parse ebur128 output for '{file_path}'. "
             f"FFmpeg exit code: {result.returncode}"
         )
 
-    integrated_lufs = float(lufs_match.group(1))
+    integrated_lufs = float(lufs_values[-1])
 
     if peak_matches:
         true_peak_dbfs = max(float(v) for v in peak_matches)
@@ -159,8 +192,8 @@ def read_replaygain_tags(file_path: str) -> Dict[str, Optional[str]]:
             result['track_peak'] = _mp4_rg(audio, _TAG_TRACK_PEAK)
             result['album_gain'] = _mp4_rg(audio, _TAG_ALBUM_GAIN)
             result['album_peak'] = _mp4_rg(audio, _TAG_ALBUM_PEAK)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read replaygain tags failed: %s", e)
 
     return result
 
@@ -177,8 +210,8 @@ def _read_id3_txxx(audio, description: str) -> Optional[str]:
             if frame_key.upper() == key.upper():
                 frame = audio.tags[frame_key]
                 return str(frame.text[0]) if frame.text else None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read id3 txxx frame failed: %s", e)
     return None
 
 
@@ -188,8 +221,8 @@ def _vorbis_first(audio, key: str) -> Optional[str]:
         vals = audio.get(key) or audio.get(key.upper())
         if vals:
             return str(vals[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read vorbis comment failed: %s", e)
     return None
 
 
@@ -204,8 +237,8 @@ def _mp4_rg(audio, tag_name: str) -> Optional[str]:
                 if hasattr(val, 'decode'):
                     return val.decode('utf-8')
                 return str(val)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read mp4 replaygain atom failed: %s", e)
     return None
 
 

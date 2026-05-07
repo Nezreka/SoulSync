@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from functools import wraps
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 matched_context_lock = threading.Lock()
 matched_downloads_context: Dict[str, Dict[str, Any]] = {}
@@ -57,8 +60,8 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
     if show_toast and _activity_toast_emitter is not None:
         try:
             _activity_toast_emitter("dashboard:toast", activity_item)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("emit activity toast failed: %s", e)
 
     return activity_item
 

@@ -1,6 +1,6 @@
 """Service connection test — lifted from web_server.py.
 
-The function body is byte-identical to the original. soulseek_client,
+The function body is byte-identical to the original. download_orchestrator,
 qobuz_enrichment_worker, hydrabase_client, docker_resolve_url, and
 docker_resolve_path are injected at runtime because they live in
 web_server.py and are constructed there.
@@ -27,7 +27,7 @@ def _get_metadata_fallback_source():
 
 
 # Injected at runtime via init().
-soulseek_client = None
+download_orchestrator = None
 qobuz_enrichment_worker = None
 hydrabase_client = None
 docker_resolve_url = None
@@ -35,16 +35,16 @@ docker_resolve_path = None
 
 
 def init(
-    soulseek_client_obj,
+    download_orchestrator_obj,
     qobuz_worker,
     hydrabase_client_obj,
     docker_resolve_url_fn,
     docker_resolve_path_fn,
 ):
     """Bind web_server-side helpers/globals so the lifted body can resolve them."""
-    global soulseek_client, qobuz_enrichment_worker, hydrabase_client
+    global download_orchestrator, qobuz_enrichment_worker, hydrabase_client
     global docker_resolve_url, docker_resolve_path
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
     qobuz_enrichment_worker = qobuz_worker
     hydrabase_client = hydrabase_client_obj
     docker_resolve_url = docker_resolve_url_fn
@@ -177,13 +177,13 @@ def run_service_test(service, test_config):
             else:
                 return False, f"Output folder not found: {transfer_path}"
         elif service == "soulseek":
-            if soulseek_client is None:
+            if download_orchestrator is None:
                 return False, "Download orchestrator failed to initialize. Check server logs for startup errors."
 
             # Test the orchestrator's configured download source (not just Soulseek)
             download_mode = config_manager.get('download_source.mode', 'hybrid')
 
-            if run_async(soulseek_client.check_connection()):
+            if run_async(download_orchestrator.check_connection()):
                 # Success message based on active mode
                 mode_messages = {
                     'soulseek': "Successfully connected to Soulseek network via slskd.",
@@ -379,6 +379,24 @@ def run_service_test(service, test_config):
                 return False, "Hydrabase not connected. Configure URL + API key and click Connect."
             except Exception as e:
                 return False, f"Hydrabase connection error: {str(e)}"
+        elif service == "soundcloud":
+            # Anonymous SoundCloud has no auth, so "test" really means
+            # "is yt-dlp installed and can it reach SoundCloud right now."
+            # This mirrors the /api/soundcloud/status check.
+            try:
+                from core.soundcloud_client import SoundcloudClient
+                sc = SoundcloudClient()
+                if not sc.is_available():
+                    return False, "SoundCloud unavailable — yt-dlp not installed."
+                # Run a tiny live probe via asyncio so the dashboard test
+                # gives a meaningful pass/fail.
+                import asyncio
+                reachable = asyncio.new_event_loop().run_until_complete(sc.check_connection())
+                if reachable:
+                    return True, "SoundCloud reachable (anonymous)"
+                return False, "SoundCloud unreachable — search probe failed. Try again."
+            except Exception as e:
+                return False, f"SoundCloud connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin

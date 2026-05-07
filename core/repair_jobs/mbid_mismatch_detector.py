@@ -8,15 +8,19 @@ SoulSync shows them correctly.
 """
 
 import os
+from collections import Counter, defaultdict
 from difflib import SequenceMatcher
+from typing import Optional
 
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.mbid_mismatch")
 
-# Tag name → format mappings (must match web_server.py write logic)
+# Tag name → format mappings for the TRACK MBID (existing detection).
+# Must match web_server.py write logic.
 _MBID_TAG_KEYS = {
     # MP3 (ID3): UFID frame with owner 'http://musicbrainz.org'
     'mp3_ufid_owner': 'http://musicbrainz.org',
@@ -24,6 +28,14 @@ _MBID_TAG_KEYS = {
     'vorbis': 'MUSICBRAINZ_TRACKID',
     # MP4/M4A: freeform key
     'mp4': '----:com.apple.iTunes:MusicBrainz Track Id',
+}
+
+# Tag name → format mappings for the ALBUM MBID (new in this PR).
+# Same Picard standards as `core/metadata/source.py:ID3_TAG_MAP` etc.
+_ALBUM_MBID_TAG_KEYS = {
+    'mp3_txxx_desc': 'MusicBrainz Album Id',           # ID3 TXXX frame description
+    'vorbis': 'MUSICBRAINZ_ALBUMID',                    # FLAC/OGG vorbis comment
+    'mp4': '----:com.apple.iTunes:MusicBrainz Album Id',
 }
 
 TITLE_SIMILARITY_THRESHOLD = 0.55
@@ -165,22 +177,123 @@ def _remove_mbid_from_file(file_path):
         return False
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None):
-    """Resolve a stored DB path to an actual file on disk."""
-    if not file_path:
-        return None
-    if os.path.exists(file_path):
-        return file_path
+def _read_album_mbid_from_file(file_path: str) -> Optional[str]:
+    """Read the embedded MusicBrainz Album Id from an audio file's tags.
 
-    path_parts = file_path.replace('\\', '/').split('/')
-    for base_dir in [transfer_folder, download_folder]:
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
-    return None
+    Mirrors `_read_file_tags` but for the ALBUM MBID. Returns None when
+    the file has no album MBID tag, when the file is unreadable, or
+    when the tag format is unsupported.
+    """
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return None
+
+        if isinstance(audio.tags, ID3):
+            txxx_key = f'TXXX:{_ALBUM_MBID_TAG_KEYS["mp3_txxx_desc"]}'
+            tag = audio.tags.get(txxx_key)
+            if tag and tag.text:
+                value = tag.text[0]
+                return str(value).strip() if value else None
+            # Some taggers use lowercase variant
+            txxx_key_lower = 'TXXX:MUSICBRAINZ_ALBUMID'
+            tag = audio.tags.get(txxx_key_lower)
+            if tag and tag.text:
+                value = tag.text[0]
+                return str(value).strip() if value else None
+            return None
+
+        if isinstance(audio, (FLAC, OggVorbis)):
+            for key in (_ALBUM_MBID_TAG_KEYS['vorbis'], 'musicbrainz_albumid'):
+                vals = audio.get(key, [])
+                if vals:
+                    value = vals[0]
+                    return str(value).strip() if value else None
+            return None
+
+        if isinstance(audio, MP4):
+            mp4_key = _ALBUM_MBID_TAG_KEYS['mp4']
+            vals = audio.get(mp4_key, [])
+            if vals:
+                raw = vals[0]
+                value = raw.decode('utf-8', errors='ignore') if isinstance(raw, bytes) else str(raw)
+                return value.strip() if value else None
+            return None
+
+        return None
+    except Exception as e:
+        logger.debug("Error reading album MBID from %s: %s", file_path, e)
+        return None
+
+
+def _write_album_mbid_to_file(file_path: str, new_mbid: str) -> bool:
+    """Rewrite the embedded MusicBrainz Album Id tag.
+
+    Used by the fix action to bring a track's album MBID in line with
+    the consensus across other tracks of the same album. Returns True
+    when the tag was written and the file saved.
+    """
+    if not new_mbid:
+        return False
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3, TXXX
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return False
+
+        if isinstance(audio.tags, ID3):
+            # Wipe any conflicting variants first so we don't end up with
+            # two TXXX frames pointing at different MBIDs.
+            for key in ('TXXX:MUSICBRAINZ_ALBUMID',
+                        f'TXXX:{_ALBUM_MBID_TAG_KEYS["mp3_txxx_desc"]}'):
+                if key in audio.tags:
+                    del audio.tags[key]
+            audio.tags.add(TXXX(
+                encoding=3,
+                desc=_ALBUM_MBID_TAG_KEYS['mp3_txxx_desc'],
+                text=[new_mbid],
+            ))
+            audio.save()
+            return True
+
+        if isinstance(audio, (FLAC, OggVorbis)):
+            for key in ('musicbrainz_albumid',):
+                if key in audio:
+                    del audio[key]
+            audio[_ALBUM_MBID_TAG_KEYS['vorbis']] = [new_mbid]
+            audio.save()
+            return True
+
+        if isinstance(audio, MP4):
+            audio[_ALBUM_MBID_TAG_KEYS['mp4']] = [new_mbid.encode('utf-8')]
+            audio.save()
+            return True
+
+        return False
+    except Exception as e:
+        logger.error("Error writing album MBID to %s: %s", file_path, e)
+        return False
+
+
+def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
+    """Backwards-compat wrapper. Use ``resolve_library_file_path`` directly."""
+    return resolve_library_file_path(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+    )
 
 
 @register_job
@@ -253,8 +366,8 @@ class MbidMismatchDetectorJob(RepairJob):
             try:
                 from core.musicbrainz_client import MusicBrainzClient
                 mb_client = MusicBrainzClient()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("MusicBrainz client init failed: %s", e)
 
         if not mb_client:
             logger.warning("MusicBrainz client not available, skipping MBID mismatch scan")
@@ -280,7 +393,8 @@ class MbidMismatchDetectorJob(RepairJob):
                 context.update_progress(i + 1, total)
 
             # Resolve the file path
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder)
+            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
+                                           config_manager=context.config_manager)
             if not resolved:
                 result.scanned += 1
                 continue
@@ -349,18 +463,199 @@ class MbidMismatchDetectorJob(RepairJob):
         if context.update_progress:
             context.update_progress(total, total)
 
-        logger.info("MBID mismatch scan: %d files scanned, %d with MBIDs verified, %d mismatches found",
+        logger.info("MBID mismatch scan (track-level): %d files scanned, %d with MBIDs verified, %d mismatches found",
                      total, checked, result.findings_created)
+
+        # Phase 2: Album MBID consistency check.
+        #
+        # Tracks of the same album that carry different MUSICBRAINZ_ALBUMID
+        # tags cause Navidrome (and other media servers grouping by album
+        # MBID) to split the album into multiple entries. Reported by user
+        # Samuel [KC]. Detection strategy: group tracks by DB album_id,
+        # find the consensus (most-common) album MBID, flag the dissenters.
+        # No MusicBrainz API calls — this is a pure consistency check, so
+        # it doesn't compete with the rate-limited track scan above.
+        track_findings_so_far = result.findings_created
+        self._scan_album_mbid_consistency(context, result, download_folder)
+        album_findings = result.findings_created - track_findings_so_far
 
         if context.report_progress:
             context.report_progress(
                 scanned=total, total=total,
                 phase='Complete',
-                log_line=f'Verified {checked} MBIDs — {result.findings_created} mismatches found',
+                log_line=(
+                    f'Verified {checked} track MBIDs ({track_findings_so_far} mismatches) — '
+                    f'album consistency check found {album_findings} dissenters'
+                ),
                 log_type='success' if result.findings_created == 0 else 'warning'
             )
 
         return result
+
+    def _scan_album_mbid_consistency(self, context: JobContext, result: JobResult,
+                                     download_folder: str) -> None:
+        """Group tracks by DB album, flag tracks whose embedded album
+        MBID differs from the consensus across the album's other tracks."""
+        # Pull tracks grouped by album. Singles (album NULL) skipped — they
+        # can't have a consistency issue.
+        rows = []
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.id, t.title, t.album_id, t.file_path,
+                       ar.name AS artist_name, al.title AS album_title,
+                       al.thumb_url AS album_thumb, ar.thumb_url AS artist_thumb
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                  AND t.album_id IS NOT NULL
+            """)
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.error("Album MBID consistency scan: DB fetch failed: %s", e, exc_info=True)
+            return
+        finally:
+            if conn:
+                conn.close()
+
+        if not rows:
+            return
+
+        # Group by album_id. Read each track's embedded album MBID — only
+        # include rows where the read succeeded (skips files that don't
+        # have an album MBID at all; those don't break Navidrome since
+        # there's no MBID for it to disagree on).
+        by_album: dict = defaultdict(list)
+        for row in rows:
+            if context.check_stop():
+                return
+            track_id = row['id']
+            album_id = row['album_id']
+            file_path = row['file_path']
+
+            resolved = _resolve_file_path(
+                file_path, context.transfer_folder, download_folder,
+                config_manager=context.config_manager,
+            )
+            if not resolved:
+                continue
+            album_mbid = _read_album_mbid_from_file(resolved)
+            if not album_mbid:
+                continue
+            by_album[album_id].append({
+                'track_id': track_id,
+                'title': row['title'],
+                'album_title': row['album_title'],
+                'artist_name': row['artist_name'],
+                'album_thumb': row['album_thumb'],
+                'artist_thumb': row['artist_thumb'],
+                'file_path': file_path,
+                'resolved': resolved,
+                'album_mbid': album_mbid,
+            })
+
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Checking album MBID consistency across {len(by_album)} albums...',
+                log_type='info',
+            )
+
+        for album_id, tracks_in_album in by_album.items():
+            if context.check_stop():
+                return
+            # Need at least 2 tracks to detect a mismatch.
+            if len(tracks_in_album) < 2:
+                continue
+
+            mbid_counts = Counter(t['album_mbid'] for t in tracks_in_album)
+            if len(mbid_counts) == 1:
+                continue  # All tracks agree → nothing to flag
+
+            consensus_mbid, consensus_count = mbid_counts.most_common(1)[0]
+
+            # Defensive: if no MBID has a clear plurality (e.g. 3 tracks,
+            # 3 different MBIDs), skip rather than picking a random one.
+            # Counter.most_common returns ties in arbitrary order; we don't
+            # want to fix a track to a "consensus" that's really a 1/N tie.
+            second_count = mbid_counts.most_common(2)[1][1] if len(mbid_counts) > 1 else 0
+            if consensus_count == second_count:
+                logger.info(
+                    "Album %s has tied album MBID counts %s — no clear consensus, skipping",
+                    album_id, dict(mbid_counts),
+                )
+                continue
+
+            for track in tracks_in_album:
+                if track['album_mbid'] == consensus_mbid:
+                    continue
+                self._create_album_mbid_mismatch_finding(
+                    context, result, track,
+                    consensus_mbid=consensus_mbid,
+                    consensus_count=consensus_count,
+                    total_tracks=len(tracks_in_album),
+                )
+
+    def _create_album_mbid_mismatch_finding(self, context: JobContext, result: JobResult,
+                                            track: dict, consensus_mbid: str,
+                                            consensus_count: int, total_tracks: int) -> None:
+        """Create a finding for a track whose album MBID disagrees with
+        the consensus across the album's other tracks."""
+        title = track['title']
+        artist_name = track['artist_name']
+        album_title = track['album_title']
+        if context.report_progress:
+            context.report_progress(
+                log_line=(
+                    f'Album MBID mismatch: "{title}" — has {track["album_mbid"][:8]}…, '
+                    f'consensus is {consensus_mbid[:8]}… ({consensus_count}/{total_tracks} tracks)'
+                ),
+                log_type='warning'
+            )
+        if context.create_finding:
+            try:
+                inserted = context.create_finding(
+                    job_id=self.job_id,
+                    finding_type='album_mbid_mismatch',
+                    severity='warning',
+                    entity_type='track',
+                    entity_id=str(track['track_id']),
+                    file_path=track['file_path'],
+                    title=f'Album MBID mismatch: {title or "Unknown"}',
+                    description=(
+                        f'Track "{title}" by {artist_name or "Unknown"} on album '
+                        f'"{album_title or "Unknown"}" has a different '
+                        f'MusicBrainz Album Id than the album\'s other tracks. '
+                        f'This causes media servers like Navidrome to split the album.'
+                    ),
+                    details={
+                        'track_id': track['track_id'],
+                        'title': title,
+                        'artist': artist_name,
+                        'album': album_title,
+                        'file_path': track['file_path'],
+                        'wrong_mbid': track['album_mbid'],
+                        'consensus_mbid': consensus_mbid,
+                        'consensus_count': consensus_count,
+                        'total_tracks_with_mbid': total_tracks,
+                        'reason': (
+                            f'{consensus_count}/{total_tracks} tracks of this album use '
+                            f'MBID {consensus_mbid}; this track uses {track["album_mbid"]}'
+                        ),
+                        'album_thumb_url': track['album_thumb'] or None,
+                        'artist_thumb_url': track['artist_thumb'] or None,
+                    }
+                )
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
+            except Exception as e:
+                logger.debug("Error creating album MBID mismatch finding for track %s: %s",
+                              track['track_id'], e)
+                result.errors += 1
 
     def _create_mismatch_finding(self, context, result, track_id, title, artist_name,
                                   album_title, file_path, album_thumb, artist_thumb,
@@ -373,7 +668,7 @@ class MbidMismatchDetectorJob(RepairJob):
             )
         if context.create_finding:
             try:
-                context.create_finding(
+                inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='mbid_mismatch',
                     severity='warning',
@@ -400,7 +695,10 @@ class MbidMismatchDetectorJob(RepairJob):
                         'artist_thumb_url': artist_thumb or None,
                     }
                 )
-                result.findings_created += 1
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
             except Exception as e:
                 logger.debug("Error creating MBID mismatch finding for track %s: %s", track_id, e)
                 result.errors += 1

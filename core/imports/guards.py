@@ -82,8 +82,8 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
                     "reason": reason or "Unknown",
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("emit download_quarantined failed: %s", e)
 
     return str(quarantine_path)
 

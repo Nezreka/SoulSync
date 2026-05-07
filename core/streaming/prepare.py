@@ -7,9 +7,9 @@ it in the local Stream/ folder for the browser audio player.
 1. Reset stream state to 'loading' with the new track info.
 2. Clear any prior file from the Stream/ folder (only one stream lives
    there at a time).
-3. Spin up a fresh asyncio event loop and `soulseek_client.download()`
+3. Spin up a fresh asyncio event loop and `download_orchestrator.download()`
    the track.
-4. Poll `soulseek_client.get_all_downloads()` every 1.5 s to track
+4. Poll `download_orchestrator.get_all_downloads()` every 1.5 s to track
    progress, with separate handling for queued vs actively downloading
    states. Queue timeout = 15 s; overall timeout = 60 s.
 5. On completion (state ~ 'succeeded' or progress >= 100% AND bytes
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 class PrepareStreamDeps:
     """Bundle of cross-cutting deps the stream-prep worker needs."""
     config_manager: Any
-    soulseek_client: Any
+    download_orchestrator: Any
     stream_lock: Any  # threading.Lock
     project_root: str  # absolute path to web_server.py's directory
     docker_resolve_path: Callable[[str], str]
@@ -112,7 +112,7 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
         asyncio.set_event_loop(loop)
         
         try:
-            download_result = loop.run_until_complete(deps.soulseek_client.download(
+            download_result = loop.run_until_complete(deps.download_orchestrator.download(
                 track_data.get('username'),
                 track_data.get('filename'),
                 track_data.get('size', 0)
@@ -144,7 +144,7 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
 
                 try:
                     # Use orchestrator's get_all_downloads() which works for both sources
-                    all_downloads = loop.run_until_complete(deps.soulseek_client.get_all_downloads())
+                    all_downloads = loop.run_until_complete(deps.download_orchestrator.get_all_downloads())
                     download_status = deps.find_streaming_download_in_all_downloads(all_downloads, track_data)
                     
                     if download_status:
@@ -252,7 +252,7 @@ def prepare_stream_task(track_data, deps: PrepareStreamDeps):
                                         download_id = download_status.get('id', '')
                                         if download_id and track_data.get('username'):
                                             success = loop.run_until_complete(
-                                                deps.soulseek_client.signal_download_completion(
+                                                deps.download_orchestrator.signal_download_completion(
                                                     download_id, track_data.get('username'), remove=True)
                                             )
                                             if success:

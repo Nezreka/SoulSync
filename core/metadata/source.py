@@ -124,12 +124,14 @@ SOURCE_TAG_CONFIG = {
     "AUDIODB_TRACK_ID": "audiodb.tags.track_id",
     "TIDAL_TRACK_ID": "tidal.tags.track_id",
     "TIDAL_ARTIST_ID": "tidal.tags.artist_id",
+    "HIFI_TRACK_ID": "hifi.tags.track_id",
+    "HIFI_ARTIST_ID": "hifi.tags.artist_id",
     "QOBUZ_TRACK_ID": "qobuz.tags.track_id",
     "QOBUZ_ARTIST_ID": "qobuz.tags.artist_id",
     "GENIUS_TRACK_ID": "genius.tags.track_id",
 }
 
-DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"]
+DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "hifi", "qobuz", "lastfm", "genius"]
 
 ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
@@ -253,7 +255,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     album_name_for_mb = metadata.get("album", "")
     if album_name_for_mb:
         artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
-        rc_key_norm = (normalize_album_cache_key(album_name_for_mb), artist_key)
+        normalized_album_key = normalize_album_cache_key(album_name_for_mb)
+        rc_key_norm = (normalized_album_key, artist_key)
         rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
         release_mbid = None
         with mb_release_cache_lock:
@@ -263,12 +266,38 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             if cached:
                 release_mbid = cached
             else:
-                rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
-                if rc_result and rc_result.get("mbid"):
-                    release_mbid = rc_result["mbid"]
+                # Persistent cache check BEFORE the live MB lookup. If a
+                # previous SoulSync run already resolved this album's
+                # release MBID, reuse it — guarantees every track of the
+                # same album gets the SAME MUSICBRAINZ_ALBUMID tag, even
+                # across server restarts and after the in-memory bounded
+                # cache evicts the entry. Strictly additive: any failure
+                # in the persistent lookup falls through to the live MB
+                # query exactly as today.
+                try:
+                    from core.metadata import album_mbid_cache as _persisted_cache
+                    persisted = _persisted_cache.lookup(normalized_album_key, artist_key)
+                except Exception:
+                    persisted = None
+
+                if persisted:
+                    release_mbid = persisted
+                else:
+                    rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                    if rc_result and rc_result.get("mbid"):
+                        release_mbid = rc_result["mbid"]
+
                 if release_mbid:
                     _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
                     _bounded_cache_set(mb_release_cache, rc_key_exact, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+                    # Also persist for future SoulSync runs. Defensive
+                    # try/except so a DB write failure can't block the
+                    # in-memory store + tag write that follow.
+                    try:
+                        from core.metadata import album_mbid_cache as _persisted_cache
+                        _persisted_cache.record(normalized_album_key, artist_key, release_mbid)
+                    except Exception as e:
+                        logger.debug("MBID cache persist failed: %s", e)
         pp["release_mbid"] = release_mbid or ""
         if pp["release_mbid"]:
             pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
@@ -452,6 +481,9 @@ def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
             td_details = _call_source_lookup("Tidal track details", tidal_client.get_track, str(td_track_id))
             if td_details:
                 pp["tidal_isrc"] = td_details.get("isrc")
+                td_bpm = td_details.get("bpm")
+                if td_bpm and td_bpm > 0:
+                    pp["tidal_bpm"] = td_bpm
                 td_copyright = td_details.get("copyright")
                 if isinstance(td_copyright, dict):
                     td_copyright = td_copyright.get("text", td_copyright.get("name", ""))
@@ -463,6 +495,47 @@ def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
                 td_release = str(td_album.get("release_date", "") or td_album.get("releaseDate", "") or "")
             if len(td_release) >= 4 and td_release[:4].isdigit():
                 pp["release_year"] = td_release[:4]
+
+
+def _process_hifi_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    if cfg.get("hifi.embed_tags", True) is False:
+        return
+    if not track_title or not artist_name:
+        return
+
+    hifi_client = getattr(runtime, "hifi_client", None)
+    if not hifi_client:
+        return
+    hifi_results = _call_source_lookup("HiFi track", hifi_client.search_tracks, track_title, artist_name)
+    if hifi_results and len(hifi_results) > 0:
+        hifi_track = hifi_results[0]
+        if _names_match(hifi_track.get("title", ""), track_title):
+            hifi_track_id = hifi_track.get("id")
+            if hifi_track_id:
+                pp["id_tags"]["HIFI_TRACK_ID"] = str(hifi_track_id)
+            hifi_artist_id = hifi_track.get("artist_id")
+            if hifi_artist_id:
+                pp["id_tags"]["HIFI_ARTIST_ID"] = str(hifi_artist_id)
+            if hifi_track_id:
+                hifi_details = _call_source_lookup("HiFi track details", hifi_client.get_track_info, hifi_track_id)
+                if hifi_details:
+                    hifi_isrc = hifi_details.get("isrc")
+                    if hifi_isrc:
+                        pp["hifi_isrc"] = hifi_isrc
+                    hifi_bpm = hifi_details.get("bpm")
+                    if hifi_bpm and hifi_bpm > 0:
+                        pp["hifi_bpm"] = hifi_bpm
+                    hifi_copyright = hifi_details.get("copyright")
+                    if hifi_copyright:
+                        pp["hifi_copyright"] = hifi_copyright
+            if not pp["release_year"]:
+                hifi_album_id = hifi_track.get("album_id")
+                if hifi_album_id:
+                    hifi_album = _call_source_lookup("HiFi album", hifi_client.get_album, hifi_album_id)
+                    if hifi_album:
+                        hifi_release = str(hifi_album.get("release_date", "") or "")
+                        if len(hifi_release) >= 4 and hifi_release[:4].isdigit():
+                            pp["release_year"] = hifi_release[:4]
 
 
 def _process_qobuz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -572,6 +645,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_audiodb_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "tidal":
         _process_tidal_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "hifi":
+        _process_hifi_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "qobuz":
         _process_qobuz_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "lastfm":
@@ -634,15 +709,23 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["\xa9day"] = [release_year]
         logger.info("Date tag: %s", release_year)
 
-    if _tag_enabled(cfg, "deezer.tags.bpm") and pp["deezer_bpm"] and pp["deezer_bpm"] > 0:
-        bpm_int = int(pp["deezer_bpm"])
+    bpm_candidates = []
+    if pp["deezer_bpm"] and pp["deezer_bpm"] > 0 and _tag_enabled(cfg, "deezer.tags.bpm"):
+        bpm_candidates.append(("Deezer", pp["deezer_bpm"]))
+    if pp["tidal_bpm"] and pp["tidal_bpm"] > 0 and _tag_enabled(cfg, "tidal.tags.bpm"):
+        bpm_candidates.append(("Tidal", pp["tidal_bpm"]))
+    if pp["hifi_bpm"] and pp["hifi_bpm"] > 0 and _tag_enabled(cfg, "hifi.tags.bpm"):
+        bpm_candidates.append(("HiFi", pp["hifi_bpm"]))
+    if bpm_candidates:
+        bpm_source, bpm_val = bpm_candidates[0]
+        bpm_int = int(bpm_val)
         if isinstance(audio_file.tags, symbols.ID3):
             audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
         elif is_vorbis_like(audio_file, symbols):
             audio_file["BPM"] = [str(bpm_int)]
         elif isinstance(audio_file, symbols.MP4):
             audio_file["tmpo"] = [bpm_int]
-        logger.info("BPM: %s", bpm_int)
+        logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if _tag_enabled(cfg, "audiodb.tags.mood") and pp["audiodb_mood"]:
         if isinstance(audio_file.tags, symbols.ID3):
@@ -699,6 +782,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         isrc_candidates.append(("Deezer", pp["deezer_isrc"]))
     if pp["tidal_isrc"] and _tag_enabled(cfg, "tidal.tags.isrc"):
         isrc_candidates.append(("Tidal", pp["tidal_isrc"]))
+    if pp["hifi_isrc"] and _tag_enabled(cfg, "hifi.tags.isrc"):
+        isrc_candidates.append(("HiFi", pp["hifi_isrc"]))
     if pp["qobuz_isrc"] and _tag_enabled(cfg, "qobuz.tags.isrc"):
         isrc_candidates.append(("Qobuz", pp["qobuz_isrc"]))
     if isrc_candidates:
@@ -716,6 +801,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         copyright_candidates.append(("Tidal", pp["tidal_copyright"]))
     if pp["qobuz_copyright"] and _tag_enabled(cfg, "qobuz.tags.copyright"):
         copyright_candidates.append(("Qobuz", pp["qobuz_copyright"]))
+    if pp["hifi_copyright"] and _tag_enabled(cfg, "hifi.tags.copyright"):
+        copyright_candidates.append(("HiFi", pp["hifi_copyright"]))
     if copyright_candidates:
         copyright_source, final_copyright = copyright_candidates[0]
         if isinstance(audio_file.tags, symbols.ID3):
@@ -872,8 +959,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                         resolved = itunes_client.resolve_primary_artist(artist_id)
                         if resolved and resolved != raw_album_artist:
                             raw_album_artist = resolved
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("itunes primary artist resolve failed: %s", e)
     metadata["album_artist"] = raw_album_artist
 
     if album_info.get("is_album"):
@@ -963,11 +1050,15 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             "isrc": None,
             "deezer_bpm": None,
             "deezer_isrc": None,
+            "tidal_bpm": None,
+            "hifi_bpm": None,
+            "hifi_copyright": None,
             "audiodb_mood": None,
             "audiodb_style": None,
             "audiodb_genre": None,
             "tidal_isrc": None,
             "tidal_copyright": None,
+            "hifi_isrc": None,
             "qobuz_isrc": None,
             "qobuz_copyright": None,
             "qobuz_label": None,
@@ -981,12 +1072,46 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if not isinstance(source_order, list) or not source_order:
             source_order = DEFAULT_SOURCE_ORDER
 
+        # If this download came from HiFi, use cached metadata from the download
+        # pipeline instead of re-searching the HiFi API.
+        original_search = get_import_original_search(context)
+        cached_meta = original_search.get("_source_metadata") or {}
+        if cached_meta.get("source") == "hifi":
+            if _tag_enabled(cfg, "hifi.embed_tags"):
+                if cfg.get("hifi.tags.track_id", True) and cached_meta.get("track_id"):
+                    pp["id_tags"]["HIFI_TRACK_ID"] = str(cached_meta["track_id"])
+                if cfg.get("hifi.tags.artist_id", True) and cached_meta.get("artist_id"):
+                    pp["id_tags"]["HIFI_ARTIST_ID"] = str(cached_meta["artist_id"])
+                if cfg.get("hifi.tags.isrc", True) and cached_meta.get("isrc"):
+                    pp["hifi_isrc"] = cached_meta["isrc"]
+                if cfg.get("hifi.tags.bpm", True) and cached_meta.get("bpm"):
+                    pp["hifi_bpm"] = cached_meta["bpm"]
+                if cfg.get("hifi.tags.copyright", True) and cached_meta.get("copyright"):
+                    pp["hifi_copyright"] = cached_meta["copyright"]
+            source_order = [s for s in source_order if s != "hifi"]
+
+        # If this download came from Tidal, use cached metadata from the download
+        # pipeline instead of re-searching the Tidal API.
+        if cached_meta.get("source") == "tidal":
+            if _tag_enabled(cfg, "tidal.embed_tags"):
+                if cfg.get("tidal.tags.track_id", True) and cached_meta.get("track_id"):
+                    pp["id_tags"]["TIDAL_TRACK_ID"] = str(cached_meta["track_id"])
+                if cfg.get("tidal.tags.artist_id", True) and cached_meta.get("artist_id"):
+                    pp["id_tags"]["TIDAL_ARTIST_ID"] = str(cached_meta["artist_id"])
+                if cfg.get("tidal.tags.isrc", True) and cached_meta.get("isrc"):
+                    pp["tidal_isrc"] = cached_meta["isrc"]
+                if cfg.get("tidal.tags.bpm", True) and cached_meta.get("bpm"):
+                    pp["tidal_bpm"] = cached_meta["bpm"]
+                if cfg.get("tidal.tags.copyright", True) and cached_meta.get("copyright"):
+                    pp["tidal_copyright"] = cached_meta["copyright"]
+            source_order = [s for s in source_order if s != "tidal"]
+
         db = get_database()
 
         for source_name in source_order:
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name)
 
-        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["audiodb_mood"] and not pp["audiodb_style"]:
+        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)
@@ -994,6 +1119,25 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if release_id:
             metadata["musicbrainz_release_id"] = release_id
             _update_album_year_in_database(db, metadata, release_year)
+
+        # Expose the final ID tag set + per-source values back to the
+        # import context so downstream side-effects (notably
+        # ``record_download_provenance``) can persist them to the
+        # ``track_downloads`` table without re-collecting. Without this,
+        # the watchlist scanner would have to wait for the async
+        # enrichment workers to backfill ``tracks.spotify_track_id`` etc.
+        # before recognizing freshly downloaded files.
+        if isinstance(context, dict):
+            try:
+                context["_embedded_id_tags"] = dict(pp.get("id_tags") or {})
+                isrc_value = (
+                    pp.get("isrc") or pp.get("deezer_isrc") or pp.get("tidal_isrc")
+                    or pp.get("hifi_isrc") or pp.get("qobuz_isrc")
+                )
+                if isrc_value:
+                    context["_isrc"] = str(isrc_value)
+            except Exception as e:
+                logger.debug("context isrc copy failed: %s", e)
 
     except Exception as exc:
         logger.error("Error embedding source IDs (non-fatal): %s", exc)

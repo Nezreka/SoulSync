@@ -298,8 +298,8 @@ class DiscogsWorker:
             self.stats['errors'] += 1
             try:
                 self._mark_status(item['type'], item['id'], 'error')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("mark item status error failed: %s", e)
 
     def _get_existing_id(self, entity_type: str, entity_id) -> Optional[str]:
         """Check if entity already has a discogs_id."""

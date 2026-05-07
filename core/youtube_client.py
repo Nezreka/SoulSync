@@ -17,7 +17,6 @@ import time
 import platform
 import asyncio
 import uuid
-import threading
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +33,7 @@ from core.matching_engine import MusicMatchingEngine
 from core.spotify_client import Track as SpotifyTrack
 
 # Import Soulseek data structures for drop-in replacement compatibility
-from core.soulseek_client import SearchResult, TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import SearchResult, TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("youtube_client")
 
@@ -92,7 +91,10 @@ class YouTubeSearchResult:
         self.parsed_artist = self.channel
 
 
-class YouTubeClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class YouTubeClient(DownloadSourcePlugin):
     """
     YouTube download client using yt-dlp.
     Provides search, matching, and download capabilities with full Spotify metadata integration.
@@ -112,10 +114,39 @@ class YouTubeClient:
         # Callback for shutdown check (avoids circular imports)
         self.shutdown_check = None
 
-        # Rate limiting — serialize YouTube downloads with delay
-        self._download_semaphore = threading.Semaphore(1)
+        # Rate-limit policy — applied to engine.worker once the engine
+        # is wired in via set_engine(). Kept as an attribute for
+        # backward-compat external readers + so settings reload can
+        # update it without touching the engine.
         self._download_delay = config_manager.get('youtube.download_delay', 3)
-        self._last_download_time = 0
+
+        # Engine reference is populated by set_engine() at registration
+        # time. Until then the client can't dispatch downloads — but
+        # in production the orchestrator wires the engine immediately
+        # after constructing the registry, so this is only None in
+        # tests that bypass the orchestrator.
+        self._engine = None
+
+    def rate_limit_policy(self):
+        """YouTube reads its download delay from user-tunable config
+        (``youtube.download_delay``, default 3s). Engine reads this
+        at ``register_plugin`` time, then ``set_engine`` runs and
+        re-applies if the config changed since instance construction."""
+        from core.download_engine import RateLimitPolicy
+        return RateLimitPolicy(
+            download_concurrency=1,
+            download_delay_seconds=float(self._download_delay),
+        )
+
+    def set_engine(self, engine):
+        """Engine callback — gives the client access to the central
+        thread worker + state store. Engine calls this during
+        ``register_plugin`` if the plugin defines it. Worker delay
+        was already set from rate_limit_policy() — re-apply here so
+        runtime ``reload_settings`` updates take effect via the
+        same pathway."""
+        self._engine = engine
+        engine.worker.set_delay('youtube', float(self._download_delay))
 
     def set_shutdown_check(self, check_callable):
         """Set a callback function to check for system shutdown"""
@@ -129,11 +160,6 @@ class YouTubeClient:
         if not self._check_ffmpeg():
             logger.error("ffmpeg is required but not found")
             logger.error("The client will attempt to auto-download ffmpeg on first use")
-
-        # Download queue management (mirrors Soulseek's download tracking)
-        # Maps download_id -> download_info dict
-        self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = threading.Lock()  # Use threading.Lock for thread safety
 
         # Configure yt-dlp options with bot detection bypass
         self.download_opts = {
@@ -272,14 +298,13 @@ class YouTubeClient:
         self.progress_callback = callback
 
     def _progress_hook(self, d):
-        """
-        yt-dlp progress hook - called during download to report progress.
-        Updates the active_downloads dictionary for the current download.
-        Mirrors Soulseek's transfer status updates.
-        """
+        """yt-dlp progress hook — called during download to report
+        progress. Writes to the engine record (Phase C2 lifted state
+        out of the per-client dict; this hook follows suit)."""
         try:
-            # Only update if we have a current download ID
             if not self.current_download_id:
+                return
+            if self._engine is None:
                 return
 
             status = d.get('status', 'unknown')
@@ -289,24 +314,18 @@ class YouTubeClient:
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                 speed = d.get('speed', 0) or 0
                 eta = d.get('eta', 0) or 0
+                percent = (downloaded / total) * 100 if total > 0 else 0
 
-                if total > 0:
-                    percent = (downloaded / total) * 100
-                else:
-                    percent = 0
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'state': 'InProgress, Downloading',
+                    'progress': round(percent, 1),
+                    'transferred': downloaded,
+                    'size': total,
+                    'speed': int(speed),
+                    'time_remaining': int(eta) if eta > 0 else None,
+                })
 
-                # Update active downloads dictionary (thread-safe update with lock)
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        download_info = self.active_downloads[self.current_download_id]
-                        download_info['state'] = 'InProgress, Downloading'  # Match Soulseek state format
-                        download_info['progress'] = round(percent, 1)
-                        download_info['transferred'] = downloaded
-                        download_info['size'] = total
-                        download_info['speed'] = int(speed)
-                        download_info['time_remaining'] = int(eta) if eta > 0 else None
-
-                # Also update current_download_progress for legacy compatibility
+                # Legacy progress dict for any external listeners.
                 self.current_download_progress = {
                     'status': 'downloading',
                     'percent': round(percent, 1),
@@ -316,30 +335,27 @@ class YouTubeClient:
                     'eta': int(eta),
                     'filename': d.get('filename', '')
                 }
-
-                # Call progress callback if set (for UI updates)
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'finished':
-                # Download finished, ffmpeg is converting to MP3
-                # Keep state as 'InProgress, Downloading' - the download thread will set final state
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        self.active_downloads[self.current_download_id]['progress'] = 95.0  # Almost done (converting)
-
+                # Download finished — ffmpeg now converts to MP3. The
+                # engine.worker thread flips to 'Completed, Succeeded'
+                # once _download_sync returns; this just bumps progress
+                # to 95% so the UI doesn't sit at 99.9% during the
+                # ffmpeg post-process.
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'progress': 95.0,
+                })
                 self.current_download_progress['status'] = 'postprocessing'
                 self.current_download_progress['percent'] = 95.0
-
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'error':
-                # Mark as error (thread-safe)
-                with self._download_lock:
-                    if self.current_download_id in self.active_downloads:
-                        self.active_downloads[self.current_download_id]['state'] = 'Errored'
-
+                self._engine.update_record('youtube', self.current_download_id, {
+                    'state': 'Errored',
+                })
                 self.current_download_progress['status'] = 'error'
                 if self.progress_callback:
                     self.progress_callback(self.current_download_progress)
@@ -859,137 +875,57 @@ class YouTubeClient:
         return matches
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
-        """
-        Download YouTube video as audio (async, Soulseek-compatible interface).
+        """Download YouTube video as audio.
 
-        Returns download_id immediately and runs download in background thread.
-        Monitor via get_download_status() or get_all_downloads().
+        Returns download_id immediately; the actual download runs in
+        a background thread spawned by ``engine.worker``. Monitor
+        via ``orchestrator.get_download_status(download_id)``.
 
         Args:
             username: Ignored for YouTube (always "youtube")
             filename: Encoded as "video_id||title" from search results
             file_size: Ignored for YouTube (kept for interface compatibility)
-
-        Returns:
-            download_id: Unique ID for tracking this download
         """
-        try:
-            # Parse filename to extract video_id
-            if '||' not in filename:
-                logger.error(f"Invalid filename format: {filename}")
-                return None
-
-            video_id, title = filename.split('||', 1)
-            youtube_url = f"https://www.youtube.com/watch?v={video_id}"
-
-            logger.info(f"Starting YouTube download: {title}")
-            logger.info(f"   URL: {youtube_url}")
-
-            # Create unique download ID
-            download_id = str(uuid.uuid4())
-
-            # Initialize download info in active downloads
-            with self._download_lock:
-                self.active_downloads[download_id] = {
-                    'id': download_id,
-                    'filename': filename,  # Keep original encoded format for context matching!
-                    'username': 'youtube',
-                    'state': 'Initializing',  # Soulseek-style states
-                    'progress': 0.0,
-                    'size': file_size or 0,
-                    'transferred': 0,
-                    'speed': 0,
-                    'time_remaining': None,
-                    'video_id': video_id,
-                    'url': youtube_url,
-                    'title': title,
-                    'file_path': None,  # Will be set when download completes
-                }
-
-            # Start download in background thread (returns immediately)
-            download_thread = threading.Thread(
-                target=self._download_thread_worker,
-                args=(download_id, youtube_url, title, filename),
-                daemon=True
-            )
-            download_thread.start()
-
-            logger.info(f"YouTube download {download_id} started in background")
-            return download_id
-
-        except Exception as e:
-            logger.error(f"Failed to start YouTube download: {e}")
-            import traceback
-            traceback.print_exc()
+        if '||' not in filename:
+            logger.error(f"Invalid filename format: {filename}")
             return None
+        if self._engine is None:
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("YouTube client has no engine reference — cannot dispatch download")
 
-    def _download_thread_worker(self, download_id: str, youtube_url: str, title: str, original_filename: str):
-        """
-        Background thread worker for downloading YouTube videos.
-        Updates active_downloads dict with progress.
-        Serialized via semaphore with configurable delay between downloads.
-        """
-        try:
-            with self._download_semaphore:
-                # Enforce delay since last download completed
-                elapsed = time.time() - self._last_download_time
-                if self._last_download_time > 0 and elapsed < self._download_delay:
-                    wait_time = self._download_delay - elapsed
-                    logger.info(f"Rate limiting: waiting {wait_time:.1f}s before next YouTube download")
-                    time.sleep(wait_time)
+        video_id, title = filename.split('||', 1)
+        youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info("Starting YouTube download: %s (%s)", title, youtube_url)
 
-                # Update state to downloading
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'InProgress, Downloading'  # Match Soulseek state
-
-                # Set current download ID for progress hook
-                self.current_download_id = download_id
-
-                # Perform actual download
-                file_path = self._download_sync(youtube_url, title)
-
-                # Clear current download ID
+        def _impl(download_id, _target_id, display_name):
+            # The progress hook reads ``current_download_id`` to know
+            # which download to update. Set it before the call, clear
+            # after, even on exception.
+            self.current_download_id = download_id
+            try:
+                return self._download_sync(youtube_url, title)
+            finally:
                 self.current_download_id = None
 
-                # Record completion time for rate limiting
-                self._last_download_time = time.time()
+        return self._engine.worker.dispatch(
+            source_name='youtube',
+            target_id=video_id,
+            display_name=title,
+            original_filename=filename,
+            impl_callable=_impl,
+            extra_record_fields={
+                'video_id': video_id,
+                'url': youtube_url,
+                'title': title,
+            },
+        )
 
-                if file_path:
-                    # Mark as completed/succeeded (match Soulseek state)
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            # IMPORTANT: Keep original filename for context lookup!
-                            # The filename must match what was used to create the context entry
-                            # We store the actual file path separately
-                            self.active_downloads[download_id]['state'] = 'Completed, Succeeded'  # Match Soulseek
-                            self.active_downloads[download_id]['progress'] = 100.0
-                            self.active_downloads[download_id]['file_path'] = file_path
-                            # DO NOT update filename - keep original_filename for context matching
-
-                    logger.info(f"YouTube download {download_id} completed: {file_path}")
-                else:
-                    # Mark as errored
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            self.active_downloads[download_id]['state'] = 'Errored'
-
-                    logger.error(f"YouTube download {download_id} failed")
-
-        except Exception as e:
-            logger.error(f"YouTube download thread failed for {download_id}: {e}")
-            import traceback
-            traceback.print_exc()
-
-            # Mark as errored
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
-
-            # Clear current download ID
-            if self.current_download_id == download_id:
-                self.current_download_id = None
-
+    # Legacy worker stub kept temporarily for legacy comment context —
+    # see _download_sync below for the actual yt-dlp invocation that
+    # the engine's BackgroundDownloadWorker now drives.
     def _download_sync(self, youtube_url: str, title: str) -> Optional[str]:
         """
         Synchronous download method (runs in thread pool executor).
@@ -1138,123 +1074,76 @@ class YouTubeClient:
             traceback.print_exc()
             return None
 
+    def _record_to_status(self, record):
+        """Translate an engine record dict into the DownloadStatus
+        dataclass shape consumers expect."""
+        return DownloadStatus(
+            id=record['id'],
+            filename=record['filename'],
+            username=record['username'],
+            state=record['state'],
+            progress=record['progress'],
+            size=record.get('size', 0),
+            transferred=record.get('transferred', 0),
+            speed=record.get('speed', 0),
+            time_remaining=record.get('time_remaining'),
+            file_path=record.get('file_path'),
+        )
+
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """
-        Get all active downloads (matches Soulseek interface).
-
-        Returns:
-            List of DownloadStatus objects for all active downloads
-        """
-        download_statuses = []
-
-        with self._download_lock:
-            for _download_id, download_info in self.active_downloads.items():
-                status = DownloadStatus(
-                    id=download_info['id'],
-                    filename=download_info['filename'],
-                    username=download_info['username'],
-                    state=download_info['state'],
-                    progress=download_info['progress'],
-                    size=download_info['size'],
-                    transferred=download_info['transferred'],
-                    speed=download_info['speed'],
-                    time_remaining=download_info.get('time_remaining')
-                )
-                download_statuses.append(status)
-
-        return download_statuses
+        """Active downloads owned by the YouTube source — read from
+        engine state."""
+        if self._engine is None:
+            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('youtube')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """
-        Get status of a specific download (matches Soulseek interface).
-
-        Args:
-            download_id: Download ID to query
-
-        Returns:
-            DownloadStatus object or None if not found
-        """
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return None
-
-            download_info = self.active_downloads[download_id]
-
-            return DownloadStatus(
-                id=download_info['id'],
-                filename=download_info['filename'],
-                username=download_info['username'],
-                state=download_info['state'],
-                progress=download_info['progress'],
-                size=download_info['size'],
-                transferred=download_info['transferred'],
-                speed=download_info['speed'],
-                time_remaining=download_info.get('time_remaining'),
-                file_path=download_info.get('file_path')
-            )
-
+        """Single download status — read from engine state. Returns
+        None if this id isn't owned by YouTube (or not found)."""
+        if self._engine is None:
+            return None
+        record = self._engine.get_record('youtube', download_id)
+        if record is None:
+            return None
+        return self._record_to_status(record)
 
     async def clear_all_completed_downloads(self) -> bool:
-        """
-        Clear all terminal (completed, cancelled, errored) downloads from the list.
-        Matches Soulseek interface.
-        """
+        """Clear terminal-state downloads (Completed / Cancelled /
+        Errored / Aborted) from engine state."""
+        if self._engine is None:
+            return True
         try:
-            with self._download_lock:
-                # Identify IDs to remove
-                ids_to_remove = []
-                for download_id, info in self.active_downloads.items():
-                    state = info.get('state', '')
-                    # Check for terminal states
-                    # Note: We check exact strings used in _download_thread_worker and cancel_download
-                    if state in ['Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted']:
-                        ids_to_remove.append(download_id)
-                
-                # Remove them
-                for download_id in ids_to_remove:
-                    del self.active_downloads[download_id]
-                    logger.debug(f"Cleared finished download {download_id}")
-            
+            terminal_states = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+            for record in list(self._engine.iter_records_for_source('youtube')):
+                if record.get('state') in terminal_states:
+                    self._engine.remove_record('youtube', record['id'])
+                    logger.debug("Cleared finished YouTube download %s", record['id'])
             return True
         except Exception as e:
             logger.error(f"Error clearing downloads: {e}")
             return False
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        """
-        Cancel an active download (matches Soulseek interface).
-
-        NOTE: YouTube downloads cannot be truly cancelled mid-download,
-        but we mark them as cancelled for UI consistency.
-
-        Args:
-            download_id: Download ID to cancel
-            username: Ignored for YouTube (kept for interface compatibility)
-            remove: If True, remove from active downloads after cancelling
-
-        Returns:
-            True if cancelled successfully, False otherwise
-        """
-        try:
-            with self._download_lock:
-                if download_id not in self.active_downloads:
-                    logger.warning(f"Download {download_id} not found")
-                    return False
-
-                # Update state to cancelled
-                self.active_downloads[download_id]['state'] = 'Cancelled'
-                logger.info(f"Marked YouTube download {download_id} as cancelled")
-
-                # Remove from active downloads if requested
-                if remove:
-                    del self.active_downloads[download_id]
-                    logger.info(f"Removed YouTube download {download_id} from queue")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to cancel download {download_id}: {e}")
+        """Mark a YouTube download as cancelled. yt-dlp downloads
+        can't be truly interrupted mid-stream — this only flips
+        the state for UI consistency. ``remove=True`` also drops
+        the engine record."""
+        if self._engine is None:
             return False
+        record = self._engine.get_record('youtube', download_id)
+        if record is None:
+            logger.warning(f"YouTube download {download_id} not found")
+            return False
+
+        self._engine.update_record('youtube', download_id, {'state': 'Cancelled'})
+        logger.info(f"Marked YouTube download {download_id} as cancelled")
+        if remove:
+            self._engine.remove_record('youtube', download_id)
+            logger.info(f"Removed YouTube download {download_id} from queue")
+        return True
 
     def _enhance_metadata(self, filepath: str, spotify_track: Optional[SpotifyTrack], yt_result: YouTubeSearchResult, track_number: int = 1, disc_number: int = 1, release_year: str = None, artist_genres: list = None):
         """
@@ -1301,8 +1190,8 @@ class YouTubeClient:
                                 album_data = track_details.get('album', {})
                                 if album_data.get('artists'):
                                     album_artist = album_data['artists'][0]
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify album artist lookup: %s", e)
 
                 logger.debug("   Setting metadata tags...")
 

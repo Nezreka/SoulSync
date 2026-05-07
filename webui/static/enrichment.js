@@ -8,7 +8,7 @@ async function updateMusicBrainzStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/musicbrainz/status');
+        const response = await fetch('/api/enrichment/musicbrainz/status');
         if (!response.ok) { console.warn('MusicBrainz status endpoint unavailable'); return; }
         const data = await response.json();
         updateMusicBrainzStatusFromData(data);
@@ -94,7 +94,7 @@ async function toggleMusicBrainzEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/musicbrainz/pause' : '/api/musicbrainz/resume';
+        const endpoint = isRunning ? '/api/enrichment/musicbrainz/pause' : '/api/enrichment/musicbrainz/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -146,7 +146,7 @@ async function updateAudioDBStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/audiodb/status');
+        const response = await fetch('/api/enrichment/audiodb/status');
         if (!response.ok) { console.warn('AudioDB status endpoint unavailable'); return; }
         const data = await response.json();
         updateAudioDBStatusFromData(data);
@@ -257,7 +257,7 @@ async function toggleDiscogsEnrichment() {
         const button = document.getElementById('discogs-button');
         if (!button) return;
         const isPaused = button.classList.contains('paused') || button.classList.contains('complete');
-        const endpoint = isPaused ? '/api/discogs/resume' : '/api/discogs/pause';
+        const endpoint = isPaused ? '/api/enrichment/discogs/resume' : '/api/enrichment/discogs/pause';
         const response = await fetch(endpoint, { method: 'POST' });
         if (response.ok) {
             showToast(isPaused ? 'Discogs enrichment resumed' : 'Discogs enrichment paused', 'info');
@@ -276,7 +276,7 @@ async function toggleAudioDBEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/audiodb/pause' : '/api/audiodb/resume';
+        const endpoint = isRunning ? '/api/enrichment/audiodb/pause' : '/api/enrichment/audiodb/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -323,7 +323,7 @@ async function updateDeezerStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/deezer/status');
+        const response = await fetch('/api/enrichment/deezer/status');
         if (!response.ok) { console.warn('Deezer status endpoint unavailable'); return; }
         const data = await response.json();
         updateDeezerStatusFromData(data);
@@ -395,7 +395,7 @@ async function toggleDeezerEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/deezer/pause' : '/api/deezer/resume';
+        const endpoint = isRunning ? '/api/enrichment/deezer/pause' : '/api/enrichment/deezer/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -442,7 +442,7 @@ async function updateSpotifyEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/spotify-enrichment/status');
+        const response = await fetch('/api/enrichment/spotify/status');
         if (!response.ok) { console.warn('Spotify enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateSpotifyEnrichmentStatusFromData(data);
@@ -548,7 +548,7 @@ async function toggleSpotifyEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/spotify-enrichment/pause' : '/api/spotify-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/spotify/pause' : '/api/enrichment/spotify/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -596,7 +596,7 @@ async function updateiTunesEnrichmentStatus() {
     if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
-        const response = await fetch('/api/itunes-enrichment/status');
+        const response = await fetch('/api/enrichment/itunes/status');
         if (!response.ok) { console.warn('iTunes enrichment status endpoint unavailable'); return; }
         const data = await response.json();
         updateiTunesEnrichmentStatusFromData(data);
@@ -672,7 +672,7 @@ async function toggleiTunesEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/itunes-enrichment/pause' : '/api/itunes-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/itunes/pause' : '/api/enrichment/itunes/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -715,7 +715,7 @@ async function updateLastFMEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/lastfm-enrichment/status');
+        const response = await fetch('/api/enrichment/lastfm/status');
         if (!response.ok) { console.warn('Last.fm status endpoint unavailable'); return; }
         const data = await response.json();
         updateLastFMEnrichmentStatusFromData(data);
@@ -800,7 +800,7 @@ async function toggleLastFMEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/lastfm-enrichment/pause' : '/api/lastfm-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/lastfm/pause' : '/api/enrichment/lastfm/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -842,7 +842,7 @@ async function updateGeniusEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/genius-enrichment/status');
+        const response = await fetch('/api/enrichment/genius/status');
         if (!response.ok) { console.warn('Genius status endpoint unavailable'); return; }
         const data = await response.json();
         updateGeniusEnrichmentStatusFromData(data);
@@ -921,7 +921,7 @@ async function toggleGeniusEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/genius-enrichment/pause' : '/api/genius-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/genius/pause' : '/api/enrichment/genius/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -963,7 +963,7 @@ async function updateTidalEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/tidal-enrichment/status');
+        const response = await fetch('/api/enrichment/tidal/status');
         if (!response.ok) { console.warn('Tidal status endpoint unavailable'); return; }
         const data = await response.json();
         updateTidalEnrichmentStatusFromData(data);
@@ -1046,7 +1046,7 @@ async function toggleTidalEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/tidal-enrichment/pause' : '/api/tidal-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/tidal/pause' : '/api/enrichment/tidal/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -1088,7 +1088,7 @@ async function updateQobuzEnrichmentStatus() {
     if (socketConnected) return;
     if (document.hidden) return;
     try {
-        const response = await fetch('/api/qobuz-enrichment/status');
+        const response = await fetch('/api/enrichment/qobuz/status');
         if (!response.ok) { console.warn('Qobuz status endpoint unavailable'); return; }
         const data = await response.json();
         updateQobuzEnrichmentStatusFromData(data);
@@ -1171,7 +1171,7 @@ async function toggleQobuzEnrichment() {
         if (!button) return;
 
         const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/qobuz-enrichment/pause' : '/api/qobuz-enrichment/resume';
+        const endpoint = isRunning ? '/api/enrichment/qobuz/pause' : '/api/enrichment/qobuz/resume';
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
@@ -1425,6 +1425,7 @@ let _repairCurrentTab = 'jobs';
 let _repairFindingsPage = 0;
 let _repairSelectedFindings = new Set();
 let _repairFindingsTotal = 0;
+let _repairFindingsAutoSwitched = false;  // Set after auto-switching to "All Status" so we don't loop
 const REPAIR_FINDINGS_PAGE_SIZE = 30;
 let _repairJobsCache = {}; // Cache job data for help modal
 
@@ -1554,11 +1555,25 @@ async function loadRepairJobs() {
                     flowParts.push('<span class="repair-flow-badge autofix">Auto-fix</span>');
                 }
             }
-            // Show pending findings count
-            const findingsCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
-            if (findingsCount > 0) {
+            // Badge: prefer the CURRENT pending count from the API
+            // (matches what the Findings tab actually shows); fall
+            // back to the historical ``findings_created`` from the
+            // last run when pending = 0 but the last scan did find
+            // something — that way users still see a hint that a scan
+            // happened recently. Without this, a scan that finds 372
+            // duplicates and then has them all bulk-fixed shows
+            // "372 findings" on the badge while the Findings tab
+            // Pending filter is empty, which reads as a bug.
+            const pendingCount = job.pending_findings_count || 0;
+            const lastScanCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
+            if (pendingCount > 0) {
                 flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
-                flowParts.push(`<span class="repair-flow-badge findings">${findingsCount} finding${findingsCount !== 1 ? 's' : ''}</span>`);
+                flowParts.push(`<span class="repair-flow-badge findings">${pendingCount} pending</span>`);
+            } else if (lastScanCount > 0) {
+                // Show historical count with a clear "found in last scan"
+                // qualifier so users don't expect them on the Pending tab.
+                flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+                flowParts.push(`<span class="repair-flow-badge findings findings-historical">${lastScanCount} found in last scan</span>`);
             }
 
             // Build meta parts
@@ -2459,6 +2474,38 @@ async function loadRepairFindings() {
         if (selectAllCb) { selectAllCb.checked = false; selectAllCb.indeterminate = false; }
 
         if (items.length === 0) {
+            // If the user is on the default "pending" filter and there are
+            // ZERO pending rows but other statuses (dismissed/resolved) do
+            // have rows, auto-switch the filter to "All Status" so the user
+            // sees the carry-over findings instead of an empty pane. Common
+            // case: scanner re-found same issues that were dismissed
+            // previously — dedup-skip means no new pending row, so the
+            // default-filtered tab looks empty even though the badge count
+            // referenced existing dismissed rows.
+            if (statusFilter && statusFilter.value === 'pending' && !_repairFindingsAutoSwitched) {
+                try {
+                    const countsResp = await fetch('/api/repair/findings/counts');
+                    if (countsResp.ok) {
+                        const counts = await countsResp.json();
+                        const otherTotal = (counts.resolved || 0) + (counts.dismissed || 0) + (counts.auto_fixed || 0);
+                        if (otherTotal > 0) {
+                            _repairFindingsAutoSwitched = true;
+                            statusFilter.value = '';
+                            _repairFindingsPage = 0;
+                            await loadRepairFindings();
+                            const list = document.getElementById('repair-findings-list');
+                            if (list && !list.querySelector('.repair-auto-switch-notice')) {
+                                const notice = document.createElement('div');
+                                notice.className = 'repair-auto-switch-notice';
+                                notice.style.cssText = 'background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.25);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#cbd5e1;';
+                                notice.innerHTML = `No <b>pending</b> findings, but ${otherTotal.toLocaleString()} carry-over (resolved/dismissed/auto-fixed). Showing <b>All Status</b> — change the filter above to switch back.`;
+                                list.parentNode.insertBefore(notice, list);
+                            }
+                            return;
+                        }
+                    }
+                } catch (e) { /* fall through to empty state */ }
+            }
             container.innerHTML = `<div class="repair-empty-state">
                 <div class="repair-empty-icon">&#10003;</div>
                 <div class="repair-empty-title">All Clear</div>

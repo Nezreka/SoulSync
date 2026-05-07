@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TaskWorkerDeps:
     """Bundle of cross-cutting deps the per-task download worker needs."""
-    soulseek_client: Any
+    download_orchestrator: Any
     matching_engine: Any
     run_async: Callable
     try_source_reuse: Callable                    # (task_id, batch_id, track) -> bool
@@ -210,7 +210,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
 
             try:
                 # Perform search with timeout
-                tracks_result, _ = deps.run_async(deps.soulseek_client.search(query, timeout=30))
+                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(query, timeout=30))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns
@@ -260,7 +260,13 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             search_diagnostics.append(f'"{query}": {result_count} results, {len(candidates)} passed filters but download failed to start')
                     else:
                         search_diagnostics.append(f'"{query}": {result_count} results but none passed quality/artist filters')
-                        all_raw_results.extend(tracks_result[:20])  # Keep top results for review
+                        # Strip SoundCloud preview snippets before caching for the
+                        # review modal — the user can't pick something useful from
+                        # a 30s preview clip, and clicking one bypasses validation
+                        # and downloads it anyway.
+                        from core.downloads.validation import filter_soundcloud_previews
+                        _filtered_raw = filter_soundcloud_previews(tracks_result[:20], track)
+                        all_raw_results.extend(_filtered_raw)
                 else:
                     search_diagnostics.append(f'"{query}": no results found')
 
@@ -272,22 +278,23 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # === HYBRID FALLBACK: If primary source failed, try remaining sources directly ===
         # The orchestrator's hybrid search stops at the first source with results, even if
         # those results all fail quality filtering. Try remaining sources individually.
-        if getattr(deps.soulseek_client, 'mode', '') == 'hybrid':
+        if getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
-                orch = deps.soulseek_client
+                orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []
                 if not hybrid_order:
                     primary = getattr(orch, 'hybrid_primary', 'soulseek')
                     secondary = getattr(orch, 'hybrid_secondary', '')
                     hybrid_order = [primary, secondary] if secondary and secondary != primary else [primary]
 
+                # Resolve via the orchestrator's generic accessor — the
+                # legacy per-source attrs were dropped in the registry
+                # refactor, so getattr(orch, 'soulseek', None) etc. all
+                # silently returned None and the fallback never fired.
                 source_clients = {
-                    'soulseek': getattr(orch, 'soulseek', None),
-                    'youtube': getattr(orch, 'youtube', None),
-                    'tidal': getattr(orch, 'tidal', None),
-                    'qobuz': getattr(orch, 'qobuz', None),
-                    'hifi': getattr(orch, 'hifi', None),
-                    'deezer_dl': getattr(orch, 'deezer_dl', None),
+                    name: orch.client(name)
+                    for name in ('soulseek', 'youtube', 'tidal', 'qobuz',
+                                 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
                 }
 
                 # The orchestrator tried sources in order but stopped at the first with results.

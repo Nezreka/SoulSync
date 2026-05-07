@@ -3305,127 +3305,133 @@ function processModalStatusUpdate(playlistId, data) {
             // Note: Auto-show logic removed - wishlist modal visibility managed by user interaction only
 
             if (data.phase === 'cancelled') {
-                process.status = 'cancelled';
+                if (process.status !== 'cancelled') {
+                    process.status = 'cancelled';
 
-                // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
-                if (playlistId.startsWith('youtube_')) {
-                    const urlHash = playlistId.replace('youtube_', '');
-                    updateYouTubeCardPhase(urlHash, 'discovered');
-                    if (urlHash.startsWith('mirrored_')) {
-                        updateMirroredCardPhase(urlHash, 'discovered');
+                    // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
+                    if (playlistId.startsWith('youtube_')) {
+                        const urlHash = playlistId.replace('youtube_', '');
+                        updateYouTubeCardPhase(urlHash, 'discovered');
+                        if (urlHash.startsWith('mirrored_')) {
+                            updateMirroredCardPhase(urlHash, 'discovered');
+                        }
                     }
-                }
 
-                showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
+                    showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
+                }
             } else if (data.phase === 'error') {
-                process.status = 'complete'; // Treat as complete to allow cleanup
-                updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                if (process.status !== 'complete') {
+                    process.status = 'complete';
+                    updatePlaylistCardUI(playlistId); // Update card to show ready for review
 
-                // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
-                if (playlistId.startsWith('youtube_')) {
-                    const urlHash = playlistId.replace('youtube_', '');
-                    updateYouTubeCardPhase(urlHash, 'discovered');
-                    if (urlHash.startsWith('mirrored_')) {
-                        updateMirroredCardPhase(urlHash, 'discovered');
+                    // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
+                    if (playlistId.startsWith('youtube_')) {
+                        const urlHash = playlistId.replace('youtube_', '');
+                        updateYouTubeCardPhase(urlHash, 'discovered');
+                        if (urlHash.startsWith('mirrored_')) {
+                            updateMirroredCardPhase(urlHash, 'discovered');
+                        }
                     }
-                }
 
-                showToast(`Process for ${process.playlist.name} failed!`, 'error');
+                    showToast(`Process for ${process.playlist.name} failed!`, 'error');
+                }
             } else {
-                process.status = 'complete';
-                updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                if (process.status !== 'complete') {
+                    process.status = 'complete';
+                    updatePlaylistCardUI(playlistId); // Update card to show ready for review
 
-                // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
-                if (playlistId.startsWith('youtube_')) {
-                    const urlHash = playlistId.replace('youtube_', '');
-                    updateYouTubeCardPhase(urlHash, 'download_complete');
-                    if (urlHash.startsWith('mirrored_')) {
-                        updateMirroredCardPhase(urlHash, 'download_complete');
-                    }
-                }
-
-                // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
-                if (playlistId.startsWith('tidal_')) {
-                    const tidalPlaylistId = playlistId.replace('tidal_', '');
-                    if (tidalPlaylistStates[tidalPlaylistId]) {
-                        tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
-                        // Store the download process ID for potential modal rehydration
-                        tidalPlaylistStates[tidalPlaylistId].download_process_id = process.batchId;
-                        updateTidalCardPhase(tidalPlaylistId, 'download_complete');
-                        console.log(`✅ [Status Complete] Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
-                    }
-                }
-
-                // Update Beatport chart phase to 'download_complete' if this is a Beatport chart
-                if (playlistId.startsWith('beatport_')) {
-                    const urlHash = playlistId.replace('beatport_', '');
-                    const state = youtubePlaylistStates[urlHash];
-
-                    if (state && state.is_beatport_playlist) {
-                        const chartHash = state.beatport_chart_hash || urlHash;
-
-                        // Update frontend states
-                        state.phase = 'download_complete';
-                        state.download_process_id = process.batchId;
-                        if (beatportChartStates[chartHash]) {
-                            beatportChartStates[chartHash].phase = 'download_complete';
+                    // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                    if (playlistId.startsWith('youtube_')) {
+                        const urlHash = playlistId.replace('youtube_', '');
+                        updateYouTubeCardPhase(urlHash, 'download_complete');
+                        if (urlHash.startsWith('mirrored_')) {
+                            updateMirroredCardPhase(urlHash, 'download_complete');
                         }
+                    }
 
-                        // Update card UI
-                        updateBeatportCardPhase(chartHash, 'download_complete');
-
-                        // Update backend state
-                        try {
-                            fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    phase: 'download_complete',
-                                    download_process_id: process.batchId
-                                })
-                            });
-                        } catch (error) {
-                            console.warn('⚠️ Error updating backend Beatport phase to download_complete:', error);
+                    // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                    if (playlistId.startsWith('tidal_')) {
+                        const tidalPlaylistId = playlistId.replace('tidal_', '');
+                        if (tidalPlaylistStates[tidalPlaylistId]) {
+                            tidalPlaylistStates[tidalPlaylistId].phase = 'download_complete';
+                            // Store the download process ID for potential modal rehydration
+                            tidalPlaylistStates[tidalPlaylistId].download_process_id = process.batchId;
+                            updateTidalCardPhase(tidalPlaylistId, 'download_complete');
+                            console.log(`✅ [Status Complete] Updated Tidal playlist ${tidalPlaylistId} to download_complete phase`);
                         }
-
-                        console.log(`✅ [Status Complete] Updated Beatport chart ${chartHash} to download_complete phase`);
                     }
-                }
 
-                // Handle background wishlist processing completion specially
-                if (isBackgroundWishlist) {
-                    console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${notFoundCount} not found, ${failedOrCancelledCount} failed`);
+                    // Update Beatport chart phase to 'download_complete' if this is a Beatport chart
+                    if (playlistId.startsWith('beatport_')) {
+                        const urlHash = playlistId.replace('beatport_', '');
+                        const state = youtubePlaylistStates[urlHash];
 
-                    // Reset modal to idle state to prevent "complete" phase disruption
-                    setTimeout(() => {
-                        resetWishlistModalToIdleState();
-                        // Server-side auto-processing will handle next cycle automatically
-                    }, 500);
+                        if (state && state.is_beatport_playlist) {
+                            const chartHash = state.beatport_chart_hash || urlHash;
 
-                    return; // Skip normal completion handling
-                }
+                            // Update frontend states
+                            state.phase = 'download_complete';
+                            state.download_process_id = process.batchId;
+                            if (beatportChartStates[chartHash]) {
+                                beatportChartStates[chartHash].phase = 'download_complete';
+                            }
 
-                // Show completion summary with wishlist stats (matching sync.py behavior)
-                let completionMessage = `Process complete for ${process.playlist.name}!`;
-                let messageType = 'success';
+                            // Update card UI
+                            updateBeatportCardPhase(chartHash, 'download_complete');
 
-                // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
-                if (data.wishlist_summary) {
-                    const summary = data.wishlist_summary;
-                    let summaryParts = [`Downloaded: ${completedCount}`];
-                    if (notFoundCount > 0) summaryParts.push(`Not Found: ${notFoundCount}`);
-                    if (failedOrCancelledCount > 0) summaryParts.push(`Failed: ${failedOrCancelledCount}`);
-                    completionMessage = `Download process complete! ${summaryParts.join(', ')}.`;
+                            // Update backend state
+                            try {
+                                fetch(`/api/beatport/charts/update-phase/${chartHash}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        phase: 'download_complete',
+                                        download_process_id: process.batchId
+                                    })
+                                });
+                            } catch (error) {
+                                console.warn('⚠️ Error updating backend Beatport phase to download_complete:', error);
+                            }
 
-                    if (summary.tracks_added > 0) {
-                        completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
-                    } else if (summary.total_failed > 0) {
-                        completionMessage += ` ${summary.total_failed} track${summary.total_failed !== 1 ? 's' : ''} could not be added to wishlist.`;
-                        messageType = 'warning';
+                            console.log(`✅ [Status Complete] Updated Beatport chart ${chartHash} to download_complete phase`);
+                        }
                     }
-                }
 
-                showToast(completionMessage, messageType);
+                    // Handle background wishlist processing completion specially
+                    if (isBackgroundWishlist) {
+                        console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${notFoundCount} not found, ${failedOrCancelledCount} failed`);
+
+                        // Reset modal to idle state to prevent "complete" phase disruption
+                        setTimeout(() => {
+                            resetWishlistModalToIdleState();
+                            // Server-side auto-processing will handle next cycle automatically
+                        }, 500);
+
+                        return; // Skip normal completion handling
+                    }
+
+                    // Show completion summary with wishlist stats (matching sync.py behavior)
+                    let completionMessage = `Process complete for ${process.playlist.name}!`;
+                    let messageType = 'success';
+
+                    // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
+                    if (data.wishlist_summary) {
+                        const summary = data.wishlist_summary;
+                        let summaryParts = [`Downloaded: ${completedCount}`];
+                        if (notFoundCount > 0) summaryParts.push(`Not Found: ${notFoundCount}`);
+                        if (failedOrCancelledCount > 0) summaryParts.push(`Failed: ${failedOrCancelledCount}`);
+                        completionMessage = `Download process complete! ${summaryParts.join(', ')}.`;
+
+                        if (summary.tracks_added > 0) {
+                            completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
+                        } else if (summary.total_failed > 0) {
+                            completionMessage += ` ${summary.total_failed} track${summary.total_failed !== 1 ? 's' : ''} could not be added to wishlist.`;
+                            messageType = 'warning';
+                        }
+                    }
+
+                    showToast(completionMessage, messageType);
+                }
             }
 
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';

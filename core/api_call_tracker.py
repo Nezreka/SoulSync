@@ -302,8 +302,8 @@ class ApiCallTracker:
             try:
                 if os.path.exists(_PERSIST_PATH + '.tmp'):
                     os.remove(_PERSIST_PATH + '.tmp')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("remove stale tmp file failed: %s", e)
 
     def _load(self):
         """Restore 24h minute history from disk. Called on init."""

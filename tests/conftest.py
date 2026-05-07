@@ -17,7 +17,8 @@ from flask_socketio import SocketIO, join_room, leave_room
 # ---------------------------------------------------------------------------
 
 _DEFAULT_STATUS_CACHE = {
-    'spotify': {'connected': True, 'authenticated': True, 'response_time': 12.5, 'source': 'spotify'},
+    'metadata_source': {'connected': True, 'response_time': 12.5, 'source': 'spotify'},
+    'spotify': {'connected': True, 'authenticated': True, 'rate_limited': False, 'rate_limit': None, 'post_ban_cooldown': None},
     'media_server': {'connected': True, 'response_time': 8.1, 'type': 'plex'},
     'soulseek': {'connected': True, 'response_time': 5.3, 'source': 'soulseek'},
 }
@@ -255,6 +256,7 @@ wishlist_stats_state = copy.deepcopy(_DEFAULT_WISHLIST_STATS)
 
 def _build_status_payload():
     return {
+        'metadata_source': dict(_status_cache['metadata_source']),
         'spotify': dict(_status_cache['spotify']),
         'media_server': dict(_status_cache['media_server']),
         'soulseek': dict(_status_cache['soulseek']),
@@ -313,11 +315,11 @@ ENRICHMENT_WORKERS = [
 ]
 
 ENRICHMENT_ENDPOINTS = {
-    'musicbrainz': '/api/musicbrainz/status',
-    'audiodb': '/api/audiodb/status',
-    'deezer': '/api/deezer/status',
-    'spotify-enrichment': '/api/spotify-enrichment/status',
-    'itunes-enrichment': '/api/itunes-enrichment/status',
+    'musicbrainz': '/api/enrichment/musicbrainz/status',
+    'audiodb': '/api/enrichment/audiodb/status',
+    'deezer': '/api/enrichment/deezer/status',
+    'spotify-enrichment': '/api/enrichment/spotify/status',
+    'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',
     'repair': '/api/repair/status',
 }
@@ -576,23 +578,23 @@ def test_app():
 
     # --- Phase 3 HTTP endpoints (enrichment workers) ---
 
-    @app.route('/api/musicbrainz/status')
+    @app.route('/api/enrichment/musicbrainz/status')
     def musicbrainz_status():
         return jsonify(_build_enrichment_status('musicbrainz'))
 
-    @app.route('/api/audiodb/status')
+    @app.route('/api/enrichment/audiodb/status')
     def audiodb_status():
         return jsonify(_build_enrichment_status('audiodb'))
 
-    @app.route('/api/deezer/status')
+    @app.route('/api/enrichment/deezer/status')
     def deezer_status():
         return jsonify(_build_enrichment_status('deezer'))
 
-    @app.route('/api/spotify-enrichment/status')
+    @app.route('/api/enrichment/spotify/status')
     def spotify_enrichment_status():
         return jsonify(_build_enrichment_status('spotify-enrichment'))
 
-    @app.route('/api/itunes-enrichment/status')
+    @app.route('/api/enrichment/itunes/status')
     def itunes_enrichment_status():
         return jsonify(_build_enrichment_status('itunes-enrichment'))
 

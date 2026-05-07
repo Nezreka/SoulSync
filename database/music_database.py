@@ -294,6 +294,7 @@ class MusicDatabase:
                     duration INTEGER,  -- milliseconds
                     file_path TEXT,
                     bitrate INTEGER,
+                    file_size INTEGER,  -- bytes; populated by deep scan from media-server API
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -649,8 +650,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN track_results TEXT")
                     logger.info("Added track_results column to sync_history table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add track_results column: %s", e)
 
             # Migration: add source_page column to sync_history (UI origin context for batch panel)
             try:
@@ -659,8 +660,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN source_page TEXT")
                     logger.info("Added source_page column to sync_history table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add source_page column: %s", e)
 
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
@@ -669,8 +670,25 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE tracks ADD COLUMN track_artist TEXT")
                     logger.info("Added track_artist column to tracks table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add track_artist column: %s", e)
+
+            # Migration: add file_size column so the Stats page can show
+            # total library size on disk without having to walk the
+            # filesystem on every request. Populated by the deep scan from
+            # whatever the media server reports (Plex MediaPart.size,
+            # Jellyfin MediaSources[].Size, Navidrome <song size="...">,
+            # SoulSync standalone os.path.getsize). NULL on existing rows
+            # until the next deep scan fills them in — UI handles the
+            # NULL case by showing "(run a Deep Scan to populate)".
+            try:
+                cursor.execute("SELECT file_size FROM tracks LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
+                    logger.info("Added file_size column to tracks table")
+                except Exception as e:
+                    logger.debug("Failed to add file_size column: %s", e)
 
             # One-time migration: purge discovery cache entries that lack track_number.
             # Prior versions cached discovery results without track_number/disc_number/release_date,
@@ -686,8 +704,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _discovery_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} stale discovery cache entries (missing track_number)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge stale discovery cache entries: %s", e)
 
             # One-time migration: purge Deezer album/track cache entries with missing data.
             # Deezer's /artist/{id}/albums returns albums without artist info, and search
@@ -703,8 +721,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _deezer_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} stale Deezer cache entries (missing artist/track_position)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge stale Deezer cache entries: %s", e)
 
             # One-time migration: purge cached tracks/albums with junk artist names.
             # The cache gate now rejects these, but existing entries need cleaning.
@@ -720,8 +738,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _cache_junk_artist_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} cached tracks/albums with junk artist names")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge cached tracks/albums with junk artist names: %s", e)
 
             # HiFi API instances table
             cursor.execute("""
@@ -801,8 +819,8 @@ class MusicDatabase:
                         config = json.loads(row[2]) if row[2] else {}
                         then_actions = json.dumps([{'type': row[1], 'config': config}])
                         cursor.execute("UPDATE automations SET then_actions = ? WHERE id = ?", (then_actions, row[0]))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to migrate notify data for automation row: %s", e)
                 logger.info("Migrated existing notify data to then_actions")
         except Exception as e:
             logger.error(f"Error adding automation then_actions column: {e}")
@@ -1384,6 +1402,55 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE track_downloads ADD COLUMN bitrate INTEGER")
                 logger.info("Added audio detail columns (bit_depth, sample_rate, bitrate) to track_downloads")
 
+            # Migration: Add external metadata-source ID columns to
+            # track_downloads. Persists the IDs we already collect at
+            # post-processing time so the watchlist scanner + media-server
+            # sync backfill can read them without waiting for the async
+            # enrichment workers.
+            external_id_cols = [
+                'spotify_track_id', 'itunes_track_id', 'deezer_track_id',
+                'tidal_track_id', 'qobuz_track_id', 'musicbrainz_recording_id',
+                'audiodb_id', 'soul_id', 'isrc',
+            ]
+            added_external = False
+            for _col in external_id_cols:
+                if _col not in td_columns:
+                    cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
+                    added_external = True
+            if added_external:
+                logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_itunes_id ON track_downloads (itunes_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_deezer_id ON track_downloads (deezer_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_tidal_id ON track_downloads (tidal_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_qobuz_id ON track_downloads (qobuz_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_mbid ON track_downloads (musicbrainz_recording_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_audiodb_id ON track_downloads (audiodb_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
+
+            # Persistent MusicBrainz album → release-MBID cache.
+            # Backs `core/metadata/album_mbid_cache.py`. Keyed by the same
+            # (normalized_album_key, artist_key) shape the in-memory
+            # `mb_release_cache` uses, so a successful lookup remembered
+            # ONCE applies to every future track of the same album for
+            # the install's lifetime. Solves the "tracks of one album get
+            # different release MBIDs after cache eviction / restart"
+            # issue that causes Navidrome to split albums.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mb_album_release_cache (
+                    normalized_album_key TEXT NOT NULL,
+                    artist_key TEXT NOT NULL,
+                    release_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (normalized_album_key, artist_key)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mb_album_release_mbid "
+                "ON mb_album_release_cache (release_mbid)"
+            )
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
@@ -1436,6 +1503,7 @@ class MusicDatabase:
                     spotify_album_id TEXT,
                     tidal_album_id TEXT,
                     deezer_album_id TEXT,
+                    discogs_release_id TEXT,
                     image_url TEXT,
                     release_date TEXT,
                     total_tracks INTEGER DEFAULT 0,
@@ -1449,6 +1517,18 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_profile ON liked_albums_pool (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_spotify ON liked_albums_pool (spotify_album_id)")
+
+            # Migration: add discogs_release_id column for the Discogs
+            # collection source on the Your Albums section. Idempotent —
+            # safe on existing installs that already have the table.
+            try:
+                cursor.execute("SELECT discogs_release_id FROM liked_albums_pool LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE liked_albums_pool ADD COLUMN discogs_release_id TEXT")
+                    logger.info("Added discogs_release_id column to liked_albums_pool")
+                except Exception as e:
+                    logger.debug("Failed to add discogs_release_id column: %s", e)
 
             logger.info("Discovery tables added/verified successfully")
 
@@ -2388,8 +2468,8 @@ class MusicDatabase:
                     if 'profile_id' not in columns:
                         cursor.execute(f"ALTER TABLE {table} ADD COLUMN profile_id INTEGER DEFAULT 1")
                         logger.info(f"Repaired missing profile_id column on {table}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to repair profile_id column on %s: %s", table, e)
 
             if already_migrated:
                 return  # Rest of migration already done
@@ -2586,8 +2666,8 @@ class MusicDatabase:
             for idx_name, table in index_pairs:
                 try:
                     cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} (profile_id)")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to create index %s on %s: %s", idx_name, table, e)
 
             # Set migration marker
             cursor.execute("""
@@ -3246,8 +3326,8 @@ class MusicDatabase:
                     ))
                     if cursor.rowcount > 0:
                         inserted += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to insert listening event: %s", e)
             conn.commit()
             return inserted
         except Exception as e:
@@ -3555,8 +3635,8 @@ class MusicDatabase:
             total_size = 0
             try:
                 total_size = os.path.getsize(str(self.database_path))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to stat database file size: %s", e)
 
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -3583,8 +3663,8 @@ class MusicDatabase:
                         cursor.execute(f"SELECT COUNT(*) FROM [{tbl}]")
                         count = cursor.fetchone()[0]
                         tables.append({'name': tbl, 'size': count})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to get row count for table %s: %s", tbl, e)
                 tables.sort(key=lambda x: x['size'], reverse=True)
 
             return {
@@ -3595,6 +3675,85 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting db storage stats: {e}")
             return {'tables': [], 'total_file_size': 0, 'method': 'error'}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_library_disk_usage(self):
+        """Aggregate disk usage of the on-disk music library.
+
+        Returns:
+            {
+                'total_bytes': int,           # sum of all known file sizes
+                'tracks_with_size': int,      # count of tracks with a known size
+                'tracks_without_size': int,   # count of tracks where size is NULL
+                'by_format': {                # bytes per file extension
+                    'flac': int, 'mp3': int, ...
+                },
+                'has_data': bool,             # False on fresh installs / before first deep scan
+            }
+
+        Returns the empty-shape dict when the column doesn't exist (very
+        old install pre-migration) — UI shows "(run a Deep Scan)" in
+        that case rather than crashing.
+        """
+        empty = {
+            'total_bytes': 0,
+            'tracks_with_size': 0,
+            'tracks_without_size': 0,
+            'by_format': {},
+            'has_data': False,
+        }
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Confirm column exists (defensive against fresh-install race
+            # where the migration hasn't run yet).
+            try:
+                cursor.execute("SELECT file_size FROM tracks LIMIT 1")
+            except Exception:
+                return empty
+
+            cursor.execute(
+                "SELECT COALESCE(SUM(file_size), 0), "
+                "       COUNT(file_size), "
+                "       COUNT(*) - COUNT(file_size) "
+                "FROM tracks"
+            )
+            row = cursor.fetchone()
+            total_bytes = int(row[0] or 0)
+            tracks_with_size = int(row[1] or 0)
+            tracks_without_size = int(row[2] or 0)
+
+            # Per-format breakdown via Python aggregation. Doing the
+            # extension split in SQLite is fragile (paths with dots
+            # before the file extension would group wrong); doing it
+            # in Python is one os.path.splitext per row, which is
+            # negligible cost compared to the SUM() above.
+            cursor.execute(
+                "SELECT file_path, file_size FROM tracks "
+                "WHERE file_size IS NOT NULL AND file_path IS NOT NULL "
+                "      AND file_path != ''"
+            )
+            by_format: dict = {}
+            for path, size in cursor.fetchall():
+                ext = os.path.splitext(path)[1].lstrip('.').lower()
+                if not ext or len(ext) > 6:
+                    continue
+                by_format[ext] = by_format.get(ext, 0) + int(size or 0)
+
+            return {
+                'total_bytes': total_bytes,
+                'tracks_with_size': tracks_with_size,
+                'tracks_without_size': tracks_without_size,
+                'by_format': by_format,
+                'has_data': tracks_with_size > 0,
+            }
+        except Exception as e:
+            logger.error(f"Error getting library disk usage: {e}")
+            return empty
         finally:
             if conn:
                 conn.close()
@@ -4030,8 +4189,8 @@ class MusicDatabase:
                               'bubble_snapshots', 'recent_releases']:
                     try:
                         cursor.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to delete from %s for profile: %s", table, e)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -4921,12 +5080,20 @@ class MusicDatabase:
                 # Get file path and media info (Plex-specific, Jellyfin may not have these)
                 file_path = None
                 bitrate = None
+                file_size = None
                 if hasattr(track_obj, 'media') and track_obj.media:
                     media = track_obj.media[0] if track_obj.media else None
                     if media:
                         if hasattr(media, 'parts') and media.parts:
                             part = media.parts[0]
                             file_path = getattr(part, 'file', None)
+                            # Plex's MediaPart exposes the file size in bytes
+                            # via plexapi — pull it for the Library Disk
+                            # Usage card on Stats. None when the server
+                            # didn't report a size.
+                            _plex_size = getattr(part, 'size', None)
+                            if isinstance(_plex_size, int) and _plex_size > 0:
+                                file_size = _plex_size
                         bitrate = getattr(media, 'bitrate', None)
 
                 # Fallback for Navidrome/Subsonic tracks
@@ -4936,6 +5103,14 @@ class MusicDatabase:
                     bitrate = track_obj.bitRate
                 if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
+                # File size: Jellyfin / Navidrome / SoulSync-standalone
+                # all set track_obj.file_size on their wrapper class.
+                # Plex came in via the media.parts[0].size path above —
+                # don't clobber that.
+                if file_size is None and hasattr(track_obj, 'file_size'):
+                    _wrapper_size = getattr(track_obj, 'file_size', None)
+                    if isinstance(_wrapper_size, int) and _wrapper_size > 0:
+                        file_size = _wrapper_size
 
                 # Extract per-track artist for compilations/DJ mixes.
                 # Only stored when it differs from the album artist.
@@ -4977,8 +5152,8 @@ class MusicDatabase:
                         album_artist_name = artist_row[0] if artist_row else ''
                         if nav_artist and nav_artist.lower() != album_artist_name.lower():
                             track_artist = nav_artist
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to load album artist for track_artist comparison: %s", e)
 
                 # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
@@ -4991,23 +5166,42 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
-                    # isrc, bpm, and all other enrichment data
+                    # isrc, bpm, and all other enrichment data. file_size uses
+                    # COALESCE(?, file_size) so a NULL from the server (e.g.
+                    # Jellyfin sometimes omits Size on first sync) doesn't wipe
+                    # an existing value.
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?, server_source = ?,
+                            duration = ?, file_path = ?, bitrate = ?,
+                            file_size = COALESCE(?, file_size),
+                            server_source = ?,
                             track_artist = COALESCE(?, track_artist),
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
+
+                # Backfill external metadata-source IDs from track_downloads
+                # provenance. SoulSync collected them at download time but the
+                # media-server scan can't see them — without this hook,
+                # tracks.spotify_track_id / itunes_track_id / etc. stay empty
+                # until the async enrichment workers eventually catch up
+                # (hours later), during which window the watchlist scanner
+                # treats freshly downloaded files as missing and re-downloads
+                # them. Idempotent COALESCE on each column preserves any value
+                # the enrichment worker already wrote.
+                try:
+                    self.backfill_track_external_ids_from_provenance(track_id, file_path)
+                except Exception as backfill_err:
+                    logger.debug(f"Provenance ID backfill skipped for track {track_id}: {backfill_err}")
 
                 # Log new imports to library history
                 if is_new_track:
@@ -5025,8 +5219,8 @@ class MusicDatabase:
                             file_path=file_path,
                             thumb_url=album_row[1] if album_row and len(album_row) > 1 else None
                         )
-                    except Exception:
-                        pass  # Non-critical history logging
+                    except Exception as e:
+                        logger.debug("history logging: %s", e)
 
                 return True
                 
@@ -9786,7 +9980,8 @@ class MusicDatabase:
 
                 if source_id and source_id_type:
                     col = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
-                           'deezer': 'deezer_album_id'}.get(source_id_type)
+                           'deezer': 'deezer_album_id',
+                           'discogs': 'discogs_release_id'}.get(source_id_type)
                     if col:
                         set_parts.append(f"{col} = COALESCE({col}, ?)")
                         params.append(source_id)
@@ -9808,7 +10003,8 @@ class MusicDatabase:
             else:
                 sources_json = json.dumps([source_service])
                 id_cols = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
-                           'deezer': 'deezer_album_id'}
+                           'deezer': 'deezer_album_id',
+                           'discogs': 'discogs_release_id'}
                 col_values = {v: None for v in id_cols.values()}
                 if source_id and source_id_type and source_id_type in id_cols:
                     col_values[id_cols[source_id_type]] = source_id
@@ -9816,13 +10012,13 @@ class MusicDatabase:
                 cursor.execute("""
                     INSERT INTO liked_albums_pool
                     (album_name, artist_name, normalized_key, spotify_album_id, tidal_album_id,
-                     deezer_album_id, image_url, release_date, total_tracks, source_services,
-                     profile_id, last_fetched_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     deezer_album_id, discogs_release_id, image_url, release_date, total_tracks,
+                     source_services, profile_id, last_fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
                     album_name, artist_name, normalized,
                     col_values['spotify_album_id'], col_values['tidal_album_id'],
-                    col_values['deezer_album_id'],
+                    col_values['deezer_album_id'], col_values['discogs_release_id'],
                     image_url, release_date, total_tracks or 0,
                     sources_json, profile_id
                 ))
@@ -9914,8 +10110,24 @@ class MusicDatabase:
                                source_filename: str, source_size: int = 0, audio_quality: str = '',
                                track_title: str = '', track_artist: str = '', track_album: str = '',
                                status: str = 'completed', track_id: str = None,
-                               bit_depth: int = None, sample_rate: int = None, bitrate: int = None) -> Optional[int]:
-        """Record a download with full source provenance. Returns the record ID."""
+                               bit_depth: int = None, sample_rate: int = None, bitrate: int = None,
+                               spotify_track_id: Optional[str] = None,
+                               itunes_track_id: Optional[str] = None,
+                               deezer_track_id: Optional[str] = None,
+                               tidal_track_id: Optional[str] = None,
+                               qobuz_track_id: Optional[str] = None,
+                               musicbrainz_recording_id: Optional[str] = None,
+                               audiodb_id: Optional[str] = None,
+                               soul_id: Optional[str] = None,
+                               isrc: Optional[str] = None) -> Optional[int]:
+        """Record a download with full source provenance. Returns the record ID.
+
+        External-ID kwargs (spotify_track_id et al.) capture the metadata-
+        source identity that the user originally asked for — they're written
+        at download time so the watchlist scanner can recognize the file as
+        already present without waiting for the async enrichment workers
+        to backfill them onto the ``tracks`` row.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -9941,16 +10153,122 @@ class MusicDatabase:
                 INSERT INTO track_downloads
                 (track_id, file_path, source_service, source_username, source_filename,
                  source_size, audio_quality, track_title, track_artist, track_album, status,
-                 bit_depth, sample_rate, bitrate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bit_depth, sample_rate, bitrate,
+                 spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
+                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
-                  bit_depth, sample_rate, bitrate))
+                  bit_depth, sample_rate, bitrate,
+                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
+                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error recording track download: {e}")
             return None
+
+    def get_provenance_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent track_downloads row matching ``file_path``.
+
+        Tries exact match first, then a basename-suffix LIKE fallback for
+        cases where the media-server scan reports the file at a slightly
+        different path than what was recorded at download time (Windows
+        separators, symlink resolution, container mount-root differences).
+        """
+        if not file_path:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM track_downloads WHERE file_path = ? ORDER BY id DESC LIMIT 1",
+                (file_path,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                import os as _os
+                fname = _os.path.basename(file_path.replace('\\', '/'))
+                if fname:
+                    cursor.execute(
+                        "SELECT * FROM track_downloads WHERE file_path LIKE ? OR file_path LIKE ? "
+                        "ORDER BY id DESC LIMIT 1",
+                        (f'%/{fname}', f'%\\{fname}'),
+                    )
+                    row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                return dict(row)
+            except (TypeError, ValueError):
+                cols = [c[0] for c in cursor.description]
+                return dict(zip(cols, row, strict=False))
+        except Exception as exc:
+            logger.debug(f"get_provenance_by_file_path failed: {exc}")
+            return None
+
+    def backfill_track_external_ids_from_provenance(self, track_id: str, file_path: Optional[str]) -> int:
+        """Copy external IDs from ``track_downloads`` onto a ``tracks`` row.
+
+        Idempotent: only writes columns that are currently NULL/empty on
+        the tracks row AND have a value in the provenance row. Returns the
+        number of columns updated. Called from
+        ``insert_or_update_media_track`` immediately after the row is
+        inserted/updated so freshly synced media-server rows pick up
+        whatever IDs SoulSync already knew at download time.
+        """
+        if not track_id or not file_path:
+            return 0
+        prov = self.get_provenance_by_file_path(file_path)
+        if not prov:
+            return 0
+
+        # Map provenance column -> tracks column. Different naming
+        # conventions because tracks.* uses shorter names (``deezer_id``,
+        # ``tidal_id``, ``qobuz_id``) while track_downloads uses the
+        # explicit ``_track_id`` suffix to avoid ambiguity.
+        prov_to_tracks = {
+            'spotify_track_id': 'spotify_track_id',
+            'itunes_track_id': 'itunes_track_id',
+            'deezer_track_id': 'deezer_id',
+            'tidal_track_id': 'tidal_id',
+            'qobuz_track_id': 'qobuz_id',
+            'musicbrainz_recording_id': 'musicbrainz_recording_id',
+            'audiodb_id': 'audiodb_id',
+            'soul_id': 'soul_id',
+            'isrc': 'isrc',
+        }
+
+        updates: Dict[str, str] = {}
+        for prov_col, track_col in prov_to_tracks.items():
+            val = prov.get(prov_col)
+            if not val:
+                continue
+            updates[track_col] = str(val)
+        if not updates:
+            return 0
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Coalesce-update: only fill empty columns. Preserves any IDs
+            # the enrichment worker already populated (those are usually
+            # more reliable than provenance for non-primary sources).
+            set_clauses = []
+            params = []
+            for track_col, val in updates.items():
+                set_clauses.append(f"{track_col} = COALESCE(NULLIF({track_col}, ''), ?)")
+                params.append(val)
+            params.append(track_id)
+            cursor.execute(
+                f"UPDATE tracks SET {', '.join(set_clauses)} WHERE id = ?",
+                params,
+            )
+            conn.commit()
+            return cursor.rowcount or 0
+        except Exception as exc:
+            logger.debug(f"backfill_track_external_ids_from_provenance failed: {exc}")
+            return 0
 
     def get_track_downloads(self, track_id: str) -> list:
         """Get all download records for a library track."""
@@ -10583,8 +10901,8 @@ class MusicDatabase:
                 """)
                 for row in cursor.fetchall():
                     source_counts[row['download_source']] = row['cnt']
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to load library history source counts: %s", e)
             stats['source_counts'] = source_counts
 
             return stats
@@ -10875,8 +11193,8 @@ class MusicDatabase:
                         WHERE playlist_id = ? AND source_track_id IS NOT NULL AND extra_data IS NOT NULL
                     """, (playlist_id,))
                     old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
 
                 # Replace all tracks
                 cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
@@ -11678,10 +11996,33 @@ class MusicDatabase:
 
     # ===================== HiFi Instances =====================
 
+    def _ensure_hifi_instances_table(self, cursor) -> None:
+        """Defensive lazy-create. Issue #503: some users hit a "no such
+        table: hifi_instances" error when adding a HiFi instance even
+        though ``_initialize_database`` runs ``CREATE TABLE IF NOT EXISTS``
+        on every boot. Root cause: the bulk init runs every CREATE +
+        every migration inside one transaction, so if any later migration
+        step throws on the user's specific DB shape, the whole batch
+        rolls back (Python's sqlite3 module doesn't autocommit DDL by
+        default) and ``hifi_instances`` never lands. This helper ensures
+        the table exists immediately before every operation that touches
+        it — idempotent, costs one PRAGMA-level no-op when the table is
+        already present, and fully recovers from a broken init."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS hifi_instances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL UNIQUE,
+                priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
     def get_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all enabled HiFi instances ordered by priority."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
 
@@ -11689,6 +12030,7 @@ class MusicDatabase:
         """Get all HiFi instances (including disabled) ordered by priority."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
 
@@ -11696,6 +12038,7 @@ class MusicDatabase:
         """Add a new HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute(
             "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
             (url, priority)
@@ -11707,6 +12050,7 @@ class MusicDatabase:
         """Remove a HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("DELETE FROM hifi_instances WHERE url = ?", (url,))
         conn.commit()
         return cursor.rowcount > 0
@@ -11715,6 +12059,7 @@ class MusicDatabase:
         """Enable or disable a HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("UPDATE hifi_instances SET enabled = ? WHERE url = ?", (1 if enabled else 0, url))
         conn.commit()
         return cursor.rowcount > 0
@@ -11727,6 +12072,7 @@ class MusicDatabase:
             return True
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         placeholders = ",".join("?" for _ in urls)
         cursor.execute(
             f"SELECT url FROM hifi_instances WHERE url IN ({placeholders})",
@@ -11745,6 +12091,7 @@ class MusicDatabase:
         """Insert default instances if the table is empty."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT COUNT(*) as cnt FROM hifi_instances")
         count = cursor.fetchone()['cnt']
         if count == 0:
@@ -11790,5 +12137,5 @@ def close_database():
                 db_instance.close()
             except Exception as e:
                 # Ignore threading errors during shutdown
-                pass
+                logger.debug("db instance close: %s", e)
         _database_instances.clear()

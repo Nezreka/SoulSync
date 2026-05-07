@@ -200,6 +200,8 @@ async function loadStatsData() {
 
     // DB storage chart (separate fetch — not part of cached stats)
     _loadDbStorageChart();
+    // Library disk usage (separate fetch — populated by deep scan)
+    _loadLibraryDiskUsage();
 
     // Recent plays
     _renderRecentPlays(data.recent || []);
@@ -385,6 +387,70 @@ async function _loadDbStorageChart() {
     } catch (e) {
         console.debug('DB storage chart load failed:', e);
     }
+}
+
+async function _loadLibraryDiskUsage() {
+    try {
+        const resp = await fetch('/api/stats/library-disk-usage');
+        const data = await resp.json();
+        if (!data.success) return;
+        _renderLibraryDiskUsage(data);
+    } catch (e) {
+        console.debug('Library disk usage load failed:', e);
+    }
+}
+
+function _formatBytes(n) {
+    if (!n || n <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
+}
+
+function _renderLibraryDiskUsage(data) {
+    const totalEl = document.getElementById('stats-disk-total-value');
+    const metaEl = document.getElementById('stats-disk-total-meta');
+    const formatsEl = document.getElementById('stats-disk-formats');
+    if (!totalEl || !metaEl || !formatsEl) return;
+
+    if (!data.has_data || !data.total_bytes) {
+        totalEl.textContent = '—';
+        metaEl.textContent = data.tracks_without_size > 0
+            ? `Run a Deep Scan to populate (${data.tracks_without_size.toLocaleString()} tracks pending)`
+            : 'No tracks in library yet';
+        formatsEl.innerHTML = '';
+        return;
+    }
+
+    totalEl.textContent = _formatBytes(data.total_bytes);
+
+    const withSize = data.tracks_with_size || 0;
+    const withoutSize = data.tracks_without_size || 0;
+    const trackBits = `${withSize.toLocaleString()} tracks measured`;
+    const pendingBits = withoutSize > 0
+        ? ` (+${withoutSize.toLocaleString()} pending next Deep Scan)`
+        : '';
+    metaEl.textContent = trackBits + pendingBits;
+
+    // Per-format bars sorted by size descending. Skip if no breakdown.
+    const formats = Object.entries(data.by_format || {}).sort((a, b) => b[1] - a[1]);
+    if (!formats.length) { formatsEl.innerHTML = ''; return; }
+
+    const max = formats[0][1] || 1;
+    formatsEl.innerHTML = formats.map(([ext, bytes]) => {
+        const pct = Math.max(2, Math.round((bytes / max) * 100));
+        return `
+            <div class="stats-disk-format-row">
+                <span class="stats-disk-format-name">${ext.toUpperCase()}</span>
+                <div class="stats-disk-format-bar">
+                    <div class="stats-disk-format-fill" style="width:${pct}%"></div>
+                </div>
+                <span class="stats-disk-format-size">${_formatBytes(bytes)}</span>
+            </div>
+        `;
+    }).join('');
 }
 
 function _renderDbStorageChart(tables, totalFileSize, method) {
@@ -626,12 +692,13 @@ function importPageSwitchTab(tab) {
 // ── Auto-Import Tab ──
 let _autoImportPollInterval = null;
 let _autoImportFilter = 'all';
+let _autoImportLastStatus = null;
 
 function _autoImportStartPolling() {
     _autoImportStopPolling();
-    _autoImportPollInterval = setInterval(() => {
+    _autoImportPollInterval = setInterval(async () => {
         if (importPageState.activeTab === 'auto') {
-            _autoImportLoadStatus();
+            await _autoImportLoadStatus();
             _autoImportLoadResults();
         }
     }, 5000);
@@ -672,6 +739,7 @@ async function _autoImportLoadStatus() {
         const res = await fetch('/api/auto-import/status');
         const data = await res.json();
         if (!data.success) return;
+        _autoImportLastStatus = data;
 
         const toggle = document.getElementById('auto-import-enabled');
         const statusText = document.getElementById('auto-import-status-text');
@@ -684,9 +752,22 @@ async function _autoImportLoadStatus() {
         if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
         if (scanNowBtn) scanNowBtn.style.display = data.running ? '' : 'none';
 
-        // Live scan progress
+        // Live scan + per-track processing progress
         if (progressEl) {
-            if (data.current_status === 'scanning') {
+            if (data.current_status === 'processing') {
+                progressEl.style.display = '';
+                if (progressText) {
+                    const idx = data.current_track_index || 0;
+                    const total = data.current_track_total || 0;
+                    const trackName = data.current_track_name || '';
+                    const folder = data.current_folder || '...';
+                    if (total > 0) {
+                        progressText.textContent = `Processing ${folder} — track ${idx}/${total}: ${trackName}`;
+                    } else {
+                        progressText.textContent = `Processing: ${folder}`;
+                    }
+                }
+            } else if (data.current_status === 'scanning') {
                 progressEl.style.display = '';
                 if (progressText) {
                     const stats = data.stats || {};
@@ -699,6 +780,7 @@ async function _autoImportLoadStatus() {
 
         if (statusText) {
             if (data.paused) statusText.textContent = 'Paused';
+            else if (data.current_status === 'processing') statusText.textContent = 'Processing...';
             else if (data.current_status === 'scanning') statusText.textContent = 'Scanning...';
             else if (data.running) {
                 // Show last scan time
@@ -713,7 +795,12 @@ async function _autoImportLoadStatus() {
                 }
                 statusText.textContent = watchText;
             } else statusText.textContent = 'Disabled';
-            statusText.className = 'auto-import-status ' + (data.running ? (data.current_status === 'scanning' ? 'scanning' : 'active') : 'disabled');
+            const _runningClass = data.current_status === 'scanning'
+                ? 'scanning'
+                : data.current_status === 'processing'
+                    ? 'processing'
+                    : 'active';
+            statusText.className = 'auto-import-status ' + (data.running ? _runningClass : 'disabled');
         }
     } catch (e) {}
 }
@@ -784,17 +871,30 @@ async function _autoImportLoadResults() {
                 'needs_identification': 'Unidentified', 'failed': 'Failed',
                 'scanning': 'Scanning...', 'matched': 'Matched',
                 'rejected': 'Dismissed', 'approved': 'Approved',
+                'processing': 'Processing',
             };
             const statusIcons = {
                 'completed': '\u2713', 'pending_review': '\u26A0',
                 'needs_identification': '\u2717', 'failed': '\u2717',
                 'scanning': '\u231B', 'matched': '\u2713',
                 'rejected': '\u2715', 'approved': '\u2713',
+                'processing': '\u29D7',
             };
             const statusLabel = statusLabels[r.status] || r.status;
             const statusIcon = statusIcons[r.status] || '';
             const statusClass = r.status === 'completed' ? 'completed' : r.status === 'pending_review' ? 'review' :
-                r.status === 'failed' || r.status === 'needs_identification' ? 'failed' : 'neutral';
+                r.status === 'failed' || r.status === 'needs_identification' ? 'failed' :
+                r.status === 'processing' ? 'processing' : 'neutral';
+
+            // Live per-track progress for the row currently being processed.
+            // Match by folder_name since the worker only tracks one folder at a time.
+            const liveStatus = _autoImportLastStatus;
+            const isLiveProcessing = r.status === 'processing'
+                && liveStatus && liveStatus.current_status === 'processing'
+                && liveStatus.current_folder === r.folder_name;
+            const liveTrackIdx = isLiveProcessing ? (liveStatus.current_track_index || 0) : 0;
+            const liveTrackTotal = isLiveProcessing ? (liveStatus.current_track_total || 0) : 0;
+            const liveTrackName = isLiveProcessing ? (liveStatus.current_track_name || '') : '';
 
             // Parse match data for track details
             let matchCount = 0, totalTracks = 0, trackDetails = [];
@@ -813,7 +913,10 @@ async function _autoImportLoadResults() {
                 } catch (e) {}
             }
 
-            const matchSummary = totalTracks > 0 ? `${matchCount}/${totalTracks} tracks` : `${r.total_files} files`;
+            let matchSummary = totalTracks > 0 ? `${matchCount}/${totalTracks} tracks` : `${r.total_files} files`;
+            if (isLiveProcessing && liveTrackTotal > 0) {
+                matchSummary = `track ${liveTrackIdx}/${liveTrackTotal}: ${liveTrackName}`;
+            }
             const methodLabels = { tags: 'Tags', folder_name: 'Folder Name', acoustid: 'AcoustID', filename: 'Filename' };
             const methodLabel = methodLabels[r.identification_method] || r.identification_method || '';
 
@@ -845,9 +948,15 @@ async function _autoImportLoadResults() {
                     <div class="auto-import-track-list-header">
                         <span>Track</span><span>Matched File</span><span>Conf</span>
                     </div>
-                    ${trackDetails.map(t => {
+                    ${trackDetails.map((t, tIdx) => {
                         const tConfClass = t.confidence >= 90 ? 'high' : t.confidence >= 70 ? 'medium' : 'low';
-                        return `<div class="auto-import-track-row">
+                        // 1-based liveTrackIdx — current row glows, prior rows dim as "done".
+                        let rowState = '';
+                        if (isLiveProcessing && liveTrackIdx > 0) {
+                            if (tIdx + 1 === liveTrackIdx) rowState = ' auto-import-track-row-active';
+                            else if (tIdx + 1 < liveTrackIdx) rowState = ' auto-import-track-row-done';
+                        }
+                        return `<div class="auto-import-track-row${rowState}">
                             <span class="auto-import-track-name">${escapeHtml(t.name)}</span>
                             <span class="auto-import-track-file">${escapeHtml(t.file)}</span>
                             <span class="auto-import-track-conf auto-import-conf-${tConfClass}">${t.confidence}%</span>
@@ -7560,7 +7669,7 @@ async function submitEnhanceQuality() {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="enhance-spinner"></span>Processing...';
     }
-    if (footerInfo) footerInfo.textContent = 'Matching tracks to Spotify and adding to wishlist...';
+    if (footerInfo) footerInfo.textContent = 'Matching tracks across metadata sources and adding to wishlist...';
 
     try {
         const resp = await fetch(`/api/library/artist/${_enhanceArtistId}/enhance`, {

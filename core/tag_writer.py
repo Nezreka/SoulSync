@@ -131,8 +131,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         result['replaygain_track_peak'] = rg.get('track_peak')
         result['replaygain_album_gain'] = rg.get('album_gain')
         result['replaygain_album_peak'] = rg.get('album_peak')
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read replaygain tags failed: %s", e)
 
     return result
 

@@ -212,7 +212,7 @@ class AcoustIDScannerJob(RepairJob):
             )
         if context.create_finding:
             severity = 'warning' if best_score >= 0.90 else 'info'
-            context.create_finding(
+            inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
                 severity=severity,
@@ -240,7 +240,10 @@ class AcoustIDScannerJob(RepairJob):
                     'track_number': expected.get('track_number'),
                 }
             )
-            result.findings_created += 1
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         """Load all tracks from DB keyed by track ID."""
@@ -289,9 +292,14 @@ class AcoustIDScannerJob(RepairJob):
             return None
         if os.path.exists(file_path):
             return file_path
-        # Try the repair_worker's resolver
-        from core.repair_worker import _resolve_file_path
-        return _resolve_file_path(file_path, context.transfer_folder)
+        # Use the shared library-path resolver — picks up
+        # library.music_paths and Plex library locations too.
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(
+            file_path,
+            transfer_folder=context.transfer_folder,
+            config_manager=context.config_manager,
+        )
 
     def _save_checkpoint_id(self, context: JobContext, track_id):
         """Save or clear the scan checkpoint by track ID."""

@@ -60,7 +60,7 @@ function syncMetadataSourceSelection(source) {
 
 function _isMetadataSourceSelectable(source) {
     if (source === 'spotify') {
-        return _lastServiceStatus?.spotify?.authenticated === true;
+        return _lastStatusPayload?.spotify?.authenticated === true;
     }
     if (source === 'discogs') {
         const token = document.getElementById('discogs-token');
@@ -173,7 +173,7 @@ function initializeSettings() {
     if (discogsTokenInput) {
         discogsTokenInput.addEventListener('input', () => {
             if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-                syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+                syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
             }
             sanitizeMetadataSourceSelection({ quiet: true });
         });
@@ -207,10 +207,10 @@ function initializeSettings() {
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 
     if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+        syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
     }
-    syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
-    syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
+    syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
+    syncMetadataSourceSelection(_lastStatusPayload?.metadata_source?.source);
     sanitizeMetadataSourceSelection({ quiet: true });
     if (metadataSourceSelect) {
         metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
@@ -408,7 +408,7 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
-        syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
+        syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
     }
@@ -596,10 +596,11 @@ const HYBRID_SOURCES = [
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
+    { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -978,6 +979,7 @@ async function loadSettingsData() {
         document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
+        document.getElementById('embed-hifi').checked = settings.hifi?.embed_tags !== false;
         // Load per-tag toggles from data-config attributes
         document.querySelectorAll('[data-config]').forEach(cb => {
             const path = cb.dataset.config.split('.');
@@ -986,7 +988,7 @@ async function loadSettingsData() {
             cb.checked = val !== false;
         });
         // Apply service disabled state to child tags
-        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius'].forEach(svc => {
+        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi'].forEach(svc => {
             const master = document.getElementById('embed-' + svc);
             if (master) toggleServiceTags(master, svc);
         });
@@ -1474,6 +1476,7 @@ function updateDownloadSourceUI() {
     const hifiContainer = document.getElementById('hifi-download-settings-container');
     const deezerDlContainer = document.getElementById('deezer-download-settings-container');
     const lidarrContainer = document.getElementById('lidarr-download-settings-container');
+    const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -1495,6 +1498,7 @@ function updateDownloadSourceUI() {
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
     if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
     if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
+    if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -1513,6 +1517,9 @@ function updateDownloadSourceUI() {
     if (activeSources.has('hifi')) {
         testHiFiConnection();
     }
+    if (activeSources.has('soundcloud')) {
+        testSoundcloudConnection();
+    }
 }
 
 function updateHybridSecondaryOptions() {
@@ -1525,6 +1532,9 @@ function updateHybridSecondaryOptions() {
         { value: 'tidal', label: 'Tidal' },
         { value: 'qobuz', label: 'Qobuz' },
         { value: 'hifi', label: 'HiFi' },
+        { value: 'deezer_dl', label: 'Deezer' },
+        { value: 'lidarr', label: 'Lidarr' },
+        { value: 'soundcloud', label: 'SoundCloud' },
     ];
 
     secondary.innerHTML = '';
@@ -2543,7 +2553,7 @@ async function saveSettings(quiet = false) {
     const discogsTokenInput = document.getElementById('discogs-token');
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
     let metadataSource = metadataSourceSelect?.value || 'itunes';
-    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
+    const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
         metadataSource = 'deezer';
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
@@ -2653,6 +2663,10 @@ async function saveSettings(quiet = false) {
             quality: document.getElementById('hifi-download-quality').value || 'lossless',
             allow_fallback: document.getElementById('hifi-allow-fallback').checked,
         },
+        hifi: {
+            embed_tags: document.getElementById('embed-hifi').checked,
+            tags: _collectServiceTags('hifi')
+        },
         deezer_download: {
             quality: document.getElementById('deezer-download-quality').value || 'flac',
             arl: document.getElementById('deezer-download-arl').value || '',
@@ -2661,6 +2675,11 @@ async function saveSettings(quiet = false) {
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
+        },
+        soundcloud_download: {
+            // No knobs yet — anonymous-only. Keeping the key present so
+            // future tier-2 OAuth wiring (Go+ session token) doesn't have
+            // to migrate existing configs.
         },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
@@ -3409,6 +3428,32 @@ async function testHiFiConnection() {
         } else {
             statusEl.textContent = 'No instances reachable';
             statusEl.style.color = '#ff9800';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testSoundcloudConnection() {
+    const statusEl = document.getElementById('soundcloud-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        const resp = await fetch('/api/soundcloud/status');
+        const data = await resp.json();
+        if (data.available && data.reachable) {
+            statusEl.textContent = 'Connected (anonymous)';
+            statusEl.style.color = '#4caf50';
+        } else if (data.available) {
+            // Client up but the live probe failed — likely a SoundCloud
+            // outage or a transient yt-dlp parse error. Surface plainly.
+            statusEl.textContent = 'Reachable check failed — try again';
+            statusEl.style.color = '#ff9800';
+        } else {
+            statusEl.textContent = data.error || 'Unavailable';
+            statusEl.style.color = '#f44336';
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';

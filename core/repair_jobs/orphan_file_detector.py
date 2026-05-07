@@ -159,8 +159,8 @@ class OrphanFileDetectorJob(RepairJob):
                                     (first_artist and (clean_title, first_artist) in known_titles_clean)
                                 ):
                                     is_known = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("tag-based orphan check: %s", e)
 
             # Last resort: parse title from filename pattern "NN - Title [Quality].ext"
             # and match against known titles. Catches files with unreadable tags.
@@ -186,8 +186,8 @@ class OrphanFileDetectorJob(RepairJob):
                             if clean_fn and (clean_fn, clean_fa) in known_titles_clean:
                                 is_known = True
                                 break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("filename-pattern orphan check: %s", e)
 
             if not is_known:
                 orphan_files.append(fpath)
@@ -217,7 +217,7 @@ class OrphanFileDetectorJob(RepairJob):
                 stat = os.stat(fpath)
                 ext = os.path.splitext(fpath)[1].lower().lstrip('.')
                 if context.create_finding:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='orphan_file',
                         severity='warning' if mass_orphan else 'info',
@@ -241,7 +241,10 @@ class OrphanFileDetectorJob(RepairJob):
                             'mass_orphan': mass_orphan,
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
             except Exception as e:
                 logger.debug("Error creating orphan finding for %s: %s", fpath, e)
                 result.errors += 1

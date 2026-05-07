@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from core.soulseek_client import AlbumResult, DownloadStatus, TrackResult
+from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")
@@ -79,7 +79,10 @@ def _decrypt_chunk(chunk: bytes, key: bytes) -> bytes:
             ) from exc
 
 
-class DeezerDownloadClient:
+from core.download_plugins.base import DownloadSourcePlugin
+
+
+class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
     def __init__(self, download_path: str = None):
@@ -91,9 +94,9 @@ class DeezerDownloadClient:
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        # Download tracking (same pattern as Tidal/Qobuz/HiFi)
-        self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = threading.Lock()
+        # Engine reference is populated by set_engine() at registration
+        # time. None until orchestrator wires the registry.
+        self._engine = None
 
         # Shutdown check callback (set by web_server)
         self.shutdown_check = None
@@ -124,6 +127,10 @@ class DeezerDownloadClient:
             self._authenticate(arl)
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
+
+    def set_engine(self, engine):
+        """Engine callback — wires the central thread worker + state store."""
+        self._engine = engine
 
     # ─── Authentication ──────────────────────────────────────────
 
@@ -423,8 +430,8 @@ class DeezerDownloadClient:
                         if cached and cached.get('release_date'):
                             album_release_dates[aid] = cached['release_date']
                             continue
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
                 try:
                     time.sleep(0.3)  # Respect rate limits
@@ -436,10 +443,10 @@ class DeezerDownloadClient:
                         if cache:
                             try:
                                 cache.store_entity('deezer', 'album', aid, a_data)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                logger.debug("cache store_entity album release_date: %s", e)
+                except Exception as e:
+                    logger.debug("fetch deezer album release_date %s: %s", aid, e)
 
             tracks = []
             for i, t in enumerate(raw_tracks, start=1):
@@ -605,87 +612,67 @@ class DeezerDownloadClient:
         if not self._authenticated:
             logger.error("Deezer not authenticated — cannot download")
             return None
+        if self._engine is None:
+            # Raise rather than return None so the orchestrator's
+            # download_with_fallback surfaces a real warning + tries
+            # the next source. Returning None silently dropped the
+            # download with no user feedback (per JohnBaumb).
+            raise RuntimeError("Deezer client has no engine reference — cannot dispatch download")
 
         # Parse filename: "track_id||display_name"
         parts = filename.split('||', 1)
         track_id = parts[0]
         display_name = parts[1] if len(parts) > 1 else f"Track {track_id}"
 
-        download_id = str(uuid.uuid4())
-
-        with self._download_lock:
-            self.active_downloads[download_id] = {
-                'id': download_id,
+        return self._engine.worker.dispatch(
+            source_name='deezer',
+            target_id=track_id,
+            display_name=display_name,
+            original_filename=filename,
+            impl_callable=self._download_sync,
+            extra_record_fields={
                 'track_id': track_id,
                 'display_name': display_name,
-                'filename': filename,
-                'username': 'deezer_dl',
-                'state': 'Initializing',
-                'progress': 0.0,
                 'size': file_size,
-                'transferred': 0,
-                'speed': 0,
-                'file_path': None,
                 'error': None,
-            }
-
-        thread = threading.Thread(
-            target=self._download_thread_worker,
-            args=(download_id, track_id, display_name),
-            daemon=True,
-            name=f'deezer-dl-{track_id}'
+            },
+            # Legacy username slot — frontend status indicators key off
+            # ``deezer_dl``, not the canonical ``deezer``.
+            username_override='deezer_dl',
+            # Diagnostic thread name for multi-thread debugging.
+            thread_name=f'deezer-dl-{track_id}',
         )
-        thread.start()
 
-        logger.info(f"Started Deezer download {download_id}: {display_name}")
-        return download_id
+    def _set_error(self, download_id: str, message: str) -> None:
+        """Helper: set the engine record's `error` slot. No-op if
+        engine isn't wired or record was already removed."""
+        if self._engine is None:
+            return
+        self._engine.update_record('deezer', download_id, {'error': message})
 
-    def _download_thread_worker(self, download_id: str, track_id: str, display_name: str):
-        """Background worker for a single download."""
-        try:
-            result_path = self._download_sync(download_id, track_id, display_name)
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    dl = self.active_downloads[download_id]
-                    if dl['state'] == 'Cancelled':
-                        return
-                    if result_path:
-                        dl['state'] = 'Completed, Succeeded'
-                        dl['progress'] = 100.0
-                        dl['file_path'] = result_path
-                        logger.info(f"Deezer download {download_id} completed: {result_path}")
-                    else:
-                        dl['state'] = 'Errored'
-                        logger.error(f"Deezer download {download_id} failed: {dl.get('error', 'unknown')}")
-        except Exception as e:
-            logger.error(f"Deezer download thread error: {e}")
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
-                    self.active_downloads[download_id]['error'] = str(e)
+    def _is_cancelled(self, download_id: str) -> bool:
+        if self._engine is None:
+            return False
+        record = self._engine.get_record('deezer', download_id)
+        return record is not None and record.get('state') == 'Cancelled'
 
     def _download_sync(self, download_id: str, track_id: str, display_name: str) -> Optional[str]:
         """Synchronous download: get URL, download, decrypt, save."""
         # Check for shutdown
         if self.shutdown_check and self.shutdown_check():
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Aborted'
+            if self._engine is not None:
+                self._engine.update_record('deezer', download_id, {'state': 'Aborted'})
             return None
 
         # Get track data from private API
         track_data = self._get_track_data(track_id)
         if not track_data:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['error'] = 'Failed to get track data'
+            self._set_error(download_id, 'Failed to get track data')
             return None
 
         track_token = track_data.get('TRACK_TOKEN', '')
         if not track_token:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['error'] = 'No track token available'
+            self._set_error(download_id, 'No track token available')
             return None
 
         # Determine quality and get media URL with fallback
@@ -695,7 +682,6 @@ class DeezerDownloadClient:
 
         if allow_fallback:
             quality_order = _QUALITY_ORDER.copy()
-            # Start from user's preferred quality
             try:
                 pref_idx = quality_order.index(self._quality)
                 quality_order = quality_order[pref_idx:] + quality_order[:pref_idx]
@@ -712,26 +698,15 @@ class DeezerDownloadClient:
                 break
 
         if not media_url:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['error'] = 'No media URL available (may require higher subscription tier)'
+            self._set_error(download_id, 'No media URL available (may require higher subscription tier)')
             return None
 
         if actual_quality != self._quality:
             logger.info(f"Quality fallback: {self._quality} → {actual_quality} for {display_name}")
 
-        # Determine file extension
         ext = '.flac' if actual_quality == 'flac' else '.mp3'
-
-        # Sanitize filename
         safe_name = self._sanitize_filename(display_name)
         out_path = str(self.download_path / f"{safe_name}{ext}")
-
-        # Update state
-        with self._download_lock:
-            if download_id in self.active_downloads:
-                dl = self.active_downloads[download_id]
-                dl['state'] = 'InProgress, Downloading'
 
         # Download and decrypt
         try:
@@ -740,9 +715,8 @@ class DeezerDownloadClient:
             resp.raise_for_status()
 
             total_size = int(resp.headers.get('content-length', 0))
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['size'] = total_size
+            if self._engine is not None:
+                self._engine.update_record('deezer', download_id, {'size': total_size})
 
             downloaded = 0
             chunk_index = 0
@@ -755,23 +729,20 @@ class DeezerDownloadClient:
 
                     # Check for cancellation/shutdown
                     if self.shutdown_check and self.shutdown_check():
-                        with self._download_lock:
-                            if download_id in self.active_downloads:
-                                self.active_downloads[download_id]['state'] = 'Aborted'
+                        if self._engine is not None:
+                            self._engine.update_record('deezer', download_id, {'state': 'Aborted'})
                         try:
                             os.remove(out_path)
                         except OSError:
                             pass
                         return None
 
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            if self.active_downloads[download_id]['state'] == 'Cancelled':
-                                try:
-                                    os.remove(out_path)
-                                except OSError:
-                                    pass
-                                return None
+                    if self._is_cancelled(download_id):
+                        try:
+                            os.remove(out_path)
+                        except OSError:
+                            pass
+                        return None
 
                     # Decrypt every 3rd chunk (Deezer's encryption pattern)
                     if chunk_index % 3 == 0 and len(raw_chunk) == _CHUNK_SIZE:
@@ -788,12 +759,12 @@ class DeezerDownloadClient:
                     speed = int(downloaded / elapsed) if elapsed > 0 else 0
                     progress = (downloaded / total_size * 100) if total_size > 0 else 0
 
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            dl = self.active_downloads[download_id]
-                            dl['transferred'] = downloaded
-                            dl['progress'] = min(progress, 99.9)
-                            dl['speed'] = speed
+                    if self._engine is not None:
+                        self._engine.update_record('deezer', download_id, {
+                            'transferred': downloaded,
+                            'progress': min(progress, 99.9),
+                            'speed': speed,
+                        })
 
             # Validate file size
             file_size = os.path.getsize(out_path)
@@ -803,9 +774,7 @@ class DeezerDownloadClient:
                     os.remove(out_path)
                 except OSError:
                     pass
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['error'] = f'File too small ({file_size} bytes)'
+                self._set_error(download_id, f'File too small ({file_size} bytes)')
                 return None
 
             logger.info(f"Deezer download complete: {out_path} ({file_size / 1048576:.1f} MB, {actual_quality})")
@@ -817,58 +786,57 @@ class DeezerDownloadClient:
                 os.remove(out_path)
             except OSError:
                 pass
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['error'] = str(e)
+            self._set_error(download_id, str(e))
             return None
 
     # ─── Download Status ─────────────────────────────────────────
 
+    def _record_to_status(self, record: dict) -> DownloadStatus:
+        return DownloadStatus(
+            id=record['id'],
+            filename=record['filename'],
+            username=record['username'],
+            state=record['state'],
+            progress=record['progress'],
+            size=record.get('size', 0),
+            transferred=record.get('transferred', 0),
+            speed=record.get('speed', 0),
+            file_path=record.get('file_path'),
+        )
+
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """Return all active downloads."""
-        with self._download_lock:
-            return [self._to_status(dl) for dl in self.active_downloads.values()]
+        if self._engine is None:
+            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('deezer')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """Get status of a specific download."""
-        with self._download_lock:
-            dl = self.active_downloads.get(download_id)
-            return self._to_status(dl) if dl else None
+        if self._engine is None:
+            return None
+        record = self._engine.get_record('deezer', download_id)
+        return self._record_to_status(record) if record is not None else None
 
     async def cancel_download(self, download_id: str, username: str = None,
                               remove: bool = False) -> bool:
-        """Cancel a download."""
-        with self._download_lock:
-            dl = self.active_downloads.get(download_id)
-            if not dl:
-                return False
-            dl['state'] = 'Cancelled'
-            if remove:
-                del self.active_downloads[download_id]
+        if self._engine is None:
+            return False
+        if self._engine.get_record('deezer', download_id) is None:
+            return False
+        self._engine.update_record('deezer', download_id, {'state': 'Cancelled'})
+        if remove:
+            self._engine.remove_record('deezer', download_id)
         return True
 
     async def clear_all_completed_downloads(self) -> bool:
-        """Remove all terminal downloads."""
-        terminal_states = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
-        with self._download_lock:
-            to_remove = [k for k, v in self.active_downloads.items() if v['state'] in terminal_states]
-            for k in to_remove:
-                del self.active_downloads[k]
+        if self._engine is None:
+            return True
+        terminal = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+        for record in list(self._engine.iter_records_for_source('deezer')):
+            if record.get('state') in terminal:
+                self._engine.remove_record('deezer', record['id'])
         return True
-
-    def _to_status(self, dl: dict) -> DownloadStatus:
-        """Convert internal dict to DownloadStatus."""
-        return DownloadStatus(
-            id=dl['id'],
-            filename=dl['filename'],
-            username=dl['username'],
-            state=dl['state'],
-            progress=dl['progress'],
-            size=dl['size'],
-            transferred=dl['transferred'],
-            speed=dl['speed'],
-            file_path=dl.get('file_path'),
-        )
 
     # ─── Utilities ───────────────────────────────────────────────
 

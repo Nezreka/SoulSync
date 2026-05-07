@@ -95,15 +95,15 @@ def build_runner(
         def _cleanup_empty(src_dir):
             try:
                 cleanup_empty_directories_fn(transfer_dir, os.path.join(src_dir, '_'))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("cleanup empty dirs failed: %s", e)
 
         def _on_progress(updates):
             try:
                 get_queue().update_active_progress(queue_id=item.queue_id, **updates)
-            except Exception:
+            except Exception as e:
                 # Progress fan-out failures must never break a run.
-                pass
+                logger.debug("reorganize progress fan-out: %s", e)
 
         return reorganize_album(
             album_id=item.album_id,

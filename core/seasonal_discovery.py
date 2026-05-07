@@ -167,8 +167,8 @@ class SeasonalDiscoveryService:
                     try:
                         cursor.execute(f"ALTER TABLE {table} ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
                         conn.commit()
-                    except Exception:
-                        pass  # Column already exists
+                    except Exception as e:
+                        logger.debug("source column migration %s: %s", table, e)
 
                 logger.info("Seasonal discovery database schema initialized")
 
@@ -201,8 +201,8 @@ class SeasonalDiscoveryService:
                     val = row[0] if isinstance(row, tuple) else row['value']
                     if val in ('northern', 'southern'):
                         return val
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("read hemisphere metadata failed: %s", e)
         return 'northern'
 
     def get_current_season(self) -> Optional[str]:

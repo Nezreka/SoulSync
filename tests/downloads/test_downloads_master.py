@@ -178,7 +178,7 @@ def _build_deps(
 ):
     return mw.MasterDeps(
         config_manager=config or _FakeConfig(),
-        soulseek_client=soulseek or _FakeSoulseekWrapper(_FakeSoulseek()),
+        download_orchestrator=soulseek or _FakeSoulseekWrapper(_FakeSoulseek()),
         run_async=run_async or _make_run_async(),
         mb_worker=mb_worker,
         mb_release_cache=mb_release_cache if mb_release_cache is not None else {},

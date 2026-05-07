@@ -64,7 +64,7 @@ download_batches = None
 sync_states = None
 youtube_playlist_states = None
 tidal_discovery_states = None
-soulseek_client = None
+download_orchestrator = None
 _log_path = None
 _log_dir = None
 app = None
@@ -80,7 +80,7 @@ def init(
     sync_states_dict,
     youtube_playlist_states_dict,
     tidal_discovery_states_dict,
-    soulseek_client_obj,
+    download_orchestrator_obj,
     log_path,
     log_dir,
     flask_app,
@@ -90,7 +90,7 @@ def init(
     """Bind shared state/helpers from web_server."""
     global SOULSYNC_VERSION, _DIRECT_RUN, _status_cache, qobuz_enrichment_worker
     global download_batches, sync_states, youtube_playlist_states
-    global tidal_discovery_states, soulseek_client, _log_path, _log_dir
+    global tidal_discovery_states, download_orchestrator, _log_path, _log_dir
     global app, get_database, _get_tidal_client
     SOULSYNC_VERSION = soulsync_version
     _DIRECT_RUN = direct_run
@@ -100,7 +100,7 @@ def init(
     sync_states = sync_states_dict
     youtube_playlist_states = youtube_playlist_states_dict
     tidal_discovery_states = tidal_discovery_states_dict
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
     _log_path = log_path
     _log_dir = log_dir
     app = flask_app
@@ -260,8 +260,8 @@ def get_debug_info():
         for _pid, st in list(tidal_discovery_states.items()):
             if st.get('phase') == 'syncing':
                 active_syncs += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("count active syncs failed: %s", e)
     info['active_downloads'] = active_downloads
     info['active_syncs'] = active_syncs
 
@@ -292,31 +292,32 @@ def get_debug_info():
 
     # Download client init failures
     info['download_client_failures'] = []
-    if soulseek_client and hasattr(soulseek_client, '_init_failures'):
-        info['download_client_failures'] = soulseek_client._init_failures
-    elif not soulseek_client:
+    if download_orchestrator and hasattr(download_orchestrator, '_init_failures'):
+        info['download_client_failures'] = download_orchestrator._init_failures
+    elif not download_orchestrator:
         info['download_client_failures'] = ['ALL (orchestrator failed to initialize)']
 
     # API rate monitor — current calls/min, 24h totals, peaks, rate limit events
     try:
         from core.api_call_tracker import api_call_tracker
+        from core.metadata.status import get_spotify_status
         rates = api_call_tracker.get_all_rates()
         info['api_rates'] = rates
         # Rich 24h debug summary with peaks, totals, per-endpoint breakdown, events
         info['api_debug_summary'] = api_call_tracker.get_debug_summary()
         # Spotify rate limit details
-        if spotify_client:
-            rl_info = spotify_client.get_rate_limit_info()
-            if rl_info:
-                info['spotify_rate_limit'] = {
-                    'active': True,
-                    'remaining_seconds': rl_info.get('remaining_seconds', 0),
-                    'retry_after': rl_info.get('retry_after', 0),
-                    'endpoint': rl_info.get('endpoint', ''),
-                    'expires_at': rl_info.get('expires_at', ''),
-                }
-            else:
-                info['spotify_rate_limit'] = {'active': False}
+        spotify_status = get_spotify_status(spotify_client=spotify_client)
+        rl_info = spotify_status.get('rate_limit')
+        if spotify_status.get('rate_limited') and rl_info:
+            info['spotify_rate_limit'] = {
+                'active': True,
+                'remaining_seconds': rl_info.get('remaining_seconds', 0),
+                'retry_after': rl_info.get('retry_after', 0),
+                'endpoint': rl_info.get('endpoint', ''),
+                'expires_at': rl_info.get('expires_at', ''),
+            }
+        else:
+            info['spotify_rate_limit'] = {'active': False}
     except Exception:
         info['api_rates'] = {}
         info['api_debug_summary'] = {}

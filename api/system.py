@@ -2,11 +2,14 @@
 System endpoints — status, activity feed, stats.
 """
 
+import logging
 import time
 
 from flask import current_app
 from .auth import require_api_key
 from .helpers import api_success, api_error
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(bp):
@@ -26,7 +29,7 @@ def register_routes(bp):
             spotify = ctx.get("spotify_client")
             spotify_ok = bool(spotify and spotify.is_authenticated())
 
-            soulseek = ctx.get("soulseek_client")
+            soulseek = ctx.get("download_orchestrator")
             soulseek_ok = bool(soulseek)
 
             hydrabase = ctx.get("hydrabase_client")
@@ -35,8 +38,8 @@ def register_routes(bp):
                 try:
                     ws, _ = hydrabase.get_ws_and_lock()
                     hydrabase_ok = ws is not None and ws.connected
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("hydrabase status probe failed: %s", e)
 
             return api_success({
                 "uptime": f"{hours}h {minutes}m {seconds}s",

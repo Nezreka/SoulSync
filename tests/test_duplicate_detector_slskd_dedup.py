@@ -66,6 +66,8 @@ class _FakeContext:
 
     def _create_finding(self, **kwargs):
         self.findings.append(kwargs)
+        # Mirror real `_create_finding` contract: True on insert.
+        return True
 
 
 # ---------------------------------------------------------------------------

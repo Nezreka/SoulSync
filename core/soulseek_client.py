@@ -9,185 +9,46 @@ from pathlib import Path
 from utils.logging_config import get_logger
 from config.settings import config_manager
 from core.imports.filename import parse_filename_metadata
+# Shared download-result dataclasses + plugin contract live in the
+# neutral plugin package — every source uses the same types, so they
+# belong there rather than this soulseek-specific module.
+from core.download_plugins.types import (
+    AlbumResult,
+    DownloadStatus,
+    SearchResult,
+    TrackResult,
+)
+from core.download_plugins.base import DownloadSourcePlugin
 
 logger = get_logger("soulseek_client")
 
-@dataclass
-class SearchResult:
-    """Base class for search results"""
-    username: str
-    filename: str
-    size: int
-    bitrate: Optional[int]
-    duration: Optional[int]  # Duration in milliseconds (converted from slskd's seconds)
-    quality: str
-    free_upload_slots: int
-    upload_speed: int
-    queue_length: int
-    result_type: str = "track"  # "track" or "album"
-    
-    @property
-    def quality_score(self) -> float:
-        quality_weights = {
-            'flac': 1.0,
-            'mp3': 0.8,
-            'ogg': 0.7,
-            'aac': 0.6,
-            'wma': 0.5
-        }
-        
-        base_score = quality_weights.get(self.quality.lower(), 0.3)
-        
-        if self.bitrate:
-            if self.bitrate >= 320:
-                base_score += 0.2
-            elif self.bitrate >= 256:
-                base_score += 0.1
-            elif self.bitrate < 128:
-                base_score -= 0.2
-        
-        # Free upload slots
-        if self.free_upload_slots == 0:
-            base_score -= 0.15
-        elif self.free_upload_slots > 0:
-            base_score += 0.05
 
-        # Upload speed in bytes/sec (tiered)
-        if self.upload_speed >= 5_000_000:      # ~5 MB/s / 40 Mbps
-            base_score += 0.15
-        elif self.upload_speed >= 1_000_000:    # ~1 MB/s / 8 Mbps
-            base_score += 0.10
-        elif self.upload_speed >= 500_000:      # ~500 KB/s / 4 Mbps
-            base_score += 0.05
-        elif self.upload_speed < 100_000:       # ~100 KB/s / 800 kbps
-            base_score -= 0.05
+# slskd HTTP timeouts. Issue #499: long-running download sessions
+# (~2-3hr) wedged because ``aiohttp.ClientSession()`` was constructed
+# with no timeout — when slskd hung on a request (overloaded, network
+# blip, internal stall), the HTTP call blocked indefinitely. The
+# download worker thread blocked with it. Once the
+# ``ThreadPoolExecutor(max_workers=3)`` had all 3 threads wedged,
+# no further downloads could start and the user had to restart the
+# container.
+#
+# Every slskd API call is metadata-level (search submission, status
+# polls, download enqueue, transfer state queries) — none stream files.
+# slskd handles file transfer via its own peer-to-peer infrastructure
+# entirely outside our HTTP requests. So generous-but-bounded timeouts
+# are safe and won't kill legitimate operations.
+#
+# Failures surface as caught exceptions in the existing
+# ``except Exception`` blocks → logged + return None → caller treats
+# as a normal failure (same as a 5xx response). No new error path.
+_SLSKD_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=120,        # hard ceiling — no single slskd call should take >2min
+    connect=15,       # TCP connect to slskd
+    sock_read=60,     # per-chunk read; slskd shouldn't go silent for >60s
+)
 
-        # Queue length (graduated penalty)
-        if self.queue_length > 50:
-            base_score -= 0.25
-        elif self.queue_length > 20:
-            base_score -= 0.15
-        elif self.queue_length > 10:
-            base_score -= 0.10
 
-        return min(base_score, 1.0)
-
-@dataclass
-class TrackResult(SearchResult):
-    """Individual track search result"""
-    artist: Optional[str] = None
-    title: Optional[str] = None
-    album: Optional[str] = None
-    track_number: Optional[int] = None
-    
-    def __post_init__(self):
-        self.result_type = "track"
-        # Try to extract metadata from filename if not provided
-        if not self.title or not self.artist:
-            self._parse_filename_metadata()
-    
-    def _parse_filename_metadata(self):
-        """Extract artist, title, album from filename patterns"""
-        parsed = parse_filename_metadata(self.filename)
-        if not self.artist and parsed.get("artist"):
-            self.artist = parsed["artist"]
-        if not self.title and parsed.get("title"):
-            self.title = parsed["title"]
-        if not self.album and parsed.get("album"):
-            self.album = parsed["album"]
-        if self.track_number is None:
-            track_number = parsed.get("track_number")
-            if track_number is not None:
-                self.track_number = track_number
-
-@dataclass
-class AlbumResult:
-    """Album/folder search result containing multiple tracks"""
-    username: str
-    album_path: str  # Directory path
-    album_title: str
-    artist: Optional[str]
-    track_count: int
-    total_size: int
-    tracks: List[TrackResult]
-    dominant_quality: str  # Most common quality in album
-    year: Optional[str] = None
-    free_upload_slots: int = 0
-    upload_speed: int = 0
-    queue_length: int = 0
-    result_type: str = "album"
-    
-    @property
-    def quality_score(self) -> float:
-        """Calculate album quality score based on dominant quality and track count"""
-        quality_weights = {
-            'flac': 1.0,
-            'mp3': 0.8,
-            'ogg': 0.7,
-            'aac': 0.6,
-            'wma': 0.5
-        }
-        
-        base_score = quality_weights.get(self.dominant_quality.lower(), 0.3)
-        
-        # Bonus for complete albums (typically 8-15 tracks)
-        if 8 <= self.track_count <= 20:
-            base_score += 0.1
-        elif self.track_count > 20:
-            base_score += 0.05
-        
-        # Free upload slots
-        if self.free_upload_slots == 0:
-            base_score -= 0.15
-        elif self.free_upload_slots > 0:
-            base_score += 0.05
-
-        # Upload speed in bytes/sec (tiered)
-        if self.upload_speed >= 5_000_000:      # ~5 MB/s / 40 Mbps
-            base_score += 0.15
-        elif self.upload_speed >= 1_000_000:    # ~1 MB/s / 8 Mbps
-            base_score += 0.10
-        elif self.upload_speed >= 500_000:      # ~500 KB/s / 4 Mbps
-            base_score += 0.05
-        elif self.upload_speed < 100_000:       # ~100 KB/s / 800 kbps
-            base_score -= 0.05
-
-        # Queue length (graduated penalty)
-        if self.queue_length > 50:
-            base_score -= 0.25
-        elif self.queue_length > 20:
-            base_score -= 0.15
-        elif self.queue_length > 10:
-            base_score -= 0.10
-
-        return min(base_score, 1.0)
-    
-    @property
-    def size_mb(self) -> int:
-        """Album size in MB"""
-        return self.total_size // (1024 * 1024)
-    
-    @property 
-    def average_track_size_mb(self) -> float:
-        """Average track size in MB"""
-        if self.track_count > 0:
-            return self.size_mb / self.track_count
-        return 0
-
-@dataclass
-class DownloadStatus:
-    id: str
-    filename: str
-    username: str
-    state: str
-    progress: float
-    size: int
-    transferred: int
-    speed: int
-    time_remaining: Optional[int] = None
-    file_path: Optional[str] = None
-
-class SoulseekClient:
+class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
@@ -283,25 +144,27 @@ class SoulseekClient:
         
         url = f"{self.base_url}/api/v0/{endpoint}"
         
-        # Create a fresh session for each thread/event loop to avoid conflicts
+        # Create a fresh session for each thread/event loop to avoid conflicts.
+        # Bounded timeout (issue #499) prevents the worker thread from
+        # wedging if slskd hangs.
         session = None
         try:
-            session = aiohttp.ClientSession()
-            
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
+
             headers = self._get_headers()
-         
+
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
-            
+
             async with session.request(
-                method, 
-                url, 
+                method,
+                url,
                 headers=headers,
                 **kwargs
             ) as response:
                 response_text = await response.text()
-             
-                
+
+
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     self._last_401_logged = False  # Reset on success
                     try:
@@ -320,7 +183,7 @@ class SoulseekClient:
                 else:
                     # Enhanced error logging for better debugging
                     error_detail = response_text if response_text.strip() else "No error details provided"
-                    
+
                     # Reduce noise for expected 404s (e.g. status checks for YouTube downloads)
                     # and repeated 401s (slskd not running / bad credentials)
                     if response.status == 404:
@@ -334,9 +197,17 @@ class SoulseekClient:
                         self._last_401_logged = False
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")
-                    
+
                     return None
-                    
+
+        except asyncio.TimeoutError:
+            # Issue #499: explicit handling so the worker thread unblocks
+            # instead of staying wedged on the HTTP call.
+            logger.warning(
+                f"slskd request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
+                f"{method} {url} — slskd may be overloaded or unreachable"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error making API request: {e}")
             return None
@@ -345,36 +216,38 @@ class SoulseekClient:
             if session:
                 try:
                     await session.close()
-                except:
-                    pass
-    
+                except Exception as _e:
+                    logger.debug("aiohttp session close: %s", _e)
+
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Make a direct request to slskd without /api/v0/ prefix (for endpoints that work directly)"""
         if not self.base_url:
             logger.debug("Soulseek client not configured")
             return None
-        
+
         url = f"{self.base_url}/{endpoint}"
-        
-        # Create a fresh session for each thread/event loop to avoid conflicts
+
+        # Create a fresh session for each thread/event loop to avoid conflicts.
+        # Bounded timeout (issue #499) prevents the worker thread from
+        # wedging if slskd hangs.
         session = None
         try:
-            session = aiohttp.ClientSession()
-            
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
+
             headers = self._get_headers()
-          
+
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
-            
+
             async with session.request(
-                method, 
-                url, 
+                method,
+                url,
                 headers=headers,
                 **kwargs
             ) as response:
                 response_text = await response.text()
-             
-                
+
+
                 if response.status == 200:
                     try:
                         return await response.json()
@@ -385,7 +258,13 @@ class SoulseekClient:
                 else:
                     logger.error(f"Direct API request failed: {response.status} - {response_text}")
                     return None
-                    
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"slskd direct request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
+                f"{method} {url} — slskd may be overloaded or unreachable"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error making direct API request: {e}")
             return None
@@ -394,9 +273,9 @@ class SoulseekClient:
             if session:
                 try:
                     await session.close()
-                except:
-                    pass
-    
+                except Exception as _e:
+                    logger.debug("aiohttp direct session close: %s", _e)
+
     def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
         """Process search response data into TrackResult and AlbumResult objects"""
         from collections import defaultdict
@@ -1684,7 +1563,7 @@ class SoulseekClient:
             # Try to get Swagger/OpenAPI documentation
             swagger_url = f"{self.base_url}/swagger/v1/swagger.json"
             
-            session = aiohttp.ClientSession()
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
             try:
                 headers = self._get_headers()
                 async with session.get(swagger_url, headers=headers) as response:
@@ -1735,15 +1614,15 @@ class SoulseekClient:
                     else:
                         # Try different endpoints without /api/v0 prefix
                         simple_url = f"{self.base_url}/{endpoint}"
-                        session = aiohttp.ClientSession()
+                        session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
                         try:
                             headers = self._get_headers()
                             async with session.get(simple_url, headers=headers) as resp:
                                 if resp.status in [200, 405]:  # 405 means endpoint exists but wrong method
                                     available_endpoints[f"direct_{endpoint}"] = f"Status: {resp.status}"
                                     logger.info(f"[OK] Direct endpoint available: {simple_url} (Status: {resp.status})")
-                        except:
-                            pass
+                        except Exception as _e:
+                            logger.debug("direct endpoint probe %s: %s", endpoint, _e)
                         finally:
                             await session.close()
                             

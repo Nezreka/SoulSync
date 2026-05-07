@@ -3,12 +3,14 @@ import re
 import threading
 import time
 from difflib import SequenceMatcher
+from types import SimpleNamespace
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
 from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("itunes_worker")
 
@@ -142,8 +144,8 @@ class iTunesWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null id table resolve failed: %s", e)
                     continue
 
                 self._process_item(item)
@@ -526,10 +528,48 @@ class iTunesWorker:
 
     # ── Individual fallback processing ─────────────────────────────────
 
+    def _refresh_album_via_stored_id(self, album_id, stored_id, api_album_dict):
+        """Issue #501 callback. Convert ``client.get_album()`` dict into
+        the Album-shaped object ``_update_album`` expects, then call it.
+        Preserves the manual match — never overwrites the stored ID
+        with a different name-search result."""
+        images = api_album_dict.get('images') or []
+        image_url = ''
+        if images and isinstance(images[0], dict):
+            image_url = images[0].get('url', '') or ''
+        adapter = SimpleNamespace(
+            id=api_album_dict.get('id') or stored_id,
+            name=api_album_dict.get('name', ''),
+            image_url=image_url,
+            album_type=api_album_dict.get('album_type', 'album'),
+            release_date=api_album_dict.get('release_date', ''),
+            total_tracks=api_album_dict.get('total_tracks', 0),
+        )
+        self._update_album(album_id, adapter)
+
+    def _refresh_track_via_stored_id(self, track_id, stored_id, api_track_dict):
+        """Track-level callback — track update only writes ID + status,
+        no metadata backfill, so the dict shape is irrelevant beyond
+        carrying the stored ID through."""
+        adapter = SimpleNamespace(id=api_track_dict.get('id') or stored_id)
+        self._update_track_from_search(track_id, adapter)
+
     def _process_album_individual(self, item: Dict[str, Any]):
         album_id = item['id']
         album_name = item['name']
         artist_name = item.get('artist', '')
+
+        # Issue #501: honor manual matches (see SpotifyWorker for full
+        # explanation — same pattern across every per-source worker).
+        if honor_stored_match(
+            db=self.db, entity_table='albums', entity_id=album_id,
+            id_column='itunes_album_id',
+            client_fetch_fn=self.client.get_album,
+            on_match_fn=self._refresh_album_via_stored_id,
+            log_prefix='iTunes',
+        ):
+            self.stats['matched'] += 1
+            return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
         results = self.client.search_albums(query, limit=5)
@@ -560,6 +600,17 @@ class iTunesWorker:
         track_id = item['id']
         track_name = item['name']
         artist_name = item.get('artist', '')
+
+        # Issue #501: honor manual matches.
+        if honor_stored_match(
+            db=self.db, entity_table='tracks', entity_id=track_id,
+            id_column='itunes_track_id',
+            client_fetch_fn=self.client.get_track_details,
+            on_match_fn=self._refresh_track_via_stored_id,
+            log_prefix='iTunes',
+        ):
+            self.stats['matched'] += 1
+            return
 
         query = f"{artist_name} {track_name}" if artist_name else track_name
         results = self.client.search_tracks(query, limit=5)
