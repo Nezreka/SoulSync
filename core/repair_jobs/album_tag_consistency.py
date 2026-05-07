@@ -62,8 +62,8 @@ def _read_tag(audio, tag_name):
                 if vals:
                     return vals[0].decode('utf-8') if isinstance(vals[0], bytes) else str(vals[0])
                 return None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read tag value failed: %s", e)
     return None
 
 
