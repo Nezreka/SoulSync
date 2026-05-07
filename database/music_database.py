@@ -650,8 +650,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN track_results TEXT")
                     logger.info("Added track_results column to sync_history table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add track_results column: %s", e)
 
             # Migration: add source_page column to sync_history (UI origin context for batch panel)
             try:
@@ -660,8 +660,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN source_page TEXT")
                     logger.info("Added source_page column to sync_history table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add source_page column: %s", e)
 
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
@@ -670,8 +670,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE tracks ADD COLUMN track_artist TEXT")
                     logger.info("Added track_artist column to tracks table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add track_artist column: %s", e)
 
             # Migration: add file_size column so the Stats page can show
             # total library size on disk without having to walk the
@@ -687,8 +687,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
                     logger.info("Added file_size column to tracks table")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add file_size column: %s", e)
 
             # One-time migration: purge discovery cache entries that lack track_number.
             # Prior versions cached discovery results without track_number/disc_number/release_date,
@@ -704,8 +704,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _discovery_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} stale discovery cache entries (missing track_number)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge stale discovery cache entries: %s", e)
 
             # One-time migration: purge Deezer album/track cache entries with missing data.
             # Deezer's /artist/{id}/albums returns albums without artist info, and search
@@ -721,8 +721,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _deezer_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} stale Deezer cache entries (missing artist/track_position)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge stale Deezer cache entries: %s", e)
 
             # One-time migration: purge cached tracks/albums with junk artist names.
             # The cache gate now rejects these, but existing entries need cleaning.
@@ -738,8 +738,8 @@ class MusicDatabase:
                     cursor.execute("CREATE TABLE _cache_junk_artist_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                     if purged > 0:
                         logger.info(f"Purged {purged} cached tracks/albums with junk artist names")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to purge cached tracks/albums with junk artist names: %s", e)
 
             # HiFi API instances table
             cursor.execute("""
@@ -819,8 +819,8 @@ class MusicDatabase:
                         config = json.loads(row[2]) if row[2] else {}
                         then_actions = json.dumps([{'type': row[1], 'config': config}])
                         cursor.execute("UPDATE automations SET then_actions = ? WHERE id = ?", (then_actions, row[0]))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to migrate notify data for automation row: %s", e)
                 logger.info("Migrated existing notify data to then_actions")
         except Exception as e:
             logger.error(f"Error adding automation then_actions column: {e}")
@@ -1527,8 +1527,8 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE liked_albums_pool ADD COLUMN discogs_release_id TEXT")
                     logger.info("Added discogs_release_id column to liked_albums_pool")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to add discogs_release_id column: %s", e)
 
             logger.info("Discovery tables added/verified successfully")
 
@@ -2468,8 +2468,8 @@ class MusicDatabase:
                     if 'profile_id' not in columns:
                         cursor.execute(f"ALTER TABLE {table} ADD COLUMN profile_id INTEGER DEFAULT 1")
                         logger.info(f"Repaired missing profile_id column on {table}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to repair profile_id column on %s: %s", table, e)
 
             if already_migrated:
                 return  # Rest of migration already done
@@ -2666,8 +2666,8 @@ class MusicDatabase:
             for idx_name, table in index_pairs:
                 try:
                     cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} (profile_id)")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to create index %s on %s: %s", idx_name, table, e)
 
             # Set migration marker
             cursor.execute("""
@@ -3326,8 +3326,8 @@ class MusicDatabase:
                     ))
                     if cursor.rowcount > 0:
                         inserted += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to insert listening event: %s", e)
             conn.commit()
             return inserted
         except Exception as e:
@@ -3635,8 +3635,8 @@ class MusicDatabase:
             total_size = 0
             try:
                 total_size = os.path.getsize(str(self.database_path))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to stat database file size: %s", e)
 
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -3663,8 +3663,8 @@ class MusicDatabase:
                         cursor.execute(f"SELECT COUNT(*) FROM [{tbl}]")
                         count = cursor.fetchone()[0]
                         tables.append({'name': tbl, 'size': count})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to get row count for table %s: %s", tbl, e)
                 tables.sort(key=lambda x: x['size'], reverse=True)
 
             return {
@@ -4189,8 +4189,8 @@ class MusicDatabase:
                               'bubble_snapshots', 'recent_releases']:
                     try:
                         cursor.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to delete from %s for profile: %s", table, e)
                 cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
                 conn.commit()
                 return cursor.rowcount > 0
@@ -5152,8 +5152,8 @@ class MusicDatabase:
                         album_artist_name = artist_row[0] if artist_row else ''
                         if nav_artist and nav_artist.lower() != album_artist_name.lower():
                             track_artist = nav_artist
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to load album artist for track_artist comparison: %s", e)
 
                 # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
                 mbid = getattr(track_obj, 'musicBrainzId', None) or None
@@ -5219,8 +5219,8 @@ class MusicDatabase:
                             file_path=file_path,
                             thumb_url=album_row[1] if album_row and len(album_row) > 1 else None
                         )
-                    except Exception:
-                        pass  # Non-critical history logging
+                    except Exception as e:
+                        logger.debug("history logging: %s", e)
 
                 return True
                 
@@ -10901,8 +10901,8 @@ class MusicDatabase:
                 """)
                 for row in cursor.fetchall():
                     source_counts[row['download_source']] = row['cnt']
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to load library history source counts: %s", e)
             stats['source_counts'] = source_counts
 
             return stats
@@ -11193,8 +11193,8 @@ class MusicDatabase:
                         WHERE playlist_id = ? AND source_track_id IS NOT NULL AND extra_data IS NOT NULL
                     """, (playlist_id,))
                     old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
 
                 # Replace all tracks
                 cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
@@ -12137,5 +12137,5 @@ def close_database():
                 db_instance.close()
             except Exception as e:
                 # Ignore threading errors during shutdown
-                pass
+                logger.debug("db instance close: %s", e)
         _database_instances.clear()

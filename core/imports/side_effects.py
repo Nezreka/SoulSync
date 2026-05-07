@@ -72,8 +72,8 @@ def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> No
                 "quality": context.get("_audio_quality", "Unknown"),
             },
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("track_downloaded emit failed: %s", e)
 
 
 def record_library_history_download(context: Dict[str, Any]) -> None:
@@ -143,8 +143,8 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             acoustid_result=acoustid_result,
             source_artist=source_artist,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library history record failed: %s", e)
 
 
 def record_download_provenance(context: Dict[str, Any]) -> None:
@@ -188,8 +188,8 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
                     sample_rate = getattr(audio.info, "sample_rate", None)
                     bitrate = getattr(audio.info, "bitrate", None)
                     bit_depth = getattr(audio.info, "bits_per_sample", None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("audio info probe failed: %s", e)
 
         # Pull the metadata-source IDs out of context. ``embed_source_ids``
         # in core/metadata/source.py wrote them to ``_embedded_id_tags``
@@ -239,8 +239,8 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             soul_id=soul_id,
             isrc=isrc,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("record_download_provenance failed: %s", e)
 
 
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:
@@ -321,8 +321,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             audio = MutagenFile(final_path)
             if audio and hasattr(audio, "info") and audio.info and hasattr(audio.info, "bitrate"):
                 bitrate = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("bitrate read failed: %s", e)
 
         # File size on disk (powers Library Disk Usage card on Stats).
         # SoulSync standalone is the only path where the file is local
@@ -371,8 +371,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE artists SET {artist_source_col} = ? WHERE id = ?",
                                 (artist_source_id, artist_id),
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("artist source-id update failed: %s", e)
 
             cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'", (album_id,))
             if not cursor.fetchone():
@@ -402,8 +402,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE albums SET {album_source_col} = ? WHERE id = ?",
                                 (album_source_id, album_id),
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("album source-id update failed: %s", e)
 
             track_artist = None
             track_artists_list = track_info.get("artists", []) or original_search.get("artists", [])
@@ -451,8 +451,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE tracks SET {track_album_col} = ? WHERE id = ?",
                                 (album_source_id, track_id),
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("track source-id update failed: %s", e)
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)

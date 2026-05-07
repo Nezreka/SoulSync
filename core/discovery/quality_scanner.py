@@ -648,8 +648,8 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
                     'low_quality': str(deps.quality_scanner_state.get('low_quality', 0)),
                     'total_scanned': str(deps.quality_scanner_state.get('processed', 0)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("emit quality_scan_completed failed: %s", e)
 
     except Exception as e:
         logger.error(f"[Quality Scanner] Critical error: {e}")

@@ -260,8 +260,8 @@ def get_debug_info():
         for _pid, st in list(tidal_discovery_states.items()):
             if st.get('phase') == 'syncing':
                 active_syncs += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("count active syncs failed: %s", e)
     info['active_downloads'] = active_downloads
     info['active_syncs'] = active_syncs
 

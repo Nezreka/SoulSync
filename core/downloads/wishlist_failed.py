@@ -146,8 +146,8 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                                         'title': track_name,
                                         'reason': failed_track_info.get('failure_reason', ''),
                                     })
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("emit wishlist_item_added failed: %s", e)
                         else:
                             logger.error(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
                             

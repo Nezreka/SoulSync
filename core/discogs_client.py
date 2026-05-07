@@ -320,8 +320,8 @@ class DiscogsClient:
             try:
                 from config.settings import config_manager
                 self.token = config_manager.get('discogs.token', '')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("load discogs.token from config: %s", e)
 
         if self.token:
             self.session.headers['Authorization'] = f'Discogs token={self.token}'
@@ -499,8 +499,8 @@ class DiscogsClient:
             for raw in cached_results:
                 try:
                     artists.append(Artist.from_discogs_artist(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Artist.from_discogs_artist cache parse: %s", e)
             if artists:
                 return artists
 
@@ -536,8 +536,8 @@ class DiscogsClient:
             for raw in cached_results:
                 try:
                     albums.append(Album.from_discogs_release(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Album.from_discogs_release cache parse: %s", e)
             if albums:
                 return albums
 

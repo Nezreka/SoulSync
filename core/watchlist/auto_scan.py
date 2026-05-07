@@ -440,8 +440,8 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                             'new_tracks_found': str(total_new_tracks),
                             'tracks_added': str(total_added_to_wishlist),
                         })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("watchlist_scan_completed emit failed: %s", e)
 
     except Exception as e:
         logger.error(f"Error in automatic watchlist scan: {e}")
@@ -460,7 +460,7 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
         # Clear one-time rescan cutoff after full scan cycle
         try:
             scanner._clear_rescan_cutoff()
-        except Exception:
+        except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
             pass
 
         # Always reset flag

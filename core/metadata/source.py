@@ -296,8 +296,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                     try:
                         from core.metadata import album_mbid_cache as _persisted_cache
                         _persisted_cache.record(normalized_album_key, artist_key, release_mbid)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("MBID cache persist failed: %s", e)
         pp["release_mbid"] = release_mbid or ""
         if pp["release_mbid"]:
             pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
@@ -959,8 +959,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                         resolved = itunes_client.resolve_primary_artist(artist_id)
                         if resolved and resolved != raw_album_artist:
                             raw_album_artist = resolved
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("itunes primary artist resolve failed: %s", e)
     metadata["album_artist"] = raw_album_artist
 
     if album_info.get("is_album"):
@@ -1136,8 +1136,8 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                 )
                 if isrc_value:
                     context["_isrc"] = str(isrc_value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("context isrc copy failed: %s", e)
 
     except Exception as exc:
         logger.error("Error embedding source IDs (non-fatal): %s", exc)

@@ -39,8 +39,8 @@ def _get_min_api_interval():
         val = config_manager.get('spotify.min_api_interval', None)
         if val is not None:
             return max(0.1, float(val))  # Floor at 100ms to prevent abuse
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("get min_api_interval setting: %s", e)
     return MIN_API_INTERVAL
 
 # Request queuing for burst handling
@@ -136,8 +136,8 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
                     detail=f'{"escalation #" + str(_rate_limit_hit_count) if escalated else "initial"}'
                          f'{", real Retry-After" if has_real_header else ", estimated"}'
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("api_call_tracker record rate_limit_ban: %s", e)
     try:
         from core.metadata.status import publish_spotify_status
 
@@ -148,8 +148,8 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
             rate_limit=_get_rate_limit_info(),
             post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("publish_spotify_status set rate limit: %s", e)
 
 
 def _is_globally_rate_limited():
@@ -230,8 +230,8 @@ def _clear_rate_limit():
             rate_limit=None,
             post_ban_cooldown=None,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("publish_spotify_status clear rate limit: %s", e)
 
 
 def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
@@ -637,8 +637,8 @@ class SpotifyClient:
                     rate_limit=_get_rate_limit_info(),
                     post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("publish_spotify_status no-client: %s", e)
             return False
 
         # If globally rate limited, report as NOT authenticated so callers
@@ -655,8 +655,8 @@ class SpotifyClient:
                     rate_limit=_get_rate_limit_info(),
                     post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("publish_spotify_status rate-limited: %s", e)
             return False
 
         # Post-ban cooldown: after a ban expires, don't probe Spotify immediately.
@@ -675,8 +675,8 @@ class SpotifyClient:
                     rate_limit=None,
                     post_ban_cooldown=remaining or None,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("publish_spotify_status post-ban cooldown: %s", e)
             return False
 
         # Check cache first (lock only for brief read)
@@ -692,8 +692,8 @@ class SpotifyClient:
                         rate_limit=None,
                         post_ban_cooldown=None,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("publish_spotify_status cache hit: %s", e)
                 return self._auth_cached_result
 
         # Cache miss — make API call outside the lock.
@@ -718,11 +718,11 @@ class SpotifyClient:
                         rate_limit=None,
                         post_ban_cooldown=None,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("publish_spotify_status no-token: %s", e)
                 return False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("cached token probe: %s", e)
 
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
@@ -771,8 +771,8 @@ class SpotifyClient:
                 rate_limit=_get_rate_limit_info() if rate_limited_state else None,
                 post_ban_cooldown=None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("publish_spotify_status auth probe: %s", e)
 
         return result
 
@@ -793,8 +793,8 @@ class SpotifyClient:
                 rate_limit=None,
                 post_ban_cooldown=None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("publish_spotify_status disconnect: %s", e)
 
         cache_path = 'config/.spotify_cache'
         try:
@@ -1245,8 +1245,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     tracks.append(Track.from_spotify_track(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Track.from_spotify_track cache parse: %s", e)
             if tracks:
                 return tracks
 
@@ -1298,8 +1298,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     artists.append(Artist.from_spotify_artist(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Artist.from_spotify_artist cache parse: %s", e)
             if artists:
                 query_lower = query.lower().strip()
                 artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
@@ -1361,8 +1361,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     albums.append(Album.from_spotify_album(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Album.from_spotify_album cache parse: %s", e)
             if albums:
                 return albums
 
@@ -1636,8 +1636,8 @@ class SpotifyClient:
                 try:
                     albums_list = cached.get('_albums', cached) if isinstance(cached, dict) else cached
                     return [Album.from_spotify_album(ad) for ad in albums_list]
-                except Exception:
-                    pass  # Cache data incompatible, re-fetch
+                except Exception as e:
+                    logger.debug("artist albums cache reuse: %s", e)
 
         if self.is_spotify_authenticated():
             try:

@@ -1441,8 +1441,8 @@ class JellyfinClient(MediaServerClient):
                     response = requests.delete(url, headers=headers, timeout=10)
                     if response.status_code in [200, 204]:
                         logger.info(f"Deleted existing backup playlist '{target_name}'")
-            except Exception:
-                pass  # Target doesn't exist, which is fine
+            except Exception as e:
+                logger.debug("backup playlist precheck: %s", e)
             
             # Create new playlist with copied tracks
             try:

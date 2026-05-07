@@ -141,8 +141,8 @@ class DeezerWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null id table resolve failed: %s", e)
                     continue
 
 

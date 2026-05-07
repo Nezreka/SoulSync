@@ -307,8 +307,8 @@ class DeezerClient:
             for raw in cached_results:
                 try:
                     tracks.append(Track.from_deezer_track(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Track.from_deezer_track cache parse: %s", e)
             if tracks:
                 return tracks
 
@@ -341,8 +341,8 @@ class DeezerClient:
             for raw in cached_results:
                 try:
                     artists.append(Artist.from_deezer_artist(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Artist.from_deezer_artist cache parse: %s", e)
             if artists:
                 return artists
 
@@ -375,8 +375,8 @@ class DeezerClient:
             for raw in cached_results:
                 try:
                     albums.append(Album.from_deezer_album(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Album.from_deezer_album cache parse: %s", e)
             if albums:
                 return albums
 
@@ -842,8 +842,8 @@ class DeezerClient:
                 try:
                     cache = get_metadata_cache()
                     cache.store_entity('deezer', 'artist', str(result.get('id', '')), result)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("cache store_entity artist search: %s", e)
                 logger.debug(f"Found artist for query: {artist_name}")
                 return result
 
@@ -887,8 +887,8 @@ class DeezerClient:
                 try:
                     cache = get_metadata_cache()
                     cache.store_entity('deezer', 'album', str(result.get('id', '')), result)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("cache store_entity album search: %s", e)
                 logger.debug(f"Found album for query: {artist_name} - {album_title}")
                 return result
 
@@ -932,8 +932,8 @@ class DeezerClient:
                 try:
                     cache = get_metadata_cache()
                     cache.store_entity('deezer', 'track', str(result.get('id', '')), result)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("cache store_entity track search: %s", e)
                 logger.debug(f"Found track for query: {artist_name} - {track_title}")
                 return result
 
@@ -965,8 +965,8 @@ class DeezerClient:
                 # Cache hit with full details (has label = was a get_album response, not just search)
                 logger.debug(f"Cache hit for album {album_id}")
                 return cached
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("cache get_entity album: %s", e)
 
         try:
             response = self.session.get(
@@ -984,8 +984,8 @@ class DeezerClient:
             try:
                 cache = get_metadata_cache()
                 cache.store_entity('deezer', 'album', str(album_id), data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("cache store_entity album full: %s", e)
             logger.debug(f"Got full album details for ID: {album_id}")
             return data
 
@@ -1013,8 +1013,8 @@ class DeezerClient:
             if cached and cached.get('bpm'):
                 logger.debug(f"Cache hit for track {track_id}")
                 return cached
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("cache get_entity track: %s", e)
 
         try:
             response = self.session.get(
@@ -1032,8 +1032,8 @@ class DeezerClient:
             try:
                 cache = get_metadata_cache()
                 cache.store_entity('deezer', 'track', str(track_id), data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("cache store_entity track full: %s", e)
             logger.debug(f"Got full track details for ID: {track_id}")
             return data
 

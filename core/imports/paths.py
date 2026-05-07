@@ -188,8 +188,8 @@ def _replace_template_variables(template: str, context: dict) -> str:
                         resolved = resolved_client.resolve_primary_artist(itunes_artist_id)
                         if resolved and resolved != album_artist_value:
                             album_artist_value = resolved
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("resolve primary artist failed: %s", e)
 
     # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
     # "CD02" etc. when the album has 2+ discs, empty string otherwise.

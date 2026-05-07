@@ -233,8 +233,8 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                                 'title': track_info.get('track_name', ''),
                                 'reason': track_info.get('failure_reason', 'Unknown'),
                             })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("download_failed emit failed: %s", e)
 
             # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
             if success and task_id in download_tasks:
@@ -364,8 +364,8 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                                 'completed_tracks': str(successful_downloads),
                                 'failed_tracks': str(failed_count),
                             })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("batch_complete emit failed: %s", e)
 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 playlist_id = batch.get('playlist_id')
@@ -569,8 +569,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                                     'completed_tracks': str(successful_downloads),
                                     'failed_tracks': str(failed_count),
                                 })
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("batch_complete emit failed: %s", e)
                 else:
                     logger.warning(f"[Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
                     return True  # Already complete
