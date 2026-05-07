@@ -8610,6 +8610,108 @@ def get_artist_image(artist_id):
         logger.error(f"Error fetching artist image: {e}")
         return jsonify({"success": False, "image_url": None, "error": str(e)})
 
+@app.route('/api/artist/<artist_id>/top-tracks', methods=['GET'])
+def get_artist_top_tracks_endpoint(artist_id):
+    """Return an artist's top-N tracks via the primary metadata source.
+
+    Issue #513: users want a "top X popular songs" path that doesn't pull
+    the entire discography. Spotify's `artist_top_tracks` endpoint and
+    Deezer's `/artist/{id}/top` both expose this; iTunes / Discogs /
+    MusicBrainz don't have popularity ranking, so this endpoint returns
+    `success=False` for those primary sources and the frontend falls back
+    to the existing Last.fm display-only sidebar.
+
+    Resolves per-source artist IDs from the DB row (matching what
+    /discography already does) so a Spotify ID in the URL still works
+    when Deezer is primary, and vice versa.
+    """
+    try:
+        primary_source = _get_metadata_fallback_source()
+        if primary_source not in ('spotify', 'deezer'):
+            return jsonify({
+                'success': False,
+                'reason': 'unsupported_source',
+                'source': primary_source,
+                'tracks': [],
+            })
+
+        try:
+            limit = max(1, min(int(request.args.get('limit', 10)), 50))
+        except (TypeError, ValueError):
+            limit = 10
+
+        # Per-source ID resolution from the DB — same pattern as
+        # /discography. Without this, the frontend's chosen ID type
+        # (Spotify, Deezer, iTunes, library DB id) decides which source
+        # can answer; we want the URL ID to be neutral.
+        resolved_id = artist_id
+        try:
+            _db = get_database()
+            _conn = _db._get_connection()
+            try:
+                _cur = _conn.cursor()
+                _cur.execute("""
+                    SELECT spotify_artist_id, deezer_id
+                    FROM artists
+                    WHERE id = ?
+                       OR spotify_artist_id = ?
+                       OR itunes_artist_id = ?
+                       OR deezer_id = ?
+                       OR musicbrainz_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                _row = _cur.fetchone()
+                if _row:
+                    if primary_source == 'spotify' and _row['spotify_artist_id']:
+                        resolved_id = str(_row['spotify_artist_id'])
+                    elif primary_source == 'deezer' and _row['deezer_id']:
+                        resolved_id = str(_row['deezer_id'])
+            finally:
+                _conn.close()
+        except Exception as e:
+            logger.debug("top-tracks per-source ID resolution failed: %s", e)
+
+        tracks = []
+        if primary_source == 'spotify':
+            if not spotify_client or not spotify_client.is_spotify_authenticated():
+                return jsonify({
+                    'success': False,
+                    'reason': 'spotify_not_authenticated',
+                    'source': 'spotify',
+                    'tracks': [],
+                })
+            market = config_manager.get('spotify.market', 'US') or 'US'
+            tracks = spotify_client.get_artist_top_tracks(resolved_id, country=market, limit=limit)
+        else:  # deezer
+            deezer_client = _get_deezer_client()
+            if not deezer_client:
+                return jsonify({
+                    'success': False,
+                    'reason': 'deezer_unavailable',
+                    'source': 'deezer',
+                    'tracks': [],
+                })
+            tracks = deezer_client.get_artist_top_tracks(resolved_id, limit=limit)
+
+        if not tracks:
+            return jsonify({
+                'success': False,
+                'reason': 'no_tracks_found',
+                'source': primary_source,
+                'tracks': [],
+            })
+
+        return jsonify({
+            'success': True,
+            'source': primary_source,
+            'resolved_artist_id': resolved_id,
+            'tracks': tracks,
+        })
+    except Exception as e:
+        logger.exception("Error fetching artist top tracks for %s", artist_id)
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
+
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
