@@ -640,8 +640,8 @@ class TidalClient:
                         image_id = image_rel.get('id', '')
                         if image_id:
                             image_url = f"https://resources.tidal.com/images/{image_id.replace('-', '/')}/640x640.jpg"
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("tidal v2 playlists image_url extract: %s", _e)
 
                 new_playlist = Playlist(
                     id=str(playlist_id),
@@ -1188,8 +1188,8 @@ class TidalClient:
                     image_id = image_rel.get('id', '')
                     if image_id:
                         playlist.image_url = f"https://resources.tidal.com/images/{image_id.replace('-', '/')}/640x640.jpg"
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("tidal playlist image_url extract: %s", _e)
 
             logger.info(f"Retrieved Tidal playlist '{playlist.name}' with {len(tracks)} tracks")
             return playlist
