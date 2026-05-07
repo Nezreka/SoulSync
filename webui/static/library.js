@@ -1441,32 +1441,126 @@ function updateArtistHeroSection(artist, discography) {
     }
 
     // Lazy-load top tracks sidebar
-    if (artist.lastfm_url || artist.lastfm_listeners) {
-        _loadArtistTopTracks(artist.name);
-    }
+    // Always try metadata-source top tracks (Spotify / Deezer); fall back to
+    // Last.fm playcount when the source can't deliver. Last.fm-only mode is
+    // display-only (no download action), matching the legacy behavior.
+    _loadArtistTopTracks(artist.name);
 }
+
+// Source label shown in the sidebar title.
+const _TOP_TRACKS_SOURCE_LABELS = {
+    spotify: 'Top Tracks (Spotify)',
+    deezer: 'Top Tracks (Deezer)',
+    lastfm: 'Popular on Last.fm',
+};
 
 async function _loadArtistTopTracks(artistName) {
     const sidebar = document.getElementById('artist-hero-sidebar');
     const container = document.getElementById('hero-top-tracks');
+    const titleEl = document.getElementById('hero-sidebar-title');
+    const downloadAllBtn = document.getElementById('hero-top-tracks-download-all');
     if (!sidebar || !container) return;
 
+    sidebar.style.display = 'none';
+    if (downloadAllBtn) downloadAllBtn.style.display = 'none';
+
+    const _fmtNum = (n) => {
+        if (!n || n <= 0) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return n.toLocaleString();
+    };
+
+    const _escAttr = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // ── Pass 1: metadata-source top tracks (Spotify / Deezer) ──
+    // Returns full track objects (id, artists, album, etc) so each row gets
+    // a real download action via the existing wishlist-add flow. The
+    // backend gracefully reports `success=False` for sources that don't
+    // expose popularity ranking (iTunes / Discogs / MusicBrainz), so the
+    // sidebar can fall through to the Last.fm display-only mode below.
+    const artistId = artistDetailPageState.currentArtistId;
+    if (artistId) {
+        try {
+            const params = new URLSearchParams({ limit: '10' });
+            const resp = await fetch(`/api/artist/${encodeURIComponent(artistId)}/top-tracks?${params}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
+                    if (titleEl) titleEl.textContent = _TOP_TRACKS_SOURCE_LABELS[data.source] || 'Top Tracks';
+
+                    // Stash the resolved tracks on the container so the
+                    // bulk-download button below can hand them to the
+                    // existing wishlist modal without refetching.
+                    container._topTracksPayload = {
+                        source: data.source,
+                        tracks: data.tracks,
+                        artistName,
+                        artistId,
+                    };
+
+                    container.innerHTML = data.tracks.map((t, i) => {
+                        const trackName = t.name || '';
+                        const trackArtists = (t.artists && t.artists.length)
+                            ? t.artists.map(a => (a && a.name) ? a.name : '').filter(Boolean).join(', ')
+                            : artistName;
+                        return `
+                            <div class="hero-top-track" data-index="${i}">
+                                <span class="hero-top-track-num">${i + 1}</span>
+                                <button class="hero-top-track-play" data-track="${_escAttr(trackName)}" data-artist="${_escAttr(trackArtists || artistName)}" title="Play">▶</button>
+                                <span class="hero-top-track-name" title="${_escAttr(trackName)}">${_escAttr(trackName)}</span>
+                                <button class="hero-top-track-download" data-index="${i}" title="Add to wishlist">⬇</button>
+                            </div>
+                        `;
+                    }).join('');
+
+                    container.onclick = (e) => {
+                        const playBtn = e.target.closest('.hero-top-track-play');
+                        if (playBtn) {
+                            e.stopPropagation();
+                            playStatsTrack(playBtn.dataset.track, playBtn.dataset.artist, '');
+                            return;
+                        }
+                        const dlBtn = e.target.closest('.hero-top-track-download');
+                        if (dlBtn) {
+                            e.stopPropagation();
+                            const idx = parseInt(dlBtn.dataset.index, 10);
+                            const payload = container._topTracksPayload;
+                            if (payload && Number.isFinite(idx) && payload.tracks[idx]) {
+                                _topTrackDownloadOne(payload.tracks[idx], payload.artistName);
+                            }
+                        }
+                    };
+
+                    // Wire the bulk "Download All" footer button
+                    if (downloadAllBtn) {
+                        downloadAllBtn.style.display = '';
+                        downloadAllBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            const payload = container._topTracksPayload;
+                            if (payload) _topTrackDownloadAll(payload);
+                        };
+                    }
+
+                    sidebar.style.display = '';
+                    return;
+                }
+            }
+        } catch (e) {
+            console.debug('Top tracks metadata-source fetch failed:', e);
+        }
+    }
+
+    // ── Pass 2 (fallback): Last.fm playcount, display-only ──
     try {
         const resp = await fetch(`/api/artist/0/lastfm-top-tracks?name=${encodeURIComponent(artistName)}`);
         const data = await resp.json();
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            sidebar.style.display = 'none';
             return;
         }
 
-        const _fmtNum = (n) => {
-            if (!n || n <= 0) return '0';
-            if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-            if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-            return n.toLocaleString();
-        };
-
-        const _escAttr = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (titleEl) titleEl.textContent = _TOP_TRACKS_SOURCE_LABELS.lastfm;
+        container._topTracksPayload = null;
         container.innerHTML = data.tracks.map((t, i) => `
             <div class="hero-top-track">
                 <span class="hero-top-track-num">${i + 1}</span>
@@ -1476,7 +1570,6 @@ async function _loadArtistTopTracks(artistName) {
             </div>
         `).join('');
 
-        // Attach play handlers via delegation (avoids inline JS escaping issues)
         container.onclick = (e) => {
             const btn = e.target.closest('.hero-top-track-play');
             if (btn) {
@@ -1486,8 +1579,76 @@ async function _loadArtistTopTracks(artistName) {
         };
         sidebar.style.display = '';
     } catch (e) {
-        console.debug('Failed to load top tracks:', e);
-        sidebar.style.display = 'none';
+        console.debug('Failed to load top tracks (Last.fm fallback):', e);
+    }
+}
+
+// Per-row download — wishlist a single track using its full metadata.
+async function _topTrackDownloadOne(track, artistName) {
+    try {
+        const trackArtists = (track.artists && track.artists.length)
+            ? track.artists
+            : [{ name: artistName }];
+        const album = (track.album && typeof track.album === 'object') ? track.album : {};
+        const resp = await fetch('/api/add-album-to-wishlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track: { ...track, artists: trackArtists },
+                artist: { id: artistDetailPageState.currentArtistId || '', name: artistName },
+                album: album,
+                source_type: 'top_tracks',
+                source_context: {
+                    artist_name: artistName,
+                    album_name: album.name || '',
+                    album_type: album.album_type || 'album',
+                },
+            }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            showToast(`Added "${track.name}" to wishlist`, 'success');
+        } else {
+            showToast(`Failed to wishlist "${track.name}": ${(data && data.error) || 'unknown'}`, 'error');
+        }
+    } catch (e) {
+        console.error('top track wishlist add failed:', e);
+        showToast('Failed to add track to wishlist', 'error');
+    }
+}
+
+// Bulk download — open the standard download modal in PLAYLIST context,
+// not album context. The virtualPlaylistId intentionally doesn't start
+// with `artist_album_` / `enhanced_search_album_` / etc, so
+// `startMissingTracksProcess` (downloads.js) sets is_album_download=false
+// and the master worker skips injecting the wrapper as `_explicit_album_context`.
+// Result: each track downloads using its own real album metadata, files
+// land in the proper per-album folders on disk.
+function _topTrackDownloadAll({ source, tracks, artistName, artistId }) {
+    const virtualPlaylistId = `top_tracks_${source}_${artistId || 'unknown'}`;
+    const playlistName = `${artistName} — Top Tracks`;
+    const wrapperAlbum = {
+        id: virtualPlaylistId,
+        name: playlistName,
+        album_type: 'compilation',
+        images: [],
+        total_tracks: tracks.length,
+        artists: [{ id: artistId || '', name: artistName }],
+    };
+    const artistObj = {
+        id: artistId || '',
+        name: artistName,
+        source: source,
+    };
+    if (typeof openDownloadMissingModalForArtistAlbum === 'function') {
+        // contextType='playlist' tells the modal to render the playlist
+        // hero (not the album hero); the playlist_id prefix above is what
+        // actually drives the per-track album-folder routing on download.
+        openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, tracks, wrapperAlbum, artistObj, true, 'playlist'
+        );
+    } else {
+        showToast('Download modal not available', 'error');
     }
 }
 
