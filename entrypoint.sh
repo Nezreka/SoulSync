@@ -35,9 +35,15 @@ if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
         usermod -o -u "$PUID" soulsync
     fi
 
-    # Fix ownership of app directories
-    echo "🔒 Fixing permissions on app directories..."
-    chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+    # Only do the expensive recursive chown if the data directory ownership
+    # doesn't already match — avoids walking large libraries on every restart.
+    DATA_OWNER=$(stat -c '%u:%g' /app/data 2>/dev/null || echo "unknown")
+    if [ "$DATA_OWNER" != "$PUID:$PGID" ]; then
+        echo "🔒 Fixing permissions on app directories..."
+        chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+    else
+        echo "✅ App directory permissions already correct"
+    fi
 else
     echo "✅ User/Group IDs already correct"
 fi
@@ -63,9 +69,11 @@ echo "   📄 Updating settings.py to current version..."
 cp /defaults/settings.py /app/config/settings.py
 chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 
-# Ensure all directories exist and have proper permissions
+# Ensure all directories exist with correct ownership.
+# Only the directory nodes themselves need chown here — the recursive chown
+# above already ran if UIDs changed, so avoid walking the whole tree every start.
 mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
-chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
 
 echo "✅ Configuration initialized successfully"
 

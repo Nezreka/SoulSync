@@ -39,8 +39,8 @@ def _get_min_api_interval():
         val = config_manager.get('spotify.min_api_interval', None)
         if val is not None:
             return max(0.1, float(val))  # Floor at 100ms to prevent abuse
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("get min_api_interval setting: %s", e)
     return MIN_API_INTERVAL
 
 # Request queuing for burst handling
@@ -136,8 +136,20 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
                     detail=f'{"escalation #" + str(_rate_limit_hit_count) if escalated else "initial"}'
                          f'{", real Retry-After" if has_real_header else ", estimated"}'
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("api_call_tracker record rate_limit_ban: %s", e)
+    try:
+        from core.metadata.status import publish_spotify_status
+
+        publish_spotify_status(
+            connected=False,
+            authenticated=True,
+            rate_limited=True,
+            rate_limit=_get_rate_limit_info(),
+            post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+        )
+    except Exception as e:
+        logger.debug("publish_spotify_status set rate limit: %s", e)
 
 
 def _is_globally_rate_limited():
@@ -210,6 +222,16 @@ def _clear_rate_limit():
         _rate_limit_hit_count = 0
         _rate_limit_first_hit = 0
     logger.info("Global rate limit ban cleared (including post-ban cooldown)")
+    try:
+        from core.metadata.status import publish_spotify_status
+
+        publish_spotify_status(
+            rate_limited=False,
+            rate_limit=None,
+            post_ban_cooldown=None,
+        )
+    except Exception as e:
+        logger.debug("publish_spotify_status clear rate limit: %s", e)
 
 
 def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
@@ -603,13 +625,38 @@ class SpotifyClient:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
         Results are cached for 60 seconds to avoid excessive API calls.
         During rate limit bans and post-ban cooldown, returns False without making API calls."""
+        rate_limited_state = False
         if self.sp is None:
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=False,
+                    rate_limited=_is_globally_rate_limited(),
+                    rate_limit=_get_rate_limit_info(),
+                    post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status no-client: %s", e)
             return False
 
         # If globally rate limited, report as NOT authenticated so callers
         # skip Spotify and fall through to iTunes fallback naturally.
         # This prevents any API calls that could extend the ban.
         if _is_globally_rate_limited():
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=True,
+                    rate_limited=True,
+                    rate_limit=_get_rate_limit_info(),
+                    post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status rate-limited: %s", e)
             return False
 
         # Post-ban cooldown: after a ban expires, don't probe Spotify immediately.
@@ -618,11 +665,35 @@ class SpotifyClient:
         if _is_in_post_ban_cooldown():
             remaining = _get_post_ban_cooldown_remaining()
             logger.debug(f"Post-ban cooldown active ({remaining}s left), skipping auth probe")
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=True,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=remaining or None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status post-ban cooldown: %s", e)
             return False
 
         # Check cache first (lock only for brief read)
         with self._auth_cache_lock:
             if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
+                try:
+                    from core.metadata.status import publish_spotify_status
+
+                    publish_spotify_status(
+                        connected=self._auth_cached_result,
+                        authenticated=self._auth_cached_result,
+                        rate_limited=False,
+                        rate_limit=None,
+                        post_ban_cooldown=None,
+                    )
+                except Exception as e:
+                    logger.debug("publish_spotify_status cache hit: %s", e)
                 return self._auth_cached_result
 
         # Cache miss — make API call outside the lock.
@@ -637,9 +708,21 @@ class SpotifyClient:
                 with self._auth_cache_lock:
                     self._auth_cached_result = False
                     self._auth_cache_time = time.time()
+                try:
+                    from core.metadata.status import publish_spotify_status
+
+                    publish_spotify_status(
+                        connected=False,
+                        authenticated=False,
+                        rate_limited=False,
+                        rate_limit=None,
+                        post_ban_cooldown=None,
+                    )
+                except Exception as e:
+                    logger.debug("publish_spotify_status no-token: %s", e)
                 return False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("cached token probe: %s", e)
 
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
@@ -668,6 +751,7 @@ class SpotifyClient:
                 ban_duration = max(delay, _BASE_UNKNOWN_BAN)
                 _set_global_rate_limit(ban_duration, 'is_spotify_authenticated', has_real_header=has_real_header)
                 logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
+                rate_limited_state = True
                 result = True
             else:
                 logger.debug(f"Spotify authentication check failed: {e}")
@@ -676,6 +760,19 @@ class SpotifyClient:
         with self._auth_cache_lock:
             self._auth_cached_result = result
             self._auth_cache_time = time.time()
+
+        try:
+            from core.metadata.status import publish_spotify_status
+
+            publish_spotify_status(
+                connected=result,
+                authenticated=result,
+                rate_limited=rate_limited_state,
+                rate_limit=_get_rate_limit_info() if rate_limited_state else None,
+                post_ban_cooldown=None,
+            )
+        except Exception as e:
+            logger.debug("publish_spotify_status auth probe: %s", e)
 
         return result
 
@@ -686,6 +783,18 @@ class SpotifyClient:
         self.user_id = None
         self._invalidate_auth_cache()
         _clear_rate_limit()
+        try:
+            from core.metadata.status import publish_spotify_status
+
+            publish_spotify_status(
+                connected=False,
+                authenticated=False,
+                rate_limited=False,
+                rate_limit=None,
+                post_ban_cooldown=None,
+            )
+        except Exception as e:
+            logger.debug("publish_spotify_status disconnect: %s", e)
 
         cache_path = 'config/.spotify_cache'
         try:
@@ -1136,8 +1245,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     tracks.append(Track.from_spotify_track(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Track.from_spotify_track cache parse: %s", e)
             if tracks:
                 return tracks
 
@@ -1189,8 +1298,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     artists.append(Artist.from_spotify_artist(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Artist.from_spotify_artist cache parse: %s", e)
             if artists:
                 query_lower = query.lower().strip()
                 artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
@@ -1252,8 +1361,8 @@ class SpotifyClient:
             for raw in cached_results:
                 try:
                     albums.append(Album.from_spotify_album(raw))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Album.from_spotify_album cache parse: %s", e)
             if albums:
                 return albums
 
@@ -1527,8 +1636,8 @@ class SpotifyClient:
                 try:
                     albums_list = cached.get('_albums', cached) if isinstance(cached, dict) else cached
                     return [Album.from_spotify_album(ad) for ad in albums_list]
-                except Exception:
-                    pass  # Cache data incompatible, re-fetch
+                except Exception as e:
+                    logger.debug("artist albums cache reuse: %s", e)
 
         if self.is_spotify_authenticated():
             try:
@@ -1643,6 +1752,31 @@ class SpotifyClient:
         else:
             logger.debug(f"Cannot use fallback for Spotify artist ID: {artist_id}")
             return None
+
+    @rate_limited
+    def get_artist_top_tracks(self, artist_id: str, country: str = 'US', limit: int = 10) -> List[Dict[str, Any]]:
+        """Return up to 10 top tracks for an artist (Spotify caps the response at 10).
+
+        Spotify's `artist_top_tracks` endpoint always returns ~10 tracks for the given
+        market regardless of any limit param. The `limit` argument here is honored as
+        a UI-side trim only — it never reduces the number of API calls. Tracks come
+        back in Spotify's standard track-object shape (id, name, artists, album, ...)
+        so the rest of the pipeline can consume them unchanged.
+        """
+        if not artist_id:
+            return []
+        if not self.is_spotify_authenticated():
+            return []
+        try:
+            result = self.sp.artist_top_tracks(artist_id, country=country)
+        except Exception as e:
+            _detect_and_set_rate_limit(e, 'get_artist_top_tracks')
+            logger.warning(f"Spotify artist_top_tracks failed for {artist_id}: {e}")
+            return []
+        if not result:
+            return []
+        tracks = result.get('tracks', []) or []
+        return tracks[:max(1, int(limit or 10))]
 
     @rate_limited
     def get_artists_batch(self, artist_ids: List[str]) -> Dict[str, Dict]:

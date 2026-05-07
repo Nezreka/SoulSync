@@ -206,6 +206,35 @@ def test_get_import_source_ids_prefers_nested_source_specific_ids():
     }
 
 
+def test_get_import_source_ids_prefers_spotify_ids_over_numeric_fallbacks():
+    context = normalize_import_context(
+        {
+            "source": "spotify",
+            "artist": {
+                "id": "396753",
+                "spotify_artist_id": "sp-artist-1",
+                "deezer_id": "396753",
+            },
+            "album": {
+                "id": "284076172",
+                "spotify_album_id": "sp-album-1",
+                "deezer_id": "284076172",
+            },
+            "track_info": {
+                "id": "1607091752",
+                "spotify_track_id": "sp-track-1",
+                "deezer_id": "1607091752",
+            },
+        }
+    )
+
+    assert get_import_source_ids(context) == {
+        "track_id": "sp-track-1",
+        "artist_id": "sp-artist-1",
+        "album_id": "sp-album-1",
+    }
+
+
 def test_build_import_album_info_uses_normalized_album_context():
     context = normalize_import_context(
         {

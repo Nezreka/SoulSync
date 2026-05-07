@@ -135,9 +135,14 @@ class UnknownArtistFixerJob(RepairJob):
             title = track['title'] or ''
             file_path = track['file_path']
 
-            # Resolve actual file on disk
-            from core.repair_worker import _resolve_file_path
-            resolved = _resolve_file_path(file_path, transfer)
+            # Resolve actual file on disk via the shared library resolver
+            # (picks up library.music_paths + Plex library locations).
+            from core.library.path_resolver import resolve_library_file_path
+            resolved = resolve_library_file_path(
+                file_path,
+                transfer_folder=transfer,
+                config_manager=context.config_manager,
+            )
             if not resolved or not os.path.exists(resolved):
                 result.skipped += 1
                 continue
@@ -185,7 +190,7 @@ class UnknownArtistFixerJob(RepairJob):
                     desc_parts.append(f'Path: → {expected_rel}')
 
                 if context.create_finding:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='unknown_artist',
                         severity='warning',
@@ -212,7 +217,10 @@ class UnknownArtistFixerJob(RepairJob):
                             'cover_url': corrected.get('image_url', ''),
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
             else:
                 # Live mode — apply fix
                 try:
@@ -488,8 +496,8 @@ class UnknownArtistFixerJob(RepairJob):
                             if not os.path.exists(sidecar_dst):
                                 try:
                                     shutil.move(sidecar_src, sidecar_dst)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("move sidecar file: %s", e)
 
                     # Also move cover.jpg from old album folder
                     cover_src = os.path.join(src_dir, 'cover.jpg')
@@ -497,8 +505,8 @@ class UnknownArtistFixerJob(RepairJob):
                     if os.path.isfile(cover_src) and not os.path.exists(cover_dst):
                         try:
                             shutil.copy2(cover_src, cover_dst)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("copy cover.jpg: %s", e)
 
                     # Clean up empty directories
                     parent = os.path.dirname(current_norm)

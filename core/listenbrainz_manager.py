@@ -302,8 +302,8 @@ class ListenBrainzManager:
                     # Fallback to first image
                     if images:
                         return images[0].get('thumbnails', {}).get('small') or images[0].get('image')
-            except:
-                pass
+            except Exception as e:
+                logger.debug("cover-art fetch: %s", e)
 
             return None
 

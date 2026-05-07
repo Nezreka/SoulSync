@@ -6558,8 +6558,8 @@ function updateLibraryStatusCard(dbStats) {
     const isScanning = window._libraryStatusScanning || false;
 
     // Determine state
-    const serverConnected = _lastServiceStatus && _lastServiceStatus.media_server && _lastServiceStatus.media_server.connected;
-    const serverType = _lastServiceStatus && _lastServiceStatus.active_media_server;
+    const serverConnected = _lastStatusPayload && _lastStatusPayload.media_server && _lastStatusPayload.media_server.connected;
+    const serverType = _lastStatusPayload && _lastStatusPayload.active_media_server;
     const hasData = tracks > 0;
     const hasServer = !!serverType && serverType !== 'none';
 
@@ -6668,7 +6668,7 @@ function updateLibraryStatusCard(dbStats) {
     }
 }
 
-// _lastServiceStatus and _isSoulsyncStandalone are declared in core.js
+// _lastStatusPayload and _isSoulsyncStandalone are declared in core.js
 const _origFetchServiceStatus = typeof fetchAndUpdateServiceStatus === 'function' ? fetchAndUpdateServiceStatus : null;
 
 function _capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }

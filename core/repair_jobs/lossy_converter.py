@@ -7,6 +7,7 @@ ffmpeg with the user's configured codec/bitrate settings.
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -20,21 +21,14 @@ CODEC_MAP = {
 }
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None):
-    """Resolve a stored DB path to an actual file on disk."""
-    if not file_path:
-        return None
-    if os.path.exists(file_path):
-        return file_path
-    path_parts = file_path.replace('\\', '/').split('/')
-    for base_dir in [transfer_folder, download_folder]:
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
-    return None
+def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
+    """Backwards-compat wrapper. Use ``resolve_library_file_path`` directly."""
+    return resolve_library_file_path(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+    )
 
 
 @register_job
@@ -136,7 +130,8 @@ class LossyConverterJob(RepairJob):
                 )
 
             # Resolve path
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder)
+            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
+                                           config_manager=context.config_manager)
             if not resolved or not os.path.exists(resolved):
                 continue
 
@@ -155,7 +150,7 @@ class LossyConverterJob(RepairJob):
             if context.create_finding:
                 try:
                     file_size = os.path.getsize(resolved)
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
                         severity='info',
@@ -182,7 +177,10 @@ class LossyConverterJob(RepairJob):
                             'artist_thumb_url': artist_thumb or None,
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
                 except Exception as e:
                     logger.debug("Error creating finding for track %s: %s", track_id, e)
                     result.errors += 1

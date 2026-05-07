@@ -2,33 +2,19 @@ import requests
 import hashlib
 import secrets
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 from datetime import datetime
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
 
+# Shared dataclasses live in the neutral media_server package — every
+# server client used to define a near-identical XTrackInfo /
+# XPlaylistInfo. Lifted to one canonical type so consumers (matching
+# engine, sync service) get a single import.
+from core.media_server.types import TrackInfo, PlaylistInfo
+
 logger = get_logger("navidrome_client")
 
-@dataclass
-class NavidromeTrackInfo:
-    id: str
-    title: str
-    artist: str
-    album: str
-    duration: int
-    track_number: Optional[int] = None
-    year: Optional[int] = None
-    rating: Optional[float] = None
-
-@dataclass
-class NavidromePlaylistInfo:
-    id: str
-    title: str
-    description: Optional[str]
-    duration: int
-    leaf_count: int
-    tracks: List[NavidromeTrackInfo]
 
 class NavidromeArtist:
     """Wrapper class to mimic Plex artist object interface"""
@@ -117,6 +103,14 @@ class NavidromeTrack:
         self.suffix = navidrome_data.get('suffix')      # e.g. "flac", "mp3"
         self.bitRate = navidrome_data.get('bitRate')     # e.g. 320
         self.path = navidrome_data.get('path')           # e.g. "/music/Artist/Album/track.flac"
+        # File size in bytes (Subsonic <song size="..."/>) — powers the
+        # Library Disk Usage card on Stats. None when the server didn't
+        # report a size (rare but possible for streaming-only nodes).
+        _nv_size = navidrome_data.get('size')
+        try:
+            self.file_size = int(_nv_size) if _nv_size else None
+        except (TypeError, ValueError):
+            self.file_size = None
 
         self._album_id = navidrome_data.get('albumId', '')
         self._artist_id = navidrome_data.get('artistId', '')
@@ -142,7 +136,10 @@ class NavidromeTrack:
             return self._client.get_album_by_id(self._album_id)
         return None
 
-class NavidromeClient:
+from core.media_server.contract import MediaServerClient
+
+
+class NavidromeClient(MediaServerClient):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.username: Optional[str] = None
@@ -816,7 +813,7 @@ class NavidromeClient:
             return {}
             return {}
 
-    def get_all_playlists(self) -> List[NavidromePlaylistInfo]:
+    def get_all_playlists(self) -> List[PlaylistInfo]:
         """Get all playlists from Navidrome server"""
         if not self.ensure_connection():
             return []
@@ -830,7 +827,7 @@ class NavidromeClient:
             playlists_data = response.get('playlists', {}).get('playlist', [])
 
             for playlist_data in playlists_data:
-                playlist_info = NavidromePlaylistInfo(
+                playlist_info = PlaylistInfo(
                     id=playlist_data.get('id', ''),
                     title=playlist_data.get('name', 'Unknown Playlist'),
                     description=playlist_data.get('comment'),
@@ -847,7 +844,7 @@ class NavidromeClient:
             logger.error(f"Error getting playlists from Navidrome: {e}")
             return []
 
-    def get_playlist_by_name(self, name: str) -> Optional[NavidromePlaylistInfo]:
+    def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         """Get a specific playlist by name"""
         playlists = self.get_all_playlists()
         for playlist in playlists:
@@ -925,8 +922,8 @@ class NavidromeClient:
                 if target_playlist:
                     self._make_request('deletePlaylist', {'id': target_playlist.id})
                     logger.info(f"Deleted existing backup playlist '{target_name}'")
-            except Exception:
-                pass  # Target doesn't exist, which is fine
+            except Exception as e:
+                logger.debug("backup playlist precheck: %s", e)
 
             # Create new playlist with copied tracks
             try:
@@ -968,7 +965,7 @@ class NavidromeClient:
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
 
-    def get_playlists_by_name(self, name: str) -> List[NavidromePlaylistInfo]:
+    def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
         """Get all playlists matching a specific name (case-insensitive)"""
         matches = []
         playlists = self.get_all_playlists()
@@ -1132,7 +1129,7 @@ class NavidromeClient:
         self._track_cache.clear()
         logger.info("Navidrome client cache cleared")
 
-    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[NavidromeTrackInfo]:
+    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[TrackInfo]:
         """Search for tracks using Navidrome search API"""
         if not self.ensure_connection():
             logger.warning("Navidrome not connected. Cannot perform search.")
@@ -1158,7 +1155,7 @@ class NavidromeClient:
             search_result = response.get('searchResult3', {})
 
             for track_data in search_result.get('song', []):
-                track_info = NavidromeTrackInfo(
+                track_info = TrackInfo(
                     id=track_data.get('id', ''),
                     title=track_data.get('title', ''),
                     artist=track_data.get('artist', ''),

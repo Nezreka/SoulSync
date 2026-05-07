@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, Tuple, List
 from enum import Enum
 from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
+from core.matching_engine import MusicMatchingEngine
 from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid.verification")
@@ -23,6 +24,25 @@ logger = get_logger("acoustid.verification")
 MIN_ACOUSTID_SCORE = 0.80       # Minimum AcoustID fingerprint score to trust
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity needed to consider a match
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity needed to consider a match
+
+# Single matching-engine instance so version detection reuses the same patterns
+# used by the pre-download Soulseek matcher (remix / live / acoustic /
+# instrumental / etc). detect_version_type doesn't use self state, so one
+# shared instance is fine.
+_match_engine_for_version = MusicMatchingEngine()
+
+
+def _detect_title_version(title: str) -> str:
+    """Return version label for a track title.
+
+    Returns ``'original'`` when no version marker is detected, otherwise one
+    of the labels produced by ``MusicMatchingEngine.detect_version_type``
+    (``'instrumental'``, ``'live'``, ``'acoustic'``, ``'remix'``, etc).
+    """
+    if not title:
+        return 'original'
+    version_type, _ = _match_engine_for_version.detect_version_type(title)
+    return version_type
 
 
 class VerificationResult(Enum):
@@ -286,6 +306,33 @@ class AcoustIDVerification:
                 f"(title_sim={title_sim:.2f}, artist_sim={artist_sim:.2f})"
             )
 
+            # Step 4b: Version-mismatch gate.
+            #
+            # The ``_normalize`` step deliberately strips parentheticals and
+            # version tags ("(Instrumental)", "- Live", etc) so that legit
+            # name variations don't fail the title-similarity comparison.
+            # That same stripping made it impossible to tell a vocal track
+            # apart from its instrumental: "In My Feelings" and "In My
+            # Feelings (Instrumental)" both normalize to "in my feelings",
+            # the title sim ends up 1.0, and the file passes verification
+            # even though it's the wrong cut.
+            #
+            # Detect the version on each side BEFORE normalization runs.
+            # If the expected track and the AcoustID-matched recording
+            # disagree on version (one is original, the other is
+            # instrumental / live / remix / acoustic / etc), reject — the
+            # fingerprint identified a real song but it's not the one the
+            # caller asked for.
+            expected_version = _detect_title_version(expected_track_name)
+            matched_version = _detect_title_version(matched_title)
+            if expected_version != matched_version:
+                msg = (
+                    f"Version mismatch: expected '{expected_track_name}' ({expected_version}) "
+                    f"but file is '{matched_title}' ({matched_version})"
+                )
+                logger.warning(f"AcoustID verification FAILED (version mismatch) - {msg}")
+                return VerificationResult.FAIL, msg
+
             # Step 5: Decide pass/fail based on similarity
             if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim >= ARTIST_MATCH_THRESHOLD:
                 msg = (
@@ -343,9 +390,15 @@ class AcoustIDVerification:
 
             # Title doesn't match — check ALL recordings for any title/artist match
             # (the best combined match might not be the right one if there are many results)
+            # Skip recordings whose version (instrumental/live/etc) disagrees with
+            # what the caller asked for — the version mismatch above checked
+            # only the best recording, but a wrong-version variant could still
+            # win this fallback scan if its bare title matched.
             for rec in recordings:
                 t = rec.get('title') or ''
                 a = rec.get('artist') or ''
+                if _detect_title_version(t) != expected_version:
+                    continue
                 if (_similarity(expected_track_name, t) >= TITLE_MATCH_THRESHOLD and
                         _similarity(expected_artist_name, a) >= ARTIST_MATCH_THRESHOLD):
                     msg = (
@@ -356,27 +409,61 @@ class AcoustIDVerification:
                     return VerificationResult.PASS, msg
 
             # No match found — but if fingerprint score is very high (≥0.95)
-            # AND there's partial similarity in title or artist, the mismatch is
-            # likely a language/script difference (e.g. Japanese kanji vs English).
-            # Skip rather than quarantine a correct file.
-            # But if both title AND artist similarity are very low, the download
-            # source gave us a completely wrong file — fail it.
-            if best_score >= 0.95 and (title_sim >= 0.55 or artist_sim >= ARTIST_MATCH_THRESHOLD):
-                top = recordings[0]
+            # AND we have evidence the mismatch is a language/script case
+            # (rather than two genuinely different songs by the same artist),
+            # skip rather than quarantine a correct file. Two routes:
+            #
+            # (a) Either side of the comparison contains non-ASCII characters
+            #     — strong signal of transliteration / kanji↔roman cases.
+            #     Artist must still be a strong match to use this path.
+            # (b) Both title AND artist similarity are very high (the song
+            #     is recognizably the same with minor punctuation / casing
+            #     differences that fell below the strict match thresholds).
+            #
+            # The OLD logic was ``title_sim >= 0.55 OR artist_sim >= match``.
+            # That fired for English-vs-English songs by the same artist that
+            # share NO actual content — e.g. "R.O.T.C (Interlude)" by
+            # Kendrick Lamar getting accepted as "Rich (Interlude)" by
+            # Kendrick Lamar because the artist matched perfectly and
+            # "interlude" was shared in both titles. Reported by user when
+            # downloading Mr. Morale: three tracks (Rich Interlude, Savior
+            # Interlude, Savior) all received the wrong R.O.T.C audio file
+            # because of this leak.
+            top = recordings[0]
+            top_title = top.get('title', '?') or ''
+            top_artist = top.get('artist', '?') or ''
+            has_non_ascii = (
+                any(ord(c) > 127 for c in (expected_track_name or ''))
+                or any(ord(c) > 127 for c in top_title)
+            )
+            language_script_skip = (
+                best_score >= 0.95
+                and has_non_ascii
+                and artist_sim >= ARTIST_MATCH_THRESHOLD
+            )
+            high_confidence_strong_match_skip = (
+                best_score >= 0.95
+                and title_sim >= 0.80
+                and artist_sim >= ARTIST_MATCH_THRESHOLD
+            )
+            if language_script_skip or high_confidence_strong_match_skip:
+                reason = (
+                    "likely same song in different language/script"
+                    if language_script_skip
+                    else "title/artist match within tolerance"
+                )
                 msg = (
                     f"Title/artist mismatch but fingerprint confidence very high ({best_score:.2f}): "
-                    f"AcoustID='{top.get('title', '?')}' by '{top.get('artist', '?')}', "
+                    f"AcoustID='{top_title}' by '{top_artist}', "
                     f"expected '{expected_track_name}' by '{expected_artist_name}' — "
-                    f"likely same song in different language/script"
+                    f"{reason}"
                 )
                 logger.info(f"AcoustID verification SKIPPED (high confidence) - {msg}")
                 return VerificationResult.SKIP, msg
 
             # Low fingerprint score + no metadata match — file is likely wrong
-            top = recordings[0]
-            top_title = top.get('title', '?')
-            top_artist = top.get('artist', '?')
-
+            # `top`, `top_title`, `top_artist` already resolved above for the
+            # skip-eligibility check.
             msg = (
                 f"Audio mismatch: file identified as '{top_title}' by '{top_artist}', "
                 f"expected '{expected_track_name}' by '{expected_artist_name}' "

@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
 from core.metadata.lookup import MetadataLookupOptions
+from core.metadata.types import Album
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.album_tracks")
+
+
+# Per-source typed converter dispatch. Powers the typed path inside
+# ``_build_album_info`` — when the caller knows which provider the raw
+# response came from, route through the canonical Album converter
+# instead of duck-typing every field. Sources missing from this map
+# fall through to the legacy duck-typed path.
+_TYPED_ALBUM_CONVERTERS: Dict[str, Callable[[Dict[str, Any]], Album]] = {
+    'spotify': Album.from_spotify_dict,
+    'itunes': Album.from_itunes_dict,
+    'deezer': Album.from_deezer_dict,
+    'discogs': Album.from_discogs_dict,
+    'musicbrainz': Album.from_musicbrainz_dict,
+    'hydrabase': Album.from_hydrabase_dict,
+    'qobuz': Album.from_qobuz_dict,
+}
 
 __all__ = [
     "get_album_for_source",
@@ -178,7 +196,83 @@ def _normalize_context_artists(artists: Any) -> List[Dict[str, Any]]:
     return normalized
 
 
-def _build_album_info(album_data: Any, album_id: str, album_name: str = '', artist_name: str = '') -> Dict[str, Any]:
+def _build_album_info(album_data: Any, album_id: str, album_name: str = '',
+                      artist_name: str = '', source: str = '') -> Dict[str, Any]:
+    """Build the canonical SoulSync internal album-info dict.
+
+    When ``source`` is provided AND maps to a known typed converter,
+    routes through the canonical ``Album.from_<source>_dict()`` path —
+    that single converter is the source of truth for that provider's
+    wire shape. Falls back to the legacy duck-typed extraction when
+    source is empty/unknown OR when the typed converter raises (so a
+    converter bug can't break album resolution).
+
+    See ``docs/metadata-types-migration.md`` for the broader plan.
+    """
+    typed_path_succeeded = None
+    if source and isinstance(album_data, dict):
+        converter = _TYPED_ALBUM_CONVERTERS.get(source.lower())
+        if converter is not None:
+            try:
+                typed_path_succeeded = _build_album_info_typed(
+                    album_data, album_id, album_name, artist_name, converter,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Typed album_info converter failed for source %s, falling "
+                    "back to legacy path: %s", source, exc,
+                )
+    if typed_path_succeeded is not None:
+        return typed_path_succeeded
+
+    return _build_album_info_legacy(album_data, album_id, album_name, artist_name)
+
+
+def _build_album_info_typed(album_data: Dict[str, Any], album_id: str,
+                            album_name: str, artist_name: str,
+                            converter: Callable[[Dict[str, Any]], Album]) -> Dict[str, Any]:
+    """Typed path: convert raw → Album, apply caller fallbacks for
+    fields the converter couldn't fill, return canonical dict."""
+    album = converter(album_data)
+
+    # Apply caller-provided fallbacks when the converter produced
+    # empty values. The legacy path treated `album_id` / `album_name`
+    # / `artist_name` as last-resort defaults.
+    if not album.id:
+        album = replace(album, id=album_id)
+    if not album.name:
+        album = replace(album, name=album_name or album_id)
+    if (not album.artists or album.artists == ['Unknown Artist']) and artist_name:
+        album = replace(album, artists=[artist_name])
+
+    ctx = album.to_context_dict()
+
+    # Preserve original `images` list shape from the raw input — the
+    # legacy path passed the source's full multi-resolution images
+    # array through verbatim. Some downstream consumers iterate the
+    # full list to pick a different size.
+    raw_images = album_data.get('images')
+    if isinstance(raw_images, list) and raw_images:
+        ctx['images'] = raw_images
+        # Legacy path also derived image_url from the first images entry
+        # when the source-specific cover field wasn't populated. Match
+        # that fallback so callers with Spotify-shaped raw images keep
+        # getting an image_url out of providers whose typed converter
+        # only checks source-native cover fields.
+        if not ctx.get('image_url'):
+            first = raw_images[0]
+            if isinstance(first, dict):
+                ctx['image_url'] = first.get('url') or ctx.get('image_url')
+
+    return ctx
+
+
+def _build_album_info_legacy(album_data: Any, album_id: str,
+                             album_name: str, artist_name: str) -> Dict[str, Any]:
+    """Original duck-typed extraction. Kept as the fallback when the
+    typed path can't apply (unknown source, non-dict input, converter
+    error). Tracked for removal once every caller passes a recognized
+    source — see migration plan."""
     images = _extract_lookup_value(album_data, 'images', default=[]) or []
     if not isinstance(images, list):
         images = list(images) if images else []
@@ -252,7 +346,10 @@ def _build_album_tracks_payload(
     album_name: str = '',
     artist_name: str = '',
 ) -> Dict[str, Any]:
-    album_info = _build_album_info(album_data, album_id, album_name=album_name, artist_name=artist_name)
+    album_info = _build_album_info(
+        album_data, album_id,
+        album_name=album_name, artist_name=artist_name, source=source,
+    )
     album_info['source'] = source
     album_info['_source'] = source
     album_info['provider'] = source

@@ -84,8 +84,8 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
                     artist['soul_id'] = row[4]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top artists enrich failed: %s", e)
 
     return artists
 
@@ -114,8 +114,8 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
                     album['artist_id'] = row[2]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top albums enrich failed: %s", e)
 
     return albums
 
@@ -146,8 +146,8 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
                     track['artist_id'] = row[2]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top tracks enrich failed: %s", e)
 
     return tracks
 
@@ -170,6 +170,17 @@ def get_library_health(database) -> dict:
 def get_db_storage(database) -> dict:
     """Database storage breakdown by table."""
     return database.get_db_storage_stats()
+
+
+def get_library_disk_usage(database) -> dict:
+    """On-disk size of the library, with per-format breakdown.
+
+    Backed by `tracks.file_size` populated during the deep scan from
+    media-server-reported sizes (Plex MediaPart.size, Jellyfin
+    MediaSources[].Size, Navidrome <song size="...">,
+    SoulSync standalone os.path.getsize).
+    """
+    return database.get_library_disk_usage()
 
 
 def get_recent_tracks(database, limit: int) -> list[dict]:

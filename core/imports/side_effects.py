@@ -72,8 +72,8 @@ def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> No
                 "quality": context.get("_audio_quality", "Unknown"),
             },
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("track_downloaded emit failed: %s", e)
 
 
 def record_library_history_download(context: Dict[str, Any]) -> None:
@@ -88,6 +88,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             "hifi": "HiFi",
             "deezer_dl": "Deezer",
             "lidarr": "Lidarr",
+            "soundcloud": "SoundCloud",
         }
         download_source = source_map.get(username, "Soulseek")
 
@@ -119,7 +120,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         source_track_id = search_result.get("track_id", "") or search_result.get("id", "") or ti.get("id", "")
         source_track_title = search_result.get("title", "") or search_result.get("name", "")
         source_artist = search_result.get("artist", "")
-        if source_filename and "||" in source_filename and username in ("tidal", "youtube", "qobuz", "hifi", "deezer_dl", "lidarr"):
+        if source_filename and "||" in source_filename and username in ("tidal", "youtube", "qobuz", "hifi", "deezer_dl", "lidarr", "soundcloud"):
             stream_id = source_filename.split("||")[0]
             if stream_id and not source_track_id:
                 source_track_id = stream_id
@@ -142,8 +143,8 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             acoustid_result=acoustid_result,
             source_artist=source_artist,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library history record failed: %s", e)
 
 
 def record_download_provenance(context: Dict[str, Any]) -> None:
@@ -159,6 +160,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             "hifi": "hifi",
             "deezer_dl": "deezer",
             "lidarr": "lidarr",
+            "soundcloud": "soundcloud",
         }.get(username, "soulseek")
 
         ti = context.get("track_info") or context.get("search_result") or {}
@@ -186,8 +188,32 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
                     sample_rate = getattr(audio.info, "sample_rate", None)
                     bitrate = getattr(audio.info, "bitrate", None)
                     bit_depth = getattr(audio.info, "bits_per_sample", None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("audio info probe failed: %s", e)
+
+        # Pull the metadata-source IDs out of context. ``embed_source_ids``
+        # in core/metadata/source.py wrote them to ``_embedded_id_tags``
+        # at the end of post-processing — we persist them here so the
+        # watchlist scanner can recognize freshly downloaded files
+        # without waiting for the async enrichment workers.
+        embedded = context.get("_embedded_id_tags") or {}
+
+        def _embedded(*keys):
+            for k in keys:
+                v = embedded.get(k)
+                if v:
+                    return str(v)
+            return None
+
+        spotify_track_id = _embedded("SPOTIFY_TRACK_ID")
+        itunes_track_id = _embedded("ITUNES_TRACK_ID")
+        deezer_track_id = _embedded("DEEZER_TRACK_ID")
+        tidal_track_id = _embedded("TIDAL_TRACK_ID")
+        qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
+        musicbrainz_recording_id = _embedded("MUSICBRAINZ_RECORDING_ID")
+        audiodb_id = _embedded("AUDIODB_TRACK_ID")
+        soul_id = _embedded("SOUL_ID")
+        isrc = context.get("_isrc")
 
         db = get_database()
         db.record_track_download(
@@ -203,9 +229,18 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             bit_depth=bit_depth,
             sample_rate=sample_rate,
             bitrate=bitrate,
+            spotify_track_id=spotify_track_id,
+            itunes_track_id=itunes_track_id,
+            deezer_track_id=deezer_track_id,
+            tidal_track_id=tidal_track_id,
+            qobuz_track_id=qobuz_track_id,
+            musicbrainz_recording_id=musicbrainz_recording_id,
+            audiodb_id=audiodb_id,
+            soul_id=soul_id,
+            isrc=isrc,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("record_download_provenance failed: %s", e)
 
 
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:
@@ -286,7 +321,18 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             audio = MutagenFile(final_path)
             if audio and hasattr(audio, "info") and audio.info and hasattr(audio.info, "bitrate"):
                 bitrate = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
-        except Exception:
+        except Exception as e:
+            logger.debug("bitrate read failed: %s", e)
+
+        # File size on disk (powers Library Disk Usage card on Stats).
+        # SoulSync standalone is the only path where the file is local
+        # at insert time, so we read it directly via os.path.getsize.
+        # Mirrors what JellyfinTrack/NavidromeTrack pull from API
+        # responses for the media-server flows.
+        file_size = None
+        try:
+            file_size = os.path.getsize(final_path) or None
+        except OSError:
             pass
 
         artist_id = _stable_soulsync_id(artist_name.lower().strip())
@@ -325,8 +371,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE artists SET {artist_source_col} = ? WHERE id = ?",
                                 (artist_source_id, artist_id),
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("artist source-id update failed: %s", e)
 
             cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'", (album_id,))
             if not cursor.fetchone():
@@ -356,8 +402,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE albums SET {album_source_col} = ? WHERE id = ?",
                                 (album_source_id, album_id),
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("album source-id update failed: %s", e)
 
             track_artist = None
             track_artists_list = track_info.get("artists", []) or original_search.get("artists", [])
@@ -375,9 +421,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 cursor.execute(
                     """
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, track_artist, server_source,
+                                        duration, file_path, bitrate, file_size, track_artist, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         track_id,
@@ -388,6 +434,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         duration_ms,
                         final_path,
                         bitrate,
+                        file_size,
                         track_artist,
                     ),
                 )
@@ -404,8 +451,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 f"UPDATE tracks SET {track_album_col} = ? WHERE id = ?",
                                 (album_source_id, track_id),
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("track source-id update failed: %s", e)
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)

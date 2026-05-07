@@ -7,8 +7,11 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 
 from core.spotify_client import Track as SpotifyTrack
-from core.plex_client import PlexTrackInfo
-from core.soulseek_client import TrackResult, AlbumResult
+from core.media_server.types import TrackInfo
+# TrackResult / AlbumResult moved out of core.soulseek_client into the
+# neutral download_plugins package (download PR's Gap 1 lift). Import
+# from the new location.
+from core.download_plugins.types import TrackResult, AlbumResult
 
 
 logger = get_logger("matching_engine")
@@ -16,7 +19,7 @@ logger = get_logger("matching_engine")
 @dataclass
 class MatchResult:
     spotify_track: SpotifyTrack
-    plex_track: Optional[PlexTrackInfo]
+    plex_track: Optional[TrackInfo]
     confidence: float
     match_type: str
     
@@ -302,7 +305,7 @@ class MusicMatchingEngine:
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
         return confidence, "standard_match"
 
-    def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
+    def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: TrackInfo) -> Tuple[float, str]:
         """Calculates a confidence score using a prioritized model, starting with a strict 'core' title check."""
         return self.score_track_match(
             source_title=spotify_track.name,
@@ -313,7 +316,7 @@ class MusicMatchingEngine:
             candidate_duration_ms=plex_track.duration if plex_track.duration else 0
         )
     
-    def find_best_match(self, spotify_track: SpotifyTrack, plex_tracks: List[PlexTrackInfo]) -> MatchResult:
+    def find_best_match(self, spotify_track: SpotifyTrack, plex_tracks: List[TrackInfo]) -> MatchResult:
         """Finds the best Plex track match from a list of candidates."""
         best_match = None
         best_confidence = 0.0

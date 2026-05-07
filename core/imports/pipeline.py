@@ -32,6 +32,7 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
+from core.imports.file_integrity import check_audio_integrity
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
 from core.imports.side_effects import (
@@ -142,6 +143,68 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             time.sleep(1.5)
         else:
             logger.info(f"File may still be writing after stability checks: {_basename} ({_prev_size} bytes)")
+
+        # File integrity check: catches broken slskd transfers (truncated,
+        # corrupted, wrong file masquerading as the target) before we burn
+        # cycles on AcoustID + tagging + library sync. Universal across
+        # formats; failed files get quarantined and the slot freed.
+        try:
+            _normalized_for_duration = normalize_import_context(context)
+            _duration_track = get_import_track_info(_normalized_for_duration)
+            _expected_duration_ms = int(_duration_track.get("duration_ms", 0) or 0) or None
+        except Exception:
+            _expected_duration_ms = None
+
+        try:
+            integrity = check_audio_integrity(file_path, _expected_duration_ms)
+        except Exception as integrity_error:
+            logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")
+            integrity = None
+
+        if integrity is not None and not integrity.ok:
+            logger.error(f"[Integrity] Rejected {_basename}: {integrity.reason}")
+            context['_integrity_failure_msg'] = integrity.reason
+            context['_integrity_checks'] = integrity.checks
+            try:
+                quarantine_path = move_to_quarantine(
+                    file_path,
+                    context,
+                    f"Integrity check failed: {integrity.reason}",
+                    automation_engine,
+                )
+                logger.error(f"File quarantined due to integrity failure: {quarantine_path}")
+            except Exception as quarantine_error:
+                logger.error(f"Quarantine failed ({quarantine_error}), deleting broken file: {file_path}")
+                try:
+                    os.remove(file_path)
+                except Exception as del_error:
+                    logger.error(f"Could not delete broken file either: {del_error}")
+
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+
+            task_id = context.get('task_id')
+            batch_id = context.get('batch_id')
+            if task_id:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = (
+                            f"File integrity check failed: {integrity.reason}"
+                        )
+
+            if task_id and batch_id:
+                _notify_download_completed(batch_id, task_id, success=False)
+            return
+
+        if integrity is not None:
+            logger.info(
+                f"[Integrity] {_basename} passed "
+                f"(size={integrity.checks.get('size_bytes', '?')}b, "
+                f"length={integrity.checks.get('actual_length_s', 0):.1f}s, "
+                f"drift={integrity.checks.get('length_drift_s', 'n/a')})"
+            )
 
         _skip_acoustid = False
         try:
@@ -371,8 +434,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                     try:
                         os.remove(file_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("delete quarantine fallback: %s", e)
 
                 context['_bitdepth_rejected'] = True
                 with matched_context_lock:
@@ -499,8 +562,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                     try:
                         os.remove(file_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("delete quarantine fallback: %s", e)
 
                 context['_bitdepth_rejected'] = True
                 with matched_context_lock:
@@ -857,6 +920,50 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     download_tasks[task_id]['status'] = 'failed'
                     download_tasks[task_id]['error_message'] = (
                         f"Downloaded file not found at expected location: {os.path.basename(expected_final_path)}"
+                    )
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
+
+        # Integrity rejection — the inner pipeline quarantined the file
+        # because audio integrity (size / parse / duration) failed. Wrapper
+        # was previously falling through to "assuming success" because
+        # quarantined files have no _final_processed_path, which left the
+        # task showing ✅ Completed in the UI even though the file is in
+        # quarantine. Reported by user when downloading Mr. Morale: 3
+        # tracks (Rich Interlude, Savior Interlude, Savior) showed
+        # Completed in the modal but were missing on disk because their
+        # source files failed integrity and were quarantined.
+        if context.get('_integrity_failure_msg'):
+            failure_msg = context.get('_integrity_failure_msg', 'unknown')
+            logger.error(
+                f"Task {task_id} failed integrity check — marking failed: {failure_msg}"
+            )
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        f"File integrity check failed: {failure_msg}"
+                    )
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
+
+        # Race guard failure — inner code set this when the source file
+        # disappeared and there was no known destination to fall back on
+        # (vs the legitimate race-guard skip where a sibling thread
+        # already moved the file to its destination).
+        if context.get('_race_guard_failed'):
+            logger.error(f"Task {task_id} failed race guard — source file gone with no known destination")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        "Source file disappeared before post-processing could complete"
                     )
             with matched_context_lock:
                 if context_key in matched_downloads_context:

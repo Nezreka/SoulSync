@@ -101,7 +101,7 @@ def _build_deps(
     on_complete=None,
 ):
     deps = dc.CandidatesDeps(
-        soulseek_client=soulseek or _FakeSoulseek(),
+        download_orchestrator=soulseek or _FakeSoulseek(),
         spotify_client=spotify or _FakeSpotify(),
         run_async=_run_async,
         get_database=lambda: db or _FakeDB(),
@@ -136,7 +136,7 @@ def test_first_candidate_starts_download_and_returns_true():
     result = dc.attempt_download_with_candidates("t1", candidates, track, batch_id="b1", deps=deps)
 
     assert result is True
-    assert deps.soulseek_client.download_calls == [("user1", "best.flac", 1000)]
+    assert deps.download_orchestrator.download_calls == [("user1", "best.flac", 1000)]
     assert download_tasks["t1"]["download_id"] == "dl-1"
     assert "user1::best.flac" in matched_downloads_context
 
@@ -155,7 +155,7 @@ def test_candidates_tried_in_confidence_order():
     dc.attempt_download_with_candidates("t2", candidates, track, batch_id=None, deps=deps)
 
     # First call should be the highest-confidence one
-    assert deps.soulseek_client.download_calls[0][1] == "high.flac"
+    assert deps.download_orchestrator.download_calls[0][1] == "high.flac"
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +175,8 @@ def test_already_tried_source_skipped():
     dc.attempt_download_with_candidates("t3", candidates, track, batch_id=None, deps=deps)
 
     # First candidate skipped (already used), second one tried
-    assert len(deps.soulseek_client.download_calls) == 1
-    assert deps.soulseek_client.download_calls[0][1] == "fresh.flac"
+    assert len(deps.download_orchestrator.download_calls) == 1
+    assert deps.download_orchestrator.download_calls[0][1] == "fresh.flac"
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +196,7 @@ def test_blacklisted_source_skipped():
 
     dc.attempt_download_with_candidates("t4", candidates, track, batch_id=None, deps=deps)
 
-    assert deps.soulseek_client.download_calls[0][1] == "ok.flac"
+    assert deps.download_orchestrator.download_calls[0][1] == "ok.flac"
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ def test_cancellation_before_attempt_returns_false():
     result = dc.attempt_download_with_candidates("t5", candidates, track, batch_id=None, deps=deps)
 
     assert result is False
-    assert deps.soulseek_client.download_calls == []
+    assert deps.download_orchestrator.download_calls == []
 
 
 def test_task_deleted_returns_false():
@@ -238,7 +238,7 @@ def test_active_download_id_skips_new_download():
     dc.attempt_download_with_candidates("t6", candidates, track, batch_id=None, deps=deps)
 
     # Both candidates skipped (download_id already present)
-    assert deps.soulseek_client.download_calls == []
+    assert deps.download_orchestrator.download_calls == []
 
 
 def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
@@ -266,7 +266,7 @@ def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
 
     assert result is False
     # cancel_download was called for the in-flight transfer
-    assert deps.soulseek_client.cancel_calls
+    assert deps.download_orchestrator.cancel_calls
     # on_download_completed fired with success=False to free the worker slot
     assert completion_calls == [("b7", "t7", False)]
 
@@ -276,7 +276,7 @@ def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
 # ---------------------------------------------------------------------------
 
 def test_all_candidates_failed_returns_false():
-    """If soulseek_client.download returns None (failure) for all candidates, returns False."""
+    """If download_orchestrator.download returns None (failure) for all candidates, returns False."""
     soulseek = _FakeSoulseek(download_id=None)
     deps = _build_deps(soulseek=soulseek)
     _seed_task("t8")
@@ -411,5 +411,5 @@ def test_candidates_with_equal_confidence_both_tried():
     dc.attempt_download_with_candidates("t13", candidates, track, batch_id=None, deps=deps)
 
     # First one wins — second never tried because download succeeded
-    assert len(deps.soulseek_client.download_calls) == 1
-    assert deps.soulseek_client.download_calls[0][1] == "a.flac"
+    assert len(deps.download_orchestrator.download_calls) == 1
+    assert deps.download_orchestrator.download_calls[0][1] == "a.flac"

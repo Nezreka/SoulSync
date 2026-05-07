@@ -33,7 +33,7 @@ _run_post_processing_worker = None
 _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
-soulseek_client = None
+download_orchestrator = None
 
 
 def init(
@@ -44,12 +44,12 @@ def init(
     start_next_batch_of_downloads,
     orphaned_download_keys,
     missing_download_executor_obj,
-    soulseek_client_obj,
+    download_orchestrator_obj,
 ):
     """Bind web_server-side helpers/globals so the class body can resolve them."""
     global _make_context_key, _on_download_completed, _download_track_worker
     global _run_post_processing_worker, _start_next_batch_of_downloads
-    global _orphaned_download_keys, missing_download_executor, soulseek_client
+    global _orphaned_download_keys, missing_download_executor, download_orchestrator
     _make_context_key = make_context_key
     _on_download_completed = on_download_completed
     _download_track_worker = download_track_worker
@@ -57,7 +57,7 @@ def init(
     _start_next_batch_of_downloads = start_next_batch_of_downloads
     _orphaned_download_keys = orphaned_download_keys
     missing_download_executor = missing_download_executor_obj
-    soulseek_client = soulseek_client_obj
+    download_orchestrator = download_orchestrator_obj
 
 
 class WebUIDownloadMonitor:
@@ -199,7 +199,7 @@ class WebUIDownloadMonitor:
                 if op[0] == 'cancel_download':
                     _, download_id, username = op
                     logger.debug(f"[Deferred] Cancelling download: {download_id} from {username}")
-                    run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+                    run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                     logger.debug(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
                     _, context_key = op
@@ -254,8 +254,9 @@ class WebUIDownloadMonitor:
 
             # Get Soulseek downloads from API
             transfers_data = None
-            if soulseek_active and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
-                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            _slsk = download_orchestrator.client('soulseek') if download_orchestrator and hasattr(download_orchestrator, 'client') else None
+            if soulseek_active and _slsk and _slsk.base_url:
+                transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     username = user_data.get('username', 'Unknown')
@@ -266,30 +267,34 @@ class WebUIDownloadMonitor:
                                     key = _make_context_key(username, file_info.get('filename', ''))
                                     live_transfers[key] = file_info
 
-            # Also get non-Soulseek downloads (YouTube/Tidal/Qobuz/HiFi/Deezer/Lidarr)
-            # Call each client directly to avoid redundant slskd API call through orchestrator
+            # Also get non-Soulseek downloads via the engine — single
+            # cross-source aggregation, no per-source iteration.
             try:
                 all_downloads = []
-                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
-                    if _dl_client:
-                        try:
-                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
-                        except Exception:
-                            pass
+                if download_orchestrator and hasattr(download_orchestrator, 'engine'):
+                    try:
+                        # Exclude soulseek — slskd transfers were already
+                        # pulled via the transfers/downloads endpoint above.
+                        # Without the exclude both fetch paths run, doubling
+                        # the per-tick slskd API hit.
+                        all_downloads = run_async(
+                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                        )
+                    except Exception as e:
+                        logger.debug("get_all_downloads failed: %s", e)
                 for download in all_downloads:
-                        key = _make_context_key(download.username, download.filename)
-                        # Convert DownloadStatus to transfer dict format for monitor compatibility
-                        live_transfers[key] = {
-                            'id': download.id,
-                            'filename': download.filename,
-                            'username': download.username,
-                            'state': download.state,
-                            'percentComplete': download.progress,
-                            'size': download.size,
-                            'bytesTransferred': download.transferred,
-                            'averageSpeed': download.speed,
-                        }
+                    key = _make_context_key(download.username, download.filename)
+                    # Convert DownloadStatus to transfer dict format for monitor compatibility
+                    live_transfers[key] = {
+                        'id': download.id,
+                        'filename': download.filename,
+                        'username': download.username,
+                        'state': download.state,
+                        'percentComplete': download.progress,
+                        'size': download.size,
+                        'bytesTransferred': download.transferred,
+                        'averageSpeed': download.speed,
+                    }
             except Exception as yt_error:
                 logger.error(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
 

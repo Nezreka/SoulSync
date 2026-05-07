@@ -98,6 +98,14 @@ class SoulSyncTrack:
         self.path = file_path
         self.bitRate = tags['bitrate']
         self.suffix = os.path.splitext(file_path)[1].lstrip('.').lower()
+        # File size in bytes (powers Library Disk Usage card on Stats).
+        # SoulSync standalone is the only "server" where we can read
+        # size from disk directly — Plex/Jellyfin/Navidrome get theirs
+        # from the API response.
+        try:
+            self.file_size = os.path.getsize(file_path) if os.path.exists(file_path) else None
+        except OSError:
+            self.file_size = None
 
     def artist(self):
         return self._artist_ref
@@ -182,7 +190,10 @@ class SoulSyncArtist:
         return self._albums
 
 
-class SoulSyncClient:
+from core.media_server.contract import MediaServerClient
+
+
+class SoulSyncClient(MediaServerClient):
     """Filesystem-based media server client for standalone SoulSync operation.
 
     Scans the Transfer folder recursively, reads audio file tags, and
@@ -242,8 +253,8 @@ class SoulSyncClient:
         if self._progress_callback:
             try:
                 self._progress_callback(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("progress callback failed: %s", e)
 
     # ── Core Scanning ──
 

@@ -273,10 +273,6 @@ body {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Explicitly lift above the nav buttons. `.sidebar > *` sets z-index 1 on
-       every sidebar child, so without this the sticky header paints at the
-       same stacking level as the nav and loses to it on DOM order. */
-    z-index: 2;
     overflow: hidden;
     flex-shrink: 0;
 
@@ -489,6 +485,42 @@ body {
 .nav-button.active .nav-text {
     color: rgb(var(--accent-light-rgb));
     font-weight: 600;
+}
+
+/* Library breadcrumb — when on the artist-detail pseudo-page, the Library
+   button label rewrites to "Library / <Artist>". The accent color stays on
+   the "Library" root; the separator and artist name are dimmed so the
+   anchor word remains scannable at a glance. JS truncates long names and
+   sets the full name as a `title` attribute for hover. */
+.nav-text[data-breadcrumb] {
+    display: inline-flex;
+    align-items: baseline;
+    max-width: 100%;
+    min-width: 0;
+}
+.nav-text[data-breadcrumb] .nav-text-root {
+    color: inherit;
+    flex-shrink: 0;
+}
+.nav-text[data-breadcrumb] .nav-text-sep {
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 400;
+    flex-shrink: 0;
+}
+.nav-button.active .nav-text[data-breadcrumb] .nav-text-sep {
+    color: rgba(255, 255, 255, 0.45);
+}
+.nav-text[data-breadcrumb] .nav-text-context {
+    color: rgba(255, 255, 255, 0.75);
+    font-weight: 500;
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.nav-button.active .nav-text[data-breadcrumb] .nav-text-context {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 /* Sidebar Spacer */
@@ -2782,6 +2814,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .status-indicator:has(.disconnected) .status-name {
     color: rgba(255, 255, 255, 0.35);
     font-weight: 400;
+}
+
+.status-indicator[data-status-ready="false"] .status-dot,
+.status-indicator[data-status-ready="false"] .status-name,
+.service-card[data-status-ready="false"] .service-card-title,
+.service-card[data-status-ready="false"] .service-card-indicator,
+.service-card[data-status-ready="false"] .service-card-status-text,
+.service-card[data-status-ready="false"] .service-card-response-time {
+    visibility: hidden;
+}
+
+#metadata-source-service-card[data-status-ready="false"] .service-card-button {
+    visibility: hidden;
 }
 
 /* =====================================
@@ -24297,6 +24342,55 @@ div.artist-hero-badge {
     font-variant-numeric: tabular-nums;
 }
 
+/* Per-row wishlist button — only shown on metadata-source rows
+   (Spotify / Deezer). Last.fm rows show the playcount instead. */
+.hero-top-track-download {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: all 0.2s;
+}
+.hero-top-track:hover .hero-top-track-download {
+    opacity: 1;
+}
+.hero-top-track-download:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-rgb));
+    transform: scale(1.1);
+}
+
+/* Footer "Download All" button on the top-tracks sidebar — only shown
+   when metadata-source provided downloadable tracks. */
+.hero-top-tracks-download-all {
+    margin-top: 12px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.08);
+    color: rgb(var(--accent-rgb));
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.hero-top-tracks-download-all:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .artist-hero-section {
@@ -39400,6 +39494,72 @@ div.artist-hero-badge {
     text-align: right;
 }
 
+/* Library Disk Usage */
+.stats-disk-usage-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.stats-disk-total-row {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.stats-disk-total-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: rgb(var(--accent-rgb));
+}
+
+.stats-disk-total-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.stats-disk-formats {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.stats-disk-format-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 80px;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.stats-disk-format-name {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.stats-disk-format-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.stats-disk-format-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        rgb(var(--accent-rgb)) 0%,
+        rgba(var(--accent-rgb), 0.6) 100%);
+    border-radius: 4px;
+}
+
+.stats-disk-format-size {
+    text-align: right;
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
+}
+
 /* Database Storage Chart */
 .stats-db-storage-wrap {
     display: flex;
@@ -50718,6 +50878,13 @@ tr.tag-diff-same {
     background: rgba(239, 68, 68, 0.10);
     color: #f87171;
 }
+/* Historical "found in last scan" — present but already resolved /
+   dismissed. Muted so it doesn't read as urgent action like the
+   current-pending badge. */
+.repair-flow-badge.findings-historical {
+    background: rgba(148, 163, 184, 0.10);
+    color: #94a3b8;
+}
 .repair-flow-arrow {
     color: rgba(255, 255, 255, 0.25);
     font-size: 12px;
@@ -59674,6 +59841,7 @@ body.reduce-effects *::after {
 .auto-import-completed { border-left: 3px solid #4ade80; }
 .auto-import-review { border-left: 3px solid #fbbf24; }
 .auto-import-failed { border-left: 3px solid #f87171; }
+.auto-import-processing { border-left: 3px solid #60a5fa; }
 
 .auto-import-card-art {
     width: 56px; height: 56px;
@@ -59931,6 +60099,26 @@ body.reduce-effects *::after {
 .auto-import-badge-review { background: rgba(251,191,36,0.1); color: #fbbf24; }
 .auto-import-badge-failed { background: rgba(248,113,113,0.1); color: #f87171; }
 .auto-import-badge-neutral { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); }
+.auto-import-badge-processing {
+    background: rgba(96,165,250,0.12);
+    color: #60a5fa;
+    animation: auto-import-badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes auto-import-badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.auto-import-track-row-active {
+    background: rgba(96,165,250,0.08);
+    border-left: 2px solid #60a5fa;
+    padding-left: 6px;
+    margin-left: -8px;
+    border-radius: 3px;
+}
+.auto-import-track-row-active .auto-import-track-name { color: #60a5fa; font-weight: 600; }
+.auto-import-track-row-done .auto-import-track-name,
+.auto-import-track-row-done .auto-import-track-file { opacity: 0.4; }
 
 .auto-import-actions {
     display: flex; gap: 4px; margin-top: 4px;

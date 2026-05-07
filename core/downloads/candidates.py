@@ -25,7 +25,7 @@ and notifies the lifecycle via `on_download_completed(success=False)` so the
 worker slot frees up.
 
 Lifted verbatim from web_server.py. Wide dependency surface
-(soulseek_client, spotify_client, lifecycle callback, context-key helper,
+(download_orchestrator, spotify_client, lifecycle callback, context-key helper,
 status updater, DB) all injected via `CandidatesDeps`.
 """
 
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CandidatesDeps:
     """Bundle of cross-cutting deps the candidate-fallback logic needs."""
-    soulseek_client: Any
+    download_orchestrator: Any
     spotify_client: Any
     run_async: Callable[..., Any]
     get_database: Callable[[], Any]
@@ -97,8 +97,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
             if _bl_db.is_blacklisted(candidate.username, candidate.filename):
                 logger.info(f"[Modal Worker] Skipping blacklisted source: {source_key}")
                 continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("blacklist check failed: %s", e)
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source
@@ -209,7 +209,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
 
             # Initiate download
             logger.info(f"[Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
-            download_id = deps.run_async(deps.soulseek_client.download(username, filename, size))
+            download_id = deps.run_async(deps.download_orchestrator.download(username, filename, size))
 
             if download_id:
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
@@ -330,7 +330,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                             logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
-                                deps.run_async(deps.soulseek_client.cancel_download(download_id, username, remove=True))
+                                deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
                                 logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:
                                 logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
@@ -340,8 +340,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                                 deps.on_download_completed(batch_id, task_id, success=False)
                             return False
                         
-                        # Store download information - use real download ID from soulseek_client
-                        # CRITICAL FIX: Trust the download ID returned by soulseek_client.download()
+                        # Store download information - use real download ID from download_orchestrator
+                        # CRITICAL FIX: Trust the download ID returned by download_orchestrator.download()
                         download_tasks[task_id]['download_id'] = download_id
                         
                         download_tasks[task_id]['username'] = username

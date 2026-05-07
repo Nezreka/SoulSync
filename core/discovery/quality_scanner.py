@@ -32,12 +32,28 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 from core.metadata.registry import get_client_for_source, get_primary_source, get_source_priority
+from core.metadata.types import Album
 from core.wishlist.payloads import ensure_wishlist_track_format
 
 logger = logging.getLogger(__name__)
+
+
+# Per-source typed converter dispatch — same registry pattern as
+# the metadata builders. Quality-scanner result normalization routes
+# the embedded ``track.album`` blob through Album.from_<source>_dict()
+# when provider is known. Falls back to legacy duck-typed extraction.
+_TYPED_ALBUM_CONVERTERS: Dict[str, Callable[[Dict[str, Any]], Album]] = {
+    'spotify': Album.from_spotify_dict,
+    'itunes': Album.from_itunes_dict,
+    'deezer': Album.from_deezer_dict,
+    'discogs': Album.from_discogs_dict,
+    'musicbrainz': Album.from_musicbrainz_dict,
+    'hydrabase': Album.from_hydrabase_dict,
+    'qobuz': Album.from_qobuz_dict,
+}
 
 
 @dataclass
@@ -140,7 +156,16 @@ def _normalize_image_entries(image_value: Any) -> list[dict]:
     return normalized
 
 
-def _normalize_track_album(track_item: Any) -> dict:
+def _normalize_track_album(track_item: Any, provider: Optional[str] = None) -> dict:
+    """Normalize a track's embedded album blob into a flat dict.
+
+    When ``provider`` is provided AND maps to a registered typed Album
+    converter, routes through the typed path to seed canonical fields
+    on ``album_data`` before legacy fallback chains fill any gaps.
+    Falls back to legacy duck-typed extraction on unknown provider /
+    non-dict input / typed converter error — same pattern as the
+    metadata builders.
+    """
     album = _extract_lookup_value(track_item, 'album', default={})
     if isinstance(album, dict):
         album_data = dict(album)
@@ -151,6 +176,27 @@ def _normalize_track_album(track_item: Any) -> dict:
             'total_tracks': _extract_lookup_value(album, 'total_tracks', 'track_count', default=0) or 0,
             'release_date': _extract_lookup_value(album, 'release_date', default='') or '',
         }
+
+    if provider and isinstance(album, dict):
+        converter = _TYPED_ALBUM_CONVERTERS.get(provider.strip().lower())
+        if converter is not None:
+            try:
+                typed_album = converter(album)
+                if typed_album.name:
+                    album_data.setdefault('name', typed_album.name)
+                if typed_album.album_type:
+                    album_data.setdefault('album_type', typed_album.album_type)
+                if typed_album.total_tracks:
+                    album_data.setdefault('total_tracks', typed_album.total_tracks)
+                if typed_album.release_date:
+                    album_data.setdefault('release_date', typed_album.release_date)
+                if typed_album.id:
+                    album_data.setdefault('id', typed_album.id)
+            except Exception as exc:
+                logger.debug(
+                    "Typed album converter failed for provider %s in quality "
+                    "scanner normalize, falling back to legacy: %s", provider, exc,
+                )
 
     album_data.setdefault('name', _extract_lookup_value(track_item, 'album_name', default='Unknown Album') or 'Unknown Album')
     album_data.setdefault('album_type', _extract_lookup_value(track_item, 'album_type', default='album') or 'album')
@@ -189,7 +235,7 @@ def _normalize_track_match(track_item: Any, provider: str) -> dict:
         'id': _extract_lookup_value(track_item, 'id', 'track_id', default='') or '',
         'name': _extract_lookup_value(track_item, 'name', 'title', default='Unknown Track') or 'Unknown Track',
         'artists': _normalize_track_artists(track_item),
-        'album': _normalize_track_album(track_item),
+        'album': _normalize_track_album(track_item, provider=provider),
         'image_url': _extract_lookup_value(track_item, 'image_url', 'album_cover_url', default=None),
         'duration_ms': _extract_lookup_value(track_item, 'duration_ms', default=0) or 0,
         'track_number': _extract_lookup_value(track_item, 'track_number', default=1) or 1,
@@ -602,8 +648,8 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
                     'low_quality': str(deps.quality_scanner_state.get('low_quality', 0)),
                     'total_scanned': str(deps.quality_scanner_state.get('processed', 0)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("emit quality_scan_completed failed: %s", e)
 
     except Exception as e:
         logger.error(f"[Quality Scanner] Critical error: {e}")

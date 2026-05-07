@@ -495,12 +495,29 @@ class ConfigManager:
             "hifi_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
             },
+            "hifi": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "isrc": True,
+                    "bpm": True,
+                    "copyright": True,
+                }
+            },
             "lidarr_download": {
                 "url": "",
                 "api_key": "",
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+            },
+            "soundcloud_download": {
+                # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
+                # added later, with credentials living under a "session" subkey
+                # alongside Tidal/Qobuz. No quality knob: anonymous SoundCloud
+                # caps at the upload's transcoding (typically 128 kbps MP3 or
+                # AAC). yt-dlp resolves bestaudio at download time.
             },
             "listenbrainz": {
                 "base_url": "",

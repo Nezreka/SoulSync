@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import hashlib
+import time
 from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -277,8 +278,8 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
         if client and client.is_connected():
             if not require_enabled or bool(_dev_mode_enabled_provider()):
                 return client
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("hydrabase client lookup: %s", e)
 
     if allow_fallback:
         return get_itunes_client()
@@ -341,6 +342,44 @@ def get_primary_client(
     )
 
 
+def get_primary_source_status(
+    *,
+    spotify_client_factory: Optional[MetadataClientFactory] = None,
+    itunes_client_factory: Optional[MetadataClientFactory] = None,
+    deezer_client_factory: Optional[MetadataClientFactory] = None,
+    discogs_client_factory: Optional[MetadataClientFactory] = None,
+) -> Dict[str, Any]:
+    """Return a generic status snapshot for the active primary metadata source."""
+    source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    started = time.time()
+    connected = False
+
+    try:
+        client = get_client_for_source(
+            source,
+            spotify_client_factory=spotify_client_factory,
+            itunes_client_factory=itunes_client_factory,
+            deezer_client_factory=deezer_client_factory,
+            discogs_client_factory=discogs_client_factory,
+        )
+        if source == "spotify":
+            connected = bool(client and client.is_spotify_authenticated())
+        elif source == "hydrabase":
+            connected = bool(client and (client.is_connected() if hasattr(client, "is_connected") else client.is_authenticated()))
+        elif client is not None and hasattr(client, "is_authenticated"):
+            connected = bool(client.is_authenticated())
+        else:
+            connected = client is not None
+    except Exception:
+        connected = False
+
+    return {
+        "source": source,
+        "connected": connected,
+        "response_time": round((time.time() - started) * 1000, 1),
+    }
+
+
 def get_client_for_source(
     source: str,
     *,
@@ -355,8 +394,8 @@ def get_client_for_source(
             client = get_spotify_client(client_factory=spotify_client_factory)
             if client and client.is_spotify_authenticated():
                 return client
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("spotify client get_for_source: %s", e)
         return None
 
     if source == "deezer":

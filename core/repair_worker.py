@@ -24,6 +24,7 @@ from core.metadata_service import (
     get_source_priority,
     get_primary_source,
 )
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -33,29 +34,26 @@ logger = get_logger("repair_worker")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None):
+def _resolve_file_path(file_path, transfer_folder, download_folder=None,
+                       config_manager=None, plex_client=None):
     """Resolve a stored DB path to an actual file on disk.
 
-    Tries the raw path first, then progressively shorter suffixes against
-    configured directories.  Handles cross-environment path mismatches
-    (e.g. Docker paths vs native Windows paths).
+    Thin wrapper around ``core.library.path_resolver.resolve_library_file_path``
+    that preserves the legacy signature used by every caller in this module
+    and the repair-job modules. The shared resolver also probes the
+    user-configured ``library.music_paths`` and Plex-reported library
+    locations — which is what fixes the Album Completeness Auto-Fill
+    failure on Docker setups (issue #476). Pre-existing call sites that
+    don't pass ``config_manager`` keep the old transfer+download-only
+    behavior; sites that pass it in pick up the wider search automatically.
     """
-    if not file_path:
-        return None
-    if os.path.exists(file_path):
-        return file_path
-
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    for base_dir in [transfer_folder, download_folder]:
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
-
-    return None
+    return resolve_library_file_path(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+        plex_client=plex_client,
+    )
 
 
 class RepairWorker:
@@ -259,8 +257,22 @@ class RepairWorker:
             self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
 
     def get_all_job_info(self) -> List[dict]:
-        """Get info for all jobs (for API response)."""
+        """Get info for all jobs (for API response).
+
+        Includes ``pending_findings_count`` per job so the job-card
+        badge can show CURRENT pending state instead of the
+        ``last_run.findings_created`` historical scan count. Without
+        this, a scan that creates 372 findings + a subsequent bulk-
+        fix that resolves all of them leaves the badge displaying
+        "372 findings" while the Findings tab Pending filter shows 0
+        — confusing UX flagged on the Library Maintenance page.
+        """
         self._ensure_jobs_loaded()
+
+        # Single query → per-job pending count dict. O(1) lookup per
+        # job instead of N round trips.
+        pending_by_job = self._get_pending_count_by_job()
+
         jobs_info = []
         for job_id, job in self._jobs.items():
             config = self.get_job_config(job_id)
@@ -286,8 +298,29 @@ class RepairWorker:
                 'last_run': last_run,
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,
+                'pending_findings_count': pending_by_job.get(job_id, 0),
             })
         return jobs_info
+
+    def _get_pending_count_by_job(self) -> dict:
+        """Return ``{job_id: pending_count}`` for every job that has
+        any pending findings. Single SQL aggregation."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT job_id, COUNT(*) FROM repair_findings
+                WHERE status = 'pending'
+                GROUP BY job_id
+            """)
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug("Error counting pending findings per job: %s", e)
+            return {}
+        finally:
+            if conn:
+                conn.close()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -546,8 +579,8 @@ class RepairWorker:
         if self._on_job_start:
             try:
                 self._on_job_start(job_id, job.display_name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("on_job_start callback failed: %s", e)
 
         # Record job start
         run_id = self._record_job_start(job_id)
@@ -557,8 +590,8 @@ class RepairWorker:
             if self._on_job_progress:
                 try:
                     self._on_job_progress(job_id, **kwargs)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("on_job_progress callback failed: %s", e)
 
         # Build context
         context = JobContext(
@@ -603,8 +636,8 @@ class RepairWorker:
             try:
                 status = 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished'
                 self._on_job_finish(job_id, status, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("on_job_finish callback failed: %s", e)
 
         logger.info(
             "Job %s complete: scanned=%d fixed=%d findings=%d errors=%d (%.1fs)",
@@ -657,8 +690,18 @@ class RepairWorker:
     # ------------------------------------------------------------------
     def _create_finding(self, job_id: str, finding_type: str, severity: str,
                         entity_type: str, entity_id: str, file_path: str,
-                        title: str, description: str, details: dict = None):
-        """Create a repair finding in the database."""
+                        title: str, description: str, details: dict = None) -> bool:
+        """Create a repair finding in the database.
+
+        Returns:
+            True  — a NEW pending row was inserted.
+            False — dedup-skipped (an equivalent row already exists with
+                    status pending/resolved/dismissed) OR a DB error
+                    occurred. Callers should only increment their
+                    ``findings_created`` counter when this returns True
+                    so the badge / scan log reports REAL new findings,
+                    not silently-skipped duplicates.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -674,7 +717,7 @@ class RepairWorker:
             """, (job_id, finding_type, entity_type, entity_id, file_path))
 
             if cursor.fetchone():
-                return  # Already exists or was already fixed
+                return False  # Already exists or was already fixed
 
             cursor.execute("""
                 INSERT INTO repair_findings
@@ -687,8 +730,10 @@ class RepairWorker:
                 json.dumps(details) if details else '{}'
             ))
             conn.commit()
+            return True
         except Exception as e:
             logger.debug("Error creating finding: %s", e)
+            return False
         finally:
             if conn:
                 conn.close()
@@ -843,6 +888,7 @@ class RepairWorker:
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
             'mbid_mismatch': self._fix_mbid_mismatch,
+            'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
             'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
@@ -1022,7 +1068,7 @@ class RepairWorker:
             download_folder = None
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
-            resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+            resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
             if not os.path.exists(resolved):
                 return {'success': True, 'action': 'already_gone',
@@ -1100,7 +1146,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
@@ -1118,8 +1164,8 @@ class RepairWorker:
                     audio = MutagenFile(resolved)
                     if audio:
                         _, total_tracks = _read_track_number_tag(audio)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read total_tracks tag from file: %s", e)
             total_tracks = int(total_tracks or 0)
             _fix_track_number_tag(resolved, int(correct_num), total_tracks)
 
@@ -1139,8 +1185,8 @@ class RepairWorker:
                         cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                                        (new_path, resolved))
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to update DB file_path after rename: %s", e)
                 finally:
                     if conn:
                         conn.close()
@@ -1285,7 +1331,7 @@ class RepairWorker:
         files_deleted = 0
         for fpath in remove_paths:
             try:
-                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     files_deleted += 1
@@ -1346,7 +1392,7 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
-                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
@@ -1414,7 +1460,7 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
-                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
@@ -1453,7 +1499,7 @@ class RepairWorker:
 
         # Resolve file
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) if file_path else None
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) if file_path else None
         if not resolved or not os.path.exists(resolved):
             return {'success': False, 'error': f'File not found: {file_path}'}
 
@@ -1498,8 +1544,8 @@ class RepairWorker:
                             if not os.path.exists(d):
                                 try:
                                     shutil.move(s, d)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("Failed to move sidecar %s: %s", s, e)
 
                     # Clean up empty dirs
                     self._cleanup_empty_parents(resolved)
@@ -1560,7 +1606,7 @@ class RepairWorker:
         if fix_action == 'delete':
             # Delete file + DB record
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1602,12 +1648,12 @@ class RepairWorker:
                     logger.warning("Could not add to wishlist: %s", e)
             # Delete wrong file
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to remove wrong file %s: %s", resolved, e)
             if track_id:
                 try:
                     conn = self.db._get_connection()
@@ -1615,8 +1661,8 @@ class RepairWorker:
                     cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
                     conn.commit()
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to delete wrong track row from DB: %s", e)
             return {'success': True, 'action': 'redownload',
                     'message': f'Added "{expected_title}" to wishlist, removed wrong file'}
 
@@ -1661,7 +1707,7 @@ class RepairWorker:
 
         # Write corrected tags to the actual audio file
         if file_path:
-            resolved = _resolve_file_path(file_path, self.transfer_folder)
+            resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
             if resolved and os.path.exists(resolved):
                 try:
                     from core.tag_writer import write_tags_to_file
@@ -1685,7 +1731,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder)
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
         if not resolved or not os.path.exists(resolved):
             return {'success': False, 'error': f'File not found: {file_path}'}
 
@@ -1705,6 +1751,47 @@ class RepairWorker:
                 return {'success': False, 'error': 'MBID tag not found in file (may have been removed already)'}
         except Exception as e:
             return {'success': False, 'error': f'Failed to remove MBID: {str(e)}'}
+
+    def _fix_album_mbid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Rewrite the dissenting track's album MBID to match the consensus.
+
+        The detector flagged this track because its embedded
+        MUSICBRAINZ_ALBUMID disagreed with the consensus across the
+        album's other tracks. Fix is to rewrite the dissenter's tag —
+        does NOT touch the other tracks (they're already in agreement).
+        """
+        consensus_mbid = details.get('consensus_mbid')
+        if not consensus_mbid:
+            return {'success': False, 'error': 'No consensus MBID in finding details'}
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager)
+        if not resolved or not os.path.exists(resolved):
+            return {'success': False, 'error': f'File not found: {file_path}'}
+
+        try:
+            from core.repair_jobs.mbid_mismatch_detector import _write_album_mbid_to_file
+            ok = _write_album_mbid_to_file(resolved, consensus_mbid)
+            if ok:
+                wrong = (details.get('wrong_mbid') or '')[:8]
+                consensus_short = consensus_mbid[:8]
+                title = details.get('title', 'track')
+                return {
+                    'success': True,
+                    'action': 'rewrote_album_mbid',
+                    'message': (
+                        f'Updated album MBID on "{title}" '
+                        f'({wrong}… → {consensus_short}…)'
+                    ),
+                }
+            return {'success': False, 'error': 'Could not write album MBID — unsupported format or write failed'}
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to rewrite album MBID: {str(e)}'}
 
     def _fix_album_tag_inconsistency(self, entity_type, entity_id, file_path, details):
         """Normalize inconsistent tags across all tracks in an album to the canonical (majority) value."""
@@ -1731,7 +1818,7 @@ class RepairWorker:
             download_folder = None
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
-            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder)
+            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not resolved or not os.path.exists(resolved):
                 continue
 
@@ -1877,7 +1964,7 @@ class RepairWorker:
 
         album_folder = None
         for t in existing_tracks:
-            resolved = _resolve_file_path(t.file_path, self.transfer_folder, download_folder)
+            resolved = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if resolved and os.path.exists(resolved):
                 album_folder = os.path.dirname(resolved)
                 break
@@ -1888,7 +1975,7 @@ class RepairWorker:
         # Detect filename pattern
         resolved_paths = []
         for t in existing_tracks:
-            rp = _resolve_file_path(t.file_path, self.transfer_folder, download_folder)
+            rp = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if rp:
                 resolved_paths.append(rp)
         filename_pattern = self._detect_filename_pattern(resolved_paths)
@@ -2145,7 +2232,7 @@ class RepairWorker:
         """Move or copy a candidate track into the album folder and update DB."""
         try:
             # Resolve source file
-            src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder)
+            src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not src_path or not os.path.exists(src_path):
                 return {'success': False, 'error': f'Source file not found: {candidate.file_path}'}
 
@@ -2302,8 +2389,8 @@ class RepairWorker:
                 album_thumb = album_row[2]
                 album_track_count = album_row[3]
                 spotify_album_id = album_row[4] if len(album_row) > 4 else None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load album metadata for retag: %s", e)
         finally:
             if conn_meta:
                 conn_meta.close()
@@ -2442,8 +2529,8 @@ class RepairWorker:
                     if not os.path.exists(sidecar_dst):
                         try:
                             shutil.move(sidecar_src, sidecar_dst)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Failed to move sidecar %s: %s", sidecar_src, e)
 
             # Update DB file path
             conn = None
@@ -2463,8 +2550,8 @@ class RepairWorker:
                         cursor.execute(
                             "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
                             (dst, '%/' + escaped))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Suffix-match DB path update failed: %s", e)
                 conn.commit()
             except Exception as e:
                 logger.debug("DB path update failed for %s: %s", src, e)
@@ -2534,7 +2621,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
         if not os.path.exists(resolved):
             return {'success': False, 'error': f'Source file not found: {file_path}'}
@@ -2559,8 +2646,8 @@ class RepairWorker:
                 if os.path.exists(out_path):
                     try:
                         os.remove(out_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to remove out_path after ffmpeg failure: %s", e)
                 return {'success': False, 'error': f'ffmpeg conversion failed: {proc.stderr[:200] if proc.stderr else "unknown error"}'}
 
             # Update QUALITY tag
@@ -2577,8 +2664,8 @@ class RepairWorker:
                         from mutagen.mp4 import MP4FreeForm
                         audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
                     audio.save()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to write QUALITY tag on lossy copy: %s", e)
 
             # Embed cover art from source FLAC
             if codec in ('opus', 'aac'):
@@ -2610,8 +2697,8 @@ class RepairWorker:
                                 fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
                                 dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
                                 dest_audio.save()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to embed cover art in lossy copy: %s", e)
 
             # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
             delete_original = False
@@ -2637,8 +2724,8 @@ class RepairWorker:
                             )
                             conn.commit()
                             conn.close()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Failed to update DB path after lossy conversion: %s", e)
                         return {'success': True, 'action': 'converted_and_deleted',
                                 'message': f'Converted to {quality_label} and deleted original'}
                 except Exception as e:
@@ -2651,8 +2738,8 @@ class RepairWorker:
             if os.path.exists(out_path):
                 try:
                     os.remove(out_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to remove out_path after timeout: %s", e)
             return {'success': False, 'error': 'Conversion timed out (120s)'}
         except Exception as e:
             return {'success': False, 'error': f'Conversion error: {e}'}
@@ -2694,6 +2781,7 @@ class RepairWorker:
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
                              'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
+                             'album_mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
                              'missing_lossy_copy',

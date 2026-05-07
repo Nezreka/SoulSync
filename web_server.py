@@ -5,7 +5,6 @@ import json
 import asyncio
 import requests
 import socket
-import ipaddress
 import subprocess
 import platform
 import threading
@@ -18,7 +17,7 @@ import collections
 import functools
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
@@ -41,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.4.1"
+_SOULSYNC_BASE_VERSION = "2.4.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -52,8 +51,8 @@ def _build_version_string():
             result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
             if result.returncode == 0:
                 sha = result.stdout.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("git rev-parse failed: %s", e)
     if sha:
         return f"{_SOULSYNC_BASE_VERSION}+{sha[:7]}"
     return _SOULSYNC_BASE_VERSION
@@ -89,19 +88,27 @@ from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
-from core.download_orchestrator import DownloadOrchestrator
+from core.download_orchestrator import DownloadOrchestrator, set_download_orchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
+from core.metadata import is_internal_image_host
+from core.metadata import normalize_image_url as fix_artist_image_url
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
     get_spotify_client,
     get_spotify_disconnect_source,
     register_runtime_clients,
+)
+from core.metadata.status import (
+    get_status_snapshot as get_metadata_status_snapshot,
+    get_spotify_status,
+    publish_spotify_status,
+    invalidate_metadata_status_caches,
 )
 from core.imports.context import (
     get_import_clean_album,
@@ -380,8 +387,8 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
-        except Exception:
-            pass  # DB error — don't block requests, use the session value
+        except Exception as e:
+            logger.debug("profile session validate: %s", e)
 
     g.profile_id = pid
 
@@ -408,8 +415,8 @@ def _log_slow_request(response):
                 response.status_code,
                 elapsed_ms,
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("slow request log failed: %s", e)
 
     return response
 
@@ -508,8 +515,8 @@ def check_download_permission():
         profile = get_database().get_profile(pid)
         if profile and not profile.get('can_download', True):
             return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
-    except Exception:
-        pass  # DB error — don't block
+    except Exception as e:
+        logger.debug("download permission check: %s", e)
     return None
 
 # --- Docker Helper Functions ---
@@ -563,7 +570,7 @@ IS_SHUTTING_DOWN = False
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 logger.info("Initializing SoulSync services for Web UI...")
-spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = download_orchestrator = tidal_client = matching_engine = sync_service = web_scan_manager = media_server_engine = None
 
 try:
     spotify_client = get_spotify_client()
@@ -571,33 +578,70 @@ try:
 except Exception as e:
     logger.error(f"  Spotify client failed to initialize: {e}")
 
-try:
-    plex_client = PlexClient()
-    logger.info("  Plex client initialized")
-except Exception as e:
-    logger.error(f"  Plex client failed to initialize: {e}")
 
-try:
-    jellyfin_client = JellyfinClient()
-    logger.info("  Jellyfin client initialized")
-except Exception as e:
-    logger.error(f"  Jellyfin client failed to initialize: {e}")
+def _safe_init_media_client(factory, name):
+    """Build a media-server client, capturing per-server init failures
+    so one broken server doesn't take the engine down with it.
 
-try:
-    navidrome_client = NavidromeClient()
-    logger.info("  Navidrome client initialized")
-except Exception as e:
-    logger.error(f"  Navidrome client failed to initialize: {e}")
+    Logs the exception class so the boot log distinguishes config errors
+    (ConnectionError, AuthenticationError) from genuine import / dependency
+    failures — the broad ``Exception`` catch is intentional (any failure
+    on this code path means the user can't use that server, and we want
+    the other three to keep working) but the log makes the cause
+    diagnosable."""
+    try:
+        instance = factory()
+        logger.info(f"  {name} client initialized")
+        return instance
+    except Exception as exc:
+        logger.error(
+            f"  {name} client failed to initialize: {type(exc).__name__}: {exc}",
+            exc_info=True,
+        )
+        return None
 
+
+# Build the MediaServerEngine. The engine OWNS the per-server client
+# instances — no separate web_server.py globals (Cin's standard from
+# the download refactor: drop redundant access paths). All callers go
+# through media_server_engine.client('<name>').
 try:
+    from core.media_server.engine import MediaServerEngine, set_media_server_engine
     from core.soulsync_client import SoulSyncClient
-    soulsync_library_client = SoulSyncClient()
-    logger.info("  SoulSync library client initialized")
+    media_server_engine = MediaServerEngine(clients={
+        'plex':      _safe_init_media_client(PlexClient, "Plex"),
+        'jellyfin':  _safe_init_media_client(JellyfinClient, "Jellyfin"),
+        'navidrome': _safe_init_media_client(NavidromeClient, "Navidrome"),
+        'soulsync':  _safe_init_media_client(SoulSyncClient, "SoulSync library"),
+    })
+    # Install as process-wide singleton so callers reaching via
+    # get_media_server_engine() see the same instance web_server.py
+    # constructs at boot. Matches the metadata + download engine
+    # patterns.
+    set_media_server_engine(media_server_engine)
+    logger.info("  Media server engine initialized")
 except Exception as e:
-    logger.error(f"  SoulSync library client failed to initialize: {e}")
+    logger.error(f"  Media server engine failed to initialize: {e}", exc_info=True)
+    # Fallback: empty engine so downstream `engine.client('plex')`
+    # returns None instead of AttributeError'ing on a None engine
+    # global. Pre-refactor each per-server client global had its own
+    # try/except so engine failure didn't take down dispatch sites;
+    # this preserves that resilience. If the fallback ALSO fails
+    # (e.g. the import itself broke), media_server_engine stays as
+    # the None initialized at the top of the module.
+    try:
+        from core.media_server.engine import MediaServerEngine, set_media_server_engine
+        media_server_engine = MediaServerEngine(clients={})
+        set_media_server_engine(media_server_engine)
+    except Exception as fallback_exc:
+        logger.error(f"  Empty-engine fallback also failed: {fallback_exc}", exc_info=True)
 
 try:
-    soulseek_client = DownloadOrchestrator()
+    download_orchestrator = DownloadOrchestrator()
+    # Install as the process-wide singleton so callers reaching for
+    # get_download_orchestrator() see the same instance web_server.py
+    # constructs at boot. Matches Cin's metadata engine pattern.
+    set_download_orchestrator(download_orchestrator)
     logger.info("  Download orchestrator initialized")
 except Exception as e:
     logger.error(f"  Download orchestrator failed to initialize: {e}")
@@ -615,35 +659,26 @@ except Exception as e:
     logger.error(f"  Matching engine failed to initialize: {e}")
 
 try:
-    sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
+    sync_service = PlaylistSyncService(spotify_client, download_orchestrator, media_server_engine=media_server_engine)
     logger.info("  Playlist sync service initialized")
 except Exception as e:
     logger.error(f"  Playlist sync service failed to initialize: {e}")
 
-# Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
-if soulseek_client:
-    if hasattr(soulseek_client, 'youtube'):
-         soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured YouTube client shutdown callback")
-    if hasattr(soulseek_client, 'tidal'):
-         soulseek_client.tidal.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured Tidal download client shutdown callback")
-    if hasattr(soulseek_client, 'qobuz'):
-         soulseek_client.qobuz.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured Qobuz client shutdown callback")
-    if hasattr(soulseek_client, 'hifi'):
-         soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         logger.info("  Configured HiFi client shutdown callback")
+# Inject shutdown check callback into every download source that
+# accepts one. Generic dispatch via the registry — no per-source
+# attribute reaches needed.
+if download_orchestrator and hasattr(download_orchestrator, 'registry'):
+    for _src_name, _src_client in download_orchestrator.registry.all_plugins():
+        if _src_client is not None and hasattr(_src_client, 'set_shutdown_check'):
+            try:
+                _src_client.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+                logger.info("  Configured %s client shutdown callback", _src_name)
+            except Exception as _exc:
+                logger.warning("  %s set_shutdown_check failed: %s", _src_name, _exc)
 
 # Initialize web scan manager for automatic post-download scanning
 try:
-    media_clients = {
-        'plex_client': plex_client,
-        'jellyfin_client': jellyfin_client,
-        'navidrome_client': navidrome_client,
-        'soulsync_library_client': soulsync_library_client,
-    }
-    web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
+    web_scan_manager = WebScanManager(media_server_engine, delay_seconds=60)
     logger.info("  Web scan manager initialized")
 except Exception as e:
     logger.error(f"  Web scan manager failed to initialize: {e}")
@@ -811,12 +846,10 @@ _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
 _status_cache = {
-    'spotify': {'connected': False, 'authenticated': False, 'response_time': 0, 'source': 'itunes'},
     'media_server': {'connected': False, 'response_time': 0, 'type': None},
     'soulseek': {'connected': False, 'response_time': 0},
 }
 _status_cache_timestamps: dict[str, float] = {
-    'spotify': 0,
     'media_server': 0,
     'soulseek': 0,
 }
@@ -1216,8 +1249,8 @@ def _register_automation_handlers():
                                     'added': str(added_count),
                                     'removed': str(removed_count),
                                 })
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("playlist_synced automation emit failed: %s", e)
                     else:
                         logger.warning(f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
                         _update_automation_progress(auto_id,
@@ -1364,8 +1397,8 @@ def _register_automation_handlers():
                     'status': 'skipped',
                     'reason': f'All {len(tracks_json)} tracks unchanged since last sync',
                 }
-        except Exception:
-            pass  # If we can't read last status, just run the sync
+        except Exception as e:
+            logger.debug("mirror sync last-status read: %s", e)
 
         _update_automation_progress(auto_id, progress=50,
             phase=f'Syncing "{pl["name"]}"',
@@ -1822,8 +1855,8 @@ def _register_automation_handlers():
                 elif os.path.isdir(fp):
                     _shutil.rmtree(fp)
                     removed += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("quarantine entry purge failed: %s", e)
         _update_automation_progress(automation_id,
             log_line=f'Removed {removed} quarantined items', log_type='success' if removed > 0 else 'info')
         return {'status': 'completed', 'removed': str(removed)}
@@ -1928,8 +1961,8 @@ def _register_automation_handlers():
         while len(existing) > max_backups:
             try:
                 os.remove(existing.pop(0))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("rolling backup cleanup failed: %s", e)
         _update_automation_progress(automation_id,
             log_line=f'Backup created: {size_mb}MB ({os.path.basename(backup_path)})', log_type='success')
         return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
@@ -1991,9 +2024,9 @@ def _register_automation_handlers():
         hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
         soulseek_active = (dl_mode == 'soulseek' or
                           (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
-        # soulseek_client is a DownloadOrchestrator; the real client lives on
-        # .soulseek. Match the getattr pattern used at the other call sites.
-        slskd = getattr(soulseek_client, 'soulseek', None) if soulseek_client else None
+        # Reach the underlying SoulseekClient via the orchestrator's
+        # generic accessor.
+        slskd = download_orchestrator.client('soulseek') if download_orchestrator else None
         if not soulseek_active or not slskd or not slskd.base_url:
             _update_automation_progress(automation_id,
                 log_line='Soulseek not active — skipped', log_type='skip')
@@ -2003,7 +2036,7 @@ def _register_automation_handlers():
                 log_line='Auto-clear disabled in settings', log_type='skip')
             return {'status': 'skipped'}
         try:
-            success = run_async(soulseek_client.maintain_search_history_with_buffer(
+            success = run_async(download_orchestrator.maintain_search_history_with_buffer(
                 keep_searches=50, trigger_threshold=200
             ))
             if success:
@@ -2039,7 +2072,7 @@ def _register_automation_handlers():
                     log_line='Skipped — downloads active', log_type='skip')
                 return {'status': 'completed'}
 
-            run_async(soulseek_client.clear_all_completed_downloads())
+            run_async(download_orchestrator.clear_all_completed_downloads())
             if not has_post_processing:
                 _sweep_empty_download_directories()
             _update_automation_progress(automation_id,
@@ -2068,8 +2101,8 @@ def _register_automation_handlers():
                     elif os.path.isdir(fp):
                         _shutil.rmtree(fp)
                         q_removed += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("quarantine entry purge failed: %s", e)
         steps.append(f'Quarantine: removed {q_removed} items')
         _update_automation_progress(automation_id,
             log_line=f'Quarantine: removed {q_removed} items', log_type='success' if q_removed else 'info')
@@ -2094,7 +2127,7 @@ def _register_automation_handlers():
                 log_line='Download queue: skipped (active batches)', log_type='skip')
         else:
             try:
-                run_async(soulseek_client.clear_all_completed_downloads())
+                run_async(download_orchestrator.clear_all_completed_downloads())
                 steps.append('Download queue: cleared')
                 _update_automation_progress(automation_id,
                     log_line='Download queue: cleared', log_type='success')
@@ -2133,8 +2166,8 @@ def _register_automation_handlers():
                     for hidden in entries:
                         try:
                             os.remove(os.path.join(dirpath, hidden))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("hidden file cleanup failed: %s", e)
                     try:
                         os.rmdir(dirpath)
                         s_removed += 1
@@ -2152,7 +2185,7 @@ def _register_automation_handlers():
                 _update_automation_progress(automation_id,
                     log_line='Search cleanup: disabled in settings', log_type='skip')
             else:
-                run_async(soulseek_client.maintain_search_history_with_buffer(
+                run_async(download_orchestrator.maintain_search_history_with_buffer(
                     keep_searches=50, trigger_threshold=200
                 ))
                 steps.append('Search history: cleaned')
@@ -2284,7 +2317,7 @@ def _register_automation_handlers():
             if automation_id:
                 _update_automation_progress(automation_id,
                     phase='Searching', log_line=f'Searching: {query}', log_type='info')
-            result = run_async(soulseek_client.search_and_download_best(query))
+            result = run_async(download_orchestrator.search_and_download_best(query))
             if result:
                 if automation_id:
                     _update_automation_progress(automation_id,
@@ -2346,7 +2379,7 @@ try:
     app.register_blueprint(api_bp, url_prefix='/api/v1')
     app.soulsync = {
         'spotify_client': spotify_client,
-        'soulseek_client': soulseek_client,
+        'download_orchestrator': download_orchestrator,
         'tidal_client': tidal_client,
         'matching_engine': matching_engine,
         'config_manager': config_manager,
@@ -2451,8 +2484,9 @@ def get_cached_transfer_data():
 
             # First, get Soulseek downloads from API
             transfers_data = None
-            if not soulseek_known_down and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
-                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
+            if not soulseek_known_down and _slsk and _slsk.base_url:
+                transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
                 for user_data in transfers_data:
@@ -2467,29 +2501,35 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator)
+            # Also add non-Soulseek downloads. Soulseek is excluded
+            # because slskd's transfers endpoint was already pulled
+            # above — without the exclude both fetch paths run.
+            # Every streaming source must appear here — task progress
+            # for in-flight downloads comes from this lookup. Missing a
+            # source = task.progress stays at 0 even when the
+            # underlying client knows the real percent.
             try:
                 all_downloads = []
-                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
-                    if _dl_client:
-                        try:
-                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
-                        except Exception:
-                            pass
+                if download_orchestrator and hasattr(download_orchestrator, 'engine'):
+                    try:
+                        all_downloads = run_async(
+                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                        )
+                    except Exception as e:
+                        logger.debug("get_all_downloads failed: %s", e)
                 for download in all_downloads:
-                        key = _make_context_key(download.username, download.filename)
-                        # Convert DownloadStatus to transfer dict format
-                        live_transfers_lookup[key] = {
-                            'id': download.id,
-                            'filename': download.filename,
-                            'username': download.username,
-                            'state': download.state,
-                            'percentComplete': download.progress,
-                            'size': download.size,
-                            'bytesTransferred': download.transferred,
-                            'averageSpeed': download.speed,
-                        }
+                    key = _make_context_key(download.username, download.filename)
+                    # Convert DownloadStatus to transfer dict format
+                    live_transfers_lookup[key] = {
+                        'id': download.id,
+                        'filename': download.filename,
+                        'username': download.username,
+                        'state': download.state,
+                        'percentComplete': download.progress,
+                        'size': download.size,
+                        'bytesTransferred': download.transferred,
+                        'averageSpeed': download.speed,
+                    }
             except Exception as e:
                 logger.error(f"Could not fetch streaming source downloads: {e}")
 
@@ -2934,13 +2974,13 @@ def _atexit_save_history():
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 def _atexit_shutdown():
     try:
         _shutdown_runtime_components()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 
@@ -3047,7 +3087,7 @@ def _build_prepare_stream_deps():
 
     return _streaming_prepare.PrepareStreamDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         stream_lock=stream_lock,
         project_root=os.path.dirname(os.path.abspath(__file__)),
         docker_resolve_path=docker_resolve_path,
@@ -3406,8 +3446,8 @@ def _get_enrichment_status():
             if key == 'spotify_enrichment':
                 try:
                     svc_data['daily_budget'] = worker._get_daily_budget_info()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify daily budget read failed: %s", e)
 
             services[key] = svc_data
         else:
@@ -3446,61 +3486,16 @@ def get_status():
         current_time = time.time()
         active_server = config_manager.get_active_media_server()
 
-        # Test Spotify - with caching to avoid excessive API calls
-        if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
-            # Guard against spotify_client being None (partial init)
-            is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
-            rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
-            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
+        metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
-            # Read configured source once — no auth validation here, we do that explicitly below
-            configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-
-            if is_rate_limited or cooldown_remaining > 0:
-                # During rate limit or post-ban cooldown, skip the auth probe entirely.
-                # Probing Spotify here would reset the rate limit timer.
-                music_source = 'deezer' if configured_source == 'spotify' else configured_source
-                spotify_response_time = 0
-            else:
-                spotify_start = time.time()
-                spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
-                spotify_response_time = (time.time() - spotify_start) * 1000
-                # Use configured source; fall back to deezer only if Spotify isn't authenticated
-                if configured_source == 'spotify':
-                    music_source = 'spotify' if spotify_connected else 'deezer'
-                else:
-                    music_source = configured_source
-
-            _status_cache['spotify'] = {
-                'connected': spotify_session_active,
-                'authenticated': spotify_session_active,
-                'response_time': round(spotify_response_time, 1),
-                'source': music_source,
-                'rate_limited': is_rate_limited,
-                'rate_limit': rate_limit_info,
-                'post_ban_cooldown': cooldown_remaining if cooldown_remaining > 0 else None
-            }
-            _status_cache_timestamps['spotify'] = current_time
-        # else: use cached value
-
-        # Test media server - use EXISTING instances (they have internal caching)
-        # Media server clients already cache connection checks internally
+        # Test media server — engine reads active_server config + dispatches
+        # to the right client (with internal connection caching). Engine
+        # returns False safely if the active client is None / not registered.
         if current_time - _status_cache_timestamps['media_server'] > STATUS_CACHE_TTL:
             media_server_start = time.time()
-            media_server_status = False
-            if active_server == "plex" and plex_client:
-                # Use existing instance - has 30s internal connection cache
-                media_server_status = plex_client.is_connected()
-            elif active_server == "jellyfin" and jellyfin_client:
-                # Use existing instance - has internal connection caching
-                media_server_status = jellyfin_client.is_connected()
-            elif active_server == "navidrome" and navidrome_client:
-                # Use existing instance
-                media_server_status = navidrome_client.is_connected()
-            elif active_server == "soulsync":
-                # Standalone mode — always connected if Transfer folder exists
-                media_server_status = soulsync_library_client.is_connected() if soulsync_library_client else False
+            media_server_status = (
+                media_server_engine.is_connected() if media_server_engine else False
+            )
             media_server_response_time = (time.time() - media_server_start) * 1000
             _status_cache['media_server'] = {
                 'connected': media_server_status,
@@ -3517,8 +3512,11 @@ def get_status():
             soulseek_relevant = (download_mode == 'soulseek' or
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
-            # Serverless sources (YouTube, HiFi, Qobuz) are always available
-            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl')
+            # Serverless sources (YouTube, HiFi, Qobuz, Tidal, Deezer, Lidarr, SoundCloud)
+            # don't depend on slskd being reachable — when one of these is the
+            # active source, surface "connected" without probing slskd so the
+            # dashboard / sidebar indicator stays green.
+            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl', 'lidarr', 'soundcloud')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
@@ -3527,10 +3525,10 @@ def get_status():
             if is_serverless:
                 soulseek_status = True
                 soulseek_response_time = 0
-            elif soulseek_relevant and soulseek_client:
+            elif soulseek_relevant and download_orchestrator:
                 soulseek_start = time.time()
                 try:
-                    soulseek_status = run_async(soulseek_client.check_connection())
+                    soulseek_status = run_async(download_orchestrator.check_connection())
                 except Exception:
                     soulseek_status = False
                 soulseek_response_time = (time.time() - soulseek_start) * 1000
@@ -3556,7 +3554,8 @@ def get_status():
                     active_dl_count += 1
 
         status_data = {
-            'spotify': _status_cache['spotify'],
+            'metadata_source': metadata_status['metadata_source'],
+            'spotify': metadata_status['spotify'],
             'media_server': _status_cache['media_server'],
             'soulseek': _status_cache['soulseek'],
             'active_media_server': active_server,
@@ -3942,7 +3941,7 @@ def _build_system_stats():
 
     if soulseek_active and not soulseek_known_down:
         try:
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     if 'directories' in user_data:
@@ -4161,23 +4160,24 @@ def handle_settings():
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
-            if plex_client:
-                plex_client.server = None
-            if jellyfin_client:
-                jellyfin_client.reload_config()
-            if navidrome_client:
-                navidrome_client.reload_config()
+            if media_server_engine.client('plex'):
+                media_server_engine.client('plex').server = None
+            if media_server_engine.client('jellyfin'):
+                media_server_engine.client('jellyfin').reload_config()
+            if media_server_engine.client('navidrome'):
+                media_server_engine.client('navidrome').reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
-            if soulseek_client:
-                soulseek_client.reload_settings()
+            if download_orchestrator:
+                download_orchestrator.reload_settings()
                 # Reload YouTube client settings (rate limiting, cookies)
-                if hasattr(soulseek_client, 'youtube'):
-                    soulseek_client.youtube.reload_settings()
+                _yt = download_orchestrator.client("youtube")
+                if _yt:
+                    _yt.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
-            except Exception:
-                pass  # Keep existing tidal_client if re-init fails
+            except Exception as e:
+                logger.debug("tidal client re-init: %s", e)
             # Reload enrichment worker clients for key-based services
             if lastfm_worker:
                 lastfm_worker._init_client()
@@ -4185,8 +4185,16 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if 'spotify' in new_settings:
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=False,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
-            _status_cache_timestamps['spotify'] = 0
+            invalidate_metadata_status_caches()
             logger.info("Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -4196,9 +4204,9 @@ def handle_settings():
             data = dict(config_manager.config_data)
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
             try:
-                data['_source_status'] = soulseek_client.get_source_status()
-            except Exception:
-                pass
+                data['_source_status'] = download_orchestrator.get_source_status()
+            except Exception as e:
+                logger.debug("download source status read failed: %s", e)
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -4322,8 +4330,8 @@ def hydrabase_connect():
             if _hydrabase_ws:
                 try:
                     _hydrabase_ws.close()
-                except:
-                    pass
+                except Exception as _e:
+                    logger.debug("hydrabase connect-existing close: %s", _e)
             ws = websocket.create_connection(
                 url,
                 header={"x-api-key": api_key},
@@ -4348,8 +4356,8 @@ def hydrabase_disconnect():
         if _hydrabase_ws:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug("hydrabase disconnect close: %s", e)
             _hydrabase_ws = None
     config_manager.set('hydrabase.auto_connect', False)
     # Only disable dev mode if not using Hydrabase as a regular fallback source
@@ -4420,8 +4428,8 @@ def hydrabase_send():
         with _hydrabase_lock:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as _e:
+                logger.debug("hydrabase send close: %s", _e)
             _hydrabase_ws = None
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -4803,11 +4811,7 @@ def test_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['authenticated'] = spotify_session_active
-            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['spotify'] = current_time
+            invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -4971,11 +4975,7 @@ def test_dashboard_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['authenticated'] = spotify_session_active
-            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['spotify'] = current_time
+            invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -5129,8 +5129,12 @@ def clear_plex_library_preference():
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         db.set_preference('plex_music_library', '')
-        if plex_client:
-            plex_client.music_library = None
+        plex = media_server_engine.client('plex')
+        if plex:
+            plex.music_library = None
+            # Also clear all-libraries mode so a fresh "select library"
+            # flow doesn't inherit stale state.
+            plex._all_libraries_mode = False
         return jsonify({"success": True, "message": "Plex library preference cleared."})
     except Exception as e:
         logger.error(f"Error clearing Plex library preference: {e}")
@@ -5141,17 +5145,22 @@ def clear_plex_library_preference():
 def get_plex_music_libraries():
     """Get list of all available music libraries from Plex"""
     try:
-        libraries = plex_client.get_available_music_libraries()
+        libraries = media_server_engine.client('plex').get_available_music_libraries()
 
         # Get currently selected library
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         selected_library = db.get_preference('plex_music_library')
 
-        # Get the currently active library name
+        # Get the currently active library name. In all-libraries mode
+        # ``music_library`` is None — surface a friendly label so the
+        # settings UI displays the active selection correctly.
         current_library = None
-        if plex_client.music_library:
-            current_library = plex_client.music_library.title
+        plex = media_server_engine.client('plex')
+        if plex.music_library:
+            current_library = plex.music_library.title
+        elif plex.is_all_libraries_mode():
+            current_library = 'All Libraries (combined)'
 
         return jsonify({
             "success": True,
@@ -5173,7 +5182,7 @@ def select_plex_music_library():
         if not library_name:
             return jsonify({"success": False, "error": "No library name provided"}), 400
 
-        success = plex_client.set_music_library_by_name(library_name)
+        success = media_server_engine.client('plex').set_music_library_by_name(library_name)
 
         if success:
             add_activity_item("", "Library Selected", f"Plex music library set to: {library_name}", "Now")
@@ -5189,7 +5198,7 @@ def select_plex_music_library():
 def get_jellyfin_users():
     """Get list of Jellyfin users that have music libraries"""
     try:
-        users = jellyfin_client.get_available_users()
+        users = media_server_engine.client('jellyfin').get_available_users()
 
         # Get currently selected user
         from database.music_database import MusicDatabase
@@ -5198,9 +5207,9 @@ def get_jellyfin_users():
 
         # Determine the current user name from user_id
         current_user = None
-        if jellyfin_client.user_id:
+        if media_server_engine.client('jellyfin').user_id:
             for u in users:
-                if u['id'] == jellyfin_client.user_id:
+                if u['id'] == media_server_engine.client('jellyfin').user_id:
                     current_user = u['name']
                     break
 
@@ -5224,7 +5233,7 @@ def select_jellyfin_user():
         if not username:
             return jsonify({"success": False, "error": "No username provided"}), 400
 
-        success = jellyfin_client.set_user_by_name(username)
+        success = media_server_engine.client('jellyfin').set_user_by_name(username)
 
         if success:
             add_activity_item("", "User Selected", f"Jellyfin user set to: {username}", "Now")
@@ -5240,7 +5249,7 @@ def select_jellyfin_user():
 def get_jellyfin_music_libraries():
     """Get list of all available music libraries from Jellyfin"""
     try:
-        libraries = jellyfin_client.get_available_music_libraries()
+        libraries = media_server_engine.client('jellyfin').get_available_music_libraries()
 
         # Get currently selected library
         from database.music_database import MusicDatabase
@@ -5249,10 +5258,10 @@ def get_jellyfin_music_libraries():
 
         # Get the currently active library name (match Plex behavior)
         current_library = None
-        if jellyfin_client.music_library_id:
+        if media_server_engine.client('jellyfin').music_library_id:
             # Look up library name from ID
             for lib in libraries:
-                if lib['key'] == jellyfin_client.music_library_id:
+                if lib['key'] == media_server_engine.client('jellyfin').music_library_id:
                     current_library = lib['title']
                     break
 
@@ -5276,7 +5285,7 @@ def select_jellyfin_music_library():
         if not library_name:
             return jsonify({"success": False, "error": "No library name provided"}), 400
 
-        success = jellyfin_client.set_music_library_by_name(library_name)
+        success = media_server_engine.client('jellyfin').set_music_library_by_name(library_name)
 
         if success:
             add_activity_item("", "Library Selected", f"Jellyfin music library set to: {library_name}", "Now")
@@ -5292,19 +5301,19 @@ def select_jellyfin_music_library():
 def get_navidrome_music_folders():
     """Get list of available music folders from Navidrome"""
     try:
-        if not navidrome_client:
+        if not media_server_engine.client('navidrome'):
             return jsonify({"success": False, "error": "Navidrome client not configured"}), 400
 
-        folders = navidrome_client.get_music_folders()
+        folders = media_server_engine.client('navidrome').get_music_folders()
 
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         selected_folder = db.get_preference('navidrome_music_folder')
 
         current_folder = None
-        if navidrome_client.music_folder_id:
+        if media_server_engine.client('navidrome').music_folder_id:
             for f in folders:
-                if f['key'] == navidrome_client.music_folder_id:
+                if f['key'] == media_server_engine.client('navidrome').music_folder_id:
                     current_folder = f['title']
                     break
 
@@ -5325,7 +5334,7 @@ def select_navidrome_music_folder():
         data = request.get_json()
         folder_name = data.get('folder_name', '')
 
-        success = navidrome_client.set_music_folder_by_name(folder_name)
+        success = media_server_engine.client('navidrome').set_music_folder_by_name(folder_name)
 
         if success:
             if folder_name:
@@ -5613,19 +5622,32 @@ def auth_tidal():
             tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
             tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
         
-        # Use the user's configured redirect_uri from settings — don't override
-        # with request.host, which in Docker returns the container hostname
+        # Use the user's configured redirect_uri from settings, falling back
+        # to the constructor default (``http://127.0.0.1:<port>/tidal/callback``).
+        # The settings UI displays the default as the placeholder, and SoulSync's
+        # docs tell users to register THAT URI with their Tidal Developer App
+        # — Tidal validates the redirect_uri sent in the authorize request
+        # against the one in the portal, so sending anything else (e.g. a
+        # network-IP variant built from request.host) returns Tidal error 1002
+        # "Invalid redirect URI" and the user can't authenticate.
+        #
+        # Docker/remote-access workflow is preserved by the post-auth swap step
+        # in the instructions page below: SoulSync sends ``127.0.0.1:<port>``,
+        # Tidal redirects the user's browser to that URI (which fails locally),
+        # the instructions tell the user to swap ``127.0.0.1`` for the host
+        # they're accessing SoulSync from, and the swapped URL hits the
+        # container's exposed callback port. Building the URI from request.host
+        # at authorize time used to skip the swap entirely but broke users
+        # who registered the documented default.
         configured_redirect = config_manager.get('tidal.redirect_uri', '')
         if configured_redirect:
             temp_tidal_client.redirect_uri = configured_redirect
             logger.info(f"Using configured Tidal redirect_uri: {configured_redirect}")
         else:
-            # Fallback: dynamically set based on request host (non-Docker local access)
-            request_host = request.host.split(':')[0]
-            if request_host not in ('127.0.0.1', 'localhost'):
-                dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
-                temp_tidal_client.redirect_uri = dynamic_redirect
-                logger.info(f"Tidal redirect_uri set from request host: {dynamic_redirect}")
+            logger.info(
+                f"Using default Tidal redirect_uri (no config override): "
+                f"{temp_tidal_client.redirect_uri}"
+            )
 
         # Store PKCE + redirect_uri for callback to use the same values
         with tidal_oauth_lock:
@@ -5854,7 +5876,7 @@ def spotify_callback():
                         return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
                     if profile_client:
                         profile_client._invalidate_auth_cache()
-                    _status_cache_timestamps['spotify'] = 0
+                    invalidate_metadata_status_caches()
                     add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id_from_state} completed OAuth but Spotify did not confirm an authenticated session", "Now")
                     return _spotify_auth_result_page(
                         "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
@@ -5890,7 +5912,7 @@ def spotify_callback():
                 _clear_rate_limit()
                 spotify_client._invalidate_auth_cache()
                 # Invalidate status cache so next poll picks up the new connection
-                _status_cache_timestamps['spotify'] = 0
+                invalidate_metadata_status_caches()
                 # Refresh enrichment worker's client so it picks up new auth
                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                     spotify_enrichment_worker.client.reload_config()
@@ -5900,7 +5922,7 @@ def spotify_callback():
             else:
                 logger.warning("Spotify OAuth token exchange succeeded but authentication validation failed")
                 spotify_client._invalidate_auth_cache()
-                _status_cache_timestamps['spotify'] = 0
+                invalidate_metadata_status_caches()
                 add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
                 return _spotify_auth_result_page(
                     "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session. You can close this window and try Authenticate again.",
@@ -5929,16 +5951,7 @@ def spotify_disconnect():
         source_label = get_metadata_source_label(active_source)
         if configured_source == 'spotify':
             config_manager.set('metadata.fallback_source', active_source)
-        _status_cache['spotify'] = {
-            'connected': False,
-            'authenticated': False,
-            'response_time': 0,
-            'source': active_source,
-            'rate_limited': False,
-            'rate_limit': None,
-            'post_ban_cooldown': None
-        }
-        _status_cache_timestamps['spotify'] = time.time()
+        invalidate_metadata_status_caches()
         add_activity_item("", "Spotify Disconnected", f"Using {source_label} for metadata", "Now")
         return jsonify({
             'success': True,
@@ -5956,15 +5969,20 @@ def spotify_disconnect():
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
-        info = spotify_client.get_rate_limit_info()
+        info = get_spotify_status(spotify_client=spotify_client)
+        rate_limit_info = info.get('rate_limit')
         if info:
-            return jsonify({
-                'rate_limited': True,
-                'remaining_seconds': info['remaining_seconds'],
-                'retry_after': info['retry_after'],
-                'endpoint': info['endpoint'],
-                'expires_at': info['expires_at']
-            })
+            payload = {
+                'rate_limited': bool(info.get('rate_limited')),
+            }
+            if rate_limit_info:
+                payload.update({
+                    'remaining_seconds': rate_limit_info.get('remaining_seconds', 0),
+                    'retry_after': rate_limit_info.get('retry_after'),
+                    'endpoint': rate_limit_info.get('endpoint'),
+                    'expires_at': rate_limit_info.get('expires_at'),
+                })
+            return jsonify(payload)
         return jsonify({'rate_limited': False})
     except Exception as e:
         logger.error(f"Error getting Spotify rate limit status: {e}")
@@ -6100,8 +6118,8 @@ def deezer_callback():
             try:
                 json_data = resp.json()
                 access_token = json_data.get('access_token')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("deezer token json parse failed: %s", e)
 
         if not access_token:
             return f"<h1>No Access Token</h1><p>Deezer response: {resp.text[:200]}</p>", 400
@@ -6746,7 +6764,7 @@ def _build_search_deps():
         spotify_client=spotify_client,
         hydrabase_client=hydrabase_client,
         hydrabase_worker=hydrabase_worker,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         fix_artist_image_url=fix_artist_image_url,
         is_hydrabase_active=_is_hydrabase_active,
         get_metadata_fallback_source=_get_metadata_fallback_source,
@@ -6772,7 +6790,7 @@ def search_music():
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     try:
-        results = _search_basic.run_basic_soulseek_search(query, soulseek_client, run_async)
+        results = _search_basic.run_basic_soulseek_search(query, download_orchestrator, run_async)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except Exception as e:
@@ -6827,7 +6845,7 @@ def enhanced_search_source(source_name):
 
     When the requested source's client isn't available (Spotify unauthed,
     Discogs missing token, Hydrabase disconnected, MusicBrainz import
-    failure, soulseek_client.youtube missing), returns plain JSON
+    failure, download_orchestrator.client("youtube") missing), returns plain JSON
     `{"artists":[],"albums":[],"tracks":[],"available":false}` to match
     the original endpoint contract.
     """
@@ -6877,7 +6895,7 @@ def enhanced_search_library_check():
         data = request.get_json() or {}
         result = _search_library_check.check_library_presence(
             database=get_database(),
-            plex_client=plex_client,
+            plex_client=media_server_engine.client('plex') if media_server_engine else None,
             config_manager=config_manager,
             profile_id=get_current_profile_id(),
             albums=data.get('albums', []),
@@ -6912,7 +6930,7 @@ def stream_enhanced_search_track():
             album_name=album_name,
             duration_ms=duration_ms,
             config_manager=config_manager,
-            soulseek_client=soulseek_client,
+            download_orchestrator=download_orchestrator,
             matching_engine=matching_engine,
             run_async=run_async,
         )
@@ -7051,7 +7069,7 @@ def download_music_video():
             def _progress(pct):
                 _music_video_downloads[video_id]['progress'] = round(pct, 1)
 
-            final_path = soulseek_client.youtube.download_music_video(video_url, output_path, progress_callback=_progress)
+            final_path = download_orchestrator.client("youtube").download_music_video(video_url, output_path, progress_callback=_progress)
 
             if final_path and os.path.exists(final_path):
                 _music_video_downloads[video_id]['status'] = 'completed'
@@ -7110,7 +7128,7 @@ def start_download():
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
 
-                    download_id = run_async(soulseek_client.download(
+                    download_id = run_async(download_orchestrator.download(
                         username,
                         filename,
                         file_size
@@ -7159,13 +7177,13 @@ def start_download():
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
-            download_id = run_async(soulseek_client.download(username, filename, file_size))
+            download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
 
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr')
+                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7355,7 +7373,7 @@ def get_download_status():
     A robust status checker that correctly finds completed files by searching
     the entire download directory with fuzzy matching, mirroring the logic from downloads.py.
     """
-    if not soulseek_client:
+    if not download_orchestrator:
         return jsonify({"transfers": []})
 
     try:
@@ -7364,7 +7382,7 @@ def get_download_status():
         soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
         transfers_data = None
         if not soulseek_known_down:
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
 
         # Don't return early if no Soulseek transfers - YouTube/Tidal downloads need to be checked too!
         all_transfers = []
@@ -7432,9 +7450,9 @@ def get_download_status():
                                                 transfer_id = file_info.get('id')
                                                 if transfer_id:
                                                     try:
-                                                        run_async(soulseek_client.cancel_download(str(transfer_id), username, remove=True))
-                                                    except Exception:
-                                                        pass
+                                                        run_async(download_orchestrator.cancel_download(str(transfer_id), username, remove=True))
+                                                    except Exception as e:
+                                                        logger.debug("orphan transfer cancel failed: %s", e)
                                                 _orphaned_download_keys.discard(context_key)
                                             continue  # Skip normal post-processing either way
 
@@ -7544,10 +7562,10 @@ def get_download_status():
 
         # Also include YouTube/Tidal downloads in the response
         try:
-            all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
+            all_streaming_downloads = run_async(download_orchestrator.get_all_downloads())
 
             for download in all_streaming_downloads:
-                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
                     source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
                     streaming_transfer = {
@@ -7676,7 +7694,7 @@ def cancel_download():
         return jsonify({"success": False, "error": "Missing download_id or username."}), 400
 
     try:
-        success = _downloads_cancel.cancel_single_download(soulseek_client, run_async, download_id, username)
+        success = _downloads_cancel.cancel_single_download(download_orchestrator, run_async, download_id, username)
         if success:
             return jsonify({"success": True, "message": "Download cancelled."})
         return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
@@ -7690,7 +7708,7 @@ def cancel_all_downloads():
     """Cancel all active downloads from slskd, then clear completed ones."""
     try:
         success, msg = _downloads_cancel.cancel_all_active(
-            soulseek_client, run_async, _sweep_empty_download_directories,
+            download_orchestrator, run_async, _sweep_empty_download_directories,
         )
         if success:
             return jsonify({"success": True, "message": msg})
@@ -7705,7 +7723,7 @@ def clear_finished_downloads():
     """Clear all terminal (completed, cancelled, failed) downloads from slskd."""
     try:
         success = _downloads_cancel.clear_finished_active(
-            soulseek_client, run_async, _sweep_empty_download_directories,
+            download_orchestrator, run_async, _sweep_empty_download_directories,
         )
         if success:
             return jsonify({"success": True, "message": "Finished downloads cleared."})
@@ -7814,7 +7832,7 @@ def download_selected_candidate(task_id):
                 batch['active_count'] = batch.get('active_count', 0) + 1
 
         # Build a TrackResult-like candidate object
-        from core.soulseek_client import TrackResult
+        from core.download_plugins.types import TrackResult
         candidate = TrackResult(
             username=username,
             filename=filename,
@@ -8044,9 +8062,9 @@ def test_automation_workflow():
         results['media_clients'] = {'active_server': active_server}
 
         for client_name, client in [
-            ('plex', plex_client),
-            ('jellyfin', jellyfin_client),
-            ('navidrome', navidrome_client)
+            ('plex', media_server_engine.client('plex')),
+            ('jellyfin', media_server_engine.client('jellyfin')),
+            ('navidrome', media_server_engine.client('navidrome'))
         ]:
             try:
                 is_connected = client.is_connected() if client else False
@@ -8092,7 +8110,7 @@ def clear_all_searches():
     Clear all searches from slskd search history.
     """
     try:
-        success = run_async(soulseek_client.clear_all_searches())
+        success = run_async(download_orchestrator.clear_all_searches())
         if success:
             add_activity_item("", "Search Cleanup", "All search history cleared manually", "Now")
             return jsonify({"success": True, "message": "All searches cleared."})
@@ -8112,7 +8130,7 @@ def maintain_search_history():
         keep_searches = data.get('keep_searches', 50)
         trigger_threshold = data.get('trigger_threshold', 200)
         
-        success = run_async(soulseek_client.maintain_search_history_with_buffer(
+        success = run_async(download_orchestrator.maintain_search_history_with_buffer(
             keep_searches=keep_searches, trigger_threshold=trigger_threshold
         ))
         if success:
@@ -8123,163 +8141,6 @@ def maintain_search_history():
     except Exception as e:
         logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-
-def fix_artist_image_url(thumb_url):
-    """Convert media-server image URLs into browser-safe URLs."""
-    if not thumb_url:
-        return None
-
-    try:
-        # Check if it's a localhost URL or relative path that needs fixing
-        needs_fixing = (
-            thumb_url.startswith('http://localhost:') or
-            thumb_url.startswith('https://localhost:') or
-            thumb_url.startswith('http://127.0.0.1:') or
-            thumb_url.startswith('https://127.0.0.1:') or
-            thumb_url.startswith('http://host.docker.internal:') or
-            thumb_url.startswith('https://host.docker.internal:') or
-            (thumb_url.startswith('http://') and _is_internal_image_host(thumb_url)) or
-            thumb_url.startswith('/library/') or  # Plex relative paths
-            thumb_url.startswith('/Items/') or    # Jellyfin relative paths
-            thumb_url.startswith('/api/') or      # Old Navidrome API paths
-            thumb_url.startswith('/rest/')        # Navidrome Subsonic API paths
-        )
-
-        if needs_fixing:
-            active_server = config_manager.get_active_media_server()
-            logger.debug(f"Fixing URL: {thumb_url}, Active server: {active_server}")
-
-            if active_server == 'plex':
-                plex_config = config_manager.get_plex_config()
-                plex_base_url = plex_config.get('base_url', '')
-                plex_token = plex_config.get('token', '')
-                logger.info(f"Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
-
-                if plex_base_url and plex_token:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/library/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Plex URL with token
-                    fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'jellyfin':
-                jellyfin_config = config_manager.get_jellyfin_config()
-                jellyfin_base_url = jellyfin_config.get('base_url', '')
-                jellyfin_token = jellyfin_config.get('api_key', '')
-                logger.info(f"Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
-
-                if jellyfin_base_url:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/Items/') or thumb_url.startswith('/api/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Jellyfin URL with token
-                    if jellyfin_token:
-                        separator = '&' if '?' in path else '?'
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
-                    else:
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'navidrome':
-                navidrome_config = config_manager.get_navidrome_config()
-                navidrome_base_url = navidrome_config.get('base_url', '')
-                navidrome_username = navidrome_config.get('username', '')
-                navidrome_password = navidrome_config.get('password', '')
-                logger.info(f"Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
-
-                if navidrome_base_url and navidrome_username and navidrome_password:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/rest/'):
-                        # Already a Subsonic API path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Generate Subsonic API authentication
-                    import hashlib
-                    import secrets
-                    salt = secrets.token_hex(6)
-                    token = hashlib.md5((navidrome_password + salt).encode()).hexdigest()
-
-                    # Add authentication parameters to the URL
-                    separator = '&' if '?' in path else '?'
-                    auth_params = f"u={navidrome_username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
-
-                    # Construct proper Navidrome Subsonic URL
-                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            logger.warning(f"No configuration found for {active_server} or unsupported server type")
-
-        # Return a browser-safe URL even if no server-specific rebuild was possible.
-        return _browser_safe_image_url(thumb_url)
-
-    except Exception as e:
-        logger.error(f"Error fixing image URL '{thumb_url}': {e}")
-        return _browser_safe_image_url(thumb_url)
-
-
-def _is_internal_image_host(url: str) -> bool:
-    """Return True when an image URL points at a host the browser likely cannot reach directly."""
-    try:
-        parsed = urlparse(url)
-        host = (parsed.hostname or '').strip('[]').lower()
-        if not host:
-            return False
-
-        if host in {'localhost', '127.0.0.1', '::1', 'host.docker.internal'}:
-            return True
-
-        # Single-label hosts are usually Docker service names or local LAN aliases.
-        if '.' not in host:
-            return True
-
-        try:
-            ip = ipaddress.ip_address(host)
-            return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
-        except ValueError:
-            return False
-    except Exception:
-        return False
-
-
-def _browser_safe_image_url(url: str) -> str:
-    """Return a browser-safe image URL, proxying internal hosts through SoulSync."""
-    if not url:
-        return url
-
-    if url.startswith('/api/image-proxy?url='):
-        return url
-
-    if url.startswith('http://') or url.startswith('https://'):
-        if _is_internal_image_host(url):
-            return f"/api/image-proxy?url={quote(url, safe='')}"
-        return url
-
-    # Relative media-server paths should already have been expanded before this point.
-    return url
-
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -8614,8 +8475,8 @@ def get_artist_detail(artist_id):
                         except Exception:
                             enrichment_coverage[svc] = 0
                     enrichment_coverage['total_tracks'] = total
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment coverage build failed: %s", e)
 
         response_data = {
             "success": True,
@@ -8749,6 +8610,108 @@ def get_artist_image(artist_id):
         logger.error(f"Error fetching artist image: {e}")
         return jsonify({"success": False, "image_url": None, "error": str(e)})
 
+@app.route('/api/artist/<artist_id>/top-tracks', methods=['GET'])
+def get_artist_top_tracks_endpoint(artist_id):
+    """Return an artist's top-N tracks via the primary metadata source.
+
+    Issue #513: users want a "top X popular songs" path that doesn't pull
+    the entire discography. Spotify's `artist_top_tracks` endpoint and
+    Deezer's `/artist/{id}/top` both expose this; iTunes / Discogs /
+    MusicBrainz don't have popularity ranking, so this endpoint returns
+    `success=False` for those primary sources and the frontend falls back
+    to the existing Last.fm display-only sidebar.
+
+    Resolves per-source artist IDs from the DB row (matching what
+    /discography already does) so a Spotify ID in the URL still works
+    when Deezer is primary, and vice versa.
+    """
+    try:
+        primary_source = _get_metadata_fallback_source()
+        if primary_source not in ('spotify', 'deezer'):
+            return jsonify({
+                'success': False,
+                'reason': 'unsupported_source',
+                'source': primary_source,
+                'tracks': [],
+            })
+
+        try:
+            limit = max(1, min(int(request.args.get('limit', 10)), 50))
+        except (TypeError, ValueError):
+            limit = 10
+
+        # Per-source ID resolution from the DB — same pattern as
+        # /discography. Without this, the frontend's chosen ID type
+        # (Spotify, Deezer, iTunes, library DB id) decides which source
+        # can answer; we want the URL ID to be neutral.
+        resolved_id = artist_id
+        try:
+            _db = get_database()
+            _conn = _db._get_connection()
+            try:
+                _cur = _conn.cursor()
+                _cur.execute("""
+                    SELECT spotify_artist_id, deezer_id
+                    FROM artists
+                    WHERE id = ?
+                       OR spotify_artist_id = ?
+                       OR itunes_artist_id = ?
+                       OR deezer_id = ?
+                       OR musicbrainz_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                _row = _cur.fetchone()
+                if _row:
+                    if primary_source == 'spotify' and _row['spotify_artist_id']:
+                        resolved_id = str(_row['spotify_artist_id'])
+                    elif primary_source == 'deezer' and _row['deezer_id']:
+                        resolved_id = str(_row['deezer_id'])
+            finally:
+                _conn.close()
+        except Exception as e:
+            logger.debug("top-tracks per-source ID resolution failed: %s", e)
+
+        tracks = []
+        if primary_source == 'spotify':
+            if not spotify_client or not spotify_client.is_spotify_authenticated():
+                return jsonify({
+                    'success': False,
+                    'reason': 'spotify_not_authenticated',
+                    'source': 'spotify',
+                    'tracks': [],
+                })
+            market = config_manager.get('spotify.market', 'US') or 'US'
+            tracks = spotify_client.get_artist_top_tracks(resolved_id, country=market, limit=limit)
+        else:  # deezer
+            deezer_client = _get_deezer_client()
+            if not deezer_client:
+                return jsonify({
+                    'success': False,
+                    'reason': 'deezer_unavailable',
+                    'source': 'deezer',
+                    'tracks': [],
+                })
+            tracks = deezer_client.get_artist_top_tracks(resolved_id, limit=limit)
+
+        if not tracks:
+            return jsonify({
+                'success': False,
+                'reason': 'no_tracks_found',
+                'source': primary_source,
+                'tracks': [],
+            })
+
+        return jsonify({
+            'success': True,
+            'source': primary_source,
+            'resolved_artist_id': resolved_id,
+            'tracks': tracks,
+        })
+    except Exception as e:
+        logger.exception("Error fetching artist top tracks for %s", artist_id)
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
+
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
@@ -8775,6 +8738,58 @@ def get_artist_discography(artist_id):
         from core.metadata.lookup import MetadataLookupOptions
         from core.metadata_service import get_artist_discography as _get_artist_discography
 
+        # Server-side per-source ID resolution. Look up the library row
+        # by ANY of the IDs the frontend might send: library DB id,
+        # spotify_artist_id, itunes_artist_id, deezer_id, or
+        # musicbrainz_id. Once matched, pull every stored provider ID
+        # and dispatch the right ID to each source via
+        # ``artist_source_ids``. Mirrors what the watchlist scanner
+        # already does.
+        #
+        # Without this, the frontend's ID choice fully decides which
+        # source can answer correctly:
+        #   - sends DB id 194687 → Deezer accepts (wrong: it's a real
+        #     Deezer ID for a different artist)
+        #   - sends Spotify ID `1bDWGdIC...` → Deezer rejects → falls
+        #     back to fuzzy name search → may pick wrong artist
+        # With server-side resolution, every source gets its OWN stored
+        # ID regardless of which one the URL carries.
+        artist_source_ids = {}
+        try:
+            _db = get_database()
+            _conn = _db._get_connection()
+            try:
+                _cur = _conn.cursor()
+                _cur.execute("""
+                    SELECT spotify_artist_id, itunes_artist_id,
+                           deezer_id, musicbrainz_id
+                    FROM artists
+                    WHERE id = ?
+                       OR spotify_artist_id = ?
+                       OR itunes_artist_id = ?
+                       OR deezer_id = ?
+                       OR musicbrainz_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                _row = _cur.fetchone()
+                if _row:
+                    if _row['spotify_artist_id']:
+                        artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
+                    if _row['itunes_artist_id']:
+                        artist_source_ids['itunes'] = str(_row['itunes_artist_id'])
+                    if _row['deezer_id']:
+                        artist_source_ids['deezer'] = str(_row['deezer_id'])
+                    if _row['musicbrainz_id']:
+                        artist_source_ids['musicbrainz'] = str(_row['musicbrainz_id'])
+                    logger.info(
+                        f"Discography: resolved per-source IDs for artist_id={artist_id} → "
+                        f"{artist_source_ids}"
+                    )
+            finally:
+                _conn.close()
+        except Exception as _id_exc:
+            logger.debug(f"Could not resolve per-source artist IDs for {artist_id}: {_id_exc}")
+
         discography = _get_artist_discography(
             artist_id,
             artist_name=artist_name,
@@ -8784,6 +8799,7 @@ def get_artist_discography(artist_id):
                 skip_cache=False,
                 max_pages=0,
                 limit=50,
+                artist_source_ids=artist_source_ids or None,
             ),
         )
 
@@ -8866,8 +8882,8 @@ def get_artist_discography(artist_id):
                         if not artist_info.get('genres') and lib['genres']:
                             try:
                                 artist_info['genres'] = json.loads(lib['genres'])
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("genres json parse failed: %s", e)
                         # Last.fm enrichment
                         if lib.get('lastfm_bio'):
                             artist_info['lastfm_bio'] = lib['lastfm_bio']
@@ -8878,8 +8894,8 @@ def get_artist_discography(artist_id):
                         if lib.get('lastfm_tags'):
                             try:
                                 artist_info['lastfm_tags'] = json.loads(lib['lastfm_tags']) if isinstance(lib['lastfm_tags'], str) else lib['lastfm_tags']
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("lastfm_tags json parse failed: %s", e)
                         if lib.get('lastfm_url'):
                             artist_info['lastfm_url'] = lib['lastfm_url']
                         if lib.get('genius_url'):
@@ -9461,15 +9477,9 @@ def get_artist_enhanced_detail(artist_id):
             if album.get('thumb_url'):
                 album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
 
-        # Include server type for sync option
+        # Include server type for sync option — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
 
         return jsonify(result)
@@ -9557,14 +9567,44 @@ def _build_artist_quality_deps():
     """Build the ArtistQualityDeps bundle from web_server.py globals on each call."""
     from core.wishlist_service import get_wishlist_service as _get_ws
 
+    def _resolve_search_sources():
+        """Mirror the Track Redownload modal's source list. Every
+        configured metadata source contributes to the parallel multi-source
+        search — Spotify (only when authenticated), iTunes, Deezer, plus
+        Discogs / Hydrabase when configured."""
+        sources = []
+        if spotify_client and spotify_client.is_authenticated():
+            sources.append(('spotify', spotify_client))
+        try:
+            sources.append(('itunes', _get_itunes_client()))
+        except Exception as e:
+            logger.debug("itunes client init failed: %s", e)
+        try:
+            sources.append(('deezer', _get_deezer_client()))
+        except Exception as e:
+            logger.debug("deezer client init failed: %s", e)
+        # Discogs needs an explicit token; only include when configured.
+        try:
+            _discogs_token = config_manager.get('discogs.token', '')
+            if _discogs_token:
+                sources.append(('discogs', _get_discogs_client(_discogs_token)))
+        except Exception as e:
+            logger.debug("discogs client init failed: %s", e)
+        # Hydrabase only when connected (dev-mode + active client).
+        try:
+            if hydrabase_client and hydrabase_client.is_connected():
+                sources.append(('hydrabase', hydrabase_client))
+        except Exception as e:
+            logger.debug("hydrabase client check failed: %s", e)
+        return sources
+
     return _artists_quality.ArtistQualityDeps(
-        spotify_client=spotify_client,
         matching_engine=matching_engine,
         get_database=get_database,
         get_wishlist_service=_get_ws,
         get_current_profile_id=get_current_profile_id,
         get_quality_tier_from_extension=_get_quality_tier_from_extension,
-        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_metadata_search_sources=_resolve_search_sources,
     )
 
 
@@ -9717,13 +9757,7 @@ def get_track_tag_preview(track_id):
 
         # Include server type so frontend can offer server sync option
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
@@ -9824,15 +9858,9 @@ def get_batch_tag_preview():
 
             results.append(entry)
 
-        # Server type info
+        # Server type info — engine routes to active client.
         active_server = config_manager.get_active_media_server()
-        server_connected = False
-        if active_server == 'plex':
-            server_connected = plex_client.is_connected()
-        elif active_server == 'jellyfin':
-            server_connected = jellyfin_client.is_connected()
-        elif active_server == 'navidrome':
-            server_connected = navidrome_client.is_connected()
+        server_connected = media_server_engine.is_connected() if media_server_engine else False
 
         return jsonify({
             "success": True,
@@ -10983,7 +11011,7 @@ def _sync_tracks_to_server(track_rows, server_type):
                 if track_data.get('year'):
                     metadata['year'] = track_data['year']
                 if metadata:
-                    success = plex_client.update_track_metadata(str(track_data['id']), metadata)
+                    success = media_server_engine.client('plex').update_track_metadata(str(track_data['id']), metadata)
                     if success:
                         result['synced'] += 1
                     else:
@@ -10998,7 +11026,7 @@ def _sync_tracks_to_server(track_rows, server_type):
     elif server_type == 'jellyfin':
         # Jellyfin: just trigger a library scan once after all file writes
         try:
-            success = jellyfin_client.trigger_library_scan()
+            success = media_server_engine.client('jellyfin').trigger_library_scan()
             if success:
                 result['synced'] = len(track_rows)
             else:
@@ -11023,14 +11051,17 @@ def _resolve_library_file_path(file_path):
     transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
 
-    # Also check the media server's music library path (handles Docker↔host path mismatch)
+    # Also check the media server's music library path (handles Docker↔host path mismatch).
+    # ``get_music_library_locations`` handles both single-library mode and
+    # all-libraries mode (unions location paths across every music section).
     library_dirs = set()
     try:
-        if plex_client and plex_client.server and plex_client.music_library:
-            for loc in plex_client.music_library.locations:
+        plex = media_server_engine.client('plex')
+        if plex and plex.server:
+            for loc in plex.get_music_library_locations():
                 library_dirs.add(loc)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("plex library locations lookup failed: %s", e)
 
     # Check user-configured music library paths (Settings > Library)
     try:
@@ -11041,8 +11072,8 @@ def _resolve_library_file_path(file_path):
                     resolved_p = docker_resolve_path(p.strip())
                     if resolved_p:
                         library_dirs.add(resolved_p)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library music paths read failed: %s", e)
 
     path_parts = file_path.replace('\\', '/').split('/')
 
@@ -11533,8 +11564,8 @@ def library_delete_track(track_id):
                                 try:
                                     os.remove(sidecar)
                                     logger.info(f"Deleted sidecar file: {sidecar}")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("sidecar removal failed: %s", e)
                     except Exception as e:
                         logger.warning(f"Failed to delete file: {e}")
                         file_error = str(e)
@@ -11699,9 +11730,9 @@ def redownload_search_metadata(track_id):
         if thumb_url and not thumb_url.startswith('http'):
             _ab = ''
             _at = ''
-            if plex_client and plex_client.server:
-                _ab = getattr(plex_client.server, '_baseurl', '') or ''
-                _at = getattr(plex_client.server, '_token', '') or ''
+            if media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
             if not _ab:
                 _pc = config_manager.get_plex_config()
                 _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -11723,21 +11754,16 @@ def redownload_search_metadata(track_id):
             'thumb_url': thumb_url,
         }
 
-        # Search all available metadata sources in parallel
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from difflib import SequenceMatcher
+        # Search all available metadata sources in parallel via the
+        # shared module — same code path the Enhance Quality flow uses
+        # so both endpoints have identical scoring + per-source query
+        # optimization + current-match flagging.
+        from core.metadata.multi_source_search import (
+            TrackQuery,
+            search_all_sources,
+        )
 
-        def _score_metadata_match(result):
-            """Score a metadata result against the current track."""
-            title_sim = SequenceMatcher(None, track_title.lower(), (result.get('name') or '').lower()).ratio()
-            artist_sim = SequenceMatcher(None, artist_name.lower(), (result.get('artist') or '').lower()).ratio()
-            dur_diff = abs((row['duration'] or 0) - (result.get('duration_ms') or 0))
-            dur_score = max(0, 1 - dur_diff / 30000) if row['duration'] else 0.5
-            return round((title_sim * 0.5 + artist_sim * 0.35 + dur_score * 0.15), 3)
-
-        metadata_results = {}
         sources_to_search = []
-
         if spotify_client and spotify_client.is_authenticated():
             sources_to_search.append(('spotify', spotify_client))
         try:
@@ -11749,65 +11775,23 @@ def redownload_search_metadata(track_id):
         except Exception as e:
             logger.debug(f"Deezer client not available for redownload search: {e}")
 
-        # Build source-optimized queries
-        deezer_query = f'artist:"{artist_name}" track:"{clean_title}"'
-
-        def _search_source(source_name, client):
-            try:
-                # Deezer works best with structured artist:/track: queries
-                search_q = deezer_query if source_name == 'deezer' else query
-                logger.info(f"[Redownload] Searching {source_name} for: {search_q}")
-                track_objs = client.search_tracks(search_q, limit=10)
-                # If no results, try plain query as fallback
-                if not track_objs and search_q != query:
-                    track_objs = client.search_tracks(query, limit=10)
-                # Last resort: title only
-                if not track_objs and clean_title != query:
-                    track_objs = client.search_tracks(clean_title, limit=10)
-                logger.info(f"[Redownload] {source_name} returned {len(track_objs)} results")
-                results = []
-                for t in track_objs:
-                    r = {
-                        'id': str(t.id),
-                        'name': t.name,
-                        'artist': ', '.join(t.artists) if t.artists else '',
-                        'album': t.album or '',
-                        'duration_ms': t.duration_ms or 0,
-                        'image_url': t.image_url or '',
-                        'is_current_match': False,
-                    }
-                    # Flag current match
-                    if source_name == 'spotify' and row['spotify_track_id'] and str(t.id) == str(row['spotify_track_id']):
-                        r['is_current_match'] = True
-                    elif source_name == 'deezer' and row['deezer_id'] and str(t.id) == str(row['deezer_id']):
-                        r['is_current_match'] = True
-                    r['match_score'] = _score_metadata_match(r)
-                    results.append(r)
-                results.sort(key=lambda x: (-int(x['is_current_match']), -x['match_score']))
-                return source_name, results
-            except Exception as e:
-                logger.error(f"[Redownload] Metadata search failed for {source_name}: {e}", exc_info=True)
-                return source_name, []
-
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {pool.submit(_search_source, name, client): name for name, client in sources_to_search}
-            for future in as_completed(futures):
-                source_name, results = future.result()
-                metadata_results[source_name] = results
-
-        # Find best overall match
-        best_match = None
-        for source, results in metadata_results.items():
-            if results:
-                top = results[0]
-                if not best_match or top['match_score'] > best_match['score']:
-                    best_match = {'source': source, 'index': 0, 'score': top['match_score']}
+        track_query = TrackQuery(
+            title=track_title,
+            artist=artist_name,
+            album=row['album_title'] or '',
+            duration_ms=row['duration'] or 0,
+            spotify_track_id=row['spotify_track_id'],
+            deezer_id=row['deezer_id'],
+        )
+        result = search_all_sources(
+            track_query, sources_to_search, clean_title=clean_title,
+        )
 
         return jsonify({
             "success": True,
             "current_track": current_track,
-            "metadata_results": metadata_results,
-            "best_match": best_match,
+            "metadata_results": result.metadata_results,
+            "best_match": result.best_match,
         })
     except Exception as e:
         logger.error(f"Error in redownload metadata search: {e}", exc_info=True)
@@ -11846,34 +11830,19 @@ def redownload_search_sources(track_id):
         candidates = []
         database = get_database()
 
-        # Get all available download source clients
+        # Get all available download source clients via the orchestrator's
+        # generic accessor — replaces the old per-source if/hasattr chain
+        # that Cin called out as defeating the purpose of the registry refactor.
         download_clients = {}
         try:
-            orch = soulseek_client  # The download orchestrator
-            if hasattr(orch, 'soulseek') and orch.soulseek:
-                if not (hasattr(orch.soulseek, 'is_configured') and not orch.soulseek.is_configured()):
-                    download_clients['soulseek'] = orch.soulseek
-            if hasattr(orch, 'youtube') and orch.youtube:
-                if not (hasattr(orch.youtube, 'is_configured') and not orch.youtube.is_configured()):
-                    download_clients['youtube'] = orch.youtube
-            if hasattr(orch, 'tidal') and orch.tidal:
-                if not (hasattr(orch.tidal, 'is_configured') and not orch.tidal.is_configured()):
-                    download_clients['tidal'] = orch.tidal
-            if hasattr(orch, 'qobuz') and orch.qobuz:
-                if not (hasattr(orch.qobuz, 'is_configured') and not orch.qobuz.is_configured()):
-                    download_clients['qobuz'] = orch.qobuz
-            if hasattr(orch, 'hifi') and orch.hifi:
-                if not (hasattr(orch.hifi, 'is_configured') and not orch.hifi.is_configured()):
-                    download_clients['hifi'] = orch.hifi
-            if hasattr(orch, 'deezer_dl') and orch.deezer_dl:
-                if not (hasattr(orch.deezer_dl, 'is_configured') and not orch.deezer_dl.is_configured()):
-                    download_clients['deezer_dl'] = orch.deezer_dl
+            if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
+                download_clients = dict(download_orchestrator.configured_clients())
         except Exception as e:
             logger.warning(f"[Redownload] Error getting download clients: {e}")
 
         if not download_clients:
             # Fallback: use orchestrator directly
-            download_clients = {'default': soulseek_client}
+            download_clients = {'default': download_orchestrator}
 
         logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
@@ -11893,7 +11862,7 @@ def redownload_search_sources(track_id):
                         quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
                         svc = source_name if source_name != 'default' else 'hybrid'
                         uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
                             svc = uname
                         source_candidates.append({
                             'username': uname,
@@ -12007,12 +11976,12 @@ def sync_artist_library(artist_id):
 
         if server_source:
             media_client = None
-            if server_source == 'plex' and plex_client and plex_client.server:
-                media_client = plex_client
-            elif server_source == 'jellyfin' and jellyfin_client:
-                media_client = jellyfin_client
-            elif server_source == 'navidrome' and navidrome_client:
-                media_client = navidrome_client
+            if server_source == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                media_client = media_server_engine.client('plex')
+            elif server_source == 'jellyfin' and media_server_engine.client('jellyfin'):
+                media_client = media_server_engine.client('jellyfin')
+            elif server_source == 'navidrome' and media_server_engine.client('navidrome'):
+                media_client = media_server_engine.client('navidrome')
 
             if media_client:
                 try:
@@ -12156,8 +12125,8 @@ def library_delete_album(album_id):
                                 if os.path.exists(sidecar):
                                     try:
                                         os.remove(sidecar)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug("sidecar removal failed: %s", e)
                         except Exception as e:
                             logger.warning(f"Failed to delete track file: {e}")
                             files_failed += 1
@@ -12175,8 +12144,8 @@ def library_delete_album(album_id):
                                 if os.path.isdir(album_dir) and not os.listdir(album_dir):
                                     os.rmdir(album_dir)
                                     logger.info(f"Removed empty album directory: {album_dir}")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("empty album dir cleanup failed: %s", e)
 
             # Delete all tracks belonging to this album
             cursor.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
@@ -12835,7 +12804,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                 continue
 
             # Start download
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12883,7 +12852,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             if not username or not filename:
                 continue
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -12991,7 +12960,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 'disc_number': corrected_meta.get('disc_number', 1)
             }
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -13058,7 +13027,7 @@ def start_matched_download():
             if not username or not filename:
                 return jsonify({"success": False, "error": "Missing username or filename"}), 400
 
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -13118,7 +13087,7 @@ def start_matched_download():
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
             
-            download_id = run_async(soulseek_client.download(username, filename, size))
+            download_id = run_async(download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -13147,7 +13116,7 @@ def start_matched_download():
 
 def _parse_filename_metadata(filename: str) -> dict:
     """
-    A direct port of the metadata parsing logic from the GUI's soulseek_client.py.
+    A direct port of the metadata parsing logic from the GUI's download_orchestrator.py.
     This is the crucial missing step that cleans filenames BEFORE Spotify matching.
     """
     return parse_filename_metadata(filename)
@@ -13330,8 +13299,8 @@ def _sweep_empty_download_directories():
                     for hidden in entries:
                         try:
                             os.remove(os.path.join(dirpath, hidden))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("hidden file cleanup failed: %s", e)
                     os.rmdir(dirpath)
                     removed += 1
                 except OSError:
@@ -14143,8 +14112,8 @@ def _apply_path_template(template: str, context: dict) -> str:
                     resolved = _get_itunes_client().resolve_primary_artist(itunes_artist_id)
                     if resolved and resolved != album_artist_value:
                         album_artist_value = resolved
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("itunes primary artist resolve failed: %s", e)
     # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
     # "CD02" etc. when the album has 2+ discs, empty string otherwise.
     # Empty output collapses gracefully via the trailing double-dash cleanup
@@ -14313,7 +14282,18 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         context,
         artist,
         album_info,
-        runtime=metadata_runtime or _build_metadata_enrichment_runtime(),
+        runtime=metadata_runtime or _build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
+        ),
     )
 
 
@@ -14407,7 +14387,18 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         task_id,
         batch_id,
         _build_import_pipeline_runtime(),
-        _build_metadata_enrichment_runtime(),
+        _build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
+        ),
     )
 
 
@@ -14520,7 +14511,18 @@ def _post_process_matched_download(context_key, context, file_path):
         context,
         file_path,
         _build_import_pipeline_runtime(),
-        metadata_runtime=_build_metadata_enrichment_runtime(),
+        metadata_runtime=_build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
+        ),
     )
 
 # Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)
@@ -14591,8 +14593,8 @@ def _get_current_commit_sha():
         result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("git rev-parse failed: %s", e)
     return None
 
 _current_commit_sha = _get_current_commit_sha()
@@ -14909,8 +14911,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
                 'total_albums': str(total_albums),
                 'total_tracks': str(total_tracks),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("library_updated automation emit failed: %s", e)
 
     # Invalidate sync match cache (track IDs may have changed)
     try:
@@ -14918,8 +14920,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         cleared = inv_db.invalidate_sync_match_cache()
         if cleared:
             logger.info(f"Cleared {cleared} sync match cache entries after database update")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("sync match cache invalidation failed: %s", e)
 
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
@@ -15050,8 +15052,8 @@ def _run_soulsync_full_refresh():
                             INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
                             VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         """, (artist_id, artist_name))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("soulsync artist insert failed: %s", e)
 
                     for album_name, tracks in albums.items():
                         album_key = f"{artist_name.lower()}::{album_name.lower()}"
@@ -15070,8 +15072,8 @@ def _run_soulsync_full_refresh():
                                 INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                             """, (album_id, artist_id, album_name, year, len(tracks)))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("soulsync album insert failed: %s", e)
 
                         # Insert tracks
                         for file_path, tags in tracks:
@@ -15262,11 +15264,11 @@ def _run_db_update_task(full_refresh, server_type):
     media_client = None
 
     if server_type == "plex":
-        media_client = plex_client
+        media_client = media_server_engine.client('plex')
     elif server_type == "jellyfin":
-        media_client = jellyfin_client
+        media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
-        media_client = navidrome_client
+        media_client = media_server_engine.client('navidrome')
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -15308,11 +15310,11 @@ def _run_deep_scan_task(server_type):
     media_client = None
 
     if server_type == "plex":
-        media_client = plex_client
+        media_client = media_server_engine.client('plex')
     elif server_type == "jellyfin":
-        media_client = jellyfin_client
+        media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
-        media_client = navidrome_client
+        media_client = media_server_engine.client('navidrome')
     elif server_type == "soulsync":
         # SoulSync standalone deep scan: find untracked files → move to Staging,
         # remove stale DB records where files no longer exist on disk
@@ -15861,8 +15863,8 @@ def backup_database_endpoint():
         try:
             with open(meta_path, 'w') as mf:
                 json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
-        except Exception:
-            pass  # Non-critical — backup still works without metadata
+        except Exception as e:
+            logger.debug("backup meta sidecar write: %s", e)
         # Rolling cleanup
         existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
         # Filter out .meta.json files from the backup list
@@ -15874,8 +15876,8 @@ def backup_database_endpoint():
                 # Also remove sidecar if present
                 if os.path.exists(removed + '.meta.json'):
                     os.remove(removed + '.meta.json')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("rolling backup cleanup failed: %s", e)
         return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15909,8 +15911,8 @@ def list_backups_endpoint():
                     with open(meta_path, 'r') as mf:
                         meta = json.load(mf)
                     entry['version'] = meta.get('version')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("backup metadata read failed: %s", e)
             backups.append(entry)
         db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2) if os.path.exists(db_path) else 0
         return jsonify({
@@ -15938,8 +15940,8 @@ def delete_backup_endpoint(filename):
         if os.path.exists(meta_path):
             try:
                 os.remove(meta_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("backup sidecar removal failed: %s", e)
         return jsonify({"success": True, "deleted": filename})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15965,8 +15967,8 @@ def restore_backup_endpoint(filename):
                 with open(meta_path, 'r') as mf:
                     meta = json.load(mf)
                 backup_version = meta.get('version')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("backup version metadata read failed: %s", e)
 
         version_warning = None
         # Compare base versions only (strip +commit suffix) to avoid false mismatches
@@ -15998,8 +16000,8 @@ def restore_backup_endpoint(filename):
         try:
             with open(safety_path + '.meta.json', 'w') as mf:
                 json.dump({"version": SOULSYNC_VERSION, "created": safety_ts}, mf)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("safety backup metadata write failed: %s", e)
 
         # Restore using SQLite backup API (handles concurrent access safely)
         from database.music_database import close_database, get_database
@@ -16963,7 +16965,7 @@ def _build_master_deps():
 
     return _downloads_master.MasterDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         run_async=run_async,
         mb_worker=mb_worker,
         mb_release_cache=mb_release_cache,
@@ -17001,7 +17003,7 @@ def _build_post_processing_deps():
     """Build the PostProcessDeps bundle from web_server.py globals on each call."""
     return _downloads_post_processing.PostProcessDeps(
         config_manager=config_manager,
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         run_async=run_async,
         docker_resolve_path=docker_resolve_path,
         extract_filename=extract_filename,
@@ -17028,7 +17030,7 @@ from core.downloads import task_worker as _downloads_task_worker
 def _build_task_worker_deps():
     """Build TaskWorkerDeps bundle from web_server.py globals on each call."""
     return _downloads_task_worker.TaskWorkerDeps(
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         matching_engine=matching_engine,
         run_async=run_async,
         try_source_reuse=_try_source_reuse,
@@ -17054,7 +17056,7 @@ from core.downloads import candidates as _downloads_candidates
 def _build_candidates_deps():
     """Build the CandidatesDeps bundle from web_server.py globals on each call."""
     return _downloads_candidates.CandidatesDeps(
-        soulseek_client=soulseek_client,
+        download_orchestrator=download_orchestrator,
         spotify_client=spotify_client,
         run_async=run_async,
         get_database=get_database,
@@ -17163,7 +17165,7 @@ def _try_source_reuse(task_id, batch_id, track):
     if not source_tracks or not last_source:
         _sr.info("Skipped — no source_tracks or no last_source")
         return False
-    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
         _sr.info(f"Skipped — {last_source.get('username')} source (no folder-based reuse)")
         return False
 
@@ -17219,7 +17221,7 @@ def _try_source_reuse(task_id, batch_id, track):
     # Sort by confidence, filter by quality preference
     candidates.sort(key=lambda c: c.confidence, reverse=True)
     _sr.info(f"Found {len(candidates)} candidates above 0.70, best={candidates[0].confidence:.3f} ({candidates[0].filename})")
-    slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+    slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'client') else download_orchestrator
     filtered = slsk.filter_results_by_quality_preference(candidates)
     if not filtered:
         _sr.info(f"Quality filter rejected all candidates for task {task_id}")
@@ -17265,7 +17267,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
@@ -17298,8 +17300,8 @@ def _store_batch_source(batch_id, username, filename):
         return
 
     try:
-        # Access SoulseekClient directly (soulseek_client is DownloadOrchestrator)
-        slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+        # Access SoulseekClient directly (download_orchestrator is DownloadOrchestrator)
+        slsk = download_orchestrator.client("soulseek") if hasattr(download_orchestrator, 'client') else download_orchestrator
         _sr.info(f"Browsing {username}:{folder_path}...")
         files = run_async(slsk.browse_user_directory(username, folder_path))
         if not files:
@@ -17630,7 +17632,7 @@ def cancel_download_task():
         if download_id and username:
             try:
                 # This is an async call, so we run it and wait
-                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+                run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                 logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
                 logger.error(f"Failed to cancel download on slskd, but worker already moved on: {e}")
@@ -17875,14 +17877,14 @@ def cancel_task_v2():
                 # username: youtube/tidal/qobuz/hifi/deezer_dl/lidarr go to
                 # their streaming clients, anything else goes to Soulseek.
                 #
-                # Replaces an older block that assumed soulseek_client was a
+                # Replaces an older block that assumed download_orchestrator was a
                 # raw SoulseekClient and accessed .base_url / ._make_request
                 # directly — crashed with AttributeError on the orchestrator
                 # and silently left streaming downloads running in background.
                 try:
                     logger.info(f"[Atomic Cancel] Dispatching cancel to orchestrator: username={username} download_id={download_id}")
                     cancel_success = run_async(
-                        soulseek_client.cancel_download(download_id, username, remove=True)
+                        download_orchestrator.cancel_download(download_id, username, remove=True)
                     )
                     if cancel_success:
                         logger.info(f"[Atomic Cancel] Orchestrator cancelled download: {download_id}")
@@ -18185,10 +18187,10 @@ def get_server_playlists():
             return jsonify({"success": False, "error": "No media server configured"}), 400
 
         playlists_data = []
-        if active_server == 'plex' and plex_client and plex_client.is_connected():
+        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').is_connected():
             # Use raw Plex API to get playlist metadata without fetching all tracks
             try:
-                raw_playlists = plex_client.server.playlists()
+                raw_playlists = media_server_engine.client('plex').server.playlists()
                 logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
                 for playlist in raw_playlists:
                     if getattr(playlist, 'playlistType', None) == 'audio':
@@ -18201,22 +18203,22 @@ def get_server_playlists():
             except Exception as e:
                 logger.error(f"[ServerPlaylists] Error fetching Plex playlists: {e}", exc_info=True)
                 return jsonify({"success": False, "error": f"Plex error: {str(e)}"}), 500
-        elif active_server == 'jellyfin' and jellyfin_client and jellyfin_client.is_connected():
-            for pl in jellyfin_client.get_all_playlists():
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin') and media_server_engine.client('jellyfin').is_connected():
+            for pl in media_server_engine.client('jellyfin').get_all_playlists():
                 playlists_data.append({
                     'id': pl.id,
                     'name': pl.title,
                     'track_count': pl.leaf_count,
                 })
-        elif active_server == 'navidrome' and navidrome_client and navidrome_client.is_connected():
-            for pl in navidrome_client.get_all_playlists():
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome') and media_server_engine.client('navidrome').is_connected():
+            for pl in media_server_engine.client('navidrome').get_all_playlists():
                 playlists_data.append({
                     'id': pl.id,
                     'name': pl.title,
                     'track_count': pl.leaf_count,
                 })
         else:
-            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={plex_client is not None}, jellyfin_client={jellyfin_client is not None}, navidrome_client={navidrome_client is not None}")
+            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={media_server_engine.client('plex') is not None}, jellyfin_client={media_server_engine.client('jellyfin') is not None}, navidrome_client={media_server_engine.client('navidrome') is not None}")
             return jsonify({"success": False, "error": f"{active_server} not connected"}), 400
 
         return jsonify({"success": True, "server_type": active_server, "playlists": playlists_data})
@@ -18234,24 +18236,30 @@ def get_server_playlist_tracks(playlist_id):
 
         # Get tracks from server
         server_tracks = []
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
             try:
                 # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
                 raw_playlist = None
                 try:
-                    raw_playlist = plex_client.server.fetchItem(int(playlist_id))
-                except Exception:
-                    pass
+                    raw_playlist = media_server_engine.client('plex').server.fetchItem(int(playlist_id))
+                except Exception as e:
+                    logger.debug("plex playlist fetchItem failed: %s", e)
                 if not raw_playlist and playlist_name:
                     try:
-                        raw_playlist = plex_client.server.playlist(playlist_name)
-                    except Exception:
-                        pass
+                        raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                    except Exception as e:
+                        logger.debug("plex playlist by-name lookup failed: %s", e)
+                if not raw_playlist:
+                    logger.warning(
+                        f"[ServerPlaylistTracks] Plex playlist not found by "
+                        f"id={playlist_id} or name='{playlist_name}' — "
+                        f"compare view will show every source track as Find & Add"
+                    )
                 if raw_playlist:
                     if not playlist_name:
                         playlist_name = raw_playlist.title
-                    plex_base = getattr(plex_client.server, '_baseurl', '') or ''
-                    plex_token = getattr(plex_client.server, '_token', '') or ''
+                    plex_base = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                    plex_token = getattr(media_server_engine.client('plex').server, '_token', '') or ''
                     if not plex_base:
                         # Fallback: get from config
                         _pc = config_manager.get_plex_config()
@@ -18276,9 +18284,9 @@ def get_server_playlist_tracks(playlist_id):
                         })
             except Exception as e:
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and jellyfin_client:
-            tracks = jellyfin_client.get_playlist_tracks(playlist_id)
-            jf_base = jellyfin_client.base_url or ''
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+            jf_base = media_server_engine.client('jellyfin').base_url or ''
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
@@ -18293,8 +18301,8 @@ def get_server_playlist_tracks(playlist_id):
                     'duration': t.duration,
                     'thumb': thumb,
                 })
-        elif active_server == 'navidrome' and navidrome_client:
-            tracks = navidrome_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 # Navidrome cover art via Subsonic API
@@ -18319,9 +18327,9 @@ def get_server_playlist_tracks(playlist_id):
             # Build server art URL prefix for resolving relative thumb paths
             _art_prefix = ''
             _art_suffix = ''
-            if active_server == 'plex' and plex_client and plex_client.server:
-                _ab = getattr(plex_client.server, '_baseurl', '') or ''
-                _at = getattr(plex_client.server, '_token', '') or ''
+            if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+                _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+                _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
                 if not _ab:
                     _pc = config_manager.get_plex_config()
                     _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -18504,11 +18512,22 @@ def server_playlist_replace_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
-            # Use raw Plex API - fetch playlist directly
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
-            except Exception:
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] replace-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found on server"}), 404
 
             # Build new track list with replacement
@@ -18516,7 +18535,7 @@ def server_playlist_replace_track(playlist_id):
             replaced = False
             for item in raw_playlist.items():
                 if str(item.ratingKey) == str(old_track_id) and not replaced:
-                    new_item = plex_client.server.fetchItem(int(new_track_id))
+                    new_item = media_server_engine.client('plex').server.fetchItem(int(new_track_id))
                     if new_item:
                         new_tracks.append(new_item)
                         replaced = True
@@ -18529,13 +18548,13 @@ def server_playlist_replace_track(playlist_id):
                 # Delete old and recreate directly (avoid update_playlist's backup logic)
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_tracks)
+                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -18548,12 +18567,12 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                jellyfin_client.update_playlist(playlist_name, new_track_objs)
+                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -18566,7 +18585,7 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
@@ -18592,12 +18611,26 @@ def server_playlist_add_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback — Plex deletes + recreates playlists
+            # on edit so the rating key the frontend cached can be stale.
+            # The GET tracks endpoint uses the same lookup chain.
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
-            except Exception:
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] add-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
-            new_item = plex_client.server.fetchItem(int(track_id))
+
+            new_item = plex_server.fetchItem(int(track_id))
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
@@ -18624,22 +18657,22 @@ def server_playlist_add_track(playlist_id):
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track added"})
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             return jsonify({"success": True, "message": "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -18663,10 +18696,22 @@ def server_playlist_remove_track(playlist_id):
 
         active_server = config_manager.get_active_media_server()
 
-        if active_server == 'plex' and plex_client:
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            # ID-first, name-fallback (Plex deletes + recreates on edit
+            # so the cached rating key can be stale).
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
             try:
-                raw_playlist = plex_client.server.playlist(playlist_name)
-            except Exception:
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
 
             # Rebuild without the target track
@@ -18677,26 +18722,26 @@ def server_playlist_remove_track(playlist_id):
             raw_playlist.delete()
             if new_items:
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_items)
+                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_items)
                 return jsonify({"success": True, "message": "Track removed", "new_playlist_id": str(new_pl.ratingKey)})
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
-        elif active_server == 'jellyfin' and jellyfin_client:
-            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
             if len(new_ids) == len(current_tracks):
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track removed"})
 
-        elif active_server == 'navidrome' and navidrome_client:
-            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
             if len(new_ids) == len(current_tracks):
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             return jsonify({"success": True, "message": "Track removed"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -18720,9 +18765,9 @@ def library_search_tracks():
         # Build thumb URL resolver for this server
         _art_prefix = ''
         _art_suffix = ''
-        if active_server == 'plex' and plex_client and plex_client.server:
-            _ab = getattr(plex_client.server, '_baseurl', '') or ''
-            _at = getattr(plex_client.server, '_token', '') or ''
+        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+            _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+            _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
             if not _ab:
                 _pc = config_manager.get_plex_config()
                 _ab = (_pc.get('base_url', '') or '').rstrip('/')
@@ -19776,6 +19821,81 @@ def get_discover_album(source, album_id):
                 'source': fallback_source,
             })
 
+        elif source == 'discogs':
+            # Discogs release detail. release_id comes from the Your
+            # Albums Discogs source. Tracklist needs normalizing —
+            # Discogs uses {position, title, duration} (duration as
+            # string like "3:45") so map to the standard
+            # {name, track_number, duration_ms, artists} shape the
+            # download modal expects.
+            from core.discogs_client import DiscogsClient
+            try:
+                rel_id = int(album_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid Discogs release id"}), 400
+
+            release = DiscogsClient().get_release(rel_id)
+            if not release:
+                return jsonify({"error": "Discogs release not found"}), 404
+
+            import re as _re
+            _disambig_re = _re.compile(r'\s*\(\d+\)$')
+            artists_raw = release.get('artists') or []
+            artist_names = []
+            for a in artists_raw:
+                name = (a.get('name') or '').strip() if isinstance(a, dict) else str(a)
+                # Strip Discogs disambiguation suffix "(N)"
+                name = _disambig_re.sub('', name)
+                if name:
+                    artist_names.append({'name': name})
+
+            tracks_out = []
+            for idx, t in enumerate(release.get('tracklist', []) or [], start=1):
+                if not isinstance(t, dict):
+                    continue
+                title = (t.get('title') or '').strip()
+                if not title:
+                    continue
+                # Discogs duration: "3:45" or "1:23:45". Convert to ms.
+                dur_ms = 0
+                dur_str = (t.get('duration') or '').strip()
+                if dur_str:
+                    try:
+                        parts = [int(p) for p in dur_str.split(':')]
+                        if len(parts) == 2:
+                            dur_ms = (parts[0] * 60 + parts[1]) * 1000
+                        elif len(parts) == 3:
+                            dur_ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+                    except (ValueError, TypeError):
+                        dur_ms = 0
+                tracks_out.append({
+                    'id': f"discogs_{rel_id}_{idx}",
+                    'name': title,
+                    'track_number': idx,
+                    'duration_ms': dur_ms,
+                    'artists': artist_names,
+                })
+
+            images = release.get('images') or []
+            cover_url = ''
+            if images and isinstance(images[0], dict):
+                cover_url = images[0].get('uri') or images[0].get('uri150') or ''
+
+            year = release.get('year')
+            release_date = str(year) if year and int(year) > 0 else ''
+
+            return jsonify({
+                'id': str(rel_id),
+                'name': release.get('title', ''),
+                'artists': artist_names,
+                'release_date': release_date,
+                'total_tracks': len(tracks_out),
+                'album_type': 'album',
+                'images': [{'url': cover_url}] if cover_url else [],
+                'tracks': tracks_out,
+                'source': 'discogs',
+            })
+
         else:
             return jsonify({"error": f"Unknown source: {source}"}), 400
 
@@ -19792,7 +19912,7 @@ def get_discover_album(source, album_id):
 def hifi_status():
     """Check if HiFi API instances are reachable."""
     try:
-        hifi = soulseek_client.hifi
+        hifi = download_orchestrator.client("hifi")
         available = hifi.is_available()
         version = hifi.get_version() if available else None
         return jsonify({
@@ -19804,12 +19924,46 @@ def hifi_status():
         return jsonify({"available": False, "error": str(e)})
 
 
+@app.route('/api/soundcloud/status', methods=['GET'])
+def soundcloud_status():
+    """Report SoundCloud client availability + a quick reachability probe.
+
+    SoundCloud anonymous mode needs no credentials, so "configured" is
+    really "yt-dlp is installed and SoundCloud responds to a search."
+    The check fans out a real (cheap) yt-dlp call so the settings page's
+    Test Connection button gives a meaningful pass/fail signal instead
+    of just verifying the import succeeded.
+    """
+    try:
+        sc = download_orchestrator.client("soundcloud") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
+        if not sc:
+            return jsonify({
+                "available": False,
+                "configured": False,
+                "error": "SoundCloud client not initialized — check yt-dlp install",
+            })
+        if not sc.is_available():
+            return jsonify({
+                "available": False,
+                "configured": False,
+                "error": "yt-dlp not installed",
+            })
+        reachable = run_async(sc.check_connection())
+        return jsonify({
+            "available": True,
+            "configured": True,
+            "reachable": bool(reachable),
+        })
+    except Exception as exc:
+        return jsonify({"available": False, "configured": False, "error": str(exc)})
+
+
 @app.route('/api/hifi/instances', methods=['GET'])
 def hifi_instances():
     """Check availability of all HiFi API instances."""
     import requests as req
     try:
-        hifi = soulseek_client.hifi
+        hifi = download_orchestrator.client("hifi")
         instances = list(hifi._instances)
         results = []
         for url in instances:
@@ -19864,9 +20018,9 @@ def hifi_add_instance():
         added = db.add_hifi_instance(url, priority)
         if not added:
             return jsonify({'success': False, 'error': 'Instance already exists'}), 400
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error adding HiFi instance: {e}")
@@ -19886,9 +20040,9 @@ def hifi_remove_instance():
         removed = db.remove_hifi_instance(url)
         if not removed:
             return jsonify({'success': False, 'error': 'Instance not found'}), 404
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True, 'url': url})
     except Exception as e:
         logger.error(f"Error removing HiFi instance: {e}")
@@ -19908,8 +20062,8 @@ def hifi_toggle_instance():
         from database.music_database import get_database
         db = get_database()
         db.toggle_hifi_instance(url, enabled)
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error toggling HiFi instance: {e}")
@@ -19929,9 +20083,9 @@ def hifi_reorder_instances():
         db = get_database()
         if not db.reorder_hifi_instances(urls):
             return jsonify({'success': False, 'error': 'One or more URLs not found'}), 400
-        # Reload the client
-        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
-            soulseek_client.hifi.reload_instances()
+        # Reload the HiFi client
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error reordering HiFi instances: {e}")
@@ -20083,11 +20237,12 @@ def deezer_download_test_download():
 
 def _get_tidal_download_client():
     """Get Tidal download client from the orchestrator, with helpful error if unavailable."""
-    if not soulseek_client:
+    if not download_orchestrator:
         raise RuntimeError("Download orchestrator not initialized — check startup logs for errors")
-    if not hasattr(soulseek_client, 'tidal') or not soulseek_client.tidal:
+    tidal = download_orchestrator.client("tidal") if hasattr(download_orchestrator, 'client') else None
+    if not tidal:
         raise RuntimeError("Tidal download client not available — ensure tidalapi is installed")
-    return soulseek_client.tidal
+    return tidal
 
 @app.route('/api/tidal/download/auth/start', methods=['POST'])
 def tidal_download_auth_start():
@@ -20129,6 +20284,22 @@ def tidal_download_auth_status():
 # QOBUZ AUTH ENDPOINTS
 # ===================================================================
 
+def _sync_qobuz_credentials_to_worker():
+    """Push the just-saved Qobuz session into the enrichment worker's
+    QobuzClient. Two separate client instances run side by side (one for
+    the auth endpoints, one for the worker thread); without this sync the
+    worker's instance never sees the new token until the next process
+    restart, which is what made the dashboard indicator stay yellow and
+    the connection test return ``Qobuz not authenticated`` after a
+    successful Connect."""
+    try:
+        worker = qobuz_enrichment_worker if 'qobuz_enrichment_worker' in globals() else None
+        if worker and getattr(worker, 'client', None):
+            worker.client.reload_credentials()
+    except Exception as e:
+        logger.debug(f"Could not sync Qobuz credentials to enrichment worker: {e}")
+
+
 @app.route('/api/qobuz/auth/login', methods=['POST'])
 def qobuz_auth_login():
     """Login to Qobuz with email/password."""
@@ -20140,10 +20311,11 @@ def qobuz_auth_login():
         if not email or not password:
             return jsonify({"success": False, "error": "Email and password required"}), 400
 
-        qobuz = soulseek_client.qobuz
+        qobuz = download_orchestrator.client("qobuz")
         result = qobuz.login(email, password)
 
         if result['status'] == 'success':
+            _sync_qobuz_credentials_to_worker()
             return jsonify({"success": True, **result})
         else:
             return jsonify({"success": False, "error": result.get('message', 'Login failed')}), 400
@@ -20162,10 +20334,11 @@ def qobuz_auth_token():
         if not token:
             return jsonify({"success": False, "error": "Auth token required"}), 400
 
-        qobuz = soulseek_client.qobuz
+        qobuz = download_orchestrator.client("qobuz")
         result = qobuz.login_with_token(token)
 
         if result['status'] == 'success':
+            _sync_qobuz_credentials_to_worker()
             return jsonify({"success": True, **result})
         else:
             return jsonify({"success": False, "error": result.get('message', 'Token login failed')}), 400
@@ -20178,7 +20351,7 @@ def qobuz_auth_token():
 def qobuz_auth_status():
     """Check if Qobuz client is authenticated."""
     try:
-        qobuz = soulseek_client.qobuz
+        qobuz = download_orchestrator.client("qobuz")
         authenticated = qobuz.is_authenticated()
         user_info = {}
         if authenticated and qobuz.user_info:
@@ -20195,7 +20368,8 @@ def qobuz_auth_status():
 def qobuz_auth_logout():
     """Logout from Qobuz."""
     try:
-        soulseek_client.qobuz.logout()
+        download_orchestrator.client("qobuz").logout()
+        _sync_qobuz_credentials_to_worker()
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -20675,8 +20849,8 @@ def _pause_enrichment_workers(label='discovery'):
                 worker.pause()
                 was_running[name] = True
                 logger.warning(f"Paused {name} enrichment worker during {label}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment worker pause failed: %s", e)
     return was_running
 
 
@@ -20693,8 +20867,8 @@ def _resume_enrichment_workers(was_running, label='discovery'):
             if was_running.get(name) and worker:
                 worker.resume()
                 logger.info(f"Resumed {name} enrichment worker after {label}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("enrichment worker resume failed: %s", e)
 
 
 def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discovery_results, discovery_source, profile_id=1):
@@ -21136,9 +21310,7 @@ def _get_metadata_fallback_client():
 def get_deezer_arl_status():
     """Check if Deezer ARL is configured and authenticated."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if deezer_dl and deezer_dl.is_authenticated():
             user_data = deezer_dl._user_data or {}
             return jsonify({
@@ -21155,9 +21327,7 @@ def get_deezer_arl_status():
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated. Configure your ARL token in Settings > Downloads.'}), 401
 
@@ -21185,9 +21355,7 @@ def get_deezer_arl_playlists():
 def get_deezer_arl_playlist_tracks(playlist_id):
     """Fetch full playlist with tracks via ARL (like /api/spotify/playlist/<id>)."""
     try:
-        deezer_dl = None
-        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
-            deezer_dl = soulseek_client.deezer_dl
+        deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
@@ -23276,8 +23444,7 @@ def _build_sync_deps():
     return _discovery_sync.SyncDeps(
         config_manager=config_manager,
         sync_service=sync_service,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
+        media_server_engine=media_server_engine,
         automation_engine=automation_engine,
         run_async=run_async,
         record_sync_history_start=_record_sync_history_start,
@@ -23409,12 +23576,12 @@ def test_database_access():
         
         # Test media clients 
         logger.info("   Media clients status:")
-        logger.info(f"     plex_client: {plex_client is not None}")
-        if plex_client:
-            logger.info(f"     plex_client.is_connected(): {plex_client.is_connected()}")
-        logger.info(f"     jellyfin_client: {jellyfin_client is not None}")
-        if jellyfin_client:
-            logger.info(f"     jellyfin_client.is_connected(): {jellyfin_client.is_connected()}")
+        logger.info(f"     media_server_engine.client('plex'): {media_server_engine.client('plex') is not None}")
+        if media_server_engine.client('plex'):
+            logger.info(f"     media_server_engine.client('plex').is_connected(): {media_server_engine.client('plex').is_connected()}")
+        logger.info(f"     media_server_engine.client('jellyfin'): {media_server_engine.client('jellyfin') is not None}")
+        if media_server_engine.client('jellyfin'):
+            logger.info(f"     media_server_engine.client('jellyfin').is_connected(): {media_server_engine.client('jellyfin').is_connected()}")
         
         return jsonify({
             "success": True, 
@@ -23423,8 +23590,8 @@ def test_database_access():
                 "database_initialized": db is not None,
                 "database_stats": stats,
                 "active_server": active_server,
-                "plex_connected": plex_client.is_connected() if plex_client else False,
-                "jellyfin_connected": jellyfin_client.is_connected() if jellyfin_client else False,
+                "plex_connected": media_server_engine.client('plex').is_connected() if media_server_engine.client('plex') else False,
+                "jellyfin_connected": media_server_engine.client('jellyfin').is_connected() if media_server_engine.client('jellyfin') else False,
             }
         })
         
@@ -24699,8 +24866,8 @@ def add_to_watchlist():
                     elif row['discogs_id']:
                         artist_id = row['discogs_id']
                         source = 'discogs'
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist artist source lookup failed: %s", e)
         if not source:
             fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
@@ -24780,16 +24947,16 @@ def add_to_watchlist():
             try:
                 pid = get_current_profile_id()
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist count emit failed: %s", e)
             try:
                 if automation_engine:
                     automation_engine.emit('watchlist_artist_added', {
                         'artist': artist_name,
                         'artist_id': str(artist_id),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist_artist_added emit failed: %s", e)
             _artmap_cache_invalidate(get_current_profile_id())
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
         else:
@@ -24817,16 +24984,16 @@ def remove_from_watchlist():
             try:
                 pid = get_current_profile_id()
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist count emit failed: %s", e)
             try:
                 if automation_engine:
                     automation_engine.emit('watchlist_artist_removed', {
                         'artist': data.get('artist_name', str(artist_id)),
                         'artist_id': str(artist_id),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("watchlist_artist_removed emit failed: %s", e)
             _artmap_cache_invalidate(get_current_profile_id())
             return jsonify({"success": True, "message": "Removed artist from watchlist"})
         else:
@@ -24968,8 +25135,8 @@ def watchlist_all_unwatched_library_artists():
                 if artist.get('image_url'):
                     try:
                         database.update_watchlist_artist_image(artist_id, artist['image_url'])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("watchlist artist image update failed: %s", e)
 
         total_unwatched = len(unwatched_artists)
         message_parts = [f"Added {added} artist{'s' if added != 1 else ''} to watchlist"]
@@ -25128,8 +25295,8 @@ def start_watchlist_scan():
                 try:
                     if config_manager.get('discogs.token', ''):
                         providers_to_backfill.append('discogs')
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("discogs token backfill check failed: %s", e)
                 for _bf_provider in providers_to_backfill:
                     try:
                         logger.debug(f"Checking for missing {_bf_provider} IDs in watchlist...")
@@ -25292,8 +25459,8 @@ def start_watchlist_scan():
                 # Clear one-time rescan cutoff after full scan cycle
                 try:
                     scanner._clear_rescan_cutoff()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("scanner rescan cutoff clear failed: %s", e)
 
                 # Always reset flag when scan completes (success or error)
                 with watchlist_timer_lock:
@@ -26130,8 +26297,8 @@ def enrich_similar_artists():
                                 aid, fallback_source,
                                 image_url=img_url, genres=genres, popularity=0
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("similar artist enrichment failed: %s", e)
 
         cached_count = len(enriched) - len([aid for aid in uncached_ids if aid in enriched])
         api_count = len([aid for aid in uncached_ids if aid in enriched])
@@ -26298,10 +26465,10 @@ def get_discover_recent_releases():
                         if album_id:
                             try:
                                 database.update_discovery_recent_album_cover(album_id, cover)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                logger.debug("recent album cover update failed: %s", e)
+                except Exception as e:
+                    logger.debug("recent album cover fetch failed: %s", e)
 
         # Filter out blacklisted artists
         blacklisted = database.get_discovery_blacklist_names()
@@ -26435,8 +26602,8 @@ def get_discover_because_you_listen_to():
                     if row and row[0]:
                         artist_image = fix_artist_image_url(row[0])
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist image lookup failed: %s", e)
 
                 sections.append({
                     'artist_name': artist_name,
@@ -26621,8 +26788,8 @@ def resolve_cache_album():
                     if results:
                         r = results[0]
                         return jsonify({'success': True, 'entity_id': str(r.id), 'source': _get_metadata_fallback_source()})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("fallback album search failed: %s", e)
 
             return jsonify({'success': False, 'error': 'Album not found in cache'})
     except Exception as e:
@@ -26937,8 +27104,8 @@ def get_seasonal_playlist(season_key):
                         try:
                             import json
                             track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("track_data_json parse: %s", e)
                     tracks.append(track_dict)
                 else:
                     # Try discovery_pool as fallback (filtered by source)
@@ -26964,8 +27131,8 @@ def get_seasonal_playlist(season_key):
                             try:
                                 import json
                                 track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("discovery track_data_json parse: %s", e)
                         tracks.append(track_dict)
 
         config = SEASONAL_CONFIG[season_key]
@@ -27370,8 +27537,8 @@ def get_your_artists_sources():
         try:
             if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
                 connected.append('tidal')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("tidal auth check failed: %s", e)
         # Last.fm
         if config_manager.get('lastfm.api_key', '') and config_manager.get('lastfm.session_key', ''):
             connected.append('lastfm')
@@ -27379,12 +27546,12 @@ def get_your_artists_sources():
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                          and soulseek_client.deezer_dl.is_authenticated())
+            deezer_arl = (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
+                          and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deezer auth check failed: %s", e)
 
         return jsonify({"success": True, "enabled": enabled, "connected": connected})
     except Exception as e:
@@ -27501,10 +27668,10 @@ def _fetch_and_match_liked_artists(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                  and soulseek_client.deezer_dl.is_authenticated()):
+            elif (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
+                  and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
-                artists = soulseek_client.deezer_dl.get_user_favorite_artists(limit=200)
+                artists = download_orchestrator.client("deezer_dl").get_user_favorite_artists(limit=200)
             for a in artists:
                 database.upsert_liked_artist(
                     artist_name=a['name'], source_service='deezer',
@@ -27646,17 +27813,26 @@ def get_your_albums_sources():
         try:
             if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
                 connected.append('tidal')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("tidal auth check failed: %s", e)
         try:
             deezer_cl = _get_deezer_client()
             deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
-            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                          and soulseek_client.deezer_dl.is_authenticated())
+            deezer_arl = (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
+                          and download_orchestrator.client("deezer_dl").is_authenticated())
             if deezer_oauth or deezer_arl:
                 connected.append('deezer')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("deezer auth check failed: %s", e)
+
+        # Discogs: counts as "connected" when a personal access token is
+        # configured. Username comes from /oauth/identity at fetch time;
+        # not required up front.
+        try:
+            if config_manager.get('discogs.token', ''):
+                connected.append('discogs')
+        except Exception as e:
+            logger.debug("discogs token check failed: %s", e)
 
         return jsonify({"success": True, "enabled": enabled, "connected": connected})
     except Exception as e:
@@ -27750,10 +27926,10 @@ def _fetch_liked_albums(profile_id: int):
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
                 albums = deezer_cl.get_user_favorite_albums(limit=500)
-            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
-                  and soulseek_client.deezer_dl.is_authenticated()):
+            elif (hasattr(download_orchestrator, 'client') and download_orchestrator.client("deezer_dl")
+                  and download_orchestrator.client("deezer_dl").is_authenticated()):
                 logger.info("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
-                albums = soulseek_client.deezer_dl.get_user_favorite_albums(limit=500)
+                albums = download_orchestrator.client("deezer_dl").get_user_favorite_albums(limit=500)
             for a in albums:
                 database.upsert_liked_album(
                     album_name=a['album_name'], artist_name=a['artist_name'],
@@ -27767,6 +27943,38 @@ def _fetch_liked_albums(profile_id: int):
                 logger.info(f"[Your Albums] Fetched {len(albums)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Albums] Deezer fetch error: {e}")
+
+    # 4. Fetch from Discogs (user's collection) — uses personal access
+    # token from `discogs.token` config. Username resolved via the
+    # `/oauth/identity` endpoint at fetch time. Discogs is physical-
+    # media-first so many releases won't have streaming equivalents,
+    # but the click-context dispatch in the frontend opens the Discogs
+    # release detail and the user can manually trigger a download
+    # search if a digital match exists.
+    try:
+        if 'discogs' not in enabled_sources:
+            logger.warning("[Your Albums] Discogs skipped (disabled in sources config)")
+        elif not config_manager.get('discogs.token', ''):
+            logger.info("[Your Albums] Discogs skipped (no token configured)")
+        else:
+            from core.discogs_client import DiscogsClient
+            discogs_cl = DiscogsClient()
+            if discogs_cl.is_authenticated():
+                logger.info("[Your Albums] Fetching collection from Discogs...")
+                releases = discogs_cl.get_user_collection()
+                for r in releases:
+                    database.upsert_liked_album(
+                        album_name=r['album_name'], artist_name=r['artist_name'],
+                        source_service='discogs',
+                        source_id=str(r['release_id']), source_id_type='discogs',
+                        image_url=r.get('image_url'), release_date=r.get('release_date', ''),
+                        total_tracks=r.get('total_tracks', 0), profile_id=profile_id
+                    )
+                fetched += len(releases)
+                if releases:
+                    logger.info(f"[Your Albums] Fetched {len(releases)} from Discogs")
+    except Exception as e:
+        logger.error(f"[Your Albums] Discogs fetch error: {e}")
 
     logger.info(f"[Your Albums] Total fetched: {fetched}")
 
@@ -27807,8 +28015,8 @@ def get_your_artist_info(artist_id):
                     'lastfm_playcount': r.get('lastfm_playcount', 0),
                 })
                 return jsonify(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("library artist lookup failed: %s", e)
 
         # 2. Try metadata cache
         try:
@@ -27829,8 +28037,8 @@ def get_your_artist_info(artist_id):
                     'followers': cached.get('followers', {}).get('total', 0) if isinstance(cached.get('followers'), dict) else cached.get('followers', 0),
                 })
                 return jsonify(result)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("metadata cache lookup failed: %s", e)
 
         # 3. Try Spotify API directly (genres, image, followers)
         try:
@@ -27900,7 +28108,7 @@ def image_proxy():
         'img.discogs.com', 'i.discogs.com',  # Discogs
         'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
     ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not _is_internal_image_host(url):
+    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not is_internal_image_host(url):
         return '', 403
     try:
         resp = requests.get(url, timeout=10, stream=True, headers={
@@ -29102,17 +29310,17 @@ def start_metadata_update():
         
         # Get appropriate media client - Support all three servers
         if active_server == "jellyfin":
-            media_client = jellyfin_client
+            media_client = media_server_engine.client('jellyfin')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Jellyfin client not available", "Now")
                 return jsonify({"success": False, "error": "Jellyfin client not available"}), 400
         elif active_server == "navidrome":
-            media_client = navidrome_client
+            media_client = media_server_engine.client('navidrome')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Navidrome client not available", "Now")
                 return jsonify({"success": False, "error": "Navidrome client not available"}), 400
         else:  # plex
-            media_client = plex_client
+            media_client = media_server_engine.client('plex')
             if not media_client:
                 add_activity_item("", "Metadata Update", "Plex client not available", "Now")
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
@@ -31296,8 +31504,8 @@ def mirror_playlist_endpoint():
                     'source': source,
                     'track_count': str(len(tracks)),
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("mirrored_playlist_created emit failed: %s", e)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
     except Exception as e:
@@ -31471,8 +31679,8 @@ def fix_discovery_pool_track():
                     cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                     row['track_name'], row['artist_name']
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("discovery cache match save failed: %s", e)
 
         return jsonify({"success": True})
     except Exception as e:
@@ -31896,8 +32104,8 @@ def playlist_explorer_album_tracks(album_id):
         if cache and tracks:
             try:
                 cache.store_entity(source_name, 'album_tracks', cache_key, result)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album_tracks cache store failed: %s", e)
 
         return jsonify(result)
     except Exception as e:
@@ -32040,7 +32248,7 @@ def start_oauth_callback_servers():
                                 _clear_rate_limit()
                                 spotify_client._invalidate_auth_cache()
                                 # Invalidate status cache so next poll picks up the new connection
-                                _status_cache_timestamps['spotify'] = 0
+                                invalidate_metadata_status_caches()
                                 # Refresh enrichment worker's client so it picks up new auth
                                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                                     spotify_enrichment_worker.client.reload_config()
@@ -32053,7 +32261,7 @@ def start_oauth_callback_servers():
                             else:
                                 _oauth_logger.warning("Spotify token exchange succeeded but authentication validation failed")
                                 spotify_client._invalidate_auth_cache()
-                                _status_cache_timestamps['spotify'] = 0
+                                invalidate_metadata_status_caches()
                                 add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
                                 self.send_response(200)
                                 self.send_header('Content-type', 'text/html')
@@ -32106,8 +32314,8 @@ def start_oauth_callback_servers():
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     self.wfile.write(f'<h1>Internal Server Error</h1><p>{str(e)}</p>'.encode())
-                except Exception:
-                    pass  # Connection already broken, nothing more we can do
+                except Exception as _e:
+                    _oauth_logger.debug("oauth response write: %s", _e)
 
         def log_message(self, format, *args):
             pass  # Suppress BaseHTTPRequestHandler access logs (we use our own logger)
@@ -32248,57 +32456,9 @@ except Exception as e:
     logger.error(f"MusicBrainz worker initialization failed: {e}")
     mb_worker = None
 
-# --- MusicBrainz API Endpoints ---
-
-@app.route('/api/musicbrainz/status', methods=['GET'])
-def musicbrainz_status():
-    """Get MusicBrainz enrichment status for UI polling"""
-    try:
-        if mb_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-        
-        status = mb_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting MusicBrainz status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/musicbrainz/pause', methods=['POST'])
-def musicbrainz_pause():
-    """Pause MusicBrainz enrichment worker (finishes current match first)"""
-    try:
-        if mb_worker is None:
-            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
-        
-        mb_worker.pause()
-        config_manager.set('musicbrainz_enrichment_paused', True)
-        logger.info("MusicBrainz worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing MusicBrainz worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/musicbrainz/resume', methods=['POST'])
-def musicbrainz_resume():
-    """Resume MusicBrainz enrichment worker"""
-    try:
-        if mb_worker is None:
-            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
-        
-        mb_worker.resume()
-        config_manager.set('musicbrainz_enrichment_paused', False)
-        logger.info("MusicBrainz worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming MusicBrainz worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# MusicBrainz status / pause / resume routes are now served by the
+# generic enrichment blueprint registered in core/enrichment/api.py
+# under /api/enrichment/musicbrainz/{status,pause,resume}.
 
 # ================================================================================================
 # END MUSICBRAINZ INTEGRATION
@@ -32325,57 +32485,8 @@ except Exception as e:
     logger.error(f"AudioDB worker initialization failed: {e}")
     audiodb_worker = None
 
-# --- AudioDB API Endpoints ---
-
-@app.route('/api/audiodb/status', methods=['GET'])
-def audiodb_status():
-    """Get AudioDB enrichment status for UI polling"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = audiodb_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting AudioDB status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/audiodb/pause', methods=['POST'])
-def audiodb_pause():
-    """Pause AudioDB enrichment worker"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({'error': 'AudioDB worker not initialized'}), 400
-
-        audiodb_worker.pause()
-        config_manager.set('audiodb_enrichment_paused', True)
-        logger.info("AudioDB worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing AudioDB worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/audiodb/resume', methods=['POST'])
-def audiodb_resume():
-    """Resume AudioDB enrichment worker"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({'error': 'AudioDB worker not initialized'}), 400
-
-        audiodb_worker.resume()
-        config_manager.set('audiodb_enrichment_paused', False)
-        logger.info("AudioDB worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming AudioDB worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# AudioDB status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/audiodb/{status,pause,resume}.
 
 # ================================================================================================
 # END AUDIODB INTEGRATION
@@ -32398,47 +32509,8 @@ except Exception as e:
     logger.error(f"Discogs worker initialization failed: {e}")
     discogs_worker = None
 
-# --- Discogs API Endpoints ---
-
-@app.route('/api/discogs/status', methods=['GET'])
-def discogs_status():
-    """Get Discogs enrichment status for UI polling"""
-    try:
-        if discogs_worker is None:
-            return jsonify({
-                'enabled': False, 'running': False, 'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-            }), 200
-        return jsonify(discogs_worker.get_stats()), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/discogs/pause', methods=['POST'])
-def discogs_pause():
-    """Pause Discogs enrichment worker"""
-    try:
-        if discogs_worker is None:
-            return jsonify({'error': 'Discogs worker not initialized'}), 400
-        discogs_worker.pause()
-        config_manager.set('discogs_enrichment_paused', True)
-        logger.info("Discogs worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/discogs/resume', methods=['POST'])
-def discogs_resume():
-    """Resume Discogs enrichment worker"""
-    try:
-        if discogs_worker is None:
-            return jsonify({'error': 'Discogs worker not initialized'}), 400
-        discogs_worker.resume()
-        config_manager.set('discogs_enrichment_paused', False)
-        logger.info("Discogs worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# Discogs status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/discogs/{status,pause,resume}.
 
 # ================================================================================================
 # DEEZER ENRICHMENT INTEGRATION
@@ -32460,57 +32532,8 @@ except Exception as e:
     logger.error(f"Deezer worker initialization failed: {e}")
     deezer_worker = None
 
-# --- Deezer API Endpoints ---
-
-@app.route('/api/deezer/status', methods=['GET'])
-def deezer_status():
-    """Get Deezer enrichment status for UI polling"""
-    try:
-        if deezer_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = deezer_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Deezer status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/deezer/pause', methods=['POST'])
-def deezer_pause():
-    """Pause Deezer enrichment worker"""
-    try:
-        if deezer_worker is None:
-            return jsonify({'error': 'Deezer worker not initialized'}), 400
-
-        deezer_worker.pause()
-        config_manager.set('deezer_enrichment_paused', True)
-        logger.info("Deezer worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Deezer worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/deezer/resume', methods=['POST'])
-def deezer_resume():
-    """Resume Deezer enrichment worker"""
-    try:
-        if deezer_worker is None:
-            return jsonify({'error': 'Deezer worker not initialized'}), 400
-
-        deezer_worker.resume()
-        config_manager.set('deezer_enrichment_paused', False)
-        logger.info("Deezer worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Deezer worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Deezer status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/deezer/{status,pause,resume}.
 
 # ================================================================================================
 # END DEEZER INTEGRATION
@@ -32569,66 +32592,10 @@ def get_rate_monitor_history(service_key):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# --- Spotify API Endpoints ---
-
-@app.route('/api/spotify-enrichment/status', methods=['GET'])
-def spotify_enrichment_status():
-    """Get Spotify enrichment status for UI polling"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = spotify_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Spotify enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/spotify-enrichment/pause', methods=['POST'])
-def spotify_enrichment_pause():
-    """Pause Spotify enrichment worker"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
-
-        spotify_enrichment_worker.pause()
-        config_manager.set('spotify_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('spotify-enrichment')
-        logger.info("Spotify enrichment worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Spotify enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/spotify-enrichment/resume', methods=['POST'])
-def spotify_enrichment_resume():
-    """Resume Spotify enrichment worker"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
-
-        # Block resume while Spotify is rate limited
-        if _spotify_rate_limited():
-            return jsonify({'error': 'Cannot resume while Spotify is rate limited', 'rate_limited': True}), 429
-
-        spotify_enrichment_worker.resume()
-        config_manager.set('spotify_enrichment_paused', False)
-        _download_auto_paused.discard('spotify-enrichment')
-        _download_yield_override.add('spotify-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Spotify enrichment worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Spotify enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Spotify status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/spotify/{status,pause,resume}.
+# The rate-limit guard, auto-pause token cleanup, and yield-override behavior
+# are encoded on the EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END SPOTIFY ENRICHMENT INTEGRATION
@@ -32655,57 +32622,8 @@ except Exception as e:
     logger.error(f"iTunes enrichment worker initialization failed: {e}")
     itunes_enrichment_worker = None
 
-# --- iTunes API Endpoints ---
-
-@app.route('/api/itunes-enrichment/status', methods=['GET'])
-def itunes_enrichment_status():
-    """Get iTunes enrichment status for UI polling"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = itunes_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting iTunes enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/itunes-enrichment/pause', methods=['POST'])
-def itunes_enrichment_pause():
-    """Pause iTunes enrichment worker"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
-
-        itunes_enrichment_worker.pause()
-        config_manager.set('itunes_enrichment_paused', True)
-        logger.info("iTunes enrichment worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing iTunes enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/itunes-enrichment/resume', methods=['POST'])
-def itunes_enrichment_resume():
-    """Resume iTunes enrichment worker"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
-
-        itunes_enrichment_worker.resume()
-        config_manager.set('itunes_enrichment_paused', False)
-        logger.info("iTunes enrichment worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming iTunes enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# iTunes status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/itunes/{status,pause,resume}.
 
 # ================================================================================================
 # END ITUNES ENRICHMENT INTEGRATION
@@ -32731,62 +32649,10 @@ except Exception as e:
     logger.error(f"Last.fm worker initialization failed: {e}")
     lastfm_worker = None
 
-# --- Last.fm API Endpoints ---
-
-@app.route('/api/lastfm-enrichment/status', methods=['GET'])
-def lastfm_enrichment_status():
-    """Get Last.fm enrichment status for UI polling"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = lastfm_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Last.fm enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/lastfm-enrichment/pause', methods=['POST'])
-def lastfm_enrichment_pause():
-    """Pause Last.fm enrichment worker"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({'error': 'Last.fm worker not initialized'}), 400
-
-        lastfm_worker.pause()
-        config_manager.set('lastfm_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('lastfm-enrichment')
-        logger.info("Last.fm worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Last.fm worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/lastfm-enrichment/resume', methods=['POST'])
-def lastfm_enrichment_resume():
-    """Resume Last.fm enrichment worker"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({'error': 'Last.fm worker not initialized'}), 400
-
-        lastfm_worker.resume()
-        config_manager.set('lastfm_enrichment_paused', False)
-        _download_auto_paused.discard('lastfm-enrichment')
-        _download_yield_override.add('lastfm-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Last.fm worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Last.fm worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Last.fm status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/lastfm/{status,pause,resume}.
+# The auto-pause token cleanup + yield-override behavior is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
 def get_artist_lastfm_top_tracks(artist_id):
@@ -32879,60 +32745,10 @@ except Exception as e:
 
 # --- Genius API Endpoints ---
 
-@app.route('/api/genius-enrichment/status', methods=['GET'])
-def genius_enrichment_status():
-    """Get Genius enrichment status for UI polling"""
-    try:
-        if genius_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = genius_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Genius enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/genius-enrichment/pause', methods=['POST'])
-def genius_enrichment_pause():
-    """Pause Genius enrichment worker"""
-    try:
-        if genius_worker is None:
-            return jsonify({'error': 'Genius worker not initialized'}), 400
-
-        genius_worker.pause()
-        config_manager.set('genius_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('genius-enrichment')
-        logger.info("Genius worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Genius worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/genius-enrichment/resume', methods=['POST'])
-def genius_enrichment_resume():
-    """Resume Genius enrichment worker"""
-    try:
-        if genius_worker is None:
-            return jsonify({'error': 'Genius worker not initialized'}), 400
-
-        genius_worker.resume()
-        config_manager.set('genius_enrichment_paused', False)
-        _download_auto_paused.discard('genius-enrichment')
-        _download_yield_override.add('genius-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Genius worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Genius worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Genius status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/genius/{status,pause,resume}.
+# The auto-pause token cleanup + yield-override behavior is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END GENIUS ENRICHMENT INTEGRATION
@@ -32957,58 +32773,10 @@ except Exception as e:
     logger.error(f"Tidal worker initialization failed: {e}")
     tidal_enrichment_worker = None
 
-# --- Tidal Enrichment API Endpoints ---
-
-@app.route('/api/tidal-enrichment/status', methods=['GET'])
-def tidal_enrichment_status():
-    """Get Tidal enrichment status for UI polling"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'authenticated': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = tidal_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Tidal enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tidal-enrichment/pause', methods=['POST'])
-def tidal_enrichment_pause():
-    """Pause Tidal enrichment worker"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({'error': 'Tidal worker not initialized'}), 400
-
-        tidal_enrichment_worker.pause()
-        config_manager.set('tidal_enrichment_paused', True)
-        logger.info("Tidal worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Tidal worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tidal-enrichment/resume', methods=['POST'])
-def tidal_enrichment_resume():
-    """Resume Tidal enrichment worker"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({'error': 'Tidal worker not initialized'}), 400
-
-        tidal_enrichment_worker.resume()
-        config_manager.set('tidal_enrichment_paused', False)
-        logger.info("Tidal worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Tidal worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Tidal status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/tidal/{status,pause,resume}.
+# The 'authenticated': False fallback field is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # QOBUZ ENRICHMENT WORKER
@@ -33043,58 +32811,10 @@ _init_service_search(
     audiodb_worker_obj=audiodb_worker,
 )
 
-# --- Qobuz Enrichment API Endpoints ---
-
-@app.route('/api/qobuz-enrichment/status', methods=['GET'])
-def qobuz_enrichment_status():
-    """Get Qobuz enrichment status for UI polling"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'authenticated': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = qobuz_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Qobuz enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/qobuz-enrichment/pause', methods=['POST'])
-def qobuz_enrichment_pause():
-    """Pause Qobuz enrichment worker"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({'error': 'Qobuz worker not initialized'}), 400
-
-        qobuz_enrichment_worker.pause()
-        config_manager.set('qobuz_enrichment_paused', True)
-        logger.info("Qobuz worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Qobuz worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/qobuz-enrichment/resume', methods=['POST'])
-def qobuz_enrichment_resume():
-    """Resume Qobuz enrichment worker"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({'error': 'Qobuz worker not initialized'}), 400
-
-        qobuz_enrichment_worker.resume()
-        config_manager.set('qobuz_enrichment_paused', False)
-        logger.info("Qobuz worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Qobuz worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Qobuz status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/qobuz/{status,pause,resume}.
+# The 'authenticated': False fallback field is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END TIDAL/QOBUZ ENRICHMENT INTEGRATION
@@ -33130,7 +32850,7 @@ register_runtime_clients(
 )
 
 _init_connection_test(
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     qobuz_worker=qobuz_enrichment_worker,
     hydrabase_client_obj=hydrabase_client,
     docker_resolve_url_fn=docker_resolve_url,
@@ -33143,12 +32863,12 @@ _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_clien
 
 _init_download_validation(
     matching_engine_obj=matching_engine,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
 )
 
 _init_wishlist_failed(
     engine=automation_engine,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     sweep_fn=_sweep_empty_download_directories,
 )
 
@@ -33167,7 +32887,7 @@ _init_debug_info(
     sync_states_dict=sync_states,
     youtube_playlist_states_dict=youtube_playlist_states,
     tidal_discovery_states_dict=tidal_discovery_states,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
     log_path=_log_path,
     log_dir=_log_dir,
     flask_app=app,
@@ -33186,7 +32906,7 @@ _init_download_monitor(
     start_next_batch_of_downloads=_start_next_batch_of_downloads,
     orphaned_download_keys=_orphaned_download_keys,
     missing_download_executor_obj=missing_download_executor,
-    soulseek_client_obj=soulseek_client,
+    download_orchestrator_obj=download_orchestrator,
 )
 
 # --- Hydrabase Auto-Reconnect ---
@@ -33305,9 +33025,7 @@ try:
     listening_stats_worker = ListeningStatsWorker(
         database=listening_stats_db,
         config_manager=config_manager,
-        plex_client=plex_client,
-        jellyfin_client=jellyfin_client,
-        navidrome_client=navidrome_client,
+        media_server_engine=media_server_engine,
     )
     listening_stats_worker.start()
     logger.info("Listening stats worker initialized and started")
@@ -33409,6 +33127,21 @@ def stats_db_storage():
     """Get database storage breakdown by table."""
     try:
         data = _stats_queries.get_db_storage(get_database())
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/library-disk-usage', methods=['GET'])
+def stats_library_disk_usage():
+    """Library on-disk size + per-format breakdown.
+
+    Reads `tracks.file_size` populated by the deep scan from data the
+    media server already returns. Returns ``has_data: false`` on fresh
+    installs that haven't run a deep scan since the migration — UI
+    shows "Run a Deep Scan to populate" in that case.
+    """
+    try:
+        data = _stats_queries.get_library_disk_usage(get_database())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -33516,12 +33249,14 @@ try:
             state['status'] = status
             state['progress'] = 100
             state['finished_at'] = datetime.now(timezone.utc).isoformat()
-            summary = f'Done: {result.scanned} scanned, {result.auto_fixed} fixed, {result.findings_created} findings, {result.errors} errors'
+            skipped_dedup = getattr(result, 'findings_skipped_dedup', 0) or 0
+            existing_part = f' ({skipped_dedup} already existed)' if skipped_dedup else ''
+            summary = f'Done: {result.scanned} scanned, {result.auto_fixed} fixed, {result.findings_created} findings{existing_part}, {result.errors} errors'
             state['log'].append({'type': 'success' if status == 'finished' else 'error', 'text': summary})
             try:
                 socketio.emit('repair:progress', {job_id: dict(state)})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("repair progress emit failed: %s", e)
 
     repair_worker.register_progress_callbacks(_repair_job_start, _repair_job_progress, _repair_job_finish)
     # Store refs for WebSocket push loop
@@ -34006,8 +33741,8 @@ def import_staging_hints():
                         if album:
                             key = (album.strip(), (artist or '').strip())
                             tag_albums[key] = tag_albums.get(key, 0) + 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("tag read failed: %s", e)
 
         # Build search queries, prioritizing tag-based hints (more specific)
         queries = []
@@ -34163,8 +33898,8 @@ def import_album_process():
                         'completed_tracks': str(processed),
                         'failed_tracks': str(len(errors)),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album import automation emit failed: %s", e)
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -34327,8 +34062,8 @@ def import_singles_process():
                         'completed_tracks': str(processed),
                         'failed_tracks': str(len(errors)),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("singles import automation emit failed: %s", e)
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -34505,17 +34240,7 @@ def _build_status_payload():
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
-
-    # Always include fresh rate limit info (it changes over time as ban expires)
-    # Call is_rate_limited() first to ensure ban-end timestamp is recorded for cooldown
-    spotify_data = dict(_status_cache.get('spotify', {}))
-    is_rl = spotify_client.is_rate_limited() if spotify_client else False
-    rate_limit_info = spotify_client.get_rate_limit_info() if is_rl else None
-    cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-    spotify_data['rate_limited'] = is_rl
-    spotify_data['rate_limit'] = rate_limit_info
-    if cooldown_remaining > 0:
-        spotify_data['post_ban_cooldown'] = cooldown_remaining
+    metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
     # Count active downloads for nav badge
     active_dl_count = 0
@@ -34524,11 +34249,12 @@ def _build_status_payload():
             for t in download_tasks.values():
                 if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
                     active_dl_count += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("active download count failed: %s", e)
 
     return {
-        'spotify': spotify_data,
+        'metadata_source': metadata_status['metadata_source'],
+        'spotify': metadata_status['spotify'],
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
@@ -34569,8 +34295,8 @@ def _hydrabase_reconnect_loop():
                 if _hydrabase_ws is not None and _hydrabase_ws.connected:
                     _consecutive_failures = 0
                     continue
-            except Exception:
-                pass  # Socket in bad state — treat as disconnected
+            except Exception as e:
+                logger.debug("hydrabase socket check: %s", e)
 
             # Disconnected with auto_connect enabled — try to reconnect
             # Back off: 30s, 60s, 120s, max 300s between attempts
@@ -34584,8 +34310,8 @@ def _hydrabase_reconnect_loop():
                     if _hydrabase_ws:
                         try:
                             _hydrabase_ws.close()
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("hydrabase reconnect close: %s", e)
                     ws = websocket.create_connection(
                         hydra_cfg['url'],
                         header={"x-api-key": hydra_cfg['api_key']},
@@ -34600,8 +34326,8 @@ def _hydrabase_reconnect_loop():
                     logger.error(f"[Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
                 elif _consecutive_failures == 4:
                     logger.error("[Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
-        except Exception:
-            pass  # Don't crash the monitor loop
+        except Exception as e:
+            logger.debug("hydrabase monitor loop: %s", e)
 
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""
@@ -34744,14 +34470,112 @@ def _has_active_downloads():
             for batch_data in download_batches.values():
                 if batch_data.get('phase') not in ('complete', 'error', 'cancelled', None):
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("active downloads check failed: %s", e)
     return False
 
 
 # Track whether we auto-paused workers so we only resume ones we paused (not user-paused ones)
 _download_auto_paused = set()
 _download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
+
+
+# ---------------------------------------------------------------------------
+# Enrichment service registry
+# ---------------------------------------------------------------------------
+# Generic ``/api/enrichment/<service_id>/{status,pause,resume}`` routes that
+# replace 30 near-identical per-service routes scattered through this file.
+# The old per-service routes still exist below as a fallback during the
+# soak period; PR-2 deletes them once the dashboard has cut over to the
+# generic ones. See `core/enrichment/services.py` for the registry.
+from core.enrichment.api import (
+    configure as _configure_enrichment_api,
+    create_blueprint as _create_enrichment_blueprint,
+)
+from core.enrichment.services import (
+    EnrichmentService as _EnrichmentService,
+    register_services as _register_enrichment_services,
+)
+
+
+def _spotify_resume_pre_check():
+    """Mirror the inline Spotify rate-limit guard from the legacy
+    ``/api/spotify-enrichment/resume`` route. Returns
+    ``(429, message)`` to short-circuit when banned, ``None`` when ok."""
+    try:
+        if _spotify_rate_limited():
+            return (429, 'Cannot resume while Spotify is rate limited')
+    except Exception as e:
+        logger.debug("spotify rate-limit pre-check failed: %s", e)
+    return None
+
+
+_register_enrichment_services([
+    _EnrichmentService(
+        id='musicbrainz', display_name='MusicBrainz',
+        worker_getter=lambda: mb_worker,
+        config_paused_key='musicbrainz_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='audiodb', display_name='AudioDB',
+        worker_getter=lambda: audiodb_worker,
+        config_paused_key='audiodb_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='discogs', display_name='Discogs',
+        worker_getter=lambda: discogs_worker,
+        config_paused_key='discogs_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='deezer', display_name='Deezer',
+        worker_getter=lambda: deezer_worker,
+        config_paused_key='deezer_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='spotify', display_name='Spotify',
+        worker_getter=lambda: spotify_enrichment_worker,
+        config_paused_key='spotify_enrichment_paused',
+        pre_resume_check=_spotify_resume_pre_check,
+        auto_pause_token='spotify-enrichment',
+    ),
+    _EnrichmentService(
+        id='itunes', display_name='iTunes',
+        worker_getter=lambda: itunes_enrichment_worker,
+        config_paused_key='itunes_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='lastfm', display_name='Last.fm',
+        worker_getter=lambda: lastfm_worker,
+        config_paused_key='lastfm_enrichment_paused',
+        auto_pause_token='lastfm-enrichment',
+    ),
+    _EnrichmentService(
+        id='genius', display_name='Genius',
+        worker_getter=lambda: genius_worker,
+        config_paused_key='genius_enrichment_paused',
+        auto_pause_token='genius-enrichment',
+    ),
+    _EnrichmentService(
+        id='tidal', display_name='Tidal',
+        worker_getter=lambda: tidal_enrichment_worker,
+        config_paused_key='tidal_enrichment_paused',
+        extra_status_defaults={'authenticated': False},
+    ),
+    _EnrichmentService(
+        id='qobuz', display_name='Qobuz',
+        worker_getter=lambda: qobuz_enrichment_worker,
+        config_paused_key='qobuz_enrichment_paused',
+        extra_status_defaults={'authenticated': False},
+    ),
+])
+
+_configure_enrichment_api(
+    config_set=lambda key, value: config_manager.set(key, value),
+    auto_paused_discard=lambda token: _download_auto_paused.discard(token),
+    yield_override_add=lambda token: _download_yield_override.add(token),
+)
+
+app.register_blueprint(_create_enrichment_blueprint())
 
 
 def _emit_rate_monitor_loop():
@@ -34789,19 +34613,19 @@ def _emit_rate_monitor_loop():
                         }
                         if svc_key == 'spotify' and enr.get('daily_budget'):
                             entry['worker']['daily_budget'] = enr['daily_budget']
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("enrichment worker status build failed: %s", e)
 
             # Add Spotify rate limit state
             try:
-                if spotify_client:
-                    rl_info = spotify_client.get_rate_limit_info()
-                    if rl_info:
-                        payload['spotify']['rate_limited'] = True
-                        payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
-                        payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
-            except Exception:
-                pass
+                spotify_status = get_spotify_status(spotify_client=spotify_client)
+                rl_info = spotify_status.get('rate_limit')
+                if spotify_status.get('rate_limited') and rl_info:
+                    payload['spotify']['rate_limited'] = True
+                    payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
+                    payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
+            except Exception as e:
+                logger.debug("spotify rate-limit status read failed: %s", e)
 
             socketio.emit('rate-monitor:update', payload)
         except Exception as e:
@@ -35041,8 +34865,8 @@ def _emit_sync_progress_loop():
                         socketio.emit('sync:progress', {
                             'playlist_id': pid, **state
                         }, room=f'sync:{pid}')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("sync progress emit failed: %s", e)
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
@@ -35079,8 +34903,8 @@ def _emit_discovery_progress_loop():
                             'complete': state.get('phase') == 'discovered',
                         }
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("discovery progress emit failed: %s", e)
             except Exception as e:
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
@@ -35223,8 +35047,8 @@ def start_runtime_services():
                 logger.info("Automation engine started")
                 try:
                     automation_engine.emit('app_started', {})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("app_started emit failed: %s", e)
             except AttributeError as e:
                 logger.error(f"Automation engine failed to start: {e}")
                 logger.info("   If using Docker, check that your volume mount is /app/data (not /app/database)")

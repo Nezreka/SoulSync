@@ -9,6 +9,7 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
 from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("deezer_worker")
 
@@ -140,8 +141,8 @@ class DeezerWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null id table resolve failed: %s", e)
                     continue
 
 
@@ -383,11 +384,33 @@ class DeezerWorker:
             self.stats['not_found'] += 1
             logger.debug(f"No match for artist '{artist_name}'")
 
+    def _refresh_album_via_stored_id(self, album_id, stored_id, full_album_dict):
+        """Issue #501 callback. Stored ID exists → fetched full Deezer
+        album payload. Use it as both args to ``_update_album`` (search-
+        result and full-data shapes overlap on the fields we need —
+        artist verification skipped since manual match presumably
+        already vetted)."""
+        self._update_album(album_id, full_album_dict, full_album_dict)
+
+    def _refresh_track_via_stored_id(self, track_id, stored_id, full_track_dict):
+        """Issue #501 callback for tracks — same pattern as albums."""
+        self._update_track(track_id, full_track_dict, full_track_dict)
+
     def _process_album(self, album_id: int, album_name: str, artist_name: str, item: Dict[str, Any]):
         """Process an album: search Deezer, verify, fetch full details, store metadata"""
-        existing_id = self._get_existing_id('album', album_id)
-        if existing_id:
-            logger.debug(f"Preserving existing Deezer ID for album '{album_name}': {existing_id}")
+        # Issue #501: honor manual matches. Pre-fix this method just
+        # SKIPPED when a stored ID was present (preserved the ID but
+        # never refreshed metadata). Now it goes through the full
+        # refresh path via the stored ID, picking up label / genres /
+        # explicit updates without ever overwriting the manual match.
+        if honor_stored_match(
+            db=self.db, entity_table='albums', entity_id=album_id,
+            id_column='deezer_id',
+            client_fetch_fn=self.client.get_album_raw,
+            on_match_fn=self._refresh_album_via_stored_id,
+            log_prefix='Deezer',
+        ):
+            self.stats['matched'] += 1
             return
 
         result = self.client.search_album(artist_name, album_name)
@@ -430,9 +453,15 @@ class DeezerWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         """Process a track: search Deezer, verify, fetch full details for BPM, store metadata"""
-        existing_id = self._get_existing_id('track', track_id)
-        if existing_id:
-            logger.debug(f"Preserving existing Deezer ID for track '{track_name}': {existing_id}")
+        # Issue #501: honor manual matches (see _process_album).
+        if honor_stored_match(
+            db=self.db, entity_table='tracks', entity_id=track_id,
+            id_column='deezer_id',
+            client_fetch_fn=self.client.get_track_raw,
+            on_match_fn=self._refresh_track_via_stored_id,
+            log_prefix='Deezer',
+        ):
+            self.stats['matched'] += 1
             return
 
         result = self.client.search_track(artist_name, track_name)

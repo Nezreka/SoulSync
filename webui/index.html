@@ -279,17 +279,17 @@
             <!-- Status Section -->
             <div class="status-section">
                 <h4 class="status-title">Service Status</h4>
-                <div class="status-indicator" id="spotify-indicator">
+                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="music-source-name">Spotify</span>
+                    <span class="status-name" id="metadata-source-name">Metadata Source</span>
                 </div>
-                <div class="status-indicator" id="media-server-indicator">
+                <div class="status-indicator" id="media-server-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="media-server-name">Plex</span>
+                    <span class="status-name" id="media-server-name">Media Server</span>
                 </div>
-                <div class="status-indicator" id="soulseek-indicator">
+                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="download-source-name">Soulseek</span>
+                    <span class="status-name" id="download-source-name">Download Source</span>
                 </div>
             </div>
         </div>
@@ -616,22 +616,22 @@
                     <div class="dashboard-section">
                         <h3 class="section-title">Service Status</h3>
                         <div class="service-status-grid">
-                            <div class="service-card" id="spotify-service-card">
+                            <div class="service-card" id="metadata-source-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="music-source-title">Spotify</span>
+                                    <span class="service-card-title" id="metadata-source-title">Metadata Source</span>
                                     <span class="service-card-indicator disconnected"
-                                        id="spotify-status-indicator">●</span>
+                                        id="metadata-source-status-indicator">●</span>
                                 </div>
-                                <p class="service-card-status-text" id="spotify-status-text">Disconnected</p>
-                                <p class="service-card-response-time" id="spotify-response-time">Response: --</p>
+                                <p class="service-card-status-text" id="metadata-source-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="metadata-source-response-time">Response: --</p>
                                 <div class="service-card-footer">
                                     <button class="service-card-button"
-                                        onclick="testDashboardConnection('spotify')">Test Connection</button>
+                                        onclick="testDashboardConnection(getActiveMetadataSource())">Test Connection</button>
                                 </div>
                             </div>
-                            <div class="service-card" id="media-server-service-card">
+                            <div class="service-card" id="media-server-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="media-server-service-name">Server</span>
+                                    <span class="service-card-title" id="media-server-service-name">Media Server</span>
                                     <span class="service-card-indicator disconnected"
                                         id="media-server-status-indicator">●</span>
                                 </div>
@@ -642,9 +642,9 @@
                                         Connection</button>
                                 </div>
                             </div>
-                            <div class="service-card" id="soulseek-service-card">
+                            <div class="service-card" id="soulseek-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="download-source-title">Soulseek</span>
+                                    <span class="service-card-title" id="download-source-title">Download Source</span>
                                     <span class="service-card-indicator disconnected"
                                         id="soulseek-status-indicator">●</span>
                                 </div>
@@ -2431,8 +2431,9 @@
 
                         <!-- Right: Top Tracks only -->
                         <div class="artist-hero-right" id="artist-hero-sidebar" style="display:none;">
-                            <div class="hero-sidebar-title">Popular on Last.fm</div>
+                            <div class="hero-sidebar-title" id="hero-sidebar-title">Popular on Last.fm</div>
                             <div class="hero-top-tracks" id="hero-top-tracks"></div>
+                            <button class="hero-top-tracks-download-all" id="hero-top-tracks-download-all" style="display:none;">Download All</button>
                         </div>
                     </div>
                 </div>
@@ -2911,48 +2912,6 @@
                             </div>
                         </div>
                         <div class="spotify-library-pagination" id="your-albums-pagination" style="display: none;"></div>
-                    </div>
-
-                    <!-- Spotify Library Section -->
-                    <div class="discover-section" id="spotify-library-section" style="display: none;">
-                        <div class="discover-section-header">
-                            <div>
-                                <h2 class="discover-section-title">Your Spotify Library</h2>
-                                <p class="discover-section-subtitle" id="spotify-library-subtitle">Your saved albums on Spotify</p>
-                            </div>
-                            <div class="spotify-library-header-actions">
-                                <button class="spotify-library-action-btn spotify-library-refresh-btn" onclick="refreshSpotifyLibraryCache()" title="Refresh from Spotify">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-                                    Refresh
-                                </button>
-                                <button class="spotify-library-action-btn spotify-library-download-btn" id="spotify-library-download-missing-btn" onclick="downloadMissingSpotifyLibraryAlbums()" style="display: none;">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                                    Download Missing
-                                </button>
-                            </div>
-                        </div>
-                        <div class="spotify-library-filters" id="spotify-library-filters" style="display: none;">
-                            <input type="text" class="spotify-library-search" id="spotify-library-search"
-                                placeholder="Search by artist or album..." oninput="debouncedSpotifyLibrarySearch()">
-                            <select id="spotify-library-status-filter" class="spotify-library-select" onchange="loadSpotifyLibraryAlbums()">
-                                <option value="all">All Albums</option>
-                                <option value="missing">Missing</option>
-                                <option value="owned">Owned</option>
-                            </select>
-                            <select id="spotify-library-sort" class="spotify-library-select" onchange="loadSpotifyLibraryAlbums()">
-                                <option value="date_saved">Date Saved</option>
-                                <option value="artist_name">Artist</option>
-                                <option value="album_name">Album</option>
-                                <option value="release_date">Release Date</option>
-                            </select>
-                        </div>
-                        <div class="spotify-library-grid" id="spotify-library-grid">
-                            <div class="discover-loading">
-                                <div class="loading-spinner"></div>
-                                <p>Loading your Spotify library...</p>
-                            </div>
-                        </div>
-                        <div class="spotify-library-pagination" id="spotify-library-pagination" style="display: none;"></div>
                     </div>
 
                     <!-- Recent Releases Section -->
@@ -4365,6 +4324,7 @@
                                         <option value="hifi">HiFi Only (Free Lossless)</option>
                                         <option value="deezer_dl">Deezer Only</option>
                                         <option value="lidarr">Lidarr Only</option>
+                                        <option value="soundcloud">SoundCloud Only</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -4412,8 +4372,8 @@
                                         <!-- Populated by JS -->
                                     </div>
                                     <!-- Hidden selects for backward compatibility with saveSettings -->
-                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
-                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
+                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
+                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
                                 </div>
 
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->
@@ -4675,6 +4635,28 @@
                                     </div>
                                 </div>
 
+                                <!-- SoundCloud Download Settings -->
+                                <div id="soundcloud-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <div class="setting-help-text">
+                                            SoundCloud downloads run anonymously — no account required. Use this for DJ mixes,
+                                            remixes, and tracks that aren't on Spotify/Tidal/Deezer.
+                                            <br><br>
+                                            <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the upload (anonymous tier).
+                                            SoundCloud doesn't expose lossless audio to anyone.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>SoundCloud Status:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" id="soundcloud-test-btn" onclick="testSoundcloudConnection()">
+                                                Test Connection
+                                            </button>
+                                            <span id="soundcloud-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Lidarr Download Settings -->
                                 <div id="lidarr-download-settings-container" style="display: none;">
                                     <div class="form-group">
@@ -4701,6 +4683,8 @@
                                         </div>
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Uses Lidarr's indexers and download clients (Usenet/torrent) for album downloads.
+                                            <br><br>
+                                            <strong>Best for full-album grabs.</strong> Lidarr is album-first by design — track-name searches usually return nothing useful, so in hybrid mode Lidarr is mostly a no-op for playlists and falls through to your other sources. Use Lidarr Only when you specifically want to grab whole albums via your indexers.
                                         </div>
                                     </div>
                                 </div>
@@ -5217,13 +5201,14 @@
                                                 <label class="checkbox-label" onclick="event.stopPropagation()">
                                                     <input type="checkbox" id="embed-tidal" checked onchange="toggleServiceTags(this, 'tidal')"> Tidal
                                                 </label>
-                                                <span class="tag-service-count">4 tags</span>
+                                                <span class="tag-service-count">5 tags</span>
                                             </div>
                                             <div class="tag-service-body" style="display:none;">
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.track_id" checked> Track ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.artist_id" checked> Artist ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.isrc" checked> ISRC</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.copyright" checked> Copyright</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.bpm" checked> BPM</label>
                                             </div>
                                         </div>
 
@@ -5272,6 +5257,24 @@
                                             <div class="tag-service-body" style="display:none;">
                                                 <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.track_id" checked> Track ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.url" checked> URL</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- HiFi -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-hifi" checked onchange="toggleServiceTags(this, 'hifi')"> HiFi
+                                                </label>
+                                                <span class="tag-service-count">5 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.isrc" checked> ISRC</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.bpm" checked> BPM</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.copyright" checked> Copyright</label>
                                             </div>
                                         </div>
 
@@ -6011,6 +6014,18 @@
                         <div class="stats-enrichment" id="stats-enrichment-coverage"></div>
                     </div>
 
+                    <!-- Library Disk Usage -->
+                    <div class="stats-section-card stats-full-width">
+                        <div class="stats-section-title">Library Disk Usage</div>
+                        <div class="stats-disk-usage-wrap" id="stats-disk-usage-wrap">
+                            <div class="stats-disk-total-row">
+                                <div class="stats-disk-total-value" id="stats-disk-total-value">—</div>
+                                <div class="stats-disk-total-meta" id="stats-disk-total-meta">Run a Deep Scan to populate</div>
+                            </div>
+                            <div class="stats-disk-formats" id="stats-disk-formats"></div>
+                        </div>
+                    </div>
+
                     <!-- Database Storage -->
                     <div class="stats-section-card stats-full-width">
                         <div class="stats-section-title">Database Storage</div>
@@ -6342,7 +6357,7 @@
                                         <option value="info">Info</option>
                                         <option value="warning">Warning</option>
                                     </select>
-                                    <select id="repair-findings-status-filter" onchange="_repairFindingsPage=0;loadRepairFindings()">
+                                    <select id="repair-findings-status-filter" onchange="_repairFindingsPage=0;_repairFindingsAutoSwitched=true;loadRepairFindings()">
                                         <option value="pending">Pending</option>
                                         <option value="">All Status</option>
                                         <option value="resolved">Resolved</option>

@@ -19,16 +19,21 @@ class WebScanManager:
     - Progress tracking and status reporting
     """
 
-    def __init__(self, media_clients, delay_seconds: int = 60):
+    def __init__(self, media_server_engine, delay_seconds: int = 60):
         """
         Initialize the web scan manager.
 
         Args:
-            media_clients: Dict containing plex_client, jellyfin_client, navidrome_client
+            media_server_engine: MediaServerEngine that owns the per-server
+                clients. Replaces the legacy ``media_clients`` dict — the
+                manager now resolves the active server's client through
+                ``self._engine.client(name)`` instead of a hand-keyed
+                dict that drifted out of sync with the engine's source
+                of truth.
             delay_seconds: Debounce delay in seconds (default 60s)
         """
         self.delay = delay_seconds
-        self.media_clients = media_clients
+        self._engine = media_server_engine
         self._timer = None
         self._scan_in_progress = False
         self._downloads_during_scan = False
@@ -44,29 +49,19 @@ class WebScanManager:
         logger.info(f"WebScanManager initialized with {delay_seconds}s debounce delay")
 
     def _get_active_media_client(self):
-        """Get the active media client based on config settings"""
+        """Get the active media client through the engine."""
         try:
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
 
-            server_client_map = {
-                'jellyfin': 'jellyfin_client',
-                'navidrome': 'navidrome_client',
-                'plex': 'plex_client',
-                'soulsync': 'soulsync_library_client',
-            }
+            if not self._engine:
+                logger.error("Web scan manager has no engine reference")
+                return None, None
 
-            # Try to get the configured active server
-            if active_server in server_client_map:
-                client_key = server_client_map[active_server]
-                client = self.media_clients.get(client_key)
-                if client and hasattr(client, 'is_connected') and client.is_connected():
-                    return client, active_server
-                else:
-                    logger.warning(f"{active_server.title()} client not connected — scan skipped")
-                    return None, None
-
-            logger.error("No active media server configured for scanning")
+            client = self._engine.client(active_server)
+            if client and hasattr(client, 'is_connected') and client.is_connected():
+                return client, active_server
+            logger.warning(f"{(active_server or 'unknown').title()} client not connected — scan skipped")
             return None, None
 
         except Exception as e:

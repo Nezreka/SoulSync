@@ -195,8 +195,8 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
                     sr_id = sr.get('id', '')
                     if sr_id and sr_id not in candidate_mbids:
                         candidate_mbids.append(sr_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("search_release fallback failed: %s", e)
 
         if not candidate_mbids:
             logger.info(f"No MB release found for '{album_name}' by '{artist_name}'")

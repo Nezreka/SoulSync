@@ -1,33 +1,19 @@
 import requests
 import time
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 from datetime import datetime
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
 
+# Shared dataclasses live in the neutral media_server package — every
+# server client used to define a near-identical XTrackInfo /
+# XPlaylistInfo. Lifted to one canonical type so consumers (matching
+# engine, sync service) get a single import.
+from core.media_server.types import TrackInfo, PlaylistInfo
+
 logger = get_logger("jellyfin_client")
 
-@dataclass
-class JellyfinTrackInfo:
-    id: str
-    title: str
-    artist: str
-    album: str
-    duration: int
-    track_number: Optional[int] = None
-    year: Optional[int] = None
-    rating: Optional[float] = None
-
-@dataclass 
-class JellyfinPlaylistInfo:
-    id: str
-    title: str
-    description: Optional[str]
-    duration: int
-    leaf_count: int
-    tracks: List[JellyfinTrackInfo]
 
 class JellyfinArtist:
     """Wrapper class to mimic Plex artist object interface"""
@@ -116,9 +102,15 @@ class JellyfinTrack:
 
         # File path and media info (used by quality scanner and DB update)
         self.path = jellyfin_data.get('Path')
-        # Extract bitrate from MediaSources if available
+        # Extract bitrate + file size from MediaSources if available.
+        # `file_size` powers the Library Disk Usage card on the Stats
+        # page — populated free during the deep scan from data Jellyfin
+        # already returns in MediaSources[].
         media_sources = jellyfin_data.get('MediaSources', [])
         self.bitRate = (media_sources[0].get('Bitrate') or 0) // 1000 if media_sources else None  # Convert bps to kbps
+        self.file_size = (media_sources[0].get('Size') or 0) if media_sources else None
+        if self.file_size == 0:
+            self.file_size = None
         
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
@@ -140,7 +132,10 @@ class JellyfinTrack:
             return self._client.get_album_by_id(self._album_id)
         return None
 
-class JellyfinClient:
+from core.media_server.contract import MediaServerClient
+
+
+class JellyfinClient(MediaServerClient):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
@@ -1195,7 +1190,7 @@ class JellyfinClient:
             
         return stats
     
-    def get_all_playlists(self) -> List[JellyfinPlaylistInfo]:
+    def get_all_playlists(self) -> List[PlaylistInfo]:
         """Get all playlists from Jellyfin server"""
         if not self.ensure_connection():
             return []
@@ -1212,7 +1207,7 @@ class JellyfinClient:
             
             playlists = []
             for item in response.get('Items', []):
-                playlist_info = JellyfinPlaylistInfo(
+                playlist_info = PlaylistInfo(
                     id=item.get('Id', ''),
                     title=item.get('Name', 'Unknown Playlist'),
                     description=item.get('Overview'),
@@ -1229,7 +1224,7 @@ class JellyfinClient:
             logger.error(f"Error getting playlists from Jellyfin: {e}")
             return []
     
-    def get_playlist_by_name(self, name: str) -> Optional[JellyfinPlaylistInfo]:
+    def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         """Get a specific playlist by name"""
         playlists = self.get_all_playlists()
         for playlist in playlists:
@@ -1446,8 +1441,8 @@ class JellyfinClient:
                     response = requests.delete(url, headers=headers, timeout=10)
                     if response.status_code in [200, 204]:
                         logger.info(f"Deleted existing backup playlist '{target_name}'")
-            except Exception:
-                pass  # Target doesn't exist, which is fine
+            except Exception as e:
+                logger.debug("backup playlist precheck: %s", e)
             
             # Create new playlist with copied tracks
             try:

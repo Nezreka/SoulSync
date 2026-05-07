@@ -196,7 +196,7 @@ class SingleAlbumDedupJob(RepairJob):
 
                 if context.create_finding:
                     try:
-                        context.create_finding(
+                        inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='single_album_redundant',
                             severity='info',
@@ -235,7 +235,10 @@ class SingleAlbumDedupJob(RepairJob):
                                 'artist_thumb_url': best_album_match.get('artist_thumb_url') or single.get('artist_thumb_url'),
                             }
                         )
-                        result.findings_created += 1
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
                     except Exception as e:
                         logger.debug("Error creating finding: %s", e)
                         result.errors += 1
