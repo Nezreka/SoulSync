@@ -252,12 +252,15 @@ function createSearchController({
         state._initialized = true;
 
         // Resolve the user's configured primary source.
+        // /status is public; /api/settings is admin-only and returns 403 for
+        // non-admin profiles, which previously caused them to silently fall
+        // back to 'spotify' regardless of what admin had configured.
         try {
-            const resp = await fetch('/api/settings');
+            const resp = await fetch('/status');
             if (resp.ok) {
-                const settings = await resp.json();
-                const cfg = settings.metadata && settings.metadata.fallback_source;
-                if (cfg && SOURCE_LABELS[cfg]) state.activeSource = cfg;
+                const status = await resp.json();
+                const src = status && status.metadata_source;
+                if (src && SOURCE_LABELS[src]) state.activeSource = src;
             }
         } catch (_) { /* best-effort */ }
         if (!SOURCE_LABELS[state.activeSource]) state.activeSource = 'spotify';
