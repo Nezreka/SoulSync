@@ -11996,10 +11996,33 @@ class MusicDatabase:
 
     # ===================== HiFi Instances =====================
 
+    def _ensure_hifi_instances_table(self, cursor) -> None:
+        """Defensive lazy-create. Issue #503: some users hit a "no such
+        table: hifi_instances" error when adding a HiFi instance even
+        though ``_initialize_database`` runs ``CREATE TABLE IF NOT EXISTS``
+        on every boot. Root cause: the bulk init runs every CREATE +
+        every migration inside one transaction, so if any later migration
+        step throws on the user's specific DB shape, the whole batch
+        rolls back (Python's sqlite3 module doesn't autocommit DDL by
+        default) and ``hifi_instances`` never lands. This helper ensures
+        the table exists immediately before every operation that touches
+        it — idempotent, costs one PRAGMA-level no-op when the table is
+        already present, and fully recovers from a broken init."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS hifi_instances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL UNIQUE,
+                priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
     def get_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all enabled HiFi instances ordered by priority."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
 
@@ -12007,6 +12030,7 @@ class MusicDatabase:
         """Get all HiFi instances (including disabled) ordered by priority."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
 
@@ -12014,6 +12038,7 @@ class MusicDatabase:
         """Add a new HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute(
             "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
             (url, priority)
@@ -12025,6 +12050,7 @@ class MusicDatabase:
         """Remove a HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("DELETE FROM hifi_instances WHERE url = ?", (url,))
         conn.commit()
         return cursor.rowcount > 0
@@ -12033,6 +12059,7 @@ class MusicDatabase:
         """Enable or disable a HiFi instance."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("UPDATE hifi_instances SET enabled = ? WHERE url = ?", (1 if enabled else 0, url))
         conn.commit()
         return cursor.rowcount > 0
@@ -12045,6 +12072,7 @@ class MusicDatabase:
             return True
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         placeholders = ",".join("?" for _ in urls)
         cursor.execute(
             f"SELECT url FROM hifi_instances WHERE url IN ({placeholders})",
@@ -12063,6 +12091,7 @@ class MusicDatabase:
         """Insert default instances if the table is empty."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT COUNT(*) as cnt FROM hifi_instances")
         count = cursor.fetchone()['cnt']
         if count == 0:

@@ -306,13 +306,17 @@ def test_seed_hifi_instances_does_not_duplicate_on_reseed(db):
     assert len(rows) == 1
 
 
-# ── error propagation ────────────────────────────────────────────────────
-# These methods now let DB errors bubble up so the route layer turns them
-# into a 500 — the user sees a real failure instead of a phantom empty state.
+# ── lazy-create recovery (issue #503) ────────────────────────────────────
+# When the bulk ``_initialize_database`` rolls back due to a brittle
+# migration step, ``hifi_instances`` would normally be missing on the
+# user's DB. The CRUD methods now ensure the table exists immediately
+# before operating, so the operation succeeds rather than throwing
+# "no such table: hifi_instances".
 
 
 def _db_without_hifi_table():
-    """Returns a MusicDatabase with NO hifi_instances table."""
+    """Returns a MusicDatabase with NO hifi_instances table — simulates
+    the broken-init state where ``_initialize_database`` rolled back."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
 
@@ -326,43 +330,78 @@ def _db_without_hifi_table():
     return _NoTableDB()
 
 
-def test_get_hifi_instances_propagates_db_errors():
+def _hifi_table_exists(db):
+    cur = db._conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='hifi_instances'")
+    return cur.fetchone() is not None
+
+
+def test_add_hifi_instance_creates_table_when_missing():
+    """Pin issue #503 fix: add_hifi_instance must lazily create the
+    table when init failed to land it. Pre-fix this raised
+    ``no such table: hifi_instances`` and the user couldn't add any
+    HiFi instances at all."""
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.get_hifi_instances()
+    assert not _hifi_table_exists(db)
+
+    result = db.add_hifi_instance("http://recovery.com", priority=0)
+
+    assert result is True
+    assert _hifi_table_exists(db)
+    rows = db.get_all_hifi_instances()
+    assert len(rows) == 1
+    assert rows[0]["url"] == "http://recovery.com"
 
 
-def test_get_all_hifi_instances_propagates_db_errors():
+def test_get_hifi_instances_creates_table_when_missing():
+    """Empty result instead of OperationalError — read methods
+    self-heal too."""
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.get_all_hifi_instances()
+    assert not _hifi_table_exists(db)
+
+    rows = db.get_hifi_instances()
+
+    assert rows == []
+    assert _hifi_table_exists(db)
 
 
-def test_add_hifi_instance_propagates_db_errors():
+def test_get_all_hifi_instances_creates_table_when_missing():
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.add_hifi_instance("http://x.com")
+    rows = db.get_all_hifi_instances()
+    assert rows == []
+    assert _hifi_table_exists(db)
 
 
-def test_remove_hifi_instance_propagates_db_errors():
+def test_remove_hifi_instance_creates_table_when_missing():
+    """Removing from a missing table is a no-op (returns False) —
+    doesn't crash."""
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.remove_hifi_instance("http://x.com")
+    result = db.remove_hifi_instance("http://x.com")
+    assert result is False
+    assert _hifi_table_exists(db)
 
 
-def test_toggle_hifi_instance_propagates_db_errors():
+def test_toggle_hifi_instance_creates_table_when_missing():
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.toggle_hifi_instance("http://x.com", enabled=True)
+    result = db.toggle_hifi_instance("http://x.com", enabled=True)
+    assert result is False  # Nothing to toggle
+    assert _hifi_table_exists(db)
 
 
-def test_reorder_hifi_instances_propagates_db_errors():
+def test_reorder_hifi_instances_creates_table_when_missing():
+    """Reorder with missing entries returns False (the existing
+    contract — caller-supplied URLs not present)."""
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.reorder_hifi_instances(["http://x.com"])
+    result = db.reorder_hifi_instances(["http://x.com"])
+    assert result is False  # No matching rows
+    assert _hifi_table_exists(db)
 
 
-def test_seed_hifi_instances_propagates_db_errors():
+def test_seed_hifi_instances_creates_table_when_missing():
+    """Seeding into a missing table works — table is created, then
+    defaults inserted."""
     db = _db_without_hifi_table()
-    with pytest.raises(sqlite3.OperationalError):
-        db.seed_hifi_instances(["http://x.com"])
+    db.seed_hifi_instances(["http://default-a.com", "http://default-b.com"])
+    rows = db.get_all_hifi_instances()
+    assert len(rows) == 2
+    assert _hifi_table_exists(db)
