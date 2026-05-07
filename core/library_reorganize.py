@@ -938,8 +938,8 @@ class _RunContext:
             return
         try:
             self.on_progress(updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("progress emit failed: %s", e)
 
     def record_error(self, track_id, title, message, kind: str = 'skipped') -> None:
         with self.state_lock:
@@ -1185,8 +1185,8 @@ def reorganize_album(
             return
         try:
             on_progress(updates)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("reorganize progress callback failed: %s", e)
 
     # Load album + tracks
     album_data, tracks = load_album_and_tracks(db, album_id)
