@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def load_wishlist_keys(cursor, profile_id: int) -> set[str]:
@@ -27,21 +30,21 @@ def load_wishlist_keys(cursor, profile_id: int) -> set[str]:
                     wa = ""
                 if wname:
                     keys.add(wname + "|||" + wa.lower().strip())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("parse wishlist row failed: %s", e)
 
     try:
         cursor.execute("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
         _absorb(cursor.fetchall())
         return keys
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("profile-aware wishlist query failed: %s", e)
 
     try:
         cursor.execute("SELECT spotify_data FROM wishlist_tracks")
         _absorb(cursor.fetchall())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("legacy wishlist query failed: %s", e)
     return keys
 
 

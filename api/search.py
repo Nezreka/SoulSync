@@ -2,9 +2,13 @@
 Search endpoints — search external sources (Spotify, iTunes, Hydrabase).
 """
 
+import logging
+
 from flask import request, current_app
 from .auth import require_api_key
 from .helpers import api_success, api_error
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(bp):
@@ -38,8 +42,8 @@ def register_routes(bp):
                         if hydra_results:
                             tracks = [_serialize_track(t) for t in hydra_results]
                             return api_success({"tracks": tracks, "source": "hydrabase"})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("hydrabase search failed: %s", e)
 
             spotify = ctx.get("spotify_client")
             from core.metadata_service import get_primary_source, get_primary_client
