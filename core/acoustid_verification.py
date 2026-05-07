@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, Tuple, List
 from enum import Enum
 from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
+from core.matching_engine import MusicMatchingEngine
 from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid.verification")
@@ -23,6 +24,25 @@ logger = get_logger("acoustid.verification")
 MIN_ACOUSTID_SCORE = 0.80       # Minimum AcoustID fingerprint score to trust
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity needed to consider a match
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity needed to consider a match
+
+# Single matching-engine instance so version detection reuses the same patterns
+# used by the pre-download Soulseek matcher (remix / live / acoustic /
+# instrumental / etc). detect_version_type doesn't use self state, so one
+# shared instance is fine.
+_match_engine_for_version = MusicMatchingEngine()
+
+
+def _detect_title_version(title: str) -> str:
+    """Return version label for a track title.
+
+    Returns ``'original'`` when no version marker is detected, otherwise one
+    of the labels produced by ``MusicMatchingEngine.detect_version_type``
+    (``'instrumental'``, ``'live'``, ``'acoustic'``, ``'remix'``, etc).
+    """
+    if not title:
+        return 'original'
+    version_type, _ = _match_engine_for_version.detect_version_type(title)
+    return version_type
 
 
 class VerificationResult(Enum):
@@ -286,6 +306,33 @@ class AcoustIDVerification:
                 f"(title_sim={title_sim:.2f}, artist_sim={artist_sim:.2f})"
             )
 
+            # Step 4b: Version-mismatch gate.
+            #
+            # The ``_normalize`` step deliberately strips parentheticals and
+            # version tags ("(Instrumental)", "- Live", etc) so that legit
+            # name variations don't fail the title-similarity comparison.
+            # That same stripping made it impossible to tell a vocal track
+            # apart from its instrumental: "In My Feelings" and "In My
+            # Feelings (Instrumental)" both normalize to "in my feelings",
+            # the title sim ends up 1.0, and the file passes verification
+            # even though it's the wrong cut.
+            #
+            # Detect the version on each side BEFORE normalization runs.
+            # If the expected track and the AcoustID-matched recording
+            # disagree on version (one is original, the other is
+            # instrumental / live / remix / acoustic / etc), reject — the
+            # fingerprint identified a real song but it's not the one the
+            # caller asked for.
+            expected_version = _detect_title_version(expected_track_name)
+            matched_version = _detect_title_version(matched_title)
+            if expected_version != matched_version:
+                msg = (
+                    f"Version mismatch: expected '{expected_track_name}' ({expected_version}) "
+                    f"but file is '{matched_title}' ({matched_version})"
+                )
+                logger.warning(f"AcoustID verification FAILED (version mismatch) - {msg}")
+                return VerificationResult.FAIL, msg
+
             # Step 5: Decide pass/fail based on similarity
             if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim >= ARTIST_MATCH_THRESHOLD:
                 msg = (
@@ -343,9 +390,15 @@ class AcoustIDVerification:
 
             # Title doesn't match — check ALL recordings for any title/artist match
             # (the best combined match might not be the right one if there are many results)
+            # Skip recordings whose version (instrumental/live/etc) disagrees with
+            # what the caller asked for — the version mismatch above checked
+            # only the best recording, but a wrong-version variant could still
+            # win this fallback scan if its bare title matched.
             for rec in recordings:
                 t = rec.get('title') or ''
                 a = rec.get('artist') or ''
+                if _detect_title_version(t) != expected_version:
+                    continue
                 if (_similarity(expected_track_name, t) >= TITLE_MATCH_THRESHOLD and
                         _similarity(expected_artist_name, a) >= ARTIST_MATCH_THRESHOLD):
                     msg = (
