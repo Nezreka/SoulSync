@@ -9,6 +9,7 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
 from core.worker_utils import interruptible_sleep
+from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("qobuz_worker")
 
@@ -426,12 +427,26 @@ class QobuzWorker:
             self.stats['not_found'] += 1
             logger.debug(f"No match for artist '{artist_name}'")
 
+    def _refresh_album_via_stored_id(self, album_id, stored_id, full_album_dict):
+        """Issue #501 callback. Same shape as Tidal/Deezer — pass the
+        full-album dict in both arg slots."""
+        self._update_album(album_id, full_album_dict, full_album_dict)
+
+    def _refresh_track_via_stored_id(self, track_id, stored_id, full_track_dict):
+        self._update_track(track_id, full_track_dict, full_track_dict)
+
     def _process_album(self, album_id: int, album_name: str, artist_name: str, item: Dict[str, Any]):
         """Process an album: search Qobuz, verify, fetch full details, store metadata"""
-        existing_id = self._get_existing_id('album', album_id)
-        if existing_id:
-            logger.debug(f"Preserving existing Qobuz ID for album '{album_name}': {existing_id}")
-            self._mark_status('album', album_id, 'matched')
+        # Issue #501: honor manual matches. Pre-fix this just marked
+        # status='matched' without refreshing metadata.
+        if honor_stored_match(
+            db=self.db, entity_table='albums', entity_id=album_id,
+            id_column='qobuz_id',
+            client_fetch_fn=self.client.get_album,
+            on_match_fn=self._refresh_album_via_stored_id,
+            log_prefix='Qobuz',
+        ):
+            self.stats['matched'] += 1
             return
 
         result = self.client.search_album(artist_name, album_name)
@@ -484,10 +499,15 @@ class QobuzWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         """Process a track: search Qobuz, verify, fetch full details, store metadata"""
-        existing_id = self._get_existing_id('track', track_id)
-        if existing_id:
-            logger.debug(f"Preserving existing Qobuz ID for track '{track_name}': {existing_id}")
-            self._mark_status('track', track_id, 'matched')
+        # Issue #501: honor manual matches.
+        if honor_stored_match(
+            db=self.db, entity_table='tracks', entity_id=track_id,
+            id_column='qobuz_id',
+            client_fetch_fn=self.client.get_track,
+            on_match_fn=self._refresh_track_via_stored_id,
+            log_prefix='Qobuz',
+        ):
+            self.stats['matched'] += 1
             return
 
         result = self.client.search_track(artist_name, track_name)
