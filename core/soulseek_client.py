@@ -216,8 +216,8 @@ class SoulseekClient(DownloadSourcePlugin):
             if session:
                 try:
                     await session.close()
-                except:
-                    pass
+                except Exception as _e:
+                    logger.debug("aiohttp session close: %s", _e)
 
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Make a direct request to slskd without /api/v0/ prefix (for endpoints that work directly)"""
@@ -273,9 +273,9 @@ class SoulseekClient(DownloadSourcePlugin):
             if session:
                 try:
                     await session.close()
-                except:
-                    pass
-    
+                except Exception as _e:
+                    logger.debug("aiohttp direct session close: %s", _e)
+
     def _process_search_responses(self, responses_data: List[Dict[str, Any]]) -> tuple[List[TrackResult], List[AlbumResult]]:
         """Process search response data into TrackResult and AlbumResult objects"""
         from collections import defaultdict
@@ -1621,8 +1621,8 @@ class SoulseekClient(DownloadSourcePlugin):
                                 if resp.status in [200, 405]:  # 405 means endpoint exists but wrong method
                                     available_endpoints[f"direct_{endpoint}"] = f"Status: {resp.status}"
                                     logger.info(f"[OK] Direct endpoint available: {simple_url} (Status: {resp.status})")
-                        except:
-                            pass
+                        except Exception as _e:
+                            logger.debug("direct endpoint probe %s: %s", endpoint, _e)
                         finally:
                             await session.close()
                             

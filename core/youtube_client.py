@@ -1190,8 +1190,8 @@ class YouTubeClient(DownloadSourcePlugin):
                                 album_data = track_details.get('album', {})
                                 if album_data.get('artists'):
                                     album_artist = album_data['artists'][0]
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify album artist lookup: %s", e)
 
                 logger.debug("   Setting metadata tags...")
 

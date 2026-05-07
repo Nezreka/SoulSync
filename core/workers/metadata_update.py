@@ -419,10 +419,10 @@ class WebMetadataUpdateWorker:
             try:
                 for album in artist.albums():
                     if hasattr(album, 'genres') and album.genres:
-                        album_genres.update(genre.tag if hasattr(genre, 'tag') else str(genre) 
+                        album_genres.update(genre.tag if hasattr(genre, 'tag') else str(genre)
                                           for genre in album.genres)
-            except Exception:
-                pass  # Albums might not be accessible
+            except Exception as e:
+                logger.debug("artist album genre walk: %s", e)
             
             # Combine all genres (prioritize Spotify genres)
             all_genres = spotify_genres.union(album_genres)

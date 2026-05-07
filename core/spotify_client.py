@@ -1636,8 +1636,8 @@ class SpotifyClient:
                 try:
                     albums_list = cached.get('_albums', cached) if isinstance(cached, dict) else cached
                     return [Album.from_spotify_album(ad) for ad in albums_list]
-                except Exception:
-                    pass  # Cache data incompatible, re-fetch
+                except Exception as e:
+                    logger.debug("artist albums cache reuse: %s", e)
 
         if self.is_spotify_authenticated():
             try:

@@ -2612,7 +2612,7 @@ class BeatportUnifiedScraper:
                     result['title'] = title
 
         except Exception as e:
-            pass  # Silently handle URL extraction errors
+            logger.debug("URL slug extraction: %s", e)
 
         return result
 

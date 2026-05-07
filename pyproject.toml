@@ -5,7 +5,7 @@ line-length = 160
 [tool.ruff.lint]
 # Start lenient — catch real bugs, not style nits
 # E: pycodestyle errors, F: pyflakes, UP: pyupgrade, B: bugbear
-select = ["F", "E9", "W6", "B"]
+select = ["F", "E9", "W6", "B", "S110"]
 # Ignore rules that will flag too much in an existing codebase
 ignore = [
     "F401",   # unused imports (too noisy initially)
@@ -15,7 +15,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Tests can use assert, magic values, etc.
-"tests/**" = ["B", "F"]
+"tests/**" = ["B", "F", "S110"]
 
 [tool.pytest.ini_options]
 markers = [

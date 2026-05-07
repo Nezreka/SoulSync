@@ -101,9 +101,9 @@ def build_runner(
         def _on_progress(updates):
             try:
                 get_queue().update_active_progress(queue_id=item.queue_id, **updates)
-            except Exception:
+            except Exception as e:
                 # Progress fan-out failures must never break a run.
-                pass
+                logger.debug("reorganize progress fan-out: %s", e)
 
         return reorganize_album(
             album_id=item.album_id,

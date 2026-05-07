@@ -399,7 +399,7 @@ class LibraryReorganizeJob(RepairJob):
             if conn:
                 try:
                     conn.close()
-                except Exception:
+                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                     pass
 
     def _get_setting(self, context: JobContext, key: str, default):

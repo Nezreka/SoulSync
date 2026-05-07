@@ -224,8 +224,8 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
                         cursor.execute("SELECT title FROM albums WHERE artist_id = ?", (ar['id'],))
                         for alb_row in cursor.fetchall():
                             owned_titles.add((alb_row['title'] or '').strip().lower())
-            except Exception:
-                pass  # Non-critical — owned badges just won't show
+            except Exception as e:
+                logger.debug("owned-titles lookup: %s", e)
 
             # Build release list
             releases = []

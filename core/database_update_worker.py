@@ -1051,8 +1051,8 @@ class DatabaseUpdateWorker:
                             batch + [self.server_type])
                         cascade_album_ids.update(row[0] for row in cursor.fetchall())
                     removed_album_ids -= cascade_album_ids
-            except Exception:
-                pass  # If this optimization fails, double-delete is harmless
+            except Exception as e:
+                logger.debug("cascade album cleanup optimization: %s", e)
 
         if not removed_artist_ids and not removed_album_ids:
             logger.info("Removal detection: no stale content found")

@@ -460,7 +460,7 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
         # Clear one-time rescan cutoff after full scan cycle
         try:
             scanner._clear_rescan_cutoff()
-        except Exception:
+        except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
             pass
 
         # Always reset flag
