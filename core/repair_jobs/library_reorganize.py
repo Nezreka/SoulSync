@@ -337,8 +337,8 @@ class LibraryReorganizeJob(RepairJob):
         if context.config_manager:
             try:
                 active_server = context.config_manager.get_active_media_server()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("active media server lookup: %s", e)
         try:
             conn = context.db._get_connection()
             try:

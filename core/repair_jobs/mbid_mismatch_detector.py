@@ -366,8 +366,8 @@ class MbidMismatchDetectorJob(RepairJob):
             try:
                 from core.musicbrainz_client import MusicBrainzClient
                 mb_client = MusicBrainzClient()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("MusicBrainz client init failed: %s", e)
 
         if not mb_client:
             logger.warning("MusicBrainz client not available, skipping MBID mismatch scan")

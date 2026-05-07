@@ -299,8 +299,8 @@ class DiscographyBackfillJob(RepairJob):
                     track_id = track_item.get('id', '')
                     if track_id and self._is_in_wishlist(context.db, track_id):
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("wishlist membership check failed: %s", e)
 
                 # Build wishlist-ready track data. album is a dict (required by
                 # add_to_wishlist and by the download pipeline's cover-art

@@ -154,8 +154,8 @@ class GeniusWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null-id item type lookup: %s", e)
                     continue
 
                 self._process_item(item)
@@ -367,8 +367,8 @@ class GeniusWorker:
                     if song_url:
                         try:
                             lyrics = self.client.get_lyrics(song_url)
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            logger.debug("genius lyrics scrape: %s", _e)
                     self._update_track(track_id, full_song, full_song, lyrics)
                     self.stats['matched'] += 1
                     logger.info(f"Enriched track '{track_name}' from existing Genius ID: {existing_id}")

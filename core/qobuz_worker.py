@@ -104,8 +104,8 @@ class QobuzWorker:
         try:
             if self.client:
                 authenticated = self.client.is_authenticated()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("qobuz auth status check: %s", e)
 
         return {
             'enabled': True,
@@ -163,8 +163,8 @@ class QobuzWorker:
                         itype = item.get('type', '')
                         table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
                         # Can't mark status without an ID — just skip
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("null-id item type lookup: %s", e)
                     continue
 
 

@@ -209,8 +209,8 @@ class WebMetadataUpdateWorker:
                 raw = self._db.api_get_artist(best.id)
                 if raw:
                     spotify_artist_id = raw.get('spotify_artist_id')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("get spotify_artist_id failed: %s", e)
             return best, has_genres, spotify_artist_id
         except Exception:
             return None, False, None
