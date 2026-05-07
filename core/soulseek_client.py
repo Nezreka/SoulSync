@@ -23,6 +23,31 @@ from core.download_plugins.base import DownloadSourcePlugin
 logger = get_logger("soulseek_client")
 
 
+# slskd HTTP timeouts. Issue #499: long-running download sessions
+# (~2-3hr) wedged because ``aiohttp.ClientSession()`` was constructed
+# with no timeout — when slskd hung on a request (overloaded, network
+# blip, internal stall), the HTTP call blocked indefinitely. The
+# download worker thread blocked with it. Once the
+# ``ThreadPoolExecutor(max_workers=3)`` had all 3 threads wedged,
+# no further downloads could start and the user had to restart the
+# container.
+#
+# Every slskd API call is metadata-level (search submission, status
+# polls, download enqueue, transfer state queries) — none stream files.
+# slskd handles file transfer via its own peer-to-peer infrastructure
+# entirely outside our HTTP requests. So generous-but-bounded timeouts
+# are safe and won't kill legitimate operations.
+#
+# Failures surface as caught exceptions in the existing
+# ``except Exception`` blocks → logged + return None → caller treats
+# as a normal failure (same as a 5xx response). No new error path.
+_SLSKD_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=120,        # hard ceiling — no single slskd call should take >2min
+    connect=15,       # TCP connect to slskd
+    sock_read=60,     # per-chunk read; slskd shouldn't go silent for >60s
+)
+
+
 class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
@@ -119,25 +144,27 @@ class SoulseekClient(DownloadSourcePlugin):
         
         url = f"{self.base_url}/api/v0/{endpoint}"
         
-        # Create a fresh session for each thread/event loop to avoid conflicts
+        # Create a fresh session for each thread/event loop to avoid conflicts.
+        # Bounded timeout (issue #499) prevents the worker thread from
+        # wedging if slskd hangs.
         session = None
         try:
-            session = aiohttp.ClientSession()
-            
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
+
             headers = self._get_headers()
-         
+
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
-            
+
             async with session.request(
-                method, 
-                url, 
+                method,
+                url,
                 headers=headers,
                 **kwargs
             ) as response:
                 response_text = await response.text()
-             
-                
+
+
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     self._last_401_logged = False  # Reset on success
                     try:
@@ -156,7 +183,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 else:
                     # Enhanced error logging for better debugging
                     error_detail = response_text if response_text.strip() else "No error details provided"
-                    
+
                     # Reduce noise for expected 404s (e.g. status checks for YouTube downloads)
                     # and repeated 401s (slskd not running / bad credentials)
                     if response.status == 404:
@@ -170,9 +197,17 @@ class SoulseekClient(DownloadSourcePlugin):
                         self._last_401_logged = False
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")
-                    
+
                     return None
-                    
+
+        except asyncio.TimeoutError:
+            # Issue #499: explicit handling so the worker thread unblocks
+            # instead of staying wedged on the HTTP call.
+            logger.warning(
+                f"slskd request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
+                f"{method} {url} — slskd may be overloaded or unreachable"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error making API request: {e}")
             return None
@@ -183,34 +218,36 @@ class SoulseekClient(DownloadSourcePlugin):
                     await session.close()
                 except:
                     pass
-    
+
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Make a direct request to slskd without /api/v0/ prefix (for endpoints that work directly)"""
         if not self.base_url:
             logger.debug("Soulseek client not configured")
             return None
-        
+
         url = f"{self.base_url}/{endpoint}"
-        
-        # Create a fresh session for each thread/event loop to avoid conflicts
+
+        # Create a fresh session for each thread/event loop to avoid conflicts.
+        # Bounded timeout (issue #499) prevents the worker thread from
+        # wedging if slskd hangs.
         session = None
         try:
-            session = aiohttp.ClientSession()
-            
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
+
             headers = self._get_headers()
-          
+
             if 'json' in kwargs:
                 logger.debug(f"JSON payload: {kwargs['json']}")
-            
+
             async with session.request(
-                method, 
-                url, 
+                method,
+                url,
                 headers=headers,
                 **kwargs
             ) as response:
                 response_text = await response.text()
-             
-                
+
+
                 if response.status == 200:
                     try:
                         return await response.json()
@@ -221,7 +258,13 @@ class SoulseekClient(DownloadSourcePlugin):
                 else:
                     logger.error(f"Direct API request failed: {response.status} - {response_text}")
                     return None
-                    
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"slskd direct request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
+                f"{method} {url} — slskd may be overloaded or unreachable"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error making direct API request: {e}")
             return None
@@ -1520,7 +1563,7 @@ class SoulseekClient(DownloadSourcePlugin):
             # Try to get Swagger/OpenAPI documentation
             swagger_url = f"{self.base_url}/swagger/v1/swagger.json"
             
-            session = aiohttp.ClientSession()
+            session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
             try:
                 headers = self._get_headers()
                 async with session.get(swagger_url, headers=headers) as response:
@@ -1571,7 +1614,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     else:
                         # Try different endpoints without /api/v0 prefix
                         simple_url = f"{self.base_url}/{endpoint}"
-                        session = aiohttp.ClientSession()
+                        session = aiohttp.ClientSession(timeout=_SLSKD_DEFAULT_TIMEOUT)
                         try:
                             headers = self._get_headers()
                             async with session.get(simple_url, headers=headers) as resp:
