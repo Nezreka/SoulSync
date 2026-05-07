@@ -89,20 +89,20 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
         search_clients['spotify'] = spotify_client
     try:
         search_clients['itunes'] = _get_itunes_client()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("itunes client init failed: %s", e)
     try:
         search_clients['deezer'] = _get_deezer_client()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("deezer client init failed: %s", e)
     try:
         dc = _get_discogs_client()
         # Only use Discogs if token is configured
         from config.settings import config_manager as _cm
         if _cm.get('discogs.token', ''):
             search_clients['discogs'] = dc
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("discogs client init failed: %s", e)
 
     # Reuse watchlist scanner's fuzzy matching logic
     from core.watchlist_scanner import WatchlistScanner
@@ -167,8 +167,8 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
                         harvested_ids[col] = str(r[col])
                 if _valid_image(r.get('thumb_url')):
                     best_image = r['thumb_url']
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("library artist lookup failed: %s", e)
 
         # 2. Watchlist artists
         try:
@@ -186,8 +186,8 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
                         harvested_ids[col] = str(wl[col])
                 if _valid_image(wl.get('image_url')) and not best_image:
                     best_image = wl['image_url']
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("watchlist artist lookup failed: %s", e)
 
         # 3. Metadata cache (all sources)
         try:
@@ -203,8 +203,8 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
                     harvested_ids[col] = row['entity_id']
                 if _valid_image(row['image_url']) and not best_image:
                     best_image = row['image_url']
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("metadata cache lookup failed: %s", e)
 
         # --- API STRATEGIES (search each missing source) ---
         # Same pattern as watchlist scanner's _backfill_missing_ids
@@ -287,8 +287,8 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
                         artist_data = sp.sp.artist(r['spotify_artist_id'])
                         if artist_data and artist_data.get('images'):
                             image_url = artist_data['images'][0]['url']
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify artist image fetch failed: %s", e)
 
             # Try Deezer (direct image URL from ID)
             if not image_url and r.get('deezer_artist_id'):
@@ -302,8 +302,8 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
                         (image_url, r['id'])
                     )
                     filled += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("liked artist image update failed: %s", e)
                 time.sleep(0.3)
 
         conn.commit()

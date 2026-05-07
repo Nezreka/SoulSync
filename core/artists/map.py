@@ -158,8 +158,8 @@ def get_artist_map_data():
                     if r.get('genres'):
                         try:
                             genres = json.loads(r['genres'])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("similar node genres parse failed: %s", e)
                     nodes.append({
                         'id': idx,
                         'name': r['similar_artist_name'],
@@ -232,8 +232,8 @@ def get_artist_map_data():
                     if cr['genres']:
                         try:
                             genres = json.loads(cr['genres']) if isinstance(cr['genres'], str) else []
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("backfill cache genres parse failed: %s", e)
                     cache_by_name[cn][source] = {
                         'id': cr['entity_id'],
                         'image_url': cr['image_url'] or '',
@@ -280,8 +280,8 @@ def get_artist_map_data():
                         an = _norm(r['artist_name'])
                         if an and an not in _album_art:
                             _album_art[an] = r['image_url']
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("artist map album-art cache build failed: %s", e)
                 for n in nodes:
                     if not n.get('image_url') or not n['image_url'].startswith('http'):
                         nn = _norm(n['name'])
@@ -330,8 +330,8 @@ def get_artist_map_genre_list():
                     if g and isinstance(g, str):
                         gl = g.lower().strip()
                         genre_counts[gl] = genre_counts.get(gl, 0) + 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("genre count row parse failed: %s", e)
 
         # Sort by count descending
         sorted_genres = sorted(genre_counts.items(), key=lambda x: -x[1])
@@ -404,8 +404,8 @@ def get_artist_map_genres():
             if r['genres']:
                 try:
                     genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("cache artist genres parse failed: %s", e)
             src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
             kwargs = {src_map.get(r['source'], 'spotify_id'): r['entity_id']}
             _add(r['name'], image_url=r['image_url'], genres=genres, source='cache', popularity=r['popularity'] or 0, **kwargs)
@@ -421,8 +421,8 @@ def get_artist_map_genres():
             if r['genres']:
                 try:
                     genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("similar artist genres parse failed: %s", e)
             _add(r['similar_artist_name'], image_url=r['image_url'], genres=genres,
                  spotify_id=r['similar_artist_spotify_id'], itunes_id=r['similar_artist_itunes_id'],
                  deezer_id=r['similar_artist_deezer_id'], source='similar', popularity=r['popularity'] or 0)
@@ -445,8 +445,8 @@ def get_artist_map_genres():
             if r['genres']:
                 try:
                     genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("library artist genres parse failed: %s", e)
             img = r['thumb_url'] if r['thumb_url'] and r['thumb_url'].startswith('http') else None
             _add(r['name'], image_url=img, genres=genres, source='library')
 
@@ -550,8 +550,8 @@ def get_artist_map_genres():
                 nn = (r['artist_name'] or '').lower().strip()
                 if nn and nn not in _album_art_cache:
                     _album_art_cache[nn] = r['image_url']
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("genre map cache build failed: %s", e)
 
         for n in nodes:
             img = n.get('image_url', '')
@@ -650,8 +650,8 @@ def get_artist_map_explore():
             if row['genres']:
                 try:
                     center_genres = json.loads(row['genres']) if isinstance(row['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("initial center genres parse failed: %s", e)
 
         # Check watchlist + library if not in cache
         if not artist_found and not artist_id:
@@ -722,8 +722,8 @@ def get_artist_map_explore():
             if r['genres'] and not center_genres:
                 try:
                     center_genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("center genres parse failed: %s", e)
 
         # Add center node
         center_idx = 0
@@ -787,8 +787,8 @@ def get_artist_map_explore():
                                     popularity=sa.get('popularity', 0),
                                     similar_artist_deezer_id=sa.get('deezer_id')
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("similar artist insert failed: %s", e)
                         # Re-query from DB to get consistent format
                         if id_values:
                             placeholders = ','.join(['?'] * len(id_values))
@@ -828,8 +828,8 @@ def get_artist_map_explore():
             if r['genres']:
                 try:
                     genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("ring1 genres parse failed: %s", e)
             img = r['image_url'] if r['image_url'] and r['image_url'].startswith('http') else ''
             nodes.append({
                 'id': idx, 'name': r['similar_artist_name'], 'image_url': img,
@@ -889,8 +889,8 @@ def get_artist_map_explore():
                 if r['genres']:
                     try:
                         genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("ring2 genres parse failed: %s", e)
                 img = r['image_url'] if r['image_url'] and r['image_url'].startswith('http') else ''
                 nodes.append({
                     'id': idx, 'name': r['similar_artist_name'], 'image_url': img,
@@ -928,8 +928,8 @@ def get_artist_map_explore():
                 if not n['genres'] and cr['genres']:
                     try:
                         n['genres'] = json.loads(cr['genres'])[:5] if isinstance(cr['genres'], str) else []
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("explorer node genres parse failed: %s", e)
                 # Harvest missing IDs from cache
                 src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
                 k = src_map.get(cr['source'])
@@ -951,8 +951,8 @@ def get_artist_map_explore():
                             n['image_url'] = artist_data['images'][0]['url']
                             if not n['genres'] and artist_data.get('genres'):
                                 n['genres'] = artist_data['genres'][:5]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("spotify artist image fallback failed: %s", e)
 
             # Album art fallback (iTunes artists have no artist images)
             if not n['image_url']:
