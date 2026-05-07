@@ -3107,8 +3107,8 @@ class WatchlistScanner:
                                     release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
                                     days_old = (datetime.now() - release_date).days
                                     is_new = days_old <= 30
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("new-release date parse: %s", e)
 
                             # Add each track to discovery pool
                             for track in tracks:
@@ -3552,8 +3552,8 @@ class WatchlistScanner:
                                     if release_date_str and len(release_date_str) >= 10:
                                         release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
                                         days_old = (datetime.now() - release_date).days
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("release-date parse: %s", e)
 
                                 for track in album_data['tracks'].get('items', []):
                                     track_id = track.get('id')

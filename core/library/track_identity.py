@@ -208,7 +208,7 @@ def find_library_track_by_external_id(
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
 
@@ -287,7 +287,7 @@ def find_provenance_by_external_id(
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
 

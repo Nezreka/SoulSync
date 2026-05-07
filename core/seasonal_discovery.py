@@ -167,8 +167,8 @@ class SeasonalDiscoveryService:
                     try:
                         cursor.execute(f"ALTER TABLE {table} ADD COLUMN source TEXT NOT NULL DEFAULT 'spotify'")
                         conn.commit()
-                    except Exception:
-                        pass  # Column already exists
+                    except Exception as e:
+                        logger.debug("source column migration %s: %s", table, e)
 
                 logger.info("Seasonal discovery database schema initialized")
 

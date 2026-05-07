@@ -387,8 +387,8 @@ def _set_profile_context():
                 session.pop('profile_id', None)
                 from flask import jsonify as _jsonify
                 return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
-        except Exception:
-            pass  # DB error — don't block requests, use the session value
+        except Exception as e:
+            logger.debug("profile session validate: %s", e)
 
     g.profile_id = pid
 
@@ -515,8 +515,8 @@ def check_download_permission():
         profile = get_database().get_profile(pid)
         if profile and not profile.get('can_download', True):
             return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
-    except Exception:
-        pass  # DB error — don't block
+    except Exception as e:
+        logger.debug("download permission check: %s", e)
     return None
 
 # --- Docker Helper Functions ---
@@ -1397,8 +1397,8 @@ def _register_automation_handlers():
                     'status': 'skipped',
                     'reason': f'All {len(tracks_json)} tracks unchanged since last sync',
                 }
-        except Exception:
-            pass  # If we can't read last status, just run the sync
+        except Exception as e:
+            logger.debug("mirror sync last-status read: %s", e)
 
         _update_automation_progress(auto_id, progress=50,
             phase=f'Syncing "{pl["name"]}"',
@@ -2974,13 +2974,13 @@ def _atexit_save_history():
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 def _atexit_shutdown():
     try:
         _shutdown_runtime_components()
-    except Exception:
+    except Exception:  # noqa: S110 — atexit handler, log handles may be closed
         pass
 
 
@@ -4176,8 +4176,8 @@ def handle_settings():
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             try:
                 tidal_client = TidalClient()
-            except Exception:
-                pass  # Keep existing tidal_client if re-init fails
+            except Exception as e:
+                logger.debug("tidal client re-init: %s", e)
             # Reload enrichment worker clients for key-based services
             if lastfm_worker:
                 lastfm_worker._init_client()
@@ -4330,8 +4330,8 @@ def hydrabase_connect():
             if _hydrabase_ws:
                 try:
                     _hydrabase_ws.close()
-                except:
-                    pass
+                except Exception as _e:
+                    logger.debug("hydrabase connect-existing close: %s", _e)
             ws = websocket.create_connection(
                 url,
                 header={"x-api-key": api_key},
@@ -4356,8 +4356,8 @@ def hydrabase_disconnect():
         if _hydrabase_ws:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug("hydrabase disconnect close: %s", e)
             _hydrabase_ws = None
     config_manager.set('hydrabase.auto_connect', False)
     # Only disable dev mode if not using Hydrabase as a regular fallback source
@@ -4428,8 +4428,8 @@ def hydrabase_send():
         with _hydrabase_lock:
             try:
                 _hydrabase_ws.close()
-            except:
-                pass
+            except Exception as _e:
+                logger.debug("hydrabase send close: %s", _e)
             _hydrabase_ws = None
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -15761,8 +15761,8 @@ def backup_database_endpoint():
         try:
             with open(meta_path, 'w') as mf:
                 json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
-        except Exception:
-            pass  # Non-critical — backup still works without metadata
+        except Exception as e:
+            logger.debug("backup meta sidecar write: %s", e)
         # Rolling cleanup
         existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
         # Filter out .meta.json files from the backup list
@@ -27002,8 +27002,8 @@ def get_seasonal_playlist(season_key):
                         try:
                             import json
                             track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("track_data_json parse: %s", e)
                     tracks.append(track_dict)
                 else:
                     # Try discovery_pool as fallback (filtered by source)
@@ -27029,8 +27029,8 @@ def get_seasonal_playlist(season_key):
                             try:
                                 import json
                                 track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug("discovery track_data_json parse: %s", e)
                         tracks.append(track_dict)
 
         config = SEASONAL_CONFIG[season_key]
@@ -32212,8 +32212,8 @@ def start_oauth_callback_servers():
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     self.wfile.write(f'<h1>Internal Server Error</h1><p>{str(e)}</p>'.encode())
-                except Exception:
-                    pass  # Connection already broken, nothing more we can do
+                except Exception as _e:
+                    _oauth_logger.debug("oauth response write: %s", _e)
 
         def log_message(self, format, *args):
             pass  # Suppress BaseHTTPRequestHandler access logs (we use our own logger)
@@ -34193,8 +34193,8 @@ def _hydrabase_reconnect_loop():
                 if _hydrabase_ws is not None and _hydrabase_ws.connected:
                     _consecutive_failures = 0
                     continue
-            except Exception:
-                pass  # Socket in bad state — treat as disconnected
+            except Exception as e:
+                logger.debug("hydrabase socket check: %s", e)
 
             # Disconnected with auto_connect enabled — try to reconnect
             # Back off: 30s, 60s, 120s, max 300s between attempts
@@ -34208,8 +34208,8 @@ def _hydrabase_reconnect_loop():
                     if _hydrabase_ws:
                         try:
                             _hydrabase_ws.close()
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("hydrabase reconnect close: %s", e)
                     ws = websocket.create_connection(
                         hydra_cfg['url'],
                         header={"x-api-key": hydra_cfg['api_key']},
@@ -34224,8 +34224,8 @@ def _hydrabase_reconnect_loop():
                     logger.error(f"[Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
                 elif _consecutive_failures == 4:
                     logger.error("[Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
-        except Exception:
-            pass  # Don't crash the monitor loop
+        except Exception as e:
+            logger.debug("hydrabase monitor loop: %s", e)
 
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""

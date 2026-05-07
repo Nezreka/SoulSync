@@ -102,7 +102,7 @@ def lookup(normalized_album_key: str, artist_key: str) -> Optional[str]:
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
     return None
@@ -142,7 +142,7 @@ def record(normalized_album_key: str, artist_key: str, release_mbid: str) -> boo
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
 
@@ -168,7 +168,7 @@ def clear_all() -> bool:
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
 
 

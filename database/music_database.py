@@ -5219,8 +5219,8 @@ class MusicDatabase:
                             file_path=file_path,
                             thumb_url=album_row[1] if album_row and len(album_row) > 1 else None
                         )
-                    except Exception:
-                        pass  # Non-critical history logging
+                    except Exception as e:
+                        logger.debug("history logging: %s", e)
 
                 return True
                 
@@ -12137,5 +12137,5 @@ def close_database():
                 db_instance.close()
             except Exception as e:
                 # Ignore threading errors during shutdown
-                pass
+                logger.debug("db instance close: %s", e)
         _database_instances.clear()
