@@ -22,7 +22,10 @@ module-level constant in the client file.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,8 +66,8 @@ def resolve_policy(plugin) -> RateLimitPolicy:
             policy = method()
             if isinstance(policy, RateLimitPolicy):
                 return policy
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("plugin rate_limit_policy() call failed: %s", e)
 
     declared = getattr(plugin, 'RATE_LIMIT_POLICY', None)
     if isinstance(declared, RateLimitPolicy):

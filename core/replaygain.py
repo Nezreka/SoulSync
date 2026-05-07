@@ -7,9 +7,12 @@ Tag writing uses mutagen directly to stay consistent with the rest of the codeba
 Supported formats: MP3, FLAC, OGG Vorbis, Opus, M4A/MP4
 """
 
+import logging
 import re
 import subprocess
 from typing import Optional, Tuple, Dict
+
+logger = logging.getLogger(__name__)
 
 # ReplayGain 2.0 reference level (EBU R128)
 RG_REFERENCE_LUFS = -18.0
@@ -189,8 +192,8 @@ def read_replaygain_tags(file_path: str) -> Dict[str, Optional[str]]:
             result['track_peak'] = _mp4_rg(audio, _TAG_TRACK_PEAK)
             result['album_gain'] = _mp4_rg(audio, _TAG_ALBUM_GAIN)
             result['album_peak'] = _mp4_rg(audio, _TAG_ALBUM_PEAK)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read replaygain tags failed: %s", e)
 
     return result
 
@@ -207,8 +210,8 @@ def _read_id3_txxx(audio, description: str) -> Optional[str]:
             if frame_key.upper() == key.upper():
                 frame = audio.tags[frame_key]
                 return str(frame.text[0]) if frame.text else None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read id3 txxx frame failed: %s", e)
     return None
 
 
@@ -218,8 +221,8 @@ def _vorbis_first(audio, key: str) -> Optional[str]:
         vals = audio.get(key) or audio.get(key.upper())
         if vals:
             return str(vals[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read vorbis comment failed: %s", e)
     return None
 
 
@@ -234,8 +237,8 @@ def _mp4_rg(audio, tag_name: str) -> Optional[str]:
                 if hasattr(val, 'decode'):
                     return val.decode('utf-8')
                 return str(val)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("read mp4 replaygain atom failed: %s", e)
     return None
 
 

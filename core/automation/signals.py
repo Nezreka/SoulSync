@@ -8,6 +8,9 @@ names from the saved automation set so the builder UI can autocomplete.
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def collect_known_signals(database) -> list[str]:
@@ -38,6 +41,6 @@ def collect_known_signals(database) -> list[str]:
                             signals.add(sig)
             except (json.JSONDecodeError, TypeError):
                 pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("collect known signals failed: %s", e)
     return sorted(signals)
