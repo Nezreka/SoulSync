@@ -50833,6 +50833,13 @@ tr.tag-diff-same {
     background: rgba(239, 68, 68, 0.10);
     color: #f87171;
 }
+/* Historical "found in last scan" — present but already resolved /
+   dismissed. Muted so it doesn't read as urgent action like the
+   current-pending badge. */
+.repair-flow-badge.findings-historical {
+    background: rgba(148, 163, 184, 0.10);
+    color: #94a3b8;
+}
 .repair-flow-arrow {
     color: rgba(255, 255, 255, 0.25);
     font-size: 12px;

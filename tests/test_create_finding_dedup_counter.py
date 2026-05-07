@@ -206,3 +206,96 @@ def test_caller_pattern_counts_only_real_inserts(repair_worker_with_temp_db):
 
     assert result.findings_created == 1
     assert result.findings_skipped_dedup == 4
+
+
+# ---------------------------------------------------------------------------
+# _get_pending_count_by_job — feeds the job-card "X pending" badge
+# ---------------------------------------------------------------------------
+
+
+def test_get_pending_count_by_job_returns_per_job_dict(repair_worker_with_temp_db):
+    """Pin: helper returns ``{job_id: pending_count}`` based on rows
+    with status='pending' only. Job-card badge uses this so it shows
+    CURRENT pending state instead of the historical
+    ``last_run.findings_created`` (which inflates after a bulk-fix
+    moves all findings to status='resolved')."""
+    worker, path = repair_worker_with_temp_db
+
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    # 3 pending duplicate_tracks for dup_detector
+    cur.executemany("""
+        INSERT INTO repair_findings (job_id, finding_type, severity, status,
+            entity_type, entity_id, file_path, title, description)
+        VALUES (?, 'duplicate_tracks', 'info', 'pending', 'track', ?, ?, 'T', 'D')
+    """, [
+        ('dup_detector', '1', '/a'),
+        ('dup_detector', '2', '/b'),
+        ('dup_detector', '3', '/c'),
+    ])
+    # 2 pending missing_cover_art for cover_art_filler
+    cur.executemany("""
+        INSERT INTO repair_findings (job_id, finding_type, severity, status,
+            entity_type, entity_id, file_path, title, description)
+        VALUES ('cover_art_filler', 'missing_cover_art', 'info', 'pending',
+                'album', ?, ?, 'T', 'D')
+    """, [('10', '/x'), ('11', '/y')])
+    # 1 RESOLVED finding — must NOT be counted
+    cur.execute("""
+        INSERT INTO repair_findings (job_id, finding_type, severity, status,
+            entity_type, entity_id, file_path, title, description)
+        VALUES ('dup_detector', 'duplicate_tracks', 'info', 'resolved',
+                'track', '99', '/z', 'T', 'D')
+    """)
+    # 1 DISMISSED finding — must NOT be counted
+    cur.execute("""
+        INSERT INTO repair_findings (job_id, finding_type, severity, status,
+            entity_type, entity_id, file_path, title, description)
+        VALUES ('cover_art_filler', 'missing_cover_art', 'info', 'dismissed',
+                'album', '88', '/w', 'T', 'D')
+    """)
+    conn.commit()
+    conn.close()
+
+    result = worker._get_pending_count_by_job()
+
+    assert result == {
+        'dup_detector': 3,
+        'cover_art_filler': 2,
+    }
+
+
+def test_get_pending_count_by_job_returns_empty_when_no_pending(repair_worker_with_temp_db):
+    """Pin: jobs with zero pending findings are absent from the dict
+    (caller handles missing key as 0)."""
+    worker, path = repair_worker_with_temp_db
+
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO repair_findings (job_id, finding_type, severity, status,
+            entity_type, entity_id, file_path, title, description)
+        VALUES ('dup_detector', 'duplicate_tracks', 'info', 'resolved',
+                'track', '1', '/a', 'T', 'D')
+    """)
+    conn.commit()
+    conn.close()
+
+    result = worker._get_pending_count_by_job()
+
+    assert result == {}
+
+
+def test_get_pending_count_by_job_handles_db_error_gracefully(repair_worker_with_temp_db):
+    """Pin: any DB exception → returns ``{}``. Job-card badge falls
+    back to historical count via the ``or 0`` safety in JS."""
+    worker, _ = repair_worker_with_temp_db
+
+    # Replace _get_connection with one that raises.
+    def _raise():
+        raise sqlite3.OperationalError("simulated")
+    worker.db._get_connection = _raise
+
+    result = worker._get_pending_count_by_job()
+
+    assert result == {}
