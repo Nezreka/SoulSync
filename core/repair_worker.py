@@ -257,8 +257,22 @@ class RepairWorker:
             self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
 
     def get_all_job_info(self) -> List[dict]:
-        """Get info for all jobs (for API response)."""
+        """Get info for all jobs (for API response).
+
+        Includes ``pending_findings_count`` per job so the job-card
+        badge can show CURRENT pending state instead of the
+        ``last_run.findings_created`` historical scan count. Without
+        this, a scan that creates 372 findings + a subsequent bulk-
+        fix that resolves all of them leaves the badge displaying
+        "372 findings" while the Findings tab Pending filter shows 0
+        — confusing UX flagged on the Library Maintenance page.
+        """
         self._ensure_jobs_loaded()
+
+        # Single query → per-job pending count dict. O(1) lookup per
+        # job instead of N round trips.
+        pending_by_job = self._get_pending_count_by_job()
+
         jobs_info = []
         for job_id, job in self._jobs.items():
             config = self.get_job_config(job_id)
@@ -284,8 +298,29 @@ class RepairWorker:
                 'last_run': last_run,
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,
+                'pending_findings_count': pending_by_job.get(job_id, 0),
             })
         return jobs_info
+
+    def _get_pending_count_by_job(self) -> dict:
+        """Return ``{job_id: pending_count}`` for every job that has
+        any pending findings. Single SQL aggregation."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT job_id, COUNT(*) FROM repair_findings
+                WHERE status = 'pending'
+                GROUP BY job_id
+            """)
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug("Error counting pending findings per job: %s", e)
+            return {}
+        finally:
+            if conn:
+                conn.close()
 
     # ------------------------------------------------------------------
     # Lifecycle
