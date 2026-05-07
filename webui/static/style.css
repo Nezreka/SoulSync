@@ -273,10 +273,6 @@ body {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Explicitly lift above the nav buttons. `.sidebar > *` sets z-index 1 on
-       every sidebar child, so without this the sticky header paints at the
-       same stacking level as the nav and loses to it on DOM order. */
-    z-index: 2;
     overflow: hidden;
     flex-shrink: 0;
 
