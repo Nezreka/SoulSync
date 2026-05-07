@@ -33,8 +33,8 @@ def get_metadata_cache():
         try:
             import threading
             threading.Thread(target=_cache_instance.backfill_deezer_album_genres, daemon=True).start()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("start deezer genres backfill failed: %s", e)
     return _cache_instance
 
 

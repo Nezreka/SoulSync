@@ -253,8 +253,8 @@ class SoulSyncClient(MediaServerClient):
         if self._progress_callback:
             try:
                 self._progress_callback(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("progress callback failed: %s", e)
 
     # ── Core Scanning ──
 

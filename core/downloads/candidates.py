@@ -97,8 +97,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
             if _bl_db.is_blacklisted(candidate.username, candidate.filename):
                 logger.info(f"[Modal Worker] Skipping blacklisted source: {source_key}")
                 continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("blacklist check failed: %s", e)
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source

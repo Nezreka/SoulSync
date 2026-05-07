@@ -84,8 +84,8 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
                     artist['soul_id'] = row[4]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top artists enrich failed: %s", e)
 
     return artists
 
@@ -114,8 +114,8 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
                     album['artist_id'] = row[2]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top albums enrich failed: %s", e)
 
     return albums
 
@@ -146,8 +146,8 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
                     track['artist_id'] = row[2]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("top tracks enrich failed: %s", e)
 
     return tracks
 

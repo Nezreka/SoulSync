@@ -77,8 +77,8 @@ def update_progress(
             if socketio_emit is not None:
                 try:
                     socketio_emit('automation:progress', {str(automation_id): dict(state)})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("socketio progress emit: %s", e)
 
 
 def get_running_progress() -> dict[str, dict]:
@@ -121,8 +121,8 @@ def record_history(
                 t0 = datetime.fromisoformat(started_at)
                 t1 = datetime.fromisoformat(finished_at)
                 duration = (t1 - t0).total_seconds()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("duration parse: %s", e)
 
         r_status = result.get('status', 'completed') if result else 'completed'
         if r_status == 'error':

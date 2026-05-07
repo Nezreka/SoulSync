@@ -280,8 +280,8 @@ class WebUIDownloadMonitor:
                         all_downloads = run_async(
                             download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("get_all_downloads failed: %s", e)
                 for download in all_downloads:
                     key = _make_context_key(download.username, download.filename)
                     # Convert DownloadStatus to transfer dict format for monitor compatibility

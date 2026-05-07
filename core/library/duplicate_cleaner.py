@@ -209,8 +209,8 @@ def _run_duplicate_cleaner():
                     'duplicates_found': str(duplicates_found),
                     'space_freed': f"{space_mb:.1f} MB",
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("emit duplicate_scan_completed failed: %s", e)
 
     except Exception as e:
         logger.error(f"[Duplicate Cleaner] Critical error: {e}")

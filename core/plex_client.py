@@ -405,8 +405,8 @@ class PlexClient(MediaServerClient):
                 new_count = getattr(a, 'leafCount', 0) or 0
                 if new_count > existing_count:
                     by_name[name_key] = a
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("artist leafCount compare failed: %s", e)
         return list(by_name.values())
 
     def _dedupe_albums(self, albums: List[PlexAlbum]) -> List[PlexAlbum]:
@@ -424,8 +424,8 @@ class PlexClient(MediaServerClient):
             artist = ''
             try:
                 artist = (getattr(alb, 'parentTitle', '') or '').strip().lower()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album parentTitle read failed: %s", e)
             key = (artist, title)
             existing = by_key.get(key)
             if existing is None:
@@ -436,8 +436,8 @@ class PlexClient(MediaServerClient):
                 new_count = getattr(alb, 'leafCount', 0) or 0
                 if new_count > existing_count:
                     by_key[key] = alb
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("album leafCount compare failed: %s", e)
         return list(by_key.values())
     
     def get_all_playlists(self) -> List[PlaylistInfo]:

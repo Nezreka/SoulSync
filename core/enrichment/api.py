@@ -67,8 +67,8 @@ def _drop_auto_pause_marker(service: EnrichmentService) -> None:
         return
     try:
         _auto_paused_discard(service.auto_pause_token)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("auto-pause marker discard: %s", e)
 
 
 def _add_yield_override(service: EnrichmentService) -> None:
@@ -76,8 +76,8 @@ def _add_yield_override(service: EnrichmentService) -> None:
         return
     try:
         _yield_override_add(service.auto_pause_token)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("yield override add: %s", e)
 
 
 def create_blueprint() -> Blueprint:
