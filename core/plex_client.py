@@ -21,10 +21,26 @@ from core.media_server.contract import MediaServerClient
 logger = get_logger("plex_client")
 
 
+# Sentinel value stored in the ``plex_music_library`` DB preference when
+# the user picks "All Libraries (combined)". Detection is one string
+# compare in ``_find_music_library`` / ``set_music_library_by_name``.
+# Existing prefs (real library names) are unaffected — only this exact
+# string flips the client into multi-section read mode.
+ALL_LIBRARIES_SENTINEL = '__all_libraries__'
+
+
 class PlexClient(MediaServerClient):
     def __init__(self):
         self.server: Optional[PlexServer] = None
         self.music_library: Optional[MusicSection] = None
+        # When True, read methods union across every music section under
+        # the connected token via ``server.library.search(libtype=...)``
+        # instead of querying ``self.music_library`` only. Set by
+        # ``_find_music_library`` / ``set_music_library_by_name`` when the
+        # user's saved preference matches ``ALL_LIBRARIES_SENTINEL``.
+        # Write methods (genre / poster / metadata updates) are unaffected
+        # — they operate on Plex objects via ratingKey, section-agnostic.
+        self._all_libraries_mode = False
         self._connection_attempted = False
         self._is_connecting = False
         self._last_connection_check = 0  # Cache connection checks
@@ -63,6 +79,7 @@ class PlexClient(MediaServerClient):
         logger.info("Resetting Plex connection state")
         self.server = None
         self.music_library = None
+        self._all_libraries_mode = False
         self._connection_attempted = False
         self._last_connection_check = 0
 
@@ -89,7 +106,14 @@ class PlexClient(MediaServerClient):
             self.server = None
     
     def get_available_music_libraries(self) -> List[Dict[str, str]]:
-        """Get list of all available music libraries on the Plex server"""
+        """Get list of all available music libraries on the Plex server.
+
+        Prepends an "All Libraries (combined)" synthetic entry whose
+        ``key`` is ``ALL_LIBRARIES_SENTINEL``. The settings UI renders
+        this as a normal dropdown option; selecting it stores the
+        sentinel as the saved preference, which flips the client into
+        all-libraries read mode (see ``_all_libraries_mode``).
+        """
         if not self.ensure_connection() or not self.server:
             return []
 
@@ -99,24 +123,56 @@ class PlexClient(MediaServerClient):
                 if section.type == 'artist':
                     music_libraries.append({
                         'title': section.title,
-                        'key': str(section.key)
+                        'key': str(section.key),
+                        # ``value`` is what the frontend submits to
+                        # ``/api/plex/select-music-library``. Real
+                        # libraries use their title (preserves prior
+                        # behavior). The synthetic sentinel entry below
+                        # uses the sentinel string so the backend's
+                        # ``set_music_library_by_name`` can recognize it.
+                        'value': section.title,
                     })
 
-            logger.debug(f"Found {len(music_libraries)} music libraries")
+            # Only offer the "All Libraries" option when the user actually
+            # has more than one music library on their server — single-
+            # library users don't need the extra menu item.
+            if len(music_libraries) > 1:
+                music_libraries.insert(0, {
+                    'title': 'All Libraries (combined)',
+                    'key': ALL_LIBRARIES_SENTINEL,
+                    'value': ALL_LIBRARIES_SENTINEL,
+                })
+
+            logger.debug(f"Found {len(music_libraries)} music libraries (incl. sentinel)")
             return music_libraries
         except Exception as e:
             logger.error(f"Error getting music libraries: {e}")
             return []
 
     def set_music_library_by_name(self, library_name: str) -> bool:
-        """Set the active music library by name"""
+        """Set the active music library by name.
+
+        Special-case ``ALL_LIBRARIES_SENTINEL`` (``'__all_libraries__'``):
+        flips the client into all-libraries mode where read methods union
+        across every music section instead of querying a single one.
+        """
         if not self.server:
             return False
 
         try:
+            if library_name == ALL_LIBRARIES_SENTINEL:
+                self.music_library = None
+                self._all_libraries_mode = True
+                logger.info("Set music library to: All Libraries (combined)")
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                db.set_preference('plex_music_library', ALL_LIBRARIES_SENTINEL)
+                return True
+
             for section in self.server.library.sections():
                 if section.type == 'artist' and section.title == library_name:
                     self.music_library = section
+                    self._all_libraries_mode = False
                     logger.info(f"Set music library to: {library_name}")
 
                     # Store preference in database
@@ -154,11 +210,23 @@ class PlexClient(MediaServerClient):
                 db = MusicDatabase()
                 preferred_library = db.get_preference('plex_music_library')
 
+                if preferred_library == ALL_LIBRARIES_SENTINEL:
+                    # User opted into all-libraries mode — read methods
+                    # union across every music section.
+                    self.music_library = None
+                    self._all_libraries_mode = True
+                    logger.debug(
+                        f"Using all-libraries mode across "
+                        f"{len(music_sections)} music sections"
+                    )
+                    return
+
                 if preferred_library:
                     # Try to find the preferred library
                     for section in music_sections:
                         if section.title == preferred_library:
                             self.music_library = section
+                            self._all_libraries_mode = False
                             logger.debug(f"Using user-selected music library: {section.title}")
                             return
             except Exception as e:
@@ -212,8 +280,165 @@ class PlexClient(MediaServerClient):
         return self.server is not None
 
     def is_fully_configured(self) -> bool:
-        """Check if both server is connected AND music library is selected."""
-        return self.server is not None and self.music_library is not None
+        """Check if both server is connected AND music library is selected
+        (or user has opted into all-libraries mode)."""
+        return self.server is not None and (
+            self.music_library is not None or self._all_libraries_mode
+        )
+
+    def is_all_libraries_mode(self) -> bool:
+        """True when the user has selected the synthetic "All Libraries
+        (combined)" option — read methods union across every music
+        section instead of querying a single one. Public accessor so
+        external callers don't reach into the underscore-prefixed
+        flag directly."""
+        return self._all_libraries_mode
+
+    # ------------------------------------------------------------------
+    # Library scope helpers — single dispatch point for "single section
+    # vs all music sections" so every read method funnels through the
+    # same branch.
+    # ------------------------------------------------------------------
+
+    def _can_query(self) -> bool:
+        """True when there's something to query — a selected section or
+        all-libraries mode + a connected server."""
+        if not self.server:
+            return False
+        if self._all_libraries_mode:
+            return True
+        return self.music_library is not None
+
+    def _get_music_sections(self) -> List:
+        """Music sections currently in scope (one for single-library
+        mode, every music section for all-libraries mode). Used by
+        ``trigger_library_scan`` / ``is_library_scanning`` which take
+        per-section action."""
+        if not self.server:
+            return []
+        if self._all_libraries_mode:
+            try:
+                return [s for s in self.server.library.sections() if s.type == 'artist']
+            except Exception as exc:
+                logger.error(f"Error enumerating music sections: {exc}")
+                return []
+        if self.music_library:
+            return [self.music_library]
+        return []
+
+    def _all_artists(self) -> List[PlexArtist]:
+        """Every artist in the configured scope."""
+        if self._all_libraries_mode:
+            return self.server.library.search(libtype='artist')
+        if self.music_library:
+            return self.music_library.searchArtists()
+        return []
+
+    def _all_albums(self) -> List[PlexAlbum]:
+        """Every album in the configured scope."""
+        if self._all_libraries_mode:
+            return self.server.library.search(libtype='album')
+        if self.music_library:
+            return self.music_library.albums()
+        return []
+
+    def _all_tracks(self) -> List[PlexTrack]:
+        """Every track in the configured scope."""
+        if self._all_libraries_mode:
+            return self.server.library.search(libtype='track')
+        if self.music_library:
+            return self.music_library.searchTracks()
+        return []
+
+    def _search_general(self, **kwargs):
+        """Generic search dispatch — single section or server-wide.
+
+        Used by ``_find_track`` / ``search_tracks`` for fielded
+        searches (title=, artist=, libtype=, limit=, etc).
+        """
+        if self._all_libraries_mode:
+            return self.server.library.search(**kwargs)
+        if self.music_library:
+            return self.music_library.search(**kwargs)
+        return []
+
+    def _search_artists_by_name(self, title: str, limit: int = 1) -> List[PlexArtist]:
+        """Find artist objects matching a name. Used by ``search_tracks``
+        Stage 1 + ``search_albums`` artist-then-filter flow."""
+        if self._all_libraries_mode:
+            results = self.server.library.search(title=title, libtype='artist', limit=limit)
+            return [r for r in results if isinstance(r, PlexArtist)]
+        if self.music_library:
+            return self.music_library.searchArtists(title=title, limit=limit)
+        return []
+
+    # ------------------------------------------------------------------
+    # Cross-section dedup. Applied ONLY in all-libraries mode and ONLY
+    # at the listing/stats layer. Never apply to ratingKey enumeration
+    # (``get_all_artist_ids`` / ``get_all_album_ids``) — removal
+    # detection compares those sets against DB-linked ratingKeys and
+    # deduping would falsely prune library tracks pointing at the
+    # non-canonical ratingKey. Single-library mode is a no-op fast
+    # path so the dedup code path never touches it.
+    # ------------------------------------------------------------------
+
+    def _dedupe_artists(self, artists: List[PlexArtist]) -> List[PlexArtist]:
+        """Collapse same-name artists across sections to a single
+        canonical entry (the one with the higher track count). Returns
+        the input unchanged in single-library mode and when there's
+        nothing to dedup."""
+        if not self._all_libraries_mode or not artists:
+            return artists
+        by_name: Dict[str, PlexArtist] = {}
+        for a in artists:
+            name_key = (getattr(a, 'title', '') or '').strip().lower()
+            if not name_key:
+                # Untitled artist — keep as-is, can't dedup blindly.
+                by_name[f'__nokey_{getattr(a, "ratingKey", id(a))}'] = a
+                continue
+            existing = by_name.get(name_key)
+            if existing is None:
+                by_name[name_key] = a
+                continue
+            try:
+                existing_count = getattr(existing, 'leafCount', 0) or 0
+                new_count = getattr(a, 'leafCount', 0) or 0
+                if new_count > existing_count:
+                    by_name[name_key] = a
+            except Exception:
+                pass
+        return list(by_name.values())
+
+    def _dedupe_albums(self, albums: List[PlexAlbum]) -> List[PlexAlbum]:
+        """Collapse same-album-by-same-artist across sections to a
+        single canonical entry. Group key is (artist_lower, title_lower);
+        canonical = higher track count. No-op in single-library mode."""
+        if not self._all_libraries_mode or not albums:
+            return albums
+        by_key: Dict[tuple, PlexAlbum] = {}
+        for alb in albums:
+            title = (getattr(alb, 'title', '') or '').strip().lower()
+            if not title:
+                by_key[('__nokey__', getattr(alb, 'ratingKey', id(alb)))] = alb
+                continue
+            artist = ''
+            try:
+                artist = (getattr(alb, 'parentTitle', '') or '').strip().lower()
+            except Exception:
+                pass
+            key = (artist, title)
+            existing = by_key.get(key)
+            if existing is None:
+                by_key[key] = alb
+                continue
+            try:
+                existing_count = getattr(existing, 'leafCount', 0) or 0
+                new_count = getattr(alb, 'leafCount', 0) or 0
+                if new_count > existing_count:
+                    by_key[key] = alb
+            except Exception:
+                pass
+        return list(by_key.values())
     
     def get_all_playlists(self) -> List[PlaylistInfo]:
         if not self.ensure_connection():
@@ -440,28 +665,28 @@ class PlexClient(MediaServerClient):
         return False
 
     def _find_track(self, title: str, artist: str, album: str) -> Optional[PlexTrack]:
-        if not self.music_library:
+        if not self._can_query():
             return None
-        
+
         try:
-            search_results = self.music_library.search(title=title, artist=artist, album=album)
-            
+            search_results = self._search_general(title=title, artist=artist, album=album)
+
             for result in search_results:
                 if isinstance(result, PlexTrack):
-                    if (result.title.lower() == title.lower() and 
+                    if (result.title.lower() == title.lower() and
                         result.artist().title.lower() == artist.lower() and
                         result.album().title.lower() == album.lower()):
                         return result
-            
-            broader_search = self.music_library.search(title=title, artist=artist)
+
+            broader_search = self._search_general(title=title, artist=artist)
             for result in broader_search:
                 if isinstance(result, PlexTrack):
-                    if (result.title.lower() == title.lower() and 
+                    if (result.title.lower() == title.lower() and
                         result.artist().title.lower() == artist.lower()):
                         return result
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error searching for track '{title}' by '{artist}': {e}")
             return None
@@ -471,7 +696,7 @@ class PlexClient(MediaServerClient):
         Searches for tracks using an efficient, multi-stage "early exit" strategy.
         It stops and returns results as soon as candidates are found.
         """
-        if not self.music_library:
+        if not self._can_query():
             logger.warning("Plex music library not found. Cannot perform search.")
             return []
 
@@ -489,7 +714,7 @@ class PlexClient(MediaServerClient):
             # --- Stage 1: High-Precision Search (Artist -> then filter by Title) ---
             if artist:
                 logger.debug(f"Stage 1: Searching for artist '{artist}'")
-                artist_results = self.music_library.searchArtists(title=artist, limit=1)
+                artist_results = self._search_artists_by_name(title=artist, limit=1)
                 if artist_results:
                     plex_artist = artist_results[0]
                     all_artist_tracks = plex_artist.tracks()
@@ -514,7 +739,7 @@ class PlexClient(MediaServerClient):
             # --- Stage 2: Flexible Keyword Search (Artist + Title combined) ---
             search_query = f"{artist} {title}".strip()
             logger.debug(f"Stage 2: Performing keyword search for '{search_query}'")
-            stage2_results = self.music_library.search(title=search_query, libtype='track', limit=limit)
+            stage2_results = self._search_general(title=search_query, libtype='track', limit=limit)
             add_candidates(stage2_results)
 
             # --- Early Exit: If Stage 2 found results, stop here ---
@@ -559,18 +784,106 @@ class PlexClient(MediaServerClient):
 
 
     def get_library_stats(self) -> Dict[str, int]:
-        if not self.music_library:
+        if not self._can_query():
             return {}
-        
+
         try:
+            # Apply dedup to artist + album counts so stats match what
+            # the user actually sees in the library list (deduped). Tracks
+            # stay raw — same track in two sections means two distinct
+            # files / Plex entries, not a logical duplicate.
             return {
-                'artists': len(self.music_library.searchArtists()),
-                'albums': len(self.music_library.searchAlbums()),
-                'tracks': len(self.music_library.searchTracks())
+                'artists': len(self._dedupe_artists(self._all_artists())),
+                'albums': len(self._dedupe_albums(self._all_albums())),
+                'tracks': len(self._all_tracks())
             }
         except Exception as e:
             logger.error(f"Error getting library stats: {e}")
             return {}
+
+    def get_recently_added_albums(self, maxresults: int = 400,
+                                   libtype: Optional[str] = 'album') -> List:
+        """Recently added items across the configured scope.
+
+        In all-libraries mode, iterates every music section and concats
+        each section's ``recentlyAdded`` list. Honors ``maxresults``
+        per-section to bound the response. Caller is responsible for
+        further sorting / deduping if needed.
+
+        Pass ``libtype=None`` to skip the type filter (returns mixed
+        artists / albums / tracks). Used by the database update worker's
+        deep-scan recent-content sweep — pre-fix it reached
+        ``self.music_library.recentlyAdded()`` directly which crashed
+        in all-libraries mode (music_library is None there).
+        """
+        if not self.ensure_connection() or not self._can_query():
+            return []
+
+        def _call(target):
+            try:
+                if libtype is not None:
+                    return target.recentlyAdded(libtype=libtype, maxresults=maxresults)
+                return target.recentlyAdded(maxresults=maxresults)
+            except TypeError:
+                # Older PlexAPI versions don't accept libtype/maxresults
+                # as kwargs — fall back to bare call.
+                return target.recentlyAdded()
+
+        try:
+            if self._all_libraries_mode:
+                aggregate = []
+                for section in self._get_music_sections():
+                    try:
+                        aggregate.extend(_call(section))
+                    except Exception as inner_exc:
+                        logger.debug(f"recentlyAdded failed for section '{section.title}': {inner_exc}")
+                return aggregate
+            if self.music_library:
+                return _call(self.music_library)
+            return []
+        except Exception as exc:
+            logger.error(f"Error getting recently added albums: {exc}")
+            return []
+
+    def get_recently_updated_albums(self, limit: int = 400) -> List:
+        """Albums sorted by ``updatedAt`` descending across the scope.
+
+        Used by the deep-scan to catch metadata corrections (renames,
+        re-tagging) that recently-added doesn't surface. In all-
+        libraries mode, unions across every music section.
+        """
+        if not self.ensure_connection() or not self._can_query():
+            return []
+        try:
+            return self._search_general(sort='updatedAt:desc', libtype='album', limit=limit)
+        except Exception as exc:
+            logger.error(f"Error getting recently updated albums: {exc}")
+            return []
+
+    def get_music_library_locations(self) -> List[str]:
+        """Folder roots configured for the music library scope.
+
+        Single-library mode returns the selected section's locations.
+        All-libraries mode unions locations across every music section
+        — needed by ``web_server.py``'s file-path resolver to recognize
+        files under any music root, not just one.
+        """
+        if not self.ensure_connection() or not self._can_query():
+            return []
+        try:
+            sections = self._get_music_sections()
+            locations = []
+            for section in sections:
+                try:
+                    for loc in section.locations:
+                        if loc and loc not in locations:
+                            locations.append(loc)
+                except Exception as inner_exc:
+                    logger.debug(f"Could not read locations for section '{getattr(section, 'title', '?')}': {inner_exc}")
+            return locations
+        except Exception as exc:
+            logger.error(f"Error getting music library locations: {exc}")
+            return []
     
     def get_play_history(self, limit=500):
         """Fetch recently played tracks from Plex.
@@ -610,11 +923,11 @@ class PlexClient(MediaServerClient):
 
         Returns dict of {ratingKey: play_count}.
         """
-        if not self.ensure_connection() or not self.music_library:
+        if not self.ensure_connection() or not self._can_query():
             return {}
 
         try:
-            tracks = self.music_library.searchTracks()
+            tracks = self._all_tracks()
             counts = {}
             for track in tracks:
                 view_count = getattr(track, 'viewCount', 0) or 0
@@ -627,14 +940,27 @@ class PlexClient(MediaServerClient):
             return {}
 
     def get_all_artists(self) -> List[PlexArtist]:
-        """Get all artists from the music library"""
-        if not self.ensure_connection() or not self.music_library:
+        """Get all artists from the music library.
+
+        In all-libraries mode, dedupes same-name artists across
+        sections (canonical = higher track count) so the library list
+        doesn't show "Drake" twice when Drake is in two sections.
+        Single-library mode is unaffected — dedup helper is a no-op.
+        """
+        if not self.ensure_connection() or not self._can_query():
             logger.error("Not connected to Plex server or no music library")
             return []
 
         try:
-            artists = self.music_library.searchArtists()
-            logger.info(f"Found {len(artists)} artists in Plex library")
+            raw = self._all_artists()
+            artists = self._dedupe_artists(raw)
+            if len(raw) != len(artists):
+                logger.info(
+                    f"Found {len(raw)} artists across all music sections "
+                    f"({len(artists)} unique after cross-section dedup)"
+                )
+            else:
+                logger.info(f"Found {len(artists)} artists in Plex library")
             return artists
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")
@@ -642,10 +968,10 @@ class PlexClient(MediaServerClient):
 
     def get_all_artist_ids(self) -> set:
         """Get all artist IDs from Plex library (lightweight, for removal detection)."""
-        if not self.ensure_connection() or not self.music_library:
+        if not self.ensure_connection() or not self._can_query():
             return set()
         try:
-            artists = self.music_library.searchArtists()
+            artists = self._all_artists()
             ids = {str(a.ratingKey) for a in artists}
             logger.info(f"Retrieved {len(ids)} artist IDs from Plex")
             return ids
@@ -655,10 +981,10 @@ class PlexClient(MediaServerClient):
 
     def get_all_album_ids(self) -> set:
         """Get all album IDs from Plex library (lightweight, for removal detection)."""
-        if not self.ensure_connection() or not self.music_library:
+        if not self.ensure_connection() or not self._can_query():
             return set()
         try:
-            albums = self.music_library.albums()
+            albums = self._all_albums()
             ids = {str(a.ratingKey) for a in albums}
             logger.info(f"Retrieved {len(ids)} album IDs from Plex")
             return ids
@@ -868,11 +1194,31 @@ class PlexClient(MediaServerClient):
             return False
     
     def trigger_library_scan(self, library_name: str = "Music") -> bool:
-        """Trigger Plex library scan for the specified library"""
+        """Trigger Plex library scan.
+
+        In all-libraries mode, fans the scan trigger across every music
+        section. Otherwise targets the named section (default ``Music``).
+        Returns True if at least one section was successfully triggered.
+        """
         if not self.ensure_connection():
             return False
-            
+
         try:
+            if self._all_libraries_mode:
+                sections = self._get_music_sections()
+                if not sections:
+                    logger.warning("All-libraries mode active but no music sections found")
+                    return False
+                triggered = 0
+                for section in sections:
+                    try:
+                        section.update()
+                        triggered += 1
+                    except Exception as inner_exc:
+                        logger.error(f"Failed to trigger scan for '{section.title}': {inner_exc}")
+                logger.info(f"Triggered Plex library scan across {triggered}/{len(sections)} music sections")
+                return triggered > 0
+
             library = self.server.library.section(library_name)
             library.update()  # Non-blocking scan request
             logger.info(f"Triggered Plex library scan for '{library_name}'")
@@ -880,66 +1226,93 @@ class PlexClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Failed to trigger library scan for '{library_name}': {e}")
             return False
-    
+
     def is_library_scanning(self, library_name: str = "Music") -> bool:
-        """Check if Plex library is currently scanning"""
+        """Check if Plex library is currently scanning.
+
+        In all-libraries mode, returns True if ANY music section is
+        scanning. Otherwise checks the named section.
+        """
         if not self.ensure_connection():
             logger.debug("Not connected to Plex, cannot check scan status")
             return False
-            
+
         try:
+            if self._all_libraries_mode:
+                sections = self._get_music_sections()
+                # Per-section refreshing flag check.
+                for section in sections:
+                    if hasattr(section, 'refreshing') and section.refreshing:
+                        logger.debug(f"Section '{section.title}' is refreshing")
+                        return True
+                # Activity feed check — match any music-section title.
+                try:
+                    activities = self.server.activities()
+                    section_titles = {s.title.lower() for s in sections}
+                    for activity in activities:
+                        activity_type = getattr(activity, 'type', 'unknown')
+                        activity_title = getattr(activity, 'title', '') or ''
+                        if activity_type not in ['library.scan', 'library.refresh']:
+                            continue
+                        if any(title in activity_title.lower() for title in section_titles):
+                            logger.debug(f"Matching scan activity: {activity_title}")
+                            return True
+                except Exception as activities_error:
+                    logger.debug(f"Could not check server activities: {activities_error}")
+                return False
+
             library = self.server.library.section(library_name)
-            
+
             # Check if library has a scanning attribute or is refreshing
             # The Plex API exposes this through the library's refreshing property
             refreshing = hasattr(library, 'refreshing') and library.refreshing
             logger.debug("Library.refreshing = %s", refreshing)
-            
+
             if refreshing:
                 logger.debug("Library is refreshing")
                 return True
-            
+
             # Alternative method: Check server activities for scanning
             try:
                 activities = self.server.activities()
                 logger.debug("Found %s server activities", len(activities))
-                
+
                 for activity in activities:
                     # Look for library scan activities
                     activity_type = getattr(activity, 'type', 'unknown')
                     activity_title = getattr(activity, 'title', 'unknown')
                     logger.debug("Activity - type=%s title=%s", activity_type, activity_title)
-                    
+
                     if (activity_type in ['library.scan', 'library.refresh'] and
                         library_name.lower() in activity_title.lower()):
                         logger.debug("Found matching scan activity: %s", activity_title)
                         return True
             except Exception as activities_error:
                 logger.debug(f"Could not check server activities: {activities_error}")
-            
+
             logger.debug("No scan activity detected")
             return False
-            
+
         except Exception as e:
             logger.debug(f"Error checking if library is scanning: {e}")
             return False
     
     def search_albums(self, album_name: str = "", artist_name: str = "", limit: int = 20) -> List[Dict[str, Any]]:
         """Search for albums in Plex library"""
-        if not self.ensure_connection() or not self.music_library:
+        if not self.ensure_connection() or not self._can_query():
             return []
-        
+
         try:
             albums = []
-            
+
             # Perform search - different approaches based on what we're searching for
             search_results = []
-            
+
             if album_name and artist_name:
                 # Search for albums by specific artist and title
                 try:
                     # First try searching for the artist, then filter their albums
-                    artist_results = self.music_library.searchArtists(title=artist_name, limit=3)
+                    artist_results = self._search_artists_by_name(title=artist_name, limit=3)
                     for artist in artist_results:
                         try:
                             artist_albums = artist.albums()
@@ -952,25 +1325,25 @@ class PlexClient(MediaServerClient):
                     logger.debug(f"Artist search failed, trying general search: {e}")
                     # Fallback to general album search
                     try:
-                        search_results = self.music_library.search(title=album_name)
+                        search_results = self._search_general(title=album_name)
                         # Filter to only albums
                         search_results = [r for r in search_results if isinstance(r, PlexAlbum)]
                     except Exception as e2:
                         logger.debug(f"General search also failed: {e2}")
-                        
+
             elif album_name:
                 # Search for albums by title only
                 try:
-                    search_results = self.music_library.search(title=album_name)
-                    # Filter to only albums  
+                    search_results = self._search_general(title=album_name)
+                    # Filter to only albums
                     search_results = [r for r in search_results if isinstance(r, PlexAlbum)]
                 except Exception as e:
                     logger.debug(f"Album title search failed: {e}")
-                    
+
             elif artist_name:
                 # Search for all albums by artist
                 try:
-                    artist_results = self.music_library.searchArtists(title=artist_name, limit=1)
+                    artist_results = self._search_artists_by_name(title=artist_name, limit=1)
                     if artist_results:
                         search_results = artist_results[0].albums()
                 except Exception as e:
@@ -978,7 +1351,7 @@ class PlexClient(MediaServerClient):
             else:
                 # Get all albums if no search terms
                 try:
-                    search_results = self.music_library.albums()
+                    search_results = self._all_albums()
                 except Exception as e:
                     logger.debug(f"Get all albums failed: {e}")
             

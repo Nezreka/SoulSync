@@ -29,6 +29,7 @@ def plex_client():
     client = PlexClient.__new__(PlexClient)
     client.server = None
     client.music_library = None
+    client._all_libraries_mode = False
     client._connection_attempted = False
     client._is_connecting = False
     client._last_connection_check = 0

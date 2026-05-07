@@ -5129,8 +5129,12 @@ def clear_plex_library_preference():
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         db.set_preference('plex_music_library', '')
-        if media_server_engine.client('plex'):
-            media_server_engine.client('plex').music_library = None
+        plex = media_server_engine.client('plex')
+        if plex:
+            plex.music_library = None
+            # Also clear all-libraries mode so a fresh "select library"
+            # flow doesn't inherit stale state.
+            plex._all_libraries_mode = False
         return jsonify({"success": True, "message": "Plex library preference cleared."})
     except Exception as e:
         logger.error(f"Error clearing Plex library preference: {e}")
@@ -5148,10 +5152,15 @@ def get_plex_music_libraries():
         db = MusicDatabase()
         selected_library = db.get_preference('plex_music_library')
 
-        # Get the currently active library name
+        # Get the currently active library name. In all-libraries mode
+        # ``music_library`` is None — surface a friendly label so the
+        # settings UI displays the active selection correctly.
         current_library = None
-        if media_server_engine.client('plex').music_library:
-            current_library = media_server_engine.client('plex').music_library.title
+        plex = media_server_engine.client('plex')
+        if plex.music_library:
+            current_library = plex.music_library.title
+        elif plex.is_all_libraries_mode():
+            current_library = 'All Libraries (combined)'
 
         return jsonify({
             "success": True,
@@ -10940,11 +10949,14 @@ def _resolve_library_file_path(file_path):
     transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
 
-    # Also check the media server's music library path (handles Docker↔host path mismatch)
+    # Also check the media server's music library path (handles Docker↔host path mismatch).
+    # ``get_music_library_locations`` handles both single-library mode and
+    # all-libraries mode (unions location paths across every music section).
     library_dirs = set()
     try:
-        if media_server_engine.client('plex') and media_server_engine.client('plex').server and media_server_engine.client('plex').music_library:
-            for loc in media_server_engine.client('plex').music_library.locations:
+        plex = media_server_engine.client('plex')
+        if plex and plex.server:
+            for loc in plex.get_music_library_locations():
                 library_dirs.add(loc)
     except Exception:
         pass
