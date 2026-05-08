@@ -885,6 +885,7 @@ async function loadDiscoverRecentReleases() {
             loadingMessage: 'Loading recent releases...',
             emptyMessage: 'No recent releases found',
             errorMessage: 'Failed to load recent releases',
+            showErrorToast: true,
         });
     }
     return _recentReleasesCtrl.load();
@@ -909,46 +910,64 @@ function debouncedYourAlbumsSearch() {
     }, 400);
 }
 
+let _yourAlbumsCtrl = null;
+
 async function loadYourAlbums() {
-    const section = document.getElementById('your-albums-section');
-    if (!section) return;
-    try {
-        const resp = await fetch('/api/discover/your-albums?page=1&per_page=48&status=all');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (!data.success) return;
-
-        const totalCount = (data.stats && data.stats.total) || 0;
-        if (totalCount === 0 && !data.stale) return; // Nothing to show yet
-
-        section.style.display = '';
-        yourAlbums = data.albums || [];
-        yourAlbumsTotal = data.total || 0;
-        yourAlbumsPage = 1;
-
-        const subtitle = document.getElementById('your-albums-subtitle');
-        if (subtitle && data.stats) {
-            const s = data.stats;
-            subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
-        }
-
-        const filters = document.getElementById('your-albums-filters');
-        if (filters && totalCount > 0) filters.style.display = '';
-
-        const downloadBtn = document.getElementById('your-albums-download-btn');
-        if (downloadBtn && data.stats && data.stats.missing > 0) downloadBtn.style.display = '';
-
-        _renderYourAlbumsGrid(yourAlbums);
-        _renderYourAlbumsPagination(yourAlbumsTotal, yourAlbumsPage);
-
-        if (data.stale && totalCount === 0) {
-            const grid = document.getElementById('your-albums-grid');
-            if (grid) grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Fetching your albums from connected services...</p></div>';
-            _pollYourAlbums();
-        }
-    } catch (e) {
-        console.error('Error loading your albums:', e);
+    if (!_yourAlbumsCtrl) {
+        _yourAlbumsCtrl = createDiscoverSectionController({
+            id: 'your-albums',
+            sectionEl: '#your-albums-section',
+            contentEl: '#your-albums-grid',
+            fetchUrl: '/api/discover/your-albums?page=1&per_page=48&status=all',
+            extractItems: (data) => data.albums || [],
+            // Truly empty (no data + not stale) \u2192 hide the whole section
+            // (matches the legacy "Nothing to show yet" early-return). The
+            // outer hideWhenEmpty + sectionEl handle the visibility flip.
+            isEmpty: (items, data) => {
+                const total = (data && data.stats && data.stats.total) || 0;
+                return total === 0 && !data.stale;
+            },
+            hideWhenEmpty: true,
+            // Stale + no albums yet \u2192 show the "fetching from connected
+            // services" UI and start the poller. Fires before isEmpty.
+            isStale: (items, data) => {
+                const total = (data && data.stats && data.stats.total) || 0;
+                return Boolean(data && data.stale) && total === 0;
+            },
+            renderStale: () =>
+                '<div class="discover-loading"><div class="loading-spinner"></div><p>Fetching your albums from connected services...</p></div>',
+            onStale: () => _pollYourAlbums(),
+            // Side-effects against sibling DOM (subtitle / filters /
+            // download button) belong here, not in renderItems.
+            onSuccess: (data) => {
+                const subtitle = document.getElementById('your-albums-subtitle');
+                if (subtitle && data.stats) {
+                    const s = data.stats;
+                    subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
+                }
+                const totalCount = (data.stats && data.stats.total) || 0;
+                const filters = document.getElementById('your-albums-filters');
+                if (filters && totalCount > 0) filters.style.display = '';
+                const downloadBtn = document.getElementById('your-albums-download-btn');
+                if (downloadBtn && data.stats && data.stats.missing > 0) downloadBtn.style.display = '';
+            },
+            // Renderer delegates to the existing grid renderer, which
+            // writes its own DOM into `#your-albums-grid`. Returning
+            // null keeps the controller from clobbering it.
+            renderItems: (items, data) => {
+                yourAlbums = items;
+                yourAlbumsTotal = data.total || 0;
+                yourAlbumsPage = 1;
+                _renderYourAlbumsGrid(yourAlbums);
+                _renderYourAlbumsPagination(yourAlbumsTotal, yourAlbumsPage);
+                return null;
+            },
+            errorMessage: 'Failed to load your albums',
+            verboseErrors: true,
+            showErrorToast: true,
+        });
     }
+    return _yourAlbumsCtrl.load();
 }
 
 function _pollYourAlbums() {
@@ -1368,6 +1387,7 @@ async function loadDiscoverReleaseRadar() {
             emptyMessage: 'No new releases available',
             errorMessage: 'Failed to load release radar',
             verboseErrors: true,
+            showErrorToast: true,
         });
     }
     return _releaseRadarCtrl.load();
@@ -1391,6 +1411,7 @@ async function loadDiscoverWeekly() {
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load discovery weekly',
             verboseErrors: true,
+            showErrorToast: true,
         });
     }
     return _weeklyCtrl.load();
@@ -1434,6 +1455,7 @@ async function loadDecadeBrowser() {
             emptyMessage: 'No decade content available yet. Run a watchlist scan to populate your discovery pool!',
             errorMessage: 'Failed to load decades',
             verboseErrors: true,
+            showErrorToast: true,
         });
     }
     return _decadeBrowserCtrl.load();
@@ -1525,6 +1547,7 @@ async function loadGenreBrowser() {
             emptyMessage: 'No genre content available yet. Run a watchlist scan to populate your discovery pool!',
             errorMessage: 'Failed to load genres',
             verboseErrors: true,
+            showErrorToast: true,
         });
     }
     return _genreBrowserCtrl.load();
@@ -1654,6 +1677,31 @@ async function openGenrePlaylist(genre) {
 let decadeTracksCache = {}; // Store tracks for each decade
 let activeDecade = null;
 
+// Shared sync-status display block. Used by per-tab playlists
+// (decade browser, genre browser) where we show download progress
+// in the standard "✓ completed | ⏳ pending | ✗ failed (N%)" format.
+// ListenBrainz playlists use a different shape (total/matched/failed)
+// because they show MATCHING progress against the library, not
+// download progress, so they intentionally don't use this helper.
+function _renderSyncStatusBlock(idPrefix) {
+    return `
+        <div class="discover-sync-status" id="${idPrefix}-sync-status" style="display: none;">
+            <div class="sync-status-content">
+                <div class="sync-status-label">
+                    <span class="sync-icon">⟳</span>
+                    <span>Syncing to media server...</span>
+                </div>
+                <div class="sync-status-stats">
+                    <span class="sync-stat">✓ <span id="${idPrefix}-sync-completed">0</span></span>
+                    <span class="sync-stat">⏳ <span id="${idPrefix}-sync-pending">0</span></span>
+                    <span class="sync-stat">✗ <span id="${idPrefix}-sync-failed">0</span></span>
+                    <span class="sync-stat">(<span id="${idPrefix}-sync-percentage">0</span>%)</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 async function loadDecadeBrowserTabs() {
     try {
         const tabsContainer = document.getElementById('decade-tabs');
@@ -1713,21 +1761,7 @@ async function loadDecadeBrowserTabs() {
                             </div>
                         </div>
 
-                        <!-- Sync Status Display -->
-                        <div class="discover-sync-status" id="${tabId}-sync-status" style="display: none;">
-                            <div class="sync-status-content">
-                                <div class="sync-status-label">
-                                    <span class="sync-icon">⟳</span>
-                                    <span>Syncing to media server...</span>
-                                </div>
-                                <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span id="${tabId}-sync-completed">0</span></span>
-                                    <span class="sync-stat">⏳ <span id="${tabId}-sync-pending">0</span></span>
-                                    <span class="sync-stat">✗ <span id="${tabId}-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="${tabId}-sync-percentage">0</span>%)</span>
-                                </div>
-                            </div>
-                        </div>
+                        ${_renderSyncStatusBlock(tabId)}
                     </div>
 
                     <!-- Track List -->
@@ -2110,21 +2144,7 @@ async function loadGenreBrowserTabs() {
                             </div>
                         </div>
 
-                        <!-- Sync Status Display -->
-                        <div class="discover-sync-status" id="${tabId}-sync-status" style="display: none;">
-                            <div class="sync-status-content">
-                                <div class="sync-status-label">
-                                    <span class="sync-icon">⟳</span>
-                                    <span>Syncing to media server...</span>
-                                </div>
-                                <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span id="${tabId}-sync-completed">0</span></span>
-                                    <span class="sync-stat">⏳ <span id="${tabId}-sync-pending">0</span></span>
-                                    <span class="sync-stat">✗ <span id="${tabId}-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="${tabId}-sync-percentage">0</span>%)</span>
-                                </div>
-                            </div>
-                        </div>
+                        ${_renderSyncStatusBlock(tabId)}
                     </div>
 
                     <!-- Track List -->
@@ -3533,59 +3553,52 @@ async function loadSeasonalContent() {
     }
 }
 
+function _renderSeasonalAlbumCard(album, index) {
+    const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+    return `
+        <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
+            <div class="discover-card-image">
+                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+            </div>
+            <div class="discover-card-info">
+                <h4 class="discover-card-title">${album.album_name}</h4>
+                <p class="discover-card-subtitle">${album.artist_name}</p>
+                ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// Seasonal Albums uses no-fetch `data:` mode — the parent
+// `loadSeasonalContent` already fetched the season payload and passes
+// the album list directly. Controller is recreated per call so the
+// per-season `data` snapshot is current.
 async function loadSeasonalAlbums(seasonData) {
-    try {
-        const carousel = document.getElementById('seasonal-albums-carousel');
-        if (!carousel) return;
-
-        // Show seasonal section
-        const seasonalSection = document.getElementById('seasonal-albums-section');
-        if (seasonalSection) {
-            seasonalSection.style.display = 'block';
-        }
-
-        // Update header
-        const seasonalTitle = document.getElementById('seasonal-albums-title');
-        const seasonalSubtitle = document.getElementById('seasonal-albums-subtitle');
-
-        if (seasonalTitle) {
-            seasonalTitle.textContent = `${seasonData.icon} ${seasonData.name}`;
-        }
-        if (seasonalSubtitle) {
-            seasonalSubtitle.textContent = seasonData.description;
-        }
-
-        // Store albums for download functionality
-        discoverSeasonalAlbums = seasonData.albums || [];
-
-        if (discoverSeasonalAlbums.length === 0) {
-            carousel.innerHTML = '<div class="discover-empty"><p>No seasonal albums found</p></div>';
-            return;
-        }
-
-        // Build carousel HTML
-        let html = '';
-        discoverSeasonalAlbums.forEach((album, index) => {
-            const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
-            html += `
-                <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
-                    <div class="discover-card-image">
-                        <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
-                    </div>
-                    <div class="discover-card-info">
-                        <h4 class="discover-card-title">${album.album_name}</h4>
-                        <p class="discover-card-subtitle">${album.artist_name}</p>
-                        ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
-                    </div>
-                </div>
-            `;
-        });
-
-        carousel.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading seasonal albums:', error);
-    }
+    const albums = (seasonData && seasonData.albums) || [];
+    const ctrl = createDiscoverSectionController({
+        id: 'seasonal-albums',
+        sectionEl: '#seasonal-albums-section',
+        contentEl: '#seasonal-albums-carousel',
+        data: { success: true, albums },
+        extractItems: (data) => data.albums,
+        beforeLoad: () => {
+            const section = document.getElementById('seasonal-albums-section');
+            if (section) section.style.display = 'block';
+            const titleEl = document.getElementById('seasonal-albums-title');
+            const subtitleEl = document.getElementById('seasonal-albums-subtitle');
+            if (titleEl && seasonData) titleEl.textContent = `${seasonData.icon} ${seasonData.name}`;
+            if (subtitleEl && seasonData) subtitleEl.textContent = seasonData.description;
+        },
+        renderItems: (items) => {
+            discoverSeasonalAlbums = items;
+            return items.map((album, i) => _renderSeasonalAlbumCard(album, i)).join('');
+        },
+        emptyMessage: 'No seasonal albums found',
+        errorMessage: 'Failed to load seasonal albums',
+        verboseErrors: true,
+            showErrorToast: true,
+    });
+    return ctrl.load();
 }
 
 let _seasonalPlaylistCtrl = null;
@@ -3629,6 +3642,7 @@ async function loadSeasonalPlaylist(seasonData) {
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load playlist',
             verboseErrors: true,
+            showErrorToast: true,
         });
         _seasonalPlaylistCtrlKey = currentSeasonKey;
     }
@@ -3983,10 +3997,11 @@ async function blockDiscoveryArtist(artistName) {
         const data = await res.json();
         if (data.success) {
             showToast(`Blocked ${artistName} from discovery`, 'success');
-            // Refresh all discovery sections to remove the artist
+            // Refresh discovery sections to remove the artist. Daily Mixes
+            // is intentionally paused (see loadDiscoverPage), so don't
+            // refresh it — the section isn't on the page anyway.
             loadPersonalizedHiddenGems();
             loadDiscoveryShuffle();
-            loadPersonalizedDailyMixes();
         } else {
             showToast(data.error || 'Failed to block artist', 'error');
         }
@@ -4181,6 +4196,7 @@ async function loadYourArtists() {
             emptyMessage: 'No followed artists found',
             errorMessage: 'Failed to load your artists',
             verboseErrors: true,
+            showErrorToast: true,
         });
     }
     return _yourArtistsCtrl.load();
