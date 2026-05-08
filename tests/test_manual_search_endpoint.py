@@ -5,6 +5,12 @@ a failed download. Manual search adds a second avenue — type a query, hit
 search, get fresh results from the configured download source(s) without
 having to leave the modal.
 
+The endpoint streams results as NDJSON — one JSON object per line — so
+the modal can render rows from each source as that source's search
+completes, instead of blocking the whole UI on the slowest source. The
+``_consume_ndjson`` helper below replays the stream as a list of message
+dicts so test assertions stay readable.
+
 These tests cover the new endpoint's validation + dispatch behavior:
 
 - Query length / source whitelist validation
@@ -12,12 +18,8 @@ These tests cover the new endpoint's validation + dispatch behavior:
 - Per-source request hits only the named source
 - Unconfigured sources in hybrid mode are silently skipped
 - Task lookup gates the endpoint with a 404 when the task isn't known
-
-The endpoint constructs candidate JSON via the same helpers the
-``/candidates`` endpoint uses, so the response shape carries the same
-fields (track_info + candidates) plus a ``source`` tag on each candidate
-so the manual-search frontend can show a per-row source badge in 'all'
-mode.
+- Per-source exceptions emit ``source_error`` events but don't fail the
+  overall stream
 
 The existing ``/download-candidate`` retry path is unchanged — manual-
 search results POST through the same endpoint so AcoustID + post-download
@@ -26,9 +28,35 @@ safety nets stay in the loop.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _consume_ndjson(resp) -> list:
+    """Parse a Flask test-client streaming response into a list of
+    NDJSON message dicts. The endpoint emits one JSON object per line,
+    each terminated by ``\\n``.
+    """
+    raw = resp.get_data(as_text=True)
+    msgs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        msgs.append(json.loads(line))
+    return msgs
+
+
+def _flatten_candidates(msgs: list) -> list:
+    """Pull all candidate dicts out of every ``source_results`` message —
+    same flat list the old single-shot response used to return."""
+    out = []
+    for m in msgs:
+        if m.get('type') == 'source_results':
+            out.extend(m.get('candidates', []))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -237,17 +265,13 @@ def test_manual_search_handles_task_not_found(manual_search_client):
 
 def test_manual_search_dispatches_to_configured_source_only(manual_search_client):
     """In hybrid mode, source='youtube' should hit only the youtube plugin's
-    search — not soulseek, hifi, etc. The candidates endpoint already
-    validates source against the configured list, so unconfigured plugins
-    aren't reachable here."""
+    search — not soulseek, hifi, etc."""
     client, ctx = manual_search_client
     plugins = ctx['plugins']
 
-    # Configure youtube to return one result so we can verify the response.
     plugins['youtube'] = _make_plugin(
         search_results=[_fake_track_result('youtube_song.mp3', 'youtube')]
     )
-    # Re-wire the orchestrator's client() so it returns the new mock.
     import web_server
     web_server.download_orchestrator.registry._plugins['youtube'] = plugins['youtube']
 
@@ -257,9 +281,9 @@ def test_manual_search_dispatches_to_configured_source_only(manual_search_client
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
-    assert len(body['candidates']) == 1
-    # Only youtube should have been searched.
+    msgs = _consume_ndjson(resp)
+    candidates = _flatten_candidates(msgs)
+    assert len(candidates) == 1
     assert plugins['youtube'].search.call_count == 1
     assert plugins['soulseek'].search.call_count == 0
     assert plugins['hifi'].search.call_count == 0
@@ -268,12 +292,10 @@ def test_manual_search_dispatches_to_configured_source_only(manual_search_client
 
 def test_manual_search_all_dispatches_parallel(manual_search_client):
     """source='all' with hybrid mode → searches every CONFIGURED source.
-    Tidal is unconfigured (is_configured()=False) so it's filtered out
-    upstream by _list_available_download_sources — 5 of 6 sources hit."""
+    Tidal is unconfigured so it's filtered out — 5 of 6 sources hit."""
     client, ctx = manual_search_client
     plugins = ctx['plugins']
 
-    # Make each configured source return one distinct result.
     import web_server
     for src_name in ('soulseek', 'youtube', 'qobuz', 'hifi', 'deezer'):
         new_plugin = _make_plugin(
@@ -288,23 +310,47 @@ def test_manual_search_all_dispatches_parallel(manual_search_client):
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
-    # 5 configured sources × 1 result each
-    assert len(body['candidates']) == 5
-    # Each configured source got searched once.
+    msgs = _consume_ndjson(resp)
+    candidates = _flatten_candidates(msgs)
+    assert len(candidates) == 5
     for src_name in ('soulseek', 'youtube', 'qobuz', 'hifi', 'deezer'):
-        assert plugins[src_name].search.call_count == 1, (
-            f"{src_name} should have been searched in 'all' mode"
-        )
-    # Tidal is unconfigured → not in available_sources → not searched.
+        assert plugins[src_name].search.call_count == 1
     assert plugins['tidal'].search.call_count == 0
+
+
+def test_manual_search_streams_one_event_per_source(manual_search_client):
+    """source='all' must emit one ``source_results`` event per configured
+    source — not a single batched event. That's what lets the frontend
+    render rows as they arrive instead of waiting for the slowest source."""
+    client, ctx = manual_search_client
+    plugins = ctx['plugins']
+
+    import web_server
+    for src_name in ('soulseek', 'youtube', 'qobuz', 'hifi', 'deezer'):
+        new_plugin = _make_plugin(
+            search_results=[_fake_track_result(f'{src_name}_song.mp3', src_name)]
+        )
+        plugins[src_name] = new_plugin
+        web_server.download_orchestrator.registry._plugins[src_name] = new_plugin
+
+    resp = client.post(
+        '/api/downloads/task/task-abc/manual-search',
+        json={'query': 'drake feelings', 'source': 'all'},
+    )
+
+    msgs = _consume_ndjson(resp)
+    source_events = [m for m in msgs if m.get('type') == 'source_results']
+    seen_sources = {m['source'] for m in source_events}
+    assert seen_sources == {'soulseek', 'youtube', 'qobuz', 'hifi', 'deezer'}
+    # One header + one per source + one done terminator
+    assert msgs[0]['type'] == 'header'
+    assert msgs[-1]['type'] == 'done'
+    assert msgs[-1]['total'] == 5
 
 
 def test_manual_search_skips_unconfigured_sources(manual_search_client):
     """Sources whose is_configured() returns False are excluded from the
-    'all' dispatch list. This is the same gate hybrid-mode fallback uses
-    for actual downloads — keeps manual search consistent with the rest
-    of the orchestrator."""
+    'all' dispatch list."""
     client, ctx = manual_search_client
     plugins = ctx['plugins']
 
@@ -314,19 +360,18 @@ def test_manual_search_skips_unconfigured_sources(manual_search_client):
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
-    # Tidal is unconfigured — not in available_sources
-    available_ids = {s['id'] for s in body['available_sources']}
+    msgs = _consume_ndjson(resp)
+    header = msgs[0]
+    assert header['type'] == 'header'
+    available_ids = {s['id'] for s in header['available_sources']}
     assert 'tidal' not in available_ids
     assert {'soulseek', 'youtube', 'qobuz', 'hifi', 'deezer'} <= available_ids
-    # And tidal.search was NEVER called.
     assert plugins['tidal'].search.call_count == 0
 
 
 def test_manual_search_rejects_unconfigured_source_explicitly(manual_search_client):
     """User can't bypass the 'all' filter by naming an unconfigured source
-    directly — endpoint validates `source` against the live configured-
-    sources list."""
+    directly."""
     client, _ctx = manual_search_client
 
     resp = client.post(
@@ -334,8 +379,6 @@ def test_manual_search_rejects_unconfigured_source_explicitly(manual_search_clie
         json={'query': 'something', 'source': 'tidal'},
     )
 
-    # Tidal is in the registry but is_configured()=False, so it's not in
-    # available_sources, so the endpoint should reject the request.
     assert resp.status_code == 400
 
 
@@ -344,11 +387,11 @@ def test_manual_search_rejects_unconfigured_source_explicitly(manual_search_clie
 # ---------------------------------------------------------------------------
 
 
-def test_manual_search_returns_same_shape_as_candidates(manual_search_client):
-    """Response includes track_info + candidates array; each candidate
-    carries a source field so the frontend can show per-row badges in
-    'all' mode. Frontend renderer reuses the same row template for both
-    auto-candidates and manual results."""
+def test_manual_search_header_carries_track_and_source_metadata(manual_search_client):
+    """The first NDJSON line is a ``header`` event carrying track_info,
+    download_mode, available_sources, and the echoed query — everything
+    the frontend needs to render the modal shell before any results
+    arrive."""
     client, ctx = manual_search_client
     plugins = ctx['plugins']
 
@@ -364,27 +407,20 @@ def test_manual_search_returns_same_shape_as_candidates(manual_search_client):
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
+    msgs = _consume_ndjson(resp)
+    header = msgs[0]
+    assert header['type'] == 'header'
+    assert header['task_id'] == 'task-abc'
+    assert header['track_info']['name'] == 'Test Track'
+    assert header['download_mode'] == 'hybrid'
+    assert isinstance(header['available_sources'], list)
+    assert header['query'] == 'drake feelings'
+    assert header['sources_queried'] == ['youtube']
 
-    # Top-level shape mirrors /candidates
-    assert body['task_id'] == 'task-abc'
-    assert 'track_info' in body
-    assert body['track_info']['name'] == 'Test Track'
-    assert 'candidates' in body
-    assert 'candidate_count' in body
-    assert body['candidate_count'] == len(body['candidates'])
-    assert body['download_mode'] == 'hybrid'
-    assert isinstance(body['available_sources'], list)
-    # Echoed query lets frontend show "No results for X" with the same casing
-    # the user typed.
-    assert body['query'] == 'drake feelings'
-
-    # Each candidate carries source for the frontend badge.
-    for candidate in body['candidates']:
-        assert 'source' in candidate
+    candidates = _flatten_candidates(msgs)
+    assert len(candidates) == 1
+    for candidate in candidates:
         assert candidate['source'] == 'youtube'
-        # And the standard candidate fields are present (same shape as
-        # /candidates serialization).
         for field in ('username', 'filename', 'size', 'quality',
                       'duration', 'bitrate', 'queue_length',
                       'free_upload_slots'):
@@ -392,12 +428,11 @@ def test_manual_search_returns_same_shape_as_candidates(manual_search_client):
 
 
 def test_manual_search_single_source_mode_only_offers_one_source(monkeypatch, manual_search_client):
-    """When download_source.mode is a single source (not hybrid), the
-    available_sources list should contain just that one source. Frontend
-    swaps the dropdown for a static label in this case."""
+    """When download_source.mode is a single source, available_sources
+    contains just that one entry. Frontend swaps the dropdown for a static
+    label in this case."""
     client, _ctx = manual_search_client
 
-    # Override config to single-source mode (soulseek only).
     from config.settings import config_manager
     monkeypatch.setattr(
         config_manager, 'get',
@@ -413,22 +448,22 @@ def test_manual_search_single_source_mode_only_offers_one_source(monkeypatch, ma
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
-    assert body['download_mode'] == 'soulseek'
-    available_ids = [s['id'] for s in body['available_sources']]
+    msgs = _consume_ndjson(resp)
+    header = msgs[0]
+    assert header['download_mode'] == 'soulseek'
+    available_ids = [s['id'] for s in header['available_sources']]
     assert available_ids == ['soulseek']
 
 
 def test_manual_search_handles_plugin_exception_gracefully(manual_search_client):
-    """If one source's .search() raises, the endpoint logs + skips it
-    instead of failing the whole 'all' request. Other sources' results
-    still come through."""
+    """If one source's .search() raises, the endpoint emits a
+    ``source_error`` event for it but other sources' results still come
+    through. The whole stream doesn't fail."""
     client, ctx = manual_search_client
     plugins = ctx['plugins']
 
     import web_server
 
-    # Soulseek raises; youtube returns one result.
     flaky_plugin = MagicMock()
     flaky_plugin.is_configured = MagicMock(return_value=True)
 
@@ -452,7 +487,12 @@ def test_manual_search_handles_plugin_exception_gracefully(manual_search_client)
     )
 
     assert resp.status_code == 200
-    body = resp.get_json()
-    # Failed plugin contributed 0; youtube's 1 result still comes through.
-    yt_results = [c for c in body['candidates'] if c.get('source') == 'youtube']
+    msgs = _consume_ndjson(resp)
+
+    error_events = [m for m in msgs if m.get('type') == 'source_error']
+    assert any(m['source'] == 'soulseek' for m in error_events)
+    assert any('network blip' in m.get('error', '') for m in error_events)
+
+    candidates = _flatten_candidates(msgs)
+    yt_results = [c for c in candidates if c.get('source') == 'youtube']
     assert len(yt_results) == 1

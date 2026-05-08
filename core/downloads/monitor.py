@@ -332,6 +332,13 @@ class WebUIDownloadMonitor:
         live_info = live_transfers_lookup.get(lookup_key)
 
         if not live_info:
+            # User-initiated manual pick — skip auto-retry. The status
+            # engine fallback owns the terminal transition for non-Soulseek
+            # manual downloads. Yanking the task back to 'searching' here
+            # would defeat the user's explicit selection.
+            if task.get('_user_manual_pick'):
+                return False
+
             # Task not in live transfers but status is downloading/queued - likely stuck
             if current_time - task.get('status_change_time', current_time) > 90:
                 retry_count = task.get('stuck_retry_count', 0)
@@ -396,6 +403,11 @@ class WebUIDownloadMonitor:
 
         # IMMEDIATE ERROR RETRY: Check for errored/rejected/timed-out downloads first (no timeout needed)
         if 'Errored' in state_str or 'Failed' in state_str or 'Rejected' in state_str or 'TimedOut' in state_str:
+            # Same manual-pick guard as the not-in-live-transfers path —
+            # user explicitly selected this candidate, surface the failure.
+            if task.get('_user_manual_pick'):
+                return False
+
             retry_count = task.get('error_retry_count', 0)
             last_retry = task.get('last_error_retry_time', 0)
 
