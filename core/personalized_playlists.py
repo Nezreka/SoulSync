@@ -111,6 +111,7 @@ class PersonalizedPlaylistsService:
     _STANDARD_DISCOVERY_COLUMNS: Tuple[str, ...] = (
         'spotify_track_id',
         'itunes_track_id',
+        'deezer_track_id',
         'track_name',
         'artist_name',
         'album_name',
@@ -141,7 +142,7 @@ class PersonalizedPlaylistsService:
 
         The WHERE clause always includes:
             source = ?
-            AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL)
+            AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
             AND LOWER(artist_name) NOT IN
                 (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
 
@@ -181,7 +182,7 @@ class PersonalizedPlaylistsService:
                         {select_cols}
                 FROM discovery_pool
                 WHERE source = ?
-                  AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL)
+                  AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
                   AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                   {extra_where}
                 ORDER BY {order_by}
