@@ -656,16 +656,32 @@ class DiscogsClient:
 
         return result
 
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 500) -> List[Album]:
         """Get releases by an artist. Prefers master releases, filters features."""
         # First get the artist name for feature filtering
         artist_data = self._api_get(f'/artists/{artist_id}')
         artist_name = artist_data.get('name', '').lower() if artist_data else ''
 
-        data = self._api_get(f'/artists/{artist_id}/releases', {
-            'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
-        })
-        if not data or not data.get('releases'):
+        # Paginate through all release pages (Discogs max per_page=100).
+        # Collect everything before filtering so the limit applies to
+        # qualified albums, not raw API rows.
+        PAGE_SIZE = 100
+        all_items: list = []
+        page = 1
+        while True:
+            data = self._api_get(f'/artists/{artist_id}/releases', {
+                'sort': 'year', 'sort_order': 'desc',
+                'per_page': PAGE_SIZE, 'page': page,
+            })
+            if not data or not data.get('releases'):
+                break
+            all_items.extend(data['releases'])
+            pagination = data.get('pagination', {})
+            if page >= pagination.get('pages', 1):
+                break
+            page += 1
+
+        if not all_items:
             return []
 
         # Separate masters from individual releases — prefer masters (canonical versions)
@@ -673,7 +689,7 @@ class DiscogsClient:
         releases_no_master = []
         master_titles = set()
 
-        for item in data['releases']:
+        for item in all_items:
             # Skip non-main roles
             role = item.get('role', 'Main').lower()
             if role not in ('main', ''):
@@ -726,7 +742,7 @@ class DiscogsClient:
                 if album.album_type in allowed_types:
                     albums.append(album)
 
-                if len(albums) >= limit:
+                if limit and len(albums) >= limit:
                     break
             except Exception as e:
                 logger.debug(f"Error parsing Discogs artist release: {e}")

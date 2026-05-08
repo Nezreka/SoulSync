@@ -8662,7 +8662,7 @@ def get_artist_detail(artist_id):
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
-                    limit=50,
+                    limit=500,
                     artist_source_ids=artist_source_ids,
                 ),
             )
@@ -9046,7 +9046,7 @@ def get_artist_discography(artist_id):
                 allow_fallback=True,
                 skip_cache=False,
                 max_pages=0,
-                limit=50,
+                limit=500,
                 artist_source_ids=artist_source_ids or None,
             ),
         )

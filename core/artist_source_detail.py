@@ -126,7 +126,7 @@ def build_source_only_artist_detail(
             allow_fallback=True,
             skip_cache=False,
             max_pages=0,
-            limit=50,
+            limit=500,
             artist_source_ids={source: artist_id},
             dedup_variants=False,
         ),
