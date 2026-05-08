@@ -46101,6 +46101,15 @@ textarea.enhanced-meta-field-input {
 
 .discog-select-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.15); }
 
+.discog-sort-select {
+    padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.4); cursor: pointer; font-family: inherit;
+    appearance: none; -webkit-appearance: none;
+}
+.discog-sort-select:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.15); }
+.discog-sort-select option { background: #1a1a2e; color: #fff; }
+
 /* Album grid */
 .discog-section-header {
     grid-column: 1 / -1;

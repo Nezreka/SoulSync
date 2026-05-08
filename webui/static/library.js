@@ -2452,6 +2452,12 @@ async function openDiscographyModal() {
                     <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
                 </div>
                 <div class="discog-select-actions">
+                    <select class="discog-sort-select" onchange="sortDiscogGrid(this.value)">
+                        <option value="date-desc">Date ↓</option>
+                        <option value="date-asc">Date ↑</option>
+                        <option value="name-asc">Name A–Z</option>
+                        <option value="name-desc">Name Z–A</option>
+                    </select>
                     <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
                     <button class="discog-select-btn" onclick="discogSelectAll(false)">Deselect All</button>
                 </div>
@@ -2500,7 +2506,10 @@ function _renderDiscogCard(release, index, completionData) {
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
+        <label class="discog-card ${statusClass}"
+            data-type="${release._type}"
+            data-year="${year || '0'}" data-name="${albumName.toLowerCase().replace(/"/g, '&quot;')}"
+            style="animation-delay:${index * 0.03}s">
             <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
@@ -2522,6 +2531,20 @@ function toggleDiscogFilter(btn) {
         card.style.display = btn.classList.contains('active') ? '' : 'none';
     });
     _updateDiscogFooterCount();
+}
+
+function sortDiscogGrid(value) {
+    const grid = document.getElementById('discog-grid');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll('.discog-card'));
+    cards.sort((a, b) => {
+        if (value === 'date-desc') return parseInt(b.dataset.year || '0') - parseInt(a.dataset.year || '0');
+        if (value === 'date-asc')  return parseInt(a.dataset.year || '0') - parseInt(b.dataset.year || '0');
+        if (value === 'name-asc')  return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+        if (value === 'name-desc') return (b.dataset.name || '').localeCompare(a.dataset.name || '');
+        return 0;
+    });
+    cards.forEach(card => grid.appendChild(card));
 }
 
 function discogSelectAll(select) {
