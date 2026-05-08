@@ -51,6 +51,20 @@ Incomplete/*
 artist_bubble_snapshots.json
 .spotify_cache
 
+# Auto-downloaded ffmpeg binaries — the YouTube client downloads these
+# into tools/ when system ffmpeg isn't on PATH. The Dockerfile installs
+# system ffmpeg via apt, so the container never needs the bundled
+# binaries. If a CI run leaves them in the workspace before the docker
+# build (e.g. because a test imported web_server which initialized the
+# YouTube client), they'd otherwise get baked into the image — adding
+# ~388 MB and getting duplicated again by the chown layer.
+tools/ffmpeg
+tools/ffprobe
+tools/ffmpeg.exe
+tools/ffprobe.exe
+tools/*.zip
+tools/*.tar.xz
+
 # Documentation
 *.md
 README.md

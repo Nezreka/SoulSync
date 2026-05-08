@@ -45,13 +45,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync
 
-# Copy application code
-COPY . .
+# Copy application code with ownership baked in.
+# Using `COPY --chown` instead of `COPY` + `chown -R /app` avoids an
+# extra image layer that duplicates the entire /app tree just to flip
+# ownership bits — Docker layers are immutable, so chown -R rewrites
+# every file into a new layer. On a clean repo that's small; if any
+# bulky workspace file slips in (e.g. auto-downloaded ffmpeg binaries
+# in tools/), it gets counted twice in the image. Cin caught this on
+# 2026-05-08 — see the .dockerignore comment for the same incident.
+COPY --chown=soulsync:soulsync . .
 
-# Create necessary directories with proper permissions
+# Create runtime mount-point directories the app expects to exist.
 # NOTE: /app/data is for database FILES, /app/database is the Python package
 RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/MusicVideos /app/scripts && \
-    chown -R soulsync:soulsync /app
+    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/MusicVideos /app/scripts
 
 # Create defaults directory and copy template files
 # These will be used by entrypoint.sh to initialize empty volumes
