@@ -257,7 +257,6 @@ class YouTubeClient(DownloadSourcePlugin):
           — which is exactly when registry.py probes is_configured at
           web_server import)
         """
-        import sys
         return bool(
             os.environ.get('SOULSYNC_NO_FFMPEG_DOWNLOAD')
             or os.environ.get('PYTEST_CURRENT_TEST')
