@@ -135,6 +135,29 @@ def test_discovery_helper_filters_null_id_rows(service):
     assert names == ['Has Spotify ID', 'Has iTunes ID']
 
 
+def test_discovery_helper_accepts_deezer_only_id_rows(service):
+    """Discovery pool rows with NULL spotify + NULL itunes but a populated
+    deezer_track_id MUST pass the gate. Regression test — early version
+    of the gate only checked Spotify + iTunes, which silently filtered
+    out every row for Deezer-primary users (entire Time Machine /
+    Genre / Hidden Gems / Shuffle / Popular Picks rendered empty)."""
+    svc, db = service
+    db.insert_discovery_track(
+        source='deezer', deezer_track_id='dz1',
+        spotify_track_id=None, itunes_track_id=None,
+        track_name='Deezer Only', artist_name='A', album_name='X',
+        popularity=50, release_date='2024-01-01',
+    )
+    with patch.object(svc, '_get_active_source', return_value='deezer'):
+        tracks = svc._select_discovery_tracks(
+            source='deezer',
+            order_by='track_name',
+            fetch_limit=100,
+        )
+    assert [t['track_name'] for t in tracks] == ['Deezer Only']
+    assert tracks[0]['deezer_track_id'] == 'dz1'
+
+
 def test_discovery_helper_filters_blacklisted_artists(service):
     svc, db = service
     db.insert_discovery_track(
