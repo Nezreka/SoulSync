@@ -15,14 +15,10 @@ let discoverSeasonalTracks = [];
 let currentSeasonKey = null;
 
 // Personalized playlists storage
-let personalizedRecentlyAdded = [];
-let personalizedTopTracks = [];
-let personalizedForgottenFavorites = [];
 let personalizedPopularPicks = [];
 let personalizedHiddenGems = [];
 let personalizedDailyMixes = [];
 let personalizedDiscoveryShuffle = [];
-let personalizedFamiliarFavorites = [];
 let buildPlaylistSelectedArtists = [];
 
 async function loadDiscoverPage() {
@@ -35,16 +31,12 @@ async function loadDiscoverPage() {
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
-        loadPersonalizedRecentlyAdded(),  // NEW: Recently added from library
         // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
         loadDiscoverReleaseRadar(),
         loadDiscoverWeekly(),
         loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
         loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
-        loadPersonalizedTopTracks(),  // NEW: Your top tracks
-        loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
-        loadFamiliarFavorites(),  // NEW: Familiar Favorites
         loadBecauseYouListenTo(),  // Personalized by listening stats
         loadCacheUndiscoveredAlbums(),  // From metadata cache
         loadCacheGenreNewReleases(),    // From metadata cache
@@ -1702,45 +1694,162 @@ function _renderSyncStatusBlock(idPrefix) {
     `;
 }
 
-async function loadDecadeBrowserTabs() {
-    try {
-        const tabsContainer = document.getElementById('decade-tabs');
-        const contentsContainer = document.getElementById('decade-tab-contents');
+// ===============================
+// TABBED BROWSER HELPER
+// ===============================
+//
+// Drives the lifecycle the decade browser ("Time Machine") and
+// genre browser ("Browse by Genre") share: fetch tab list → paint
+// tab strip + per-tab content shells → fetch + render content for
+// the active tab → handle empty / error states.
+//
+// The two browsers paint slightly different markup (different CSS
+// prefixes, different action buttons, different sync handlers) but
+// the lifecycle is identical. Each browser registers a config; the
+// helper handles the rest.
+//
+// Two-phase render:
+//   Phase 1 (loadTabs)        — paint tab strip + N content shells,
+//                                each shell containing a loading
+//                                spinner in its playlist container,
+//                                then trigger Phase 2 for first tab.
+//   Phase 2 (loadTabContent)  — fetch tracks for one tab, swap the
+//                                spinner in its playlist container
+//                                for the rendered track list.
+//
+// Renderers stay per-browser because action buttons + classes
+// legitimately differ. The helper owns the lifecycle, not the look.
+function createTabbedBrowserSection(config) {
+    const cfg = Object.assign({
+        // Diagnostic id used in console errors.
+        id: 'tabbed-browser',
+        // DOM IDs of the tab-strip + per-tab-contents containers.
+        tabsContainerId: null,
+        contentsContainerId: null,
+        // Async fn returning array of tab descriptors (e.g. decades).
+        fetchTabs: null,
+        // (tab) => string  unique id for one tab (e.g. 'decade-1980').
+        // Used as the prefix for that tab's content + playlist + sync IDs.
+        tabId: null,
+        // (tab) => string  HTML for one tab button. Receives `(tab, isActive)`.
+        renderTabButton: null,
+        // (tab) => string  HTML for one tab's content shell (action
+        // buttons + sync-status block + empty playlist container).
+        // The playlist container inside MUST have id `${tabId}-playlist`
+        // so the helper can fill it during Phase 2.
+        renderTabShell: null,
+        // Async fn (tab) => array of tracks for that tab.
+        fetchTabContent: null,
+        // (tracks, tab) => string  HTML for the playlist container.
+        renderTabTracks: null,
+        // Copy / messages.
+        emptyTabsMessage: 'No content available',
+        emptyContentMessage: (tab) => 'No tracks found',
+        errorTabsMessage: 'Failed to load',
+        errorContentMessage: 'Failed to load tracks',
+        // Fired after Phase 1 paints the tab strip + shells, before
+        // Phase 2 is triggered for the first tab. Useful for caching
+        // the tab list (e.g. `availableGenres = ...`).
+        onTabsRendered: null,
+    }, config || {});
 
-        if (!tabsContainer || !contentsContainer) return;
+    async function loadTabs() {
+        try {
+            const tabsContainer = document.getElementById(cfg.tabsContainerId);
+            const contentsContainer = document.getElementById(cfg.contentsContainerId);
+            if (!tabsContainer || !contentsContainer) return;
 
-        // Fetch available decades from backend
-        const response = await fetch('/api/discover/decades/available');
-        if (!response.ok) {
-            throw new Error('Failed to fetch available decades');
+            const tabs = await cfg.fetchTabs();
+            if (!Array.isArray(tabs) || tabs.length === 0) {
+                tabsContainer.innerHTML = `<div class="discover-empty"><p>${cfg.emptyTabsMessage}</p></div>`;
+                return;
+            }
+
+            let tabsHTML = '';
+            let contentsHTML = '';
+            tabs.forEach((tab, index) => {
+                const isActive = index === 0;
+                tabsHTML += cfg.renderTabButton(tab, isActive);
+                contentsHTML += cfg.renderTabShell(tab, isActive);
+            });
+
+            tabsContainer.innerHTML = tabsHTML;
+            contentsContainer.innerHTML = contentsHTML;
+
+            if (typeof cfg.onTabsRendered === 'function') {
+                try { cfg.onTabsRendered(tabs); }
+                catch (err) { console.debug(`[${cfg.id}] onTabsRendered threw:`, err); }
+            }
+
+            // Phase 2: kick off content load for the first tab.
+            await loadTabContent(tabs[0]);
+        } catch (error) {
+            console.error(`Error loading ${cfg.id} tabs:`, error);
+            const tabsContainer = document.getElementById(cfg.tabsContainerId);
+            if (tabsContainer) {
+                tabsContainer.innerHTML = `<div class="discover-empty"><p>${cfg.errorTabsMessage}</p></div>`;
+            }
         }
+    }
 
-        const data = await response.json();
-        if (!data.success || !data.decades || data.decades.length === 0) {
-            tabsContainer.innerHTML = '<div class="discover-empty"><p>No decade content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
-            return;
+    async function loadTabContent(tab) {
+        const tabId = cfg.tabId(tab);
+        const playlistContainer = document.getElementById(`${tabId}-playlist`);
+        if (!playlistContainer) return;
+
+        try {
+            const tracks = await cfg.fetchTabContent(tab);
+            if (!Array.isArray(tracks) || tracks.length === 0) {
+                const msg = (typeof cfg.emptyContentMessage === 'function')
+                    ? cfg.emptyContentMessage(tab)
+                    : cfg.emptyContentMessage;
+                playlistContainer.innerHTML = `<div class="discover-empty"><p>${msg}</p></div>`;
+                return;
+            }
+            playlistContainer.innerHTML = cfg.renderTabTracks(tracks, tab);
+        } catch (error) {
+            console.error(`Error loading ${cfg.id} tab content:`, error);
+            const stillThere = document.getElementById(`${tabId}-playlist`);
+            if (stillThere) {
+                stillThere.innerHTML = `<div class="discover-empty"><p>${cfg.errorContentMessage}</p></div>`;
+            }
         }
+    }
 
-        // Build decade tabs
-        let tabsHTML = '';
-        let contentsHTML = '';
+    return { loadTabs, loadTabContent };
+}
 
-        data.decades.forEach((decade, index) => {
-            const isActive = index === 0;
+// ----- Decade browser config + thin wrappers -----
+
+let _decadeBrowserTabsCtrl = null;
+
+function _getDecadeBrowserTabsCtrl() {
+    if (_decadeBrowserTabsCtrl) return _decadeBrowserTabsCtrl;
+    _decadeBrowserTabsCtrl = createTabbedBrowserSection({
+        id: 'decade-browser-tabs',
+        tabsContainerId: 'decade-tabs',
+        contentsContainerId: 'decade-tab-contents',
+        fetchTabs: async () => {
+            const response = await fetch('/api/discover/decades/available');
+            if (!response.ok) throw new Error('Failed to fetch available decades');
+            const data = await response.json();
+            if (!data.success) return [];
+            return data.decades || [];
+        },
+        tabId: (decade) => `decade-${decade.year}`,
+        renderTabButton: (decade, isActive) => {
             const icon = getDecadeIcon(decade.year);
-            const tabId = `decade-${decade.year}`;
-
-            // Tab button
-            tabsHTML += `
+            return `
                 <button class="decade-tab ${isActive ? 'active' : ''}"
                         data-decade="${decade.year}"
                         onclick="switchDecadeTab(${decade.year})">
                     ${icon} ${decade.year}s
                 </button>
             `;
-
-            // Tab content
-            contentsHTML += `
+        },
+        renderTabShell: (decade, isActive) => {
+            const tabId = `decade-${decade.year}`;
+            return `
                 <div class="decade-tab-content ${isActive ? 'active' : ''}" id="${tabId}-content">
                     <!-- Action Buttons -->
                     <div class="decade-actions">
@@ -1770,23 +1879,69 @@ async function loadDecadeBrowserTabs() {
                     </div>
                 </div>
             `;
-        });
+        },
+        fetchTabContent: async (decade) => {
+            const response = await fetch(`/api/discover/decade/${decade.year}`);
+            if (!response.ok) throw new Error('Failed to fetch decade playlist');
+            const data = await response.json();
+            if (!data.success) return [];
+            // Side-effect: cache + active marker, exactly as old code did.
+            decadeTracksCache[decade.year] = data.tracks || [];
+            activeDecade = decade.year;
+            return data.tracks || [];
+        },
+        renderTabTracks: (tracks) => _renderTabbedTrackList(tracks),
+        emptyContentMessage: (decade) => `No tracks found for the ${decade.year}s`,
+        errorTabsMessage: 'Failed to load decades',
+        errorContentMessage: 'Failed to load decade tracks',
+        emptyTabsMessage: 'No decade content available yet. Run a watchlist scan to populate your discovery pool!',
+    });
+    return _decadeBrowserTabsCtrl;
+}
 
-        tabsContainer.innerHTML = tabsHTML;
-        contentsContainer.innerHTML = contentsHTML;
-
-        // Load first decade's tracks
-        if (data.decades.length > 0) {
-            await loadDecadeTracks(data.decades[0].year);
+// Shared track-row markup for tabbed browsers. Decade + genre rows
+// have the same shape — both pull from `track_data_json` first then
+// fall back to top-level fields. Lifted so the helper-driven
+// renderers don't each carry a copy.
+function _renderTabbedTrackList(tracks) {
+    let html = '<div class="discover-playlist-tracks-compact">';
+    tracks.forEach((track, index) => {
+        let trackData = track;
+        if (track.track_data_json) {
+            trackData = track.track_data_json;
         }
 
-    } catch (error) {
-        console.error('Error loading decade browser tabs:', error);
-        const tabsContainer = document.getElementById('decade-tabs');
-        if (tabsContainer) {
-            tabsContainer.innerHTML = '<div class="discover-empty"><p>Failed to load decades</p></div>';
-        }
-    }
+        const trackName = trackData.name || trackData.track_name || track.track_name || 'Unknown Track';
+        const artistName = trackData.artists?.[0]?.name || trackData.artists?.[0] || trackData.artist_name || track.artist_name || 'Unknown Artist';
+        const albumName = trackData.album?.name || trackData.album_name || track.album_name || 'Unknown Album';
+        const coverUrl = trackData.album?.images?.[0]?.url || track.album_cover_url || '/static/placeholder-album.png';
+        const durationMs = trackData.duration_ms || track.duration_ms || 0;
+
+        const durationMin = Math.floor(durationMs / 60000);
+        const durationSec = Math.floor((durationMs % 60000) / 1000);
+        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+
+        html += `
+                <div class="discover-playlist-track-compact" data-track-index="${index}">
+                    <div class="track-compact-number">${index + 1}</div>
+                    <div class="track-compact-image">
+                        <img src="${coverUrl}" alt="${albumName}" loading="lazy">
+                    </div>
+                    <div class="track-compact-info">
+                        <div class="track-compact-name">${trackName}</div>
+                        <div class="track-compact-artist">${artistName}</div>
+                    </div>
+                    <div class="track-compact-album">${albumName}</div>
+                    <div class="track-compact-duration">${duration}</div>
+                </div>
+            `;
+    });
+    html += '</div>';
+    return html;
+}
+
+async function loadDecadeBrowserTabs() {
+    return _getDecadeBrowserTabsCtrl().loadTabs();
 }
 
 function switchDecadeTab(decade) {
@@ -1817,71 +1972,7 @@ function switchDecadeTab(decade) {
 }
 
 async function loadDecadeTracks(decade) {
-    try {
-        const playlistContainer = document.getElementById(`decade-${decade}-playlist`);
-        if (!playlistContainer) return;
-
-        const response = await fetch(`/api/discover/decade/${decade}`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch decade playlist');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks found for the ' + decade + 's</p></div>';
-            return;
-        }
-
-        // Store tracks in cache
-        decadeTracksCache[decade] = data.tracks;
-        activeDecade = decade;
-
-        // Build compact playlist HTML
-        let html = '<div class="discover-playlist-tracks-compact">';
-        data.tracks.forEach((track, index) => {
-            // Extract track data from track_data_json if available
-            let trackData = track;
-            if (track.track_data_json) {
-                trackData = track.track_data_json;
-            }
-
-            // Get track properties with fallbacks
-            const trackName = trackData.name || trackData.track_name || track.track_name || 'Unknown Track';
-            const artistName = trackData.artists?.[0]?.name || trackData.artists?.[0] || trackData.artist_name || track.artist_name || 'Unknown Artist';
-            const albumName = trackData.album?.name || trackData.album_name || track.album_name || 'Unknown Album';
-            const coverUrl = trackData.album?.images?.[0]?.url || track.album_cover_url || '/static/placeholder-album.png';
-            const durationMs = trackData.duration_ms || track.duration_ms || 0;
-
-            const durationMin = Math.floor(durationMs / 60000);
-            const durationSec = Math.floor((durationMs % 60000) / 1000);
-            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-
-            html += `
-                <div class="discover-playlist-track-compact" data-track-index="${index}">
-                    <div class="track-compact-number">${index + 1}</div>
-                    <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${albumName}" loading="lazy">
-                    </div>
-                    <div class="track-compact-info">
-                        <div class="track-compact-name">${trackName}</div>
-                        <div class="track-compact-artist">${artistName}</div>
-                    </div>
-                    <div class="track-compact-album">${albumName}</div>
-                    <div class="track-compact-duration">${duration}</div>
-                </div>
-            `;
-        });
-        html += '</div>';
-
-        playlistContainer.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading decade tracks:', error);
-        const playlistContainer = document.getElementById(`decade-${decade}-playlist`);
-        if (playlistContainer) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load decade tracks</p></div>';
-        }
-    }
+    return _getDecadeBrowserTabsCtrl().loadTabContent({ year: decade });
 }
 
 async function startDecadeSync(decade) {
@@ -2080,64 +2171,58 @@ let genreTracksCache = {}; // Store tracks for each genre
 let activeGenre = null;
 let availableGenres = [];
 
-async function loadGenreBrowserTabs() {
-    try {
-        const tabsContainer = document.getElementById('genre-tabs');
-        const contentsContainer = document.getElementById('genre-tab-contents');
+// Helper: derive the URL/DOM-safe id used for a genre tab. Both
+// the tab shell and the playlist-container element are keyed on this.
+function _genreTabId(genreName) {
+    const safe = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+    return `genre-${safe}`;
+}
 
-        if (!tabsContainer || !contentsContainer) return;
+let _genreBrowserTabsCtrl = null;
 
-        // Fetch available genres from backend
-        const response = await fetch('/api/discover/genres/available');
-        if (!response.ok) {
-            throw new Error('Failed to fetch available genres');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.genres || data.genres.length === 0) {
-            tabsContainer.innerHTML = '<div class="discover-empty"><p>No genre content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
-            return;
-        }
-
-        availableGenres = data.genres;
-
-        // Build genre tabs (limit to first 8-10 to avoid overcrowding)
-        const displayGenres = data.genres.slice(0, 10);
-        let tabsHTML = '';
-        let contentsHTML = '';
-
-        displayGenres.forEach((genre, index) => {
-            const isActive = index === 0;
+function _getGenreBrowserTabsCtrl() {
+    if (_genreBrowserTabsCtrl) return _genreBrowserTabsCtrl;
+    _genreBrowserTabsCtrl = createTabbedBrowserSection({
+        id: 'genre-browser-tabs',
+        tabsContainerId: 'genre-tabs',
+        contentsContainerId: 'genre-tab-contents',
+        fetchTabs: async () => {
+            const response = await fetch('/api/discover/genres/available');
+            if (!response.ok) throw new Error('Failed to fetch available genres');
+            const data = await response.json();
+            if (!data.success) return [];
+            // Cap at 10 to avoid overcrowding; old behavior preserved.
+            return (data.genres || []).slice(0, 10);
+        },
+        onTabsRendered: (genres) => { availableGenres = genres; },
+        tabId: (genre) => _genreTabId(genre.name),
+        renderTabButton: (genre, isActive) => {
             const icon = getGenreIcon(genre.name);
-            const genreName = genre.name;
-            const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
-            const tabId = `genre-${genreId}`;
-
-            // Tab button
-            tabsHTML += `
+            return `
                 <button class="genre-tab ${isActive ? 'active' : ''}"
-                        data-genre="${escapeHtml(genreName)}"
-                        onclick="switchGenreTab('${escapeForInlineJs(genreName)}')">
-                    ${icon} ${capitalizeGenre(genreName)}
+                        data-genre="${escapeHtml(genre.name)}"
+                        onclick="switchGenreTab('${escapeForInlineJs(genre.name)}')">
+                    ${icon} ${capitalizeGenre(genre.name)}
                 </button>
             `;
-
-            // Tab content
-            contentsHTML += `
-                <div class="genre-tab-content ${isActive ? 'active' : ''}" id="${tabId}-content" data-genre="${escapeHtml(genreName)}">
+        },
+        renderTabShell: (genre, isActive) => {
+            const tabId = _genreTabId(genre.name);
+            return `
+                <div class="genre-tab-content ${isActive ? 'active' : ''}" id="${tabId}-content" data-genre="${escapeHtml(genre.name)}">
                     <!-- Action Buttons -->
                     <div class="genre-actions">
                         <div class="discover-section-header">
                             <div>
-                                <h3 style="margin: 0; color: #fff; font-size: 18px;">${capitalizeGenre(genreName)} Mix</h3>
+                                <h3 style="margin: 0; color: #fff; font-size: 18px;">${capitalizeGenre(genre.name)} Mix</h3>
                                 <p id="${tabId}-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;">${genre.track_count} tracks</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForGenre('${escapeForInlineJs(genreName)}')" title="Download missing tracks">
+                                <button class="action-button secondary" onclick="openDownloadModalForGenre('${escapeForInlineJs(genre.name)}')" title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startGenreSync('${escapeForInlineJs(genreName)}')" title="Sync to media server">
+                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startGenreSync('${escapeForInlineJs(genre.name)}')" title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -2149,27 +2234,32 @@ async function loadGenreBrowserTabs() {
 
                     <!-- Track List -->
                     <div class="discover-playlist-container compact" id="${tabId}-playlist">
-                        <div class="discover-loading"><div class="loading-spinner"></div><p>Loading ${capitalizeGenre(genreName)} tracks...</p></div>
+                        <div class="discover-loading"><div class="loading-spinner"></div><p>Loading ${capitalizeGenre(genre.name)} tracks...</p></div>
                     </div>
                 </div>
             `;
-        });
+        },
+        fetchTabContent: async (genre) => {
+            const response = await fetch(`/api/discover/genre/${encodeURIComponent(genre.name)}`);
+            if (!response.ok) throw new Error('Failed to fetch genre playlist');
+            const data = await response.json();
+            if (!data.success) return [];
+            // Side-effect: cache + active marker, exactly as old code did.
+            genreTracksCache[genre.name] = data.tracks || [];
+            activeGenre = genre.name;
+            return data.tracks || [];
+        },
+        renderTabTracks: (tracks) => _renderTabbedTrackList(tracks),
+        emptyContentMessage: (genre) => `No tracks found for ${capitalizeGenre(genre.name)}`,
+        errorTabsMessage: 'Failed to load genres',
+        errorContentMessage: 'Failed to load genre tracks',
+        emptyTabsMessage: 'No genre content available yet. Run a watchlist scan to populate your discovery pool!',
+    });
+    return _genreBrowserTabsCtrl;
+}
 
-        tabsContainer.innerHTML = tabsHTML;
-        contentsContainer.innerHTML = contentsHTML;
-
-        // Load first genre's tracks
-        if (displayGenres.length > 0) {
-            await loadGenreTracks(displayGenres[0].name);
-        }
-
-    } catch (error) {
-        console.error('Error loading genre browser tabs:', error);
-        const tabsContainer = document.getElementById('genre-tabs');
-        if (tabsContainer) {
-            tabsContainer.innerHTML = '<div class="discover-empty"><p>Failed to load genres</p></div>';
-        }
-    }
+async function loadGenreBrowserTabs() {
+    return _getGenreBrowserTabsCtrl().loadTabs();
 }
 
 function switchGenreTab(genreName) {
@@ -2200,73 +2290,7 @@ function switchGenreTab(genreName) {
 }
 
 async function loadGenreTracks(genreName) {
-    try {
-        const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
-        const playlistContainer = document.getElementById(`genre-${genreId}-playlist`);
-        if (!playlistContainer) return;
-
-        const response = await fetch(`/api/discover/genre/${encodeURIComponent(genreName)}`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch genre playlist');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            playlistContainer.innerHTML = `<div class="discover-empty"><p>No tracks found for ${capitalizeGenre(genreName)}</p></div>`;
-            return;
-        }
-
-        // Store tracks in cache
-        genreTracksCache[genreName] = data.tracks;
-        activeGenre = genreName;
-
-        // Build compact playlist HTML
-        let html = '<div class="discover-playlist-tracks-compact">';
-        data.tracks.forEach((track, index) => {
-            // Extract track data from track_data_json if available
-            let trackData = track;
-            if (track.track_data_json) {
-                trackData = track.track_data_json;
-            }
-
-            // Get track properties with fallbacks
-            const trackName = trackData.name || trackData.track_name || track.track_name || 'Unknown Track';
-            const artistName = trackData.artists?.[0]?.name || trackData.artists?.[0] || trackData.artist_name || track.artist_name || 'Unknown Artist';
-            const albumName = trackData.album?.name || trackData.album_name || track.album_name || 'Unknown Album';
-            const coverUrl = trackData.album?.images?.[0]?.url || track.album_cover_url || '/static/placeholder-album.png';
-            const durationMs = trackData.duration_ms || track.duration_ms || 0;
-
-            const durationMin = Math.floor(durationMs / 60000);
-            const durationSec = Math.floor((durationMs % 60000) / 1000);
-            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-
-            html += `
-                <div class="discover-playlist-track-compact" data-track-index="${index}">
-                    <div class="track-compact-number">${index + 1}</div>
-                    <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${albumName}" loading="lazy">
-                    </div>
-                    <div class="track-compact-info">
-                        <div class="track-compact-name">${trackName}</div>
-                        <div class="track-compact-artist">${artistName}</div>
-                    </div>
-                    <div class="track-compact-album">${albumName}</div>
-                    <div class="track-compact-duration">${duration}</div>
-                </div>
-            `;
-        });
-        html += '</div>';
-
-        playlistContainer.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading genre tracks:', error);
-        const genreId = genreName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
-        const playlistContainer = document.getElementById(`genre-${genreId}-playlist`);
-        if (playlistContainer) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load genre tracks</p></div>';
-        }
-    }
+    return _getGenreBrowserTabsCtrl().loadTabContent({ name: genreName });
 }
 
 async function startGenreSync(genreName) {
@@ -3793,75 +3817,6 @@ async function syncSeasonalPlaylist() {
 // ===============================
 // PERSONALIZED PLAYLISTS
 // ===============================
-
-async function loadPersonalizedRecentlyAdded() {
-    try {
-        const container = document.getElementById('personalized-recently-added');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/recently-added');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedRecentlyAdded = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading recently added:', error);
-    }
-}
-
-async function loadPersonalizedTopTracks() {
-    try {
-        const container = document.getElementById('personalized-top-tracks');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/top-tracks');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedTopTracks = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading top tracks:', error);
-    }
-}
-
-async function loadPersonalizedForgottenFavorites() {
-    try {
-        const container = document.getElementById('personalized-forgotten-favorites');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/forgotten-favorites');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedForgottenFavorites = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading forgotten favorites:', error);
-    }
-}
 
 async function loadPersonalizedPopularPicks() {
     try {
@@ -6580,29 +6535,6 @@ async function loadDiscoveryShuffle() {
     }
 }
 
-async function loadFamiliarFavorites() {
-    try {
-        const container = document.getElementById('personalized-familiar-favorites');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/familiar-favorites?limit=50');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedFamiliarFavorites = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading familiar favorites:', error);
-    }
-}
-
 // ===============================
 // BECAUSE YOU LISTEN TO
 // ===============================
@@ -7357,14 +7289,6 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = personalizedHiddenGems;
         } else if (playlistType === 'discovery_shuffle') {
             tracks = personalizedDiscoveryShuffle;
-        } else if (playlistType === 'familiar_favorites') {
-            tracks = personalizedFamiliarFavorites;
-        } else if (playlistType === 'recently_added') {
-            tracks = personalizedRecentlyAdded;
-        } else if (playlistType === 'top_tracks') {
-            tracks = personalizedTopTracks;
-        } else if (playlistType === 'forgotten_favorites') {
-            tracks = personalizedForgottenFavorites;
         } else if (playlistType === 'build_playlist') {
             tracks = buildPlaylistTracks;
         }
@@ -7484,8 +7408,6 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         tracks = personalizedHiddenGems;
     } else if (playlistType === 'discovery_shuffle') {
         tracks = personalizedDiscoveryShuffle;
-    } else if (playlistType === 'familiar_favorites') {
-        tracks = personalizedFamiliarFavorites;
     } else if (playlistType === 'build_playlist') {
         tracks = buildPlaylistTracks;
     }
@@ -7616,7 +7538,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'release_radar': 'Fresh Tape', 'discovery_weekly': 'The Archives',
                     'seasonal_playlist': 'Seasonal Mix', 'popular_picks': 'Popular Picks',
                     'hidden_gems': 'Hidden Gems', 'discovery_shuffle': 'Discovery Shuffle',
-                    'familiar_favorites': 'Familiar Favorites', 'build_playlist': 'Custom Playlist'
+                    'build_playlist': 'Custom Playlist'
                 };
                 showToast(`${playlistNames[playlistType] || playlistType} sync complete!`, 'success');
                 setTimeout(() => { const sd = el(`${prefix}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
@@ -7682,7 +7604,6 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'popular_picks': 'Popular Picks',
                     'hidden_gems': 'Hidden Gems',
                     'discovery_shuffle': 'Discovery Shuffle',
-                    'familiar_favorites': 'Familiar Favorites',
                     'build_playlist': 'Custom Playlist'
                 };
                 const displayName = playlistNames[playlistType] || playlistType;
@@ -8207,8 +8128,6 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             apiEndpoint = '/api/discover/hidden-gems';
         } else if (playlistId === 'discover_discovery_shuffle') {
             apiEndpoint = '/api/discover/discovery-shuffle';
-        } else if (playlistId === 'discover_familiar_favorites') {
-            apiEndpoint = '/api/discover/familiar-favorites';
         } else if (playlistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (playlistId.startsWith('discover_lb_')) {
