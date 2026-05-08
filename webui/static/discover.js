@@ -15,14 +15,10 @@ let discoverSeasonalTracks = [];
 let currentSeasonKey = null;
 
 // Personalized playlists storage
-let personalizedRecentlyAdded = [];
-let personalizedTopTracks = [];
-let personalizedForgottenFavorites = [];
 let personalizedPopularPicks = [];
 let personalizedHiddenGems = [];
 let personalizedDailyMixes = [];
 let personalizedDiscoveryShuffle = [];
-let personalizedFamiliarFavorites = [];
 let buildPlaylistSelectedArtists = [];
 
 async function loadDiscoverPage() {
@@ -35,16 +31,12 @@ async function loadDiscoverPage() {
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
-        loadPersonalizedRecentlyAdded(),  // NEW: Recently added from library
         // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
         loadDiscoverReleaseRadar(),
         loadDiscoverWeekly(),
         loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
         loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
-        loadPersonalizedTopTracks(),  // NEW: Your top tracks
-        loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
-        loadFamiliarFavorites(),  // NEW: Familiar Favorites
         loadBecauseYouListenTo(),  // Personalized by listening stats
         loadCacheUndiscoveredAlbums(),  // From metadata cache
         loadCacheGenreNewReleases(),    // From metadata cache
@@ -3826,75 +3818,6 @@ async function syncSeasonalPlaylist() {
 // PERSONALIZED PLAYLISTS
 // ===============================
 
-async function loadPersonalizedRecentlyAdded() {
-    try {
-        const container = document.getElementById('personalized-recently-added');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/recently-added');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedRecentlyAdded = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading recently added:', error);
-    }
-}
-
-async function loadPersonalizedTopTracks() {
-    try {
-        const container = document.getElementById('personalized-top-tracks');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/top-tracks');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedTopTracks = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading top tracks:', error);
-    }
-}
-
-async function loadPersonalizedForgottenFavorites() {
-    try {
-        const container = document.getElementById('personalized-forgotten-favorites');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/forgotten-favorites');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedForgottenFavorites = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading forgotten favorites:', error);
-    }
-}
-
 async function loadPersonalizedPopularPicks() {
     try {
         const container = document.getElementById('personalized-popular-picks');
@@ -6612,29 +6535,6 @@ async function loadDiscoveryShuffle() {
     }
 }
 
-async function loadFamiliarFavorites() {
-    try {
-        const container = document.getElementById('personalized-familiar-favorites');
-        if (!container) return;
-
-        const response = await fetch('/api/discover/personalized/familiar-favorites?limit=50');
-        if (!response.ok) return;
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            container.closest('.discover-section').style.display = 'none';
-            return;
-        }
-
-        personalizedFamiliarFavorites = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
-
-    } catch (error) {
-        console.error('Error loading familiar favorites:', error);
-    }
-}
-
 // ===============================
 // BECAUSE YOU LISTEN TO
 // ===============================
@@ -7389,14 +7289,6 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = personalizedHiddenGems;
         } else if (playlistType === 'discovery_shuffle') {
             tracks = personalizedDiscoveryShuffle;
-        } else if (playlistType === 'familiar_favorites') {
-            tracks = personalizedFamiliarFavorites;
-        } else if (playlistType === 'recently_added') {
-            tracks = personalizedRecentlyAdded;
-        } else if (playlistType === 'top_tracks') {
-            tracks = personalizedTopTracks;
-        } else if (playlistType === 'forgotten_favorites') {
-            tracks = personalizedForgottenFavorites;
         } else if (playlistType === 'build_playlist') {
             tracks = buildPlaylistTracks;
         }
@@ -7516,8 +7408,6 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         tracks = personalizedHiddenGems;
     } else if (playlistType === 'discovery_shuffle') {
         tracks = personalizedDiscoveryShuffle;
-    } else if (playlistType === 'familiar_favorites') {
-        tracks = personalizedFamiliarFavorites;
     } else if (playlistType === 'build_playlist') {
         tracks = buildPlaylistTracks;
     }
@@ -7648,7 +7538,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'release_radar': 'Fresh Tape', 'discovery_weekly': 'The Archives',
                     'seasonal_playlist': 'Seasonal Mix', 'popular_picks': 'Popular Picks',
                     'hidden_gems': 'Hidden Gems', 'discovery_shuffle': 'Discovery Shuffle',
-                    'familiar_favorites': 'Familiar Favorites', 'build_playlist': 'Custom Playlist'
+                    'build_playlist': 'Custom Playlist'
                 };
                 showToast(`${playlistNames[playlistType] || playlistType} sync complete!`, 'success');
                 setTimeout(() => { const sd = el(`${prefix}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
@@ -7714,7 +7604,6 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'popular_picks': 'Popular Picks',
                     'hidden_gems': 'Hidden Gems',
                     'discovery_shuffle': 'Discovery Shuffle',
-                    'familiar_favorites': 'Familiar Favorites',
                     'build_playlist': 'Custom Playlist'
                 };
                 const displayName = playlistNames[playlistType] || playlistType;
@@ -8239,8 +8128,6 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             apiEndpoint = '/api/discover/hidden-gems';
         } else if (playlistId === 'discover_discovery_shuffle') {
             apiEndpoint = '/api/discover/discovery-shuffle';
-        } else if (playlistId === 'discover_familiar_favorites') {
-            apiEndpoint = '/api/discover/familiar-favorites';
         } else if (playlistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (playlistId.startsWith('discover_lb_')) {

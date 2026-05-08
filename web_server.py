@@ -27189,66 +27189,6 @@ def refresh_seasonal_content():
 # PERSONALIZED PLAYLISTS ENDPOINTS
 # ========================================
 
-@app.route('/api/discover/personalized/recently-added', methods=['GET'])
-def get_recently_added_playlist():
-    """Get recently added tracks from library"""
-    try:
-        from core.personalized_playlists import get_personalized_playlists_service
-
-        database = get_database()
-        service = get_personalized_playlists_service(database, spotify_client)
-
-        tracks = service.get_recently_added(limit=50)
-
-        return jsonify({
-            "success": True,
-            "tracks": tracks
-        })
-
-    except Exception as e:
-        logger.error(f"Error getting recently added playlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/discover/personalized/top-tracks', methods=['GET'])
-def get_top_tracks_playlist():
-    """Get user's all-time top tracks"""
-    try:
-        from core.personalized_playlists import get_personalized_playlists_service
-
-        database = get_database()
-        service = get_personalized_playlists_service(database, spotify_client)
-
-        tracks = service.get_top_tracks(limit=50)
-
-        return jsonify({
-            "success": True,
-            "tracks": tracks
-        })
-
-    except Exception as e:
-        logger.error(f"Error getting top tracks playlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/discover/personalized/forgotten-favorites', methods=['GET'])
-def get_forgotten_favorites_playlist():
-    """Get forgotten favorites - tracks you loved but haven't played recently"""
-    try:
-        from core.personalized_playlists import get_personalized_playlists_service
-
-        database = get_database()
-        service = get_personalized_playlists_service(database, spotify_client)
-
-        tracks = service.get_forgotten_favorites(limit=50)
-
-        return jsonify({
-            "success": True,
-            "tracks": tracks
-        })
-
-    except Exception as e:
-        logger.error(f"Error getting forgotten favorites playlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
 @app.route('/api/discover/personalized/decade/<int:decade>', methods=['GET'])
 def get_decade_playlist(decade):
     """Get tracks from a specific decade"""
@@ -27351,27 +27291,6 @@ def get_discovery_shuffle():
 
     except Exception as e:
         logger.error(f"Error getting discovery shuffle playlist: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/discover/personalized/familiar-favorites', methods=['GET'])
-def get_familiar_favorites():
-    """Get Familiar Favorites playlist - reliable go-to tracks"""
-    try:
-        from core.personalized_playlists import get_personalized_playlists_service
-
-        database = get_database()
-        service = get_personalized_playlists_service(database, spotify_client)
-
-        limit = int(request.args.get('limit', 50))
-        tracks = service.get_familiar_favorites(limit=limit)
-
-        return jsonify({
-            "success": True,
-            "tracks": tracks
-        })
-
-    except Exception as e:
-        logger.error(f"Error getting familiar favorites playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/artist-blacklist', methods=['GET'])

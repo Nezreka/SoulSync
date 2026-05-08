@@ -10,14 +10,11 @@ section can't accidentally bypass it.
 Coverage:
 - `_select_discovery_tracks` filters out rows where every source ID is NULL
 - `_select_discovery_tracks` honors source filter + blacklist filter
-- `_select_library_tracks` enforces the same gate against the `tracks` table
 - `_apply_diversity_filter` caps per-album + per-artist counts
 - `_compute_adaptive_diversity_limits` returns the right tier for the
   unique-artist count + relaxed flag
 - The 5 discovery_pool methods (decade / genre / popular_picks /
   hidden_gems / discovery_shuffle) each filter NULL-id rows
-- The 4 library methods (recently_added / top_tracks /
-  forgotten_favorites / familiar_favorites) each filter NULL-id rows
 """
 
 from __future__ import annotations
@@ -71,31 +68,6 @@ class _FakeDatabase:
             CREATE TABLE discovery_artist_blacklist (
                 artist_name TEXT PRIMARY KEY
             );
-            CREATE TABLE artists (
-                id INTEGER PRIMARY KEY,
-                name TEXT
-            );
-            CREATE TABLE albums (
-                id INTEGER PRIMARY KEY,
-                title TEXT,
-                artist_id INTEGER,
-                thumb_url TEXT
-            );
-            CREATE TABLE tracks (
-                id INTEGER PRIMARY KEY,
-                album_id INTEGER,
-                artist_id INTEGER,
-                title TEXT,
-                duration INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                play_count INTEGER DEFAULT 0,
-                last_played TIMESTAMP,
-                spotify_track_id TEXT,
-                itunes_track_id TEXT,
-                deezer_id TEXT,
-                musicbrainz_recording_id TEXT,
-                audiodb_id TEXT
-            );
         """)
         self._conn.commit()
 
@@ -113,26 +85,6 @@ class _FakeDatabase:
         self._conn.execute(
             f"INSERT INTO discovery_pool ({cols}) VALUES ({placeholders})",
             tuple(kwargs.values()),
-        )
-        self._conn.commit()
-
-    def insert_library_track(self, *, artist_name='Library Artist',
-                              album_name='Library Album', track_name='Library Track',
-                              **track_kwargs):
-        # Insert artist + album + track in one shot for convenience.
-        cur = self._conn.cursor()
-        cur.execute("INSERT INTO artists (name) VALUES (?)", (artist_name,))
-        artist_id = cur.lastrowid
-        cur.execute(
-            "INSERT INTO albums (title, artist_id, thumb_url) VALUES (?, ?, ?)",
-            (album_name, artist_id, 'http://x/cover.jpg'),
-        )
-        album_id = cur.lastrowid
-        track_kwargs.setdefault('duration', 200000)
-        cur.execute(
-            f"""INSERT INTO tracks (album_id, artist_id, title, {', '.join(track_kwargs.keys())})
-                VALUES (?, ?, ?, {', '.join(['?'] * len(track_kwargs))})""",
-            (album_id, artist_id, track_name, *track_kwargs.values()),
         )
         self._conn.commit()
 
@@ -375,49 +327,3 @@ def test_get_decade_playlist_filters_null_id_rows(service):
     assert [t['track_name'] for t in out] == ['Yes']
 
 
-# ---------------------------------------------------------------------------
-# Library methods (re-enabled)
-# ---------------------------------------------------------------------------
-
-
-def test_get_recently_added_filters_null_id_rows(service):
-    svc, db = service
-    db.insert_library_track(
-        track_name='Has Spotify', spotify_track_id='sp1',
-    )
-    db.insert_library_track(
-        track_name='No IDs',  # all source ID columns NULL
-    )
-    db.insert_library_track(
-        track_name='Has MB', musicbrainz_recording_id='mb1',
-    )
-    out = svc.get_recently_added(limit=10)
-    names = sorted(t['track_name'] for t in out)
-    assert names == ['Has MB', 'Has Spotify']
-
-
-def test_get_top_tracks_requires_play_count(service):
-    svc, db = service
-    db.insert_library_track(
-        track_name='Played', spotify_track_id='sp1', play_count=5,
-    )
-    db.insert_library_track(
-        track_name='Unplayed', spotify_track_id='sp2', play_count=0,
-    )
-    out = svc.get_top_tracks(limit=10)
-    assert [t['track_name'] for t in out] == ['Played']
-
-
-def test_get_familiar_favorites_uses_play_count_band(service):
-    svc, db = service
-    db.insert_library_track(
-        track_name='InBand', spotify_track_id='sp1', play_count=8,
-    )
-    db.insert_library_track(
-        track_name='TooLow', spotify_track_id='sp2', play_count=2,
-    )
-    db.insert_library_track(
-        track_name='TooHigh', spotify_track_id='sp3', play_count=20,
-    )
-    out = svc.get_familiar_favorites(limit=10)
-    assert [t['track_name'] for t in out] == ['InBand']
