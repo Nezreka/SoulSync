@@ -842,54 +842,52 @@ function showDiscoverHeroEmpty() {
     if (subtitleEl) subtitleEl.textContent = 'Run a watchlist scan to generate personalized recommendations';
 }
 
+// Recent Releases — first section migrated to the shared
+// `createDiscoverSectionController`. The controller owns the
+// loading / empty / error / refresh lifecycle that every other
+// discover section currently re-implements by hand. This function
+// stays as the public entry-point so existing callers don't change;
+// internally it builds (or reuses) the controller and triggers a
+// load. See `discover-section-controller.js` for the contract.
+let _recentReleasesCtrl = null;
+
+function _renderRecentReleaseCard(album, index) {
+    const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+    return `
+        <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
+            <div class="discover-card-image">
+                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+            </div>
+            <div class="discover-card-info">
+                <h4 class="discover-card-title">${album.album_name}</h4>
+                <p class="discover-card-subtitle">${album.artist_name}</p>
+                <p class="discover-card-meta">${album.release_date}</p>
+            </div>
+        </div>
+    `;
+}
+
 async function loadDiscoverRecentReleases() {
-    try {
-        const carousel = document.getElementById('recent-releases-carousel');
-        if (!carousel) return;
-
-        carousel.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading recent releases...</p></div>';
-
-        const response = await fetch('/api/discover/recent-releases');
-        if (!response.ok) {
-            throw new Error('Failed to fetch recent releases');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.albums || data.albums.length === 0) {
-            carousel.innerHTML = '<div class="discover-empty"><p>No recent releases found</p></div>';
-            return;
-        }
-
-        // Store albums for download functionality
-        discoverRecentAlbums = data.albums;
-
-        // Build carousel HTML
-        let html = '';
-        data.albums.forEach((album, index) => {
-            const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
-            html += `
-                <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
-                    <div class="discover-card-image">
-                        <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
-                    </div>
-                    <div class="discover-card-info">
-                        <h4 class="discover-card-title">${album.album_name}</h4>
-                        <p class="discover-card-subtitle">${album.artist_name}</p>
-                        <p class="discover-card-meta">${album.release_date}</p>
-                    </div>
-                </div>
-            `;
+    if (!_recentReleasesCtrl) {
+        _recentReleasesCtrl = createDiscoverSectionController({
+            id: 'recent-releases',
+            contentEl: '#recent-releases-carousel',
+            fetchUrl: '/api/discover/recent-releases',
+            extractItems: (data) => data.albums || [],
+            renderItems: (items) => {
+                // Module-level `discoverRecentAlbums` is what the click
+                // handler reads to look up the album by index. Keep it
+                // in sync so `openDownloadModalForRecentAlbum(index)`
+                // still resolves correctly after re-renders.
+                discoverRecentAlbums = items;
+                return items.map((album, i) => _renderRecentReleaseCard(album, i)).join('');
+            },
+            loadingMessage: 'Loading recent releases...',
+            emptyMessage: 'No recent releases found',
+            errorMessage: 'Failed to load recent releases',
         });
-
-        carousel.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading recent releases:', error);
-        const carousel = document.getElementById('recent-releases-carousel');
-        if (carousel) {
-            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load recent releases</p></div>';
-        }
     }
+    return _recentReleasesCtrl.load();
 }
 
 // ===============================

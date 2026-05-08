@@ -3429,6 +3429,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.4.3': [
+        // --- post-2.4.2 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.4.3 dev cycle' },
+        { title: 'Internal: Discover Section Controller Foundation', desc: 'every section on the discover page (recent releases, your artists, your albums, seasonal, fresh tape, the archives, etc) re-implements the same lifecycle by hand: show spinner → fetch endpoint → parse → either render or show empty state or show error → maybe wire post-render handlers → maybe expose refresh. ~30 sections, all subtly drifting — different empty messages, different error handling (some console.debug, some silently swallowed, some leave the spinner spinning forever), different sync-status icons, no consistent error toast. lifted that lifecycle into a shared `createDiscoverSectionController` (renderers stay per-section because section data shapes legitimately differ — album cards vs artist circles vs playlist tiles vs track rows; the controller is the wrapper, not a forced visual abstraction). this commit is the foundation: built the controller + migrated `recent releases` as proof. each remaining section will migrate in its own follow-up commit (keeps reviews small + lets us sequence the work). once everything is on the controller, the discover-page cleanup work (kill 13 dead sections, standardize sync-status icons, add error toasts) becomes single-line registry edits instead of section-by-section rewrites.', page: 'discover' },
+    ],
     '2.4.2': [
         // --- May 7, 2026 — patch release ---
         { date: 'May 7, 2026 — 2.4.2 release' },
