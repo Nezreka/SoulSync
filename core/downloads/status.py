@@ -21,6 +21,7 @@ are passed via `StatusDeps` so the module is web_server-import-free.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -34,6 +35,37 @@ from core.runtime_state import (
 logger = logging.getLogger(__name__)
 
 
+def _schedule_completion_callback(deps, batch_id: str, task_id: str, success: bool) -> None:
+    """Fire ``deps.on_download_completed`` on a one-shot daemon thread so
+    the caller can hold ``tasks_lock`` without deadlocking.
+
+    ``on_download_completed`` re-acquires ``tasks_lock`` (it removes the
+    completed task from the batch's active set, decrements active_count,
+    and may submit the next queued worker). Calling it synchronously
+    from within ``build_batch_status_data`` — which is invoked under the
+    same Lock — would self-deadlock since ``threading.Lock`` is not
+    reentrant. A daemon thread defers the call until after the lock is
+    released.
+    """
+    if deps.on_download_completed is None:
+        return
+
+    def _run():
+        try:
+            deps.on_download_completed(batch_id, task_id, success)
+        except Exception as exc:
+            logger.error(
+                "[Status] deferred on_download_completed raised for task %s: %s",
+                task_id, exc,
+            )
+
+    threading.Thread(
+        target=_run,
+        name=f"on-completed-{task_id[:8]}",
+        daemon=True,
+    ).start()
+
+
 @dataclass
 class StatusDeps:
     """Cross-cutting deps the status helpers need."""
@@ -43,6 +75,162 @@ class StatusDeps:
     make_context_key: Callable[[str, str], str]
     submit_post_processing: Callable[[str, str], None]  # (task_id, batch_id) -> None
     get_cached_transfer_data: Callable[[], dict]
+    # Engine-state fallback for non-Soulseek (streaming) downloads.
+    # Without these, YouTube/Tidal/Qobuz/HiFi/Deezer/SoundCloud/Lidarr
+    # tasks never appear in live_transfers_lookup so their status never
+    # advances out of 'downloading 0%'.
+    download_orchestrator: Any = None
+    run_async: Optional[Callable] = None
+    on_download_completed: Optional[Callable[[str, str, bool], None]] = None
+
+
+# Streaming sources the engine fallback applies to. Soulseek goes through
+# slskd's live_transfers path and must NOT hit the engine fallback.
+_STREAMING_SOURCE_NAMES = frozenset((
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud',
+))
+
+# Keep these in sync with the engine plugins' state strings.
+_ENGINE_FAILURE_STATES = ('Errored', 'Failed', 'Rejected', 'TimedOut', 'Aborted')
+_ENGINE_CANCELLED_STATES = ('Cancelled', 'Canceled')
+_ENGINE_SUCCESS_STATES = ('Succeeded', 'Completed, Succeeded')
+
+
+def _engine_state_str(record: Any) -> str:
+    if record is None:
+        return ''
+    state = getattr(record, 'state', None)
+    if state is None and isinstance(record, dict):
+        state = record.get('state')
+    return str(state) if state is not None else ''
+
+
+def _engine_progress_pct(record: Any) -> float:
+    if record is None:
+        return 0
+    progress = getattr(record, 'progress', None)
+    if progress is None and isinstance(record, dict):
+        progress = record.get('progress')
+    try:
+        progress = float(progress)
+    except (TypeError, ValueError):
+        return 0
+    if progress <= 1.0:
+        progress *= 100
+    return progress
+
+
+def _apply_engine_state_fallback(
+    task_id: str,
+    task: dict,
+    task_status: dict,
+    batch_id: str,
+    deps: StatusDeps,
+) -> None:
+    """Populate ``task_status`` from the download engine's per-source
+    record when the task isn't in ``live_transfers_lookup`` — i.e. it's
+    a non-Soulseek streaming source. Mirrors the Soulseek branch's
+    Cancelled → Failed → Succeeded → InProgress priority order so
+    compound states like ``"Completed, Errored"`` hit the failure branch
+    first.
+
+    Mutates ``task`` in place (status / error_message) the same way the
+    Soulseek branch does, so the next status poll sees the new state.
+    Submits post-processing on terminal success and fires
+    ``on_download_completed`` on terminal failure to free the worker
+    slot.
+    """
+    if deps.download_orchestrator is None or deps.run_async is None:
+        return
+    if task.get('status') in ('completed', 'failed', 'cancelled', 'not_found', 'post_processing'):
+        return
+    # Scope this fallback to user-initiated manual picks. Auto attempts
+    # already flow through the live_transfers_lookup IF branch (the engine
+    # pre-populates non-Soulseek records via get_all_downloads), and on
+    # failure the monitor's existing retry path picks the next candidate.
+    # Marking auto attempts failed here would short-circuit that fallback.
+    if not task.get('_user_manual_pick'):
+        return
+    download_id = task.get('download_id')
+    if not download_id:
+        return
+    ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+    username = task.get('username') or ti.get('username')
+    if username not in _STREAMING_SOURCE_NAMES:
+        return
+
+    try:
+        record = deps.run_async(
+            deps.download_orchestrator.get_download_status(download_id)
+        )
+    except Exception as exc:
+        logger.debug(
+            "[Engine Fallback] get_download_status(%s) raised: %s",
+            download_id, exc,
+        )
+        return
+
+    if record is None:
+        return
+
+    state_str = _engine_state_str(record)
+    if not state_str:
+        return
+
+    if any(s in state_str for s in _ENGINE_CANCELLED_STATES):
+        if task['status'] != 'cancelled':
+            task['status'] = 'cancelled'
+            err = getattr(record, 'error_message', None) or getattr(record, 'error', None) or ''
+            if err:
+                task['error_message'] = str(err)
+            _schedule_completion_callback(deps, batch_id, task_id, False)
+        task_status['status'] = 'cancelled'
+        task_status['progress'] = _engine_progress_pct(record)
+        return
+
+    if any(s in state_str for s in _ENGINE_FAILURE_STATES):
+        if task['status'] != 'failed':
+            task['status'] = 'failed'
+            err = getattr(record, 'error_message', None) or getattr(record, 'error', None) or ''
+            task['error_message'] = (
+                str(err) if err
+                else f'{username} download failed (engine state: {state_str})'
+            )
+            logger.info(
+                "[Engine Fallback] Task %s engine reports '%s' — marking failed",
+                task_id, state_str,
+            )
+            _schedule_completion_callback(deps, batch_id, task_id, False)
+        task_status['status'] = 'failed'
+        task_status['error_message'] = task.get('error_message')
+        task_status['progress'] = _engine_progress_pct(record)
+        return
+
+    if any(s in state_str for s in _ENGINE_SUCCESS_STATES):
+        if task['status'] != 'post_processing':
+            task['status'] = 'post_processing'
+            logger.info(
+                "[Engine Fallback] Task %s engine reports '%s' — starting post-processing verification",
+                task_id, state_str,
+            )
+            try:
+                deps.submit_post_processing(task_id, batch_id)
+            except Exception as exc:
+                logger.error(
+                    "[Engine Fallback] submit_post_processing raised for task %s: %s",
+                    task_id, exc,
+                )
+        task_status['status'] = 'post_processing'
+        task_status['progress'] = 95
+        return
+
+    if 'InProgress' in state_str:
+        task_status['status'] = 'downloading'
+        if task['status'] in ('searching', 'queued'):
+            task['status'] = 'downloading'
+    elif 'Queued' in state_str:
+        task_status['status'] = 'queued'
+    task_status['progress'] = _engine_progress_pct(record)
 
 
 def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: dict, deps: StatusDeps) -> dict:
@@ -144,17 +332,41 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                             task_status['status'] = 'cancelled'
                             task['status'] = 'cancelled'
                         elif 'Failed' in state_str or 'Errored' in state_str or 'Rejected' in state_str or 'TimedOut' in state_str:
-                            # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
-                            # Monitor will detect errored state and trigger retry within 5 seconds
-                            logger.error(f"Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
-
-                            # Keep task in current status (downloading/queued) so monitor can detect error
-                            # Don't mark as failed here - let the unified retry system handle it
-                            if task['status'] in ['searching', 'downloading', 'queued']:
-                                task_status['status'] = task['status']  # Keep current status for monitor
+                            # User-initiated manual pick — surface the failure
+                            # immediately. The monitor's auto-retry path is gated
+                            # on `_user_manual_pick` and won't fire, so deferring
+                            # to it would leave the task stuck at 'downloading 0%'
+                            # forever. Mark failed here and free the worker slot.
+                            if task.get('_user_manual_pick'):
+                                err_msg = live_info.get('errorMessage') or live_info.get('error') or ''
+                                task['status'] = 'failed'
+                                task['error_message'] = (
+                                    str(err_msg) if err_msg
+                                    else f'Manual pick failed (state: {state_str})'
+                                )
+                                task_status['status'] = 'failed'
+                                task_status['error_message'] = task['error_message']
+                                logger.info(
+                                    f"[Manual Pick] Task {task_id} engine reports '{state_str}' — marking failed"
+                                )
+                                # NOTE: caller (build_batched_status) holds
+                                # tasks_lock. on_download_completed re-acquires
+                                # the same Lock — synchronous call would
+                                # deadlock. Spawn a thread so it runs after we
+                                # release the lock.
+                                _schedule_completion_callback(deps, batch_id, task_id, False)
                             else:
-                                task_status['status'] = 'downloading'  # Default to downloading for error detection
-                                task['status'] = 'downloading'
+                                # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
+                                # Monitor will detect errored state and trigger retry within 5 seconds
+                                logger.error(f"Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
+
+                                # Keep task in current status (downloading/queued) so monitor can detect error
+                                # Don't mark as failed here - let the unified retry system handle it
+                                if task['status'] in ['searching', 'downloading', 'queued']:
+                                    task_status['status'] = task['status']  # Keep current status for monitor
+                                else:
+                                    task_status['status'] = 'downloading'  # Default to downloading for error detection
+                                    task['status'] = 'downloading'
                         elif 'Completed' in state_str or 'Succeeded' in state_str:
                             # Verify bytes actually transferred before trusting state string
                             expected_size = live_info.get('size', 0)
@@ -193,6 +405,15 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                         task_status['progress'] = 100
                     elif task['status'] == 'post_processing':
                         task_status['progress'] = 95  # Nearly complete, just verifying
+                    else:
+                        # Non-Soulseek (streaming) sources don't appear in
+                        # slskd's live_transfers_lookup — poll the engine
+                        # directly so YouTube/Tidal/Qobuz/HiFi/Deezer/
+                        # SoundCloud/Lidarr tasks actually advance out of
+                        # 'downloading 0%' instead of staying there forever.
+                        _apply_engine_state_fallback(
+                            task_id, task, task_status, batch_id, deps,
+                        )
             batch_tasks.append(task_status)
         batch_tasks.sort(key=lambda x: x['track_index'])
         response_data['tasks'] = batch_tasks
