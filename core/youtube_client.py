@@ -222,18 +222,47 @@ class YouTubeClient(DownloadSourcePlugin):
 
         Returns:
             bool: True if YouTube downloads can work, False otherwise
+
+        Note: this is called polymorphically from registry / orchestrator /
+        engine boot probes via ``is_configured()`` — i.e. it runs every
+        time something imports web_server. We therefore call
+        ``_check_ffmpeg`` (which CAN auto-download) but skip the download
+        side-effect when running under pytest / explicit no-download mode
+        — that side-effect is what was leaking ffmpeg binaries into the
+        workspace and bloating docker images via CI test runs.
         """
         try:
-            # Check yt-dlp
-            import yt_dlp
-
-            # Check ffmpeg (will auto-download if needed)
-            ffmpeg_ok = self._check_ffmpeg()
-
-            return ffmpeg_ok
+            import yt_dlp  # noqa: F401
         except ImportError:
             logger.error("yt-dlp is not installed")
             return False
+
+        return self._check_ffmpeg()
+
+    @staticmethod
+    def _auto_download_disabled() -> bool:
+        """Skip the ffmpeg auto-download when running under pytest or
+        when ``SOULSYNC_NO_FFMPEG_DOWNLOAD`` is set. Lets test runs +
+        CI builds probe ``is_available()`` without dragging a 388 MB
+        binary into the workspace.
+
+        Three detection paths:
+        - ``SOULSYNC_NO_FFMPEG_DOWNLOAD=1`` env var (explicit opt-out
+          — set in CI workflows for belt-and-suspenders defense)
+        - ``PYTEST_CURRENT_TEST`` env var (set by pytest during test
+          execution — covers `is_available` calls fired from within a
+          test fixture / test body)
+        - ``'pytest' in sys.modules`` (covers calls fired during pytest
+          collection / import phase, before the per-test env var is set
+          — which is exactly when registry.py probes is_configured at
+          web_server import)
+        """
+        import sys
+        return bool(
+            os.environ.get('SOULSYNC_NO_FFMPEG_DOWNLOAD')
+            or os.environ.get('PYTEST_CURRENT_TEST')
+            or 'pytest' in sys.modules
+        )
 
     def reload_settings(self):
         """Reload YouTube settings from config (called when settings are saved)."""
@@ -451,6 +480,18 @@ class YouTubeClient(DownloadSourcePlugin):
             tools_dir_str = str(tools_dir.absolute())
             os.environ['PATH'] = tools_dir_str + os.pathsep + os.environ.get('PATH', '')
             return True
+
+        # Skip the auto-download when running under pytest or when the
+        # opt-out env var is set — keeps test runs / CI builds from
+        # leaking the binary into the repo workspace where docker would
+        # then bake it into the image.
+        if self._auto_download_disabled():
+            logger.warning(
+                "ffmpeg not found and auto-download is disabled "
+                "(pytest / SOULSYNC_NO_FFMPEG_DOWNLOAD). YouTube downloads "
+                "will not work until ffmpeg is on PATH."
+            )
+            return False
 
         # Auto-download ffmpeg binary
         logger.info(f"⬇️  ffmpeg not found - downloading for {system}...")
