@@ -7742,6 +7742,109 @@ def clear_finished_downloads():
         logger.error(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# Streaming sources where the candidate's `username` field IS the source name
+# (Soulseek uses a real peer username; everything else stamps the source string).
+_STREAMING_SOURCE_NAMES = frozenset((
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'
+))
+
+
+def _infer_candidate_source(username: str) -> str:
+    """Infer which download source a candidate came from based on its
+    `username` field. Streaming sources stamp their canonical name there;
+    everything else is Soulseek."""
+    if not username:
+        return 'soulseek'
+    return username if username in _STREAMING_SOURCE_NAMES else 'soulseek'
+
+
+def _serialize_candidate(c, source_override: str = None) -> dict:
+    """Convert a TrackResult (or dict) into the JSON shape the candidates
+    modal expects. ``source_override`` lets manual-search callers stamp
+    the source explicitly when the dispatcher knows it; otherwise we
+    infer from the username."""
+    if hasattr(c, '__dict__'):
+        username = getattr(c, 'username', '')
+        return {
+            'username': username,
+            'filename': getattr(c, 'filename', ''),
+            'size': getattr(c, 'size', 0),
+            'bitrate': getattr(c, 'bitrate', None),
+            'duration': getattr(c, 'duration', None),
+            'quality': getattr(c, 'quality', ''),
+            'free_upload_slots': getattr(c, 'free_upload_slots', 0),
+            'upload_speed': getattr(c, 'upload_speed', 0),
+            'queue_length': getattr(c, 'queue_length', 0),
+            'artist': getattr(c, 'artist', None),
+            'title': getattr(c, 'title', None),
+            'album': getattr(c, 'album', None),
+            'source': source_override or _infer_candidate_source(username),
+        }
+    if isinstance(c, dict):
+        out = dict(c)
+        out.setdefault('source', source_override or _infer_candidate_source(out.get('username', '')))
+        return out
+    return {}
+
+
+def _list_available_download_sources() -> tuple:
+    """Return ``(download_mode, available_sources)`` for the current
+    download configuration. ``download_mode`` is the value of
+    ``download_source.mode`` (one of 'soulseek'/'youtube'/.../'hybrid').
+    ``available_sources`` is a list of ``{id, label}`` dicts — the
+    sources the manual-search dropdown should offer.
+
+    In single-source mode: returns just that one source if it's
+    initialized + configured (the user picked it, so we expose it
+    even if is_configured() doesn't fully approve — they may still
+    want to retry).
+
+    In hybrid mode: filters ``hybrid_order`` down to sources that are
+    BOTH initialized and ``is_configured()`` — same gate hybrid-mode
+    fallback already uses.
+    """
+    if not download_orchestrator:
+        return 'soulseek', []
+
+    download_mode = config_manager.get('download_source.mode', 'soulseek')
+    sources = []
+
+    def _make_entry(name: str) -> dict:
+        spec = download_orchestrator.registry.get_spec(name) if hasattr(download_orchestrator, 'registry') else None
+        return {
+            'id': name,
+            'label': spec.display_name if spec else name.title(),
+        }
+
+    if download_mode == 'hybrid':
+        hybrid_order = config_manager.get('download_source.hybrid_order',
+                                          ['hifi', 'youtube', 'soulseek']) or []
+        seen = set()
+        for raw_name in hybrid_order:
+            spec = download_orchestrator.registry.get_spec(raw_name) if hasattr(download_orchestrator, 'registry') else None
+            canonical = spec.name if spec else raw_name
+            if canonical in seen:
+                continue
+            client = download_orchestrator.client(canonical)
+            if not client:
+                continue
+            try:
+                if not client.is_configured():
+                    continue
+            except Exception:
+                continue
+            seen.add(canonical)
+            sources.append(_make_entry(canonical))
+    else:
+        # Single-source mode — just expose the configured mode (the user
+        # picked it, so they expect manual search to hit that source).
+        client = download_orchestrator.client(download_mode)
+        if client:
+            sources.append(_make_entry(download_mode))
+
+    return download_mode, sources
+
+
 @app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
 def get_task_candidates(task_id):
     """Returns the cached search candidates for a download task so the UI can show what was found."""
@@ -7755,25 +7858,10 @@ def get_task_candidates(task_id):
             track_info = task.get('track_info', {})
             error_message = task.get('error_message', '')
 
-            serialized = []
-            for c in candidates:
-                if hasattr(c, '__dict__'):
-                    serialized.append({
-                        'username': getattr(c, 'username', ''),
-                        'filename': getattr(c, 'filename', ''),
-                        'size': getattr(c, 'size', 0),
-                        'bitrate': getattr(c, 'bitrate', None),
-                        'duration': getattr(c, 'duration', None),
-                        'quality': getattr(c, 'quality', ''),
-                        'free_upload_slots': getattr(c, 'free_upload_slots', 0),
-                        'upload_speed': getattr(c, 'upload_speed', 0),
-                        'queue_length': getattr(c, 'queue_length', 0),
-                        'artist': getattr(c, 'artist', None),
-                        'title': getattr(c, 'title', None),
-                        'album': getattr(c, 'album', None),
-                    })
-                elif isinstance(c, dict):
-                    serialized.append(c)
+            serialized = [_serialize_candidate(c) for c in candidates if c is not None]
+            serialized = [s for s in serialized if s]
+
+        download_mode, available_sources = _list_available_download_sources()
 
         return jsonify({
             "task_id": task_id,
@@ -7784,6 +7872,8 @@ def get_task_candidates(task_id):
             "error_message": error_message,
             "candidates": serialized,
             "candidate_count": len(serialized),
+            "download_mode": download_mode,
+            "available_sources": available_sources,
         })
     except Exception as e:
         logger.error(f"[Candidates] Error fetching candidates for task {task_id}: {e}")
@@ -7902,6 +7992,118 @@ def download_selected_candidate(task_id):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
+def manual_search_for_task(task_id):
+    """Run a user-driven search against one (or all) configured download sources
+    and return candidate results in the same shape as ``/candidates``. The
+    candidates modal lets the user pick one to retry the download — that retry
+    still goes through the existing ``/download-candidate`` endpoint, so all
+    AcoustID + post-download safety nets stay in the loop.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_query = data.get('query', '')
+        query = raw_query.strip() if isinstance(raw_query, str) else ''
+        source = data.get('source', 'all')
+
+        if len(query) < 2:
+            return jsonify({"error": "Query must be at least 2 characters"}), 400
+
+        # Validate task exists
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if not task:
+                return jsonify({"error": "Task not found"}), 404
+            track_info = dict(task.get('track_info', {}))
+
+        # Validate source against the live configured-sources list (so users
+        # can't bypass hybrid_order and trigger a search against a source the
+        # user disabled / hasn't configured).
+        download_mode, available_sources = _list_available_download_sources()
+        valid_source_ids = {s['id'] for s in available_sources}
+
+        if source != 'all':
+            if source not in valid_source_ids:
+                return jsonify({
+                    "error": f"Source '{source}' is not configured or available"
+                }), 400
+            sources_to_query = [source]
+        else:
+            # 'all' is only meaningful in hybrid mode, but we accept it in
+            # single-source mode too (degenerates to the one configured source).
+            sources_to_query = list(valid_source_ids)
+
+        if not sources_to_query:
+            return jsonify({
+                "task_id": task_id,
+                "track_info": {
+                    "name": track_info.get('name', 'Unknown'),
+                    "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
+                },
+                "candidates": [],
+                "candidate_count": 0,
+                "download_mode": download_mode,
+                "available_sources": available_sources,
+            })
+
+        # Dispatch parallel searches. Each plugin's `.search(query)` is a
+        # coroutine, so we wrap it via run_async and submit to a small thread
+        # pool — same pattern the rest of the app uses to fan out across
+        # sources without blocking the request thread.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _search_one(src_name: str):
+            client = download_orchestrator.client(src_name) if download_orchestrator else None
+            if not client:
+                return src_name, []
+            try:
+                result = run_async(client.search(query))
+                if isinstance(result, tuple):
+                    tracks = result[0] if result else []
+                else:
+                    tracks = result or []
+                return src_name, tracks
+            except Exception as exc:
+                logger.warning(f"[Manual Search] {src_name} search failed for query '{query}': {exc}")
+                return src_name, []
+
+        merged_candidates = []
+        max_workers = min(8, max(1, len(sources_to_query)))
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='manual-search') as executor:
+            futures = [executor.submit(_search_one, name) for name in sources_to_query]
+            for future in as_completed(futures):
+                src_name, tracks = future.result()
+                for t in tracks:
+                    serialized = _serialize_candidate(t, source_override=src_name)
+                    if serialized:
+                        merged_candidates.append(serialized)
+
+        logger.info(
+            f"[Manual Search] task={task_id} query='{query}' source={source} "
+            f"sources_queried={sources_to_query} results={len(merged_candidates)}"
+        )
+
+        return jsonify({
+            "task_id": task_id,
+            "track_info": {
+                "name": track_info.get('name', 'Unknown'),
+                "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
+            },
+            "candidates": merged_candidates,
+            "candidate_count": len(merged_candidates),
+            "download_mode": download_mode,
+            "available_sources": available_sources,
+            "query": query,
+        })
+
+    except Exception as e:
+        logger.error(f"[Manual Search] {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/quarantine/clear', methods=['POST'])
 def clear_quarantine():
