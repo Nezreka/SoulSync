@@ -1329,118 +1329,71 @@ async function downloadMissingYourAlbums() {
 }
 
 
-async function loadDiscoverReleaseRadar() {
-    try {
-        const playlistContainer = document.getElementById('release-radar-playlist');
-        if (!playlistContainer) return;
-
-        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading release radar...</p></div>';
-
-        const response = await fetch('/api/discover/release-radar');
-        if (!response.ok) {
-            throw new Error('Failed to fetch release radar');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>No new releases available</p></div>';
-            return;
-        }
-
-        // Store tracks for download/sync functionality
-        discoverReleaseRadarTracks = data.tracks;
-
-        // Build compact playlist HTML
-        let html = '<div class="discover-playlist-tracks-compact">';
-        data.tracks.forEach((track, index) => {
-            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-            const durationMin = Math.floor(track.duration_ms / 60000);
-            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-
-            html += `
-                <div class="discover-playlist-track-compact" data-track-index="${index}">
-                    <div class="track-compact-number">${index + 1}</div>
-                    <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
-                    </div>
-                    <div class="track-compact-info">
-                        <div class="track-compact-name">${track.track_name}</div>
-                        <div class="track-compact-artist">${track.artist_name}</div>
-                    </div>
-                    <div class="track-compact-album">${track.album_name}</div>
-                    <div class="track-compact-duration">${duration}</div>
-                </div>
-            `;
-        });
-        html += '</div>';
-
-        playlistContainer.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading release radar:', error);
-        const playlistContainer = document.getElementById('release-radar-playlist');
-        if (playlistContainer) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load release radar</p></div>';
-        }
-    }
+function _renderCompactTrackRow(track, index) {
+    const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
+    const durationMin = Math.floor(track.duration_ms / 60000);
+    const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+    const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+    return `
+        <div class="discover-playlist-track-compact" data-track-index="${index}">
+            <div class="track-compact-number">${index + 1}</div>
+            <div class="track-compact-image">
+                <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
+            </div>
+            <div class="track-compact-info">
+                <div class="track-compact-name">${track.track_name}</div>
+                <div class="track-compact-artist">${track.artist_name}</div>
+            </div>
+            <div class="track-compact-album">${track.album_name}</div>
+            <div class="track-compact-duration">${duration}</div>
+        </div>
+    `;
 }
 
-async function loadDiscoverWeekly() {
-    try {
-        const playlistContainer = document.getElementById('discovery-weekly-playlist');
-        if (!playlistContainer) return;
+let _releaseRadarCtrl = null;
 
-        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Curating your discovery playlist...</p></div>';
-
-        const response = await fetch('/api/discover/weekly');
-        if (!response.ok) {
-            throw new Error('Failed to fetch discovery weekly');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks available yet</p></div>';
-            return;
-        }
-
-        // Store tracks for download/sync functionality
-        discoverWeeklyTracks = data.tracks;
-
-        // Build compact playlist HTML
-        let html = '<div class="discover-playlist-tracks-compact">';
-        data.tracks.forEach((track, index) => {
-            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-            const durationMin = Math.floor(track.duration_ms / 60000);
-            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-
-            html += `
-                <div class="discover-playlist-track-compact" data-track-index="${index}">
-                    <div class="track-compact-number">${index + 1}</div>
-                    <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
-                    </div>
-                    <div class="track-compact-info">
-                        <div class="track-compact-name">${track.track_name}</div>
-                        <div class="track-compact-artist">${track.artist_name}</div>
-                    </div>
-                    <div class="track-compact-album">${track.album_name}</div>
-                    <div class="track-compact-duration">${duration}</div>
-                </div>
-            `;
+async function loadDiscoverReleaseRadar() {
+    if (!_releaseRadarCtrl) {
+        _releaseRadarCtrl = createDiscoverSectionController({
+            id: 'release-radar',
+            contentEl: '#release-radar-playlist',
+            fetchUrl: '/api/discover/release-radar',
+            extractItems: (data) => data.tracks || [],
+            renderItems: (items) => {
+                discoverReleaseRadarTracks = items;
+                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
+                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
+            },
+            loadingMessage: 'Loading release radar...',
+            emptyMessage: 'No new releases available',
+            errorMessage: 'Failed to load release radar',
+            verboseErrors: true,
         });
-        html += '</div>';
-
-        playlistContainer.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading discovery weekly:', error);
-        const playlistContainer = document.getElementById('discovery-weekly-playlist');
-        if (playlistContainer) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load discovery weekly</p></div>';
-        }
     }
+    return _releaseRadarCtrl.load();
+}
+
+let _weeklyCtrl = null;
+
+async function loadDiscoverWeekly() {
+    if (!_weeklyCtrl) {
+        _weeklyCtrl = createDiscoverSectionController({
+            id: 'discovery-weekly',
+            contentEl: '#discovery-weekly-playlist',
+            fetchUrl: '/api/discover/weekly',
+            extractItems: (data) => data.tracks || [],
+            renderItems: (items) => {
+                discoverWeeklyTracks = items;
+                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
+                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
+            },
+            loadingMessage: 'Curating your discovery playlist...',
+            emptyMessage: 'No tracks available yet',
+            errorMessage: 'Failed to load discovery weekly',
+            verboseErrors: true,
+        });
+    }
+    return _weeklyCtrl.load();
 }
 
 // ===============================
@@ -1450,51 +1403,40 @@ async function loadDiscoverWeekly() {
 let selectedDecade = null;
 let decadeTracks = [];
 
+function _renderDecadeCard(decade) {
+    const icon = getDecadeIcon(decade.year);
+    const label = `${decade.year}s`;
+    return `
+        <div class="discover-card decade-card-modern" onclick="openDecadePlaylist(${decade.year})">
+            <div class="discover-card-image decade-card-image">
+                <div class="decade-icon-large">${icon}</div>
+            </div>
+            <div class="discover-card-info">
+                <h4 class="discover-card-title">${label}</h4>
+                <p class="discover-card-subtitle">${decade.track_count} tracks</p>
+                <p class="discover-card-meta">Classics</p>
+            </div>
+        </div>
+    `;
+}
+
+let _decadeBrowserCtrl = null;
+
 async function loadDecadeBrowser() {
-    try {
-        const carousel = document.getElementById('decade-browser-carousel');
-        if (!carousel) return;
-
-        // Fetch available decades from backend
-        const response = await fetch('/api/discover/decades/available');
-        if (!response.ok) {
-            throw new Error('Failed to fetch available decades');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.decades || data.decades.length === 0) {
-            carousel.innerHTML = '<div class="discover-empty"><p>No decade content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
-            return;
-        }
-
-        // Build decade cards matching Recent Releases style
-        let html = '';
-        data.decades.forEach(decade => {
-            const icon = getDecadeIcon(decade.year);
-            const label = `${decade.year}s`;
-            html += `
-                <div class="discover-card decade-card-modern" onclick="openDecadePlaylist(${decade.year})">
-                    <div class="discover-card-image decade-card-image">
-                        <div class="decade-icon-large">${icon}</div>
-                    </div>
-                    <div class="discover-card-info">
-                        <h4 class="discover-card-title">${label}</h4>
-                        <p class="discover-card-subtitle">${decade.track_count} tracks</p>
-                        <p class="discover-card-meta">Classics</p>
-                    </div>
-                </div>
-            `;
+    if (!_decadeBrowserCtrl) {
+        _decadeBrowserCtrl = createDiscoverSectionController({
+            id: 'decade-browser',
+            contentEl: '#decade-browser-carousel',
+            fetchUrl: '/api/discover/decades/available',
+            extractItems: (data) => data.decades || [],
+            renderItems: (items) => items.map(d => _renderDecadeCard(d)).join(''),
+            loadingMessage: 'Loading decades...',
+            emptyMessage: 'No decade content available yet. Run a watchlist scan to populate your discovery pool!',
+            errorMessage: 'Failed to load decades',
+            verboseErrors: true,
         });
-
-        carousel.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading decade browser:', error);
-        const carousel = document.getElementById('decade-browser-carousel');
-        if (carousel) {
-            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load decades</p></div>';
-        }
     }
+    return _decadeBrowserCtrl.load();
 }
 
 function getDecadeIcon(year) {
@@ -1552,51 +1494,40 @@ async function openDecadePlaylist(decade) {
 let selectedGenre = null;
 let genreTracks = [];
 
+function _renderGenreCard(genre) {
+    const icon = getGenreIcon(genre.name);
+    const displayName = capitalizeGenre(genre.name);
+    return `
+        <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
+            <div class="discover-card-image genre-card-image">
+                <div class="genre-icon-large">${icon}</div>
+            </div>
+            <div class="discover-card-info">
+                <h4 class="discover-card-title">${displayName}</h4>
+                <p class="discover-card-subtitle">${genre.track_count} tracks</p>
+                <p class="discover-card-meta">Curated</p>
+            </div>
+        </div>
+    `;
+}
+
+let _genreBrowserCtrl = null;
+
 async function loadGenreBrowser() {
-    try {
-        const carousel = document.getElementById('genre-browser-carousel');
-        if (!carousel) return;
-
-        // Fetch available genres from backend
-        const response = await fetch('/api/discover/genres/available');
-        if (!response.ok) {
-            throw new Error('Failed to fetch available genres');
-        }
-
-        const data = await response.json();
-        if (!data.success || !data.genres || data.genres.length === 0) {
-            carousel.innerHTML = '<div class="discover-empty"><p>No genre content available yet. Run a watchlist scan to populate your discovery pool!</p></div>';
-            return;
-        }
-
-        // Build genre cards matching Recent Releases style
-        let html = '';
-        data.genres.forEach(genre => {
-            const icon = getGenreIcon(genre.name);
-            const displayName = capitalizeGenre(genre.name);
-            html += `
-                <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
-                    <div class="discover-card-image genre-card-image">
-                        <div class="genre-icon-large">${icon}</div>
-                    </div>
-                    <div class="discover-card-info">
-                        <h4 class="discover-card-title">${displayName}</h4>
-                        <p class="discover-card-subtitle">${genre.track_count} tracks</p>
-                        <p class="discover-card-meta">Curated</p>
-                    </div>
-                </div>
-            `;
+    if (!_genreBrowserCtrl) {
+        _genreBrowserCtrl = createDiscoverSectionController({
+            id: 'genre-browser',
+            contentEl: '#genre-browser-carousel',
+            fetchUrl: '/api/discover/genres/available',
+            extractItems: (data) => data.genres || [],
+            renderItems: (items) => items.map(g => _renderGenreCard(g)).join(''),
+            loadingMessage: 'Loading genres...',
+            emptyMessage: 'No genre content available yet. Run a watchlist scan to populate your discovery pool!',
+            errorMessage: 'Failed to load genres',
+            verboseErrors: true,
         });
-
-        carousel.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading genre browser:', error);
-        const carousel = document.getElementById('genre-browser-carousel');
-        if (carousel) {
-            carousel.innerHTML = '<div class="discover-empty"><p>Failed to load genres</p></div>';
-        }
     }
+    return _genreBrowserCtrl.load();
 }
 
 function getGenreIcon(genreName) {
@@ -3657,80 +3588,51 @@ async function loadSeasonalAlbums(seasonData) {
     }
 }
 
+let _seasonalPlaylistCtrl = null;
+let _seasonalPlaylistCtrlKey = null;
+
 async function loadSeasonalPlaylist(seasonData) {
-    try {
-        const playlistContainer = document.getElementById('seasonal-playlist');
-        if (!playlistContainer) return;
+    const playlistContainer = document.getElementById('seasonal-playlist');
+    if (!playlistContainer) return;
 
-        // Show seasonal playlist section
-        const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
-        if (seasonalPlaylistSection) {
-            seasonalPlaylistSection.style.display = 'block';
-        }
-
-        // Update header
-        const playlistTitle = document.getElementById('seasonal-playlist-title');
-        const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
-
-        if (playlistTitle) {
-            playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
-        }
-        if (playlistSubtitle) {
-            playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
-        }
-
-        playlistContainer.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlist...</p></div>';
-
-        // Fetch playlist tracks
-        const response = await fetch(`/api/discover/seasonal/${currentSeasonKey}/playlist`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch seasonal playlist');
-        }
-
-        const data = await response.json();
-
-        if (!data.success || !data.tracks || data.tracks.length === 0) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>No tracks available yet</p></div>';
-            return;
-        }
-
-        // Store tracks for download/sync functionality
-        discoverSeasonalTracks = data.tracks;
-
-        // Build compact playlist HTML
-        let html = '<div class="discover-playlist-tracks-compact">';
-        data.tracks.forEach((track, index) => {
-            const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-            const durationMin = Math.floor(track.duration_ms / 60000);
-            const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-            const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-
-            html += `
-                <div class="discover-playlist-track-compact" data-track-index="${index}">
-                    <div class="track-compact-number">${index + 1}</div>
-                    <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
-                    </div>
-                    <div class="track-compact-info">
-                        <div class="track-compact-name">${track.track_name}</div>
-                        <div class="track-compact-artist">${track.artist_name}</div>
-                    </div>
-                    <div class="track-compact-album">${track.album_name}</div>
-                    <div class="track-compact-duration">${duration}</div>
-                </div>
-            `;
-        });
-        html += '</div>';
-
-        playlistContainer.innerHTML = html;
-
-    } catch (error) {
-        console.error('Error loading seasonal playlist:', error);
-        const playlistContainer = document.getElementById('seasonal-playlist');
-        if (playlistContainer) {
-            playlistContainer.innerHTML = '<div class="discover-empty"><p>Failed to load playlist</p></div>';
-        }
+    // Show seasonal playlist section
+    const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
+    if (seasonalPlaylistSection) {
+        seasonalPlaylistSection.style.display = 'block';
     }
+
+    // Update header
+    const playlistTitle = document.getElementById('seasonal-playlist-title');
+    const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
+
+    if (playlistTitle) {
+        playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
+    }
+    if (playlistSubtitle) {
+        playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
+    }
+
+    // Re-create the controller when the season key changes so the
+    // fetchUrl always points at the active season's endpoint.
+    if (!_seasonalPlaylistCtrl || _seasonalPlaylistCtrlKey !== currentSeasonKey) {
+        _seasonalPlaylistCtrl = createDiscoverSectionController({
+            id: 'seasonal-playlist',
+            contentEl: '#seasonal-playlist',
+            fetchUrl: `/api/discover/seasonal/${currentSeasonKey}/playlist`,
+            extractItems: (data) => data.tracks || [],
+            renderItems: (items) => {
+                discoverSeasonalTracks = items;
+                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
+                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
+            },
+            loadingMessage: 'Loading playlist...',
+            emptyMessage: 'No tracks available yet',
+            errorMessage: 'Failed to load playlist',
+            verboseErrors: true,
+        });
+        _seasonalPlaylistCtrlKey = currentSeasonKey;
+    }
+    return _seasonalPlaylistCtrl.load();
 }
 
 function hideSeasonalSections() {
@@ -4225,59 +4127,63 @@ async function unblockDiscoveryArtist(id, name) {
 // Backwards compat — called during page init but now a no-op (modal handles it)
 // ── Your Artists (Liked Artists Pool) ──
 
+let _yourArtistsCtrl = null;
+
 async function loadYourArtists() {
-    const section = document.getElementById('your-artists-section');
-    const carousel = document.getElementById('your-artists-carousel');
-    const subtitle = document.getElementById('your-artists-subtitle');
-    if (!section || !carousel) return;
+    if (!_yourArtistsCtrl) {
+        _yourArtistsCtrl = createDiscoverSectionController({
+            id: 'your-artists',
+            sectionEl: '#your-artists-section',
+            contentEl: '#your-artists-carousel',
+            fetchUrl: '/api/discover/your-artists',
+            extractItems: (data) => data.artists || [],
+            // Only treat as "truly empty" when there's no data AND the
+            // upstream isn't still discovering. When stale + empty, the
+            // renderer shows a custom in-progress message and a poller
+            // is started in onRendered.
+            isEmpty: (items, data) => items.length === 0 && !data.stale,
+            hideWhenEmpty: true,
+            renderItems: (items, data) => {
+                const subtitle = document.getElementById('your-artists-subtitle');
 
-    try {
-        const resp = await fetch('/api/discover/your-artists');
-        if (!resp.ok) return;
-        const data = await resp.json();
+                // Stale + empty — show custom "still fetching" message
+                if (items.length === 0 && data.stale) {
+                    if (subtitle) subtitle.textContent = 'Discovering your artists across connected services...';
+                    return `
+                        <div class="ya-loading">
+                            <div class="watch-all-loading-spinner"></div>
+                            <span>Fetching and matching artists from your services...</span>
+                        </div>
+                    `;
+                }
 
-        if (!data.artists || data.artists.length === 0) {
-            if (data.stale) {
-                // First load — show section with loading state, poll until ready
-                section.style.display = '';
-                if (subtitle) subtitle.textContent = 'Discovering your artists across connected services...';
-                carousel.innerHTML = `
-                    <div class="ya-loading">
-                        <div class="watch-all-loading-spinner"></div>
-                        <span>Fetching and matching artists from your services...</span>
-                    </div>
-                `;
-                _pollYourArtists();
-            } else {
-                section.style.display = 'none';
-            }
-            return;
-        }
+                // Update subtitle with source info
+                const sources = new Set();
+                items.forEach(a => (a.source_services || []).forEach(s => sources.add(s)));
+                const sourceNames = { spotify: 'Spotify', lastfm: 'Last.fm', tidal: 'Tidal', deezer: 'Deezer' };
+                const sourceList = [...sources].map(s => sourceNames[s] || s).join(' and ');
+                if (subtitle) {
+                    subtitle.textContent = `Artists you follow on ${sourceList || 'your music services'}`;
+                    if (data.stale) subtitle.textContent += ' (updating...)';
+                }
 
-        // Show section
-        section.style.display = '';
-
-        // Update subtitle with source info
-        const sources = new Set();
-        data.artists.forEach(a => (a.source_services || []).forEach(s => sources.add(s)));
-        const sourceNames = { spotify: 'Spotify', lastfm: 'Last.fm', tidal: 'Tidal', deezer: 'Deezer' };
-        const sourceList = [...sources].map(s => sourceNames[s] || s).join(' and ');
-        if (subtitle) subtitle.textContent = `Artists you follow on ${sourceList || 'your music services'}`;
-
-        if (data.stale) {
-            if (subtitle) subtitle.textContent += ' (updating...)';
-            _pollYourArtists();
-        }
-
-        // Store for modal access and render carousel cards
-        window._yaArtists = {};
-        window._yaActiveSource = data.active_source || 'spotify';
-        data.artists.forEach(a => { window._yaArtists[a.id] = a; });
-        carousel.innerHTML = data.artists.map(a => _renderYourArtistCard(a)).join('');
-
-    } catch (err) {
-        console.error('Error loading Your Artists:', err);
+                // Store for modal access and render carousel cards
+                window._yaArtists = {};
+                window._yaActiveSource = data.active_source || 'spotify';
+                items.forEach(a => { window._yaArtists[a.id] = a; });
+                return items.map(a => _renderYourArtistCard(a)).join('');
+            },
+            onRendered: ({ data }) => {
+                // Continue polling while upstream is still discovering.
+                if (data.stale) _pollYourArtists();
+            },
+            loadingMessage: 'Loading your artists...',
+            emptyMessage: 'No followed artists found',
+            errorMessage: 'Failed to load your artists',
+            verboseErrors: true,
+        });
     }
+    return _yourArtistsCtrl.load();
 }
 
 function _pollYourArtists() {
@@ -6685,60 +6591,78 @@ async function loadFamiliarFavorites() {
 // BECAUSE YOU LISTEN TO
 // ===============================
 
-async function loadBecauseYouListenTo() {
-    try {
-        const resp = await fetch('/api/discover/because-you-listen-to');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (!data.success || !data.sections || data.sections.length === 0) return;
-
-        // Find or create the BYLT container
-        let byltContainer = document.getElementById('discover-bylt-sections');
-        if (!byltContainer) {
-            // Insert after the release radar section
-            const releaseRadar = document.getElementById('discover-release-radar');
-            if (!releaseRadar) return;
-            const parent = releaseRadar.closest('.discover-section');
-            if (!parent) return;
-
-            byltContainer = document.createElement('div');
-            byltContainer.id = 'discover-bylt-sections';
-            parent.parentNode.insertBefore(byltContainer, parent.nextSibling);
-        }
-
-        byltContainer.innerHTML = data.sections.map((section, idx) => `
-            <div class="discover-section bylt-section">
-                <div class="discover-section-header">
-                    <div class="bylt-header">
-                        ${section.artist_image ? `<img class="bylt-artist-img" src="${section.artist_image}" alt="" onerror="this.style.display='none'">` : ''}
-                        <div>
-                            <div class="discover-section-subtitle">Because you listen to</div>
-                            <h3 class="discover-section-title">${_esc(section.artist_name)}</h3>
-                        </div>
+function _renderByltSection(section, idx) {
+    return `
+        <div class="discover-section bylt-section">
+            <div class="discover-section-header">
+                <div class="bylt-header">
+                    ${section.artist_image ? `<img class="bylt-artist-img" src="${section.artist_image}" alt="" onerror="this.style.display='none'">` : ''}
+                    <div>
+                        <div class="discover-section-subtitle">Because you listen to</div>
+                        <h3 class="discover-section-title">${_esc(section.artist_name)}</h3>
                     </div>
                 </div>
-                <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
             </div>
-        `).join('');
+            <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
+        </div>
+    `;
+}
 
-        // Render track cards in each carousel
-        data.sections.forEach((section, idx) => {
-            const carousel = document.getElementById(`bylt-carousel-${idx}`);
-            if (!carousel) return;
-            carousel.innerHTML = section.tracks.map(t => `
-                <div class="discover-card">
-                    <div class="discover-card-image">
-                        ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
-                    </div>
-                    <div class="discover-card-title">${_esc(t.name)}</div>
-                    <div class="discover-card-artist">${_esc(t.artist)}</div>
-                </div>
-            `).join('');
-        });
+function _renderByltTrackCard(t) {
+    return `
+        <div class="discover-card">
+            <div class="discover-card-image">
+                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+            </div>
+            <div class="discover-card-title">${_esc(t.name)}</div>
+            <div class="discover-card-artist">${_esc(t.artist)}</div>
+        </div>
+    `;
+}
 
-    } catch (error) {
-        console.debug('Error loading Because You Listen To:', error);
+let _byltCtrl = null;
+
+async function loadBecauseYouListenTo() {
+    // Ensure the BYLT container exists in the DOM. It's dynamically
+    // inserted after the release radar section because the markup
+    // doesn't ship a placeholder for it. Bail if anchor section
+    // isn't present.
+    let byltContainer = document.getElementById('discover-bylt-sections');
+    if (!byltContainer) {
+        const releaseRadar = document.getElementById('discover-release-radar');
+        if (!releaseRadar) return;
+        const parent = releaseRadar.closest('.discover-section');
+        if (!parent) return;
+
+        byltContainer = document.createElement('div');
+        byltContainer.id = 'discover-bylt-sections';
+        parent.parentNode.insertBefore(byltContainer, parent.nextSibling);
     }
+
+    if (!_byltCtrl) {
+        _byltCtrl = createDiscoverSectionController({
+            id: 'because-you-listen-to',
+            contentEl: '#discover-bylt-sections',
+            fetchUrl: '/api/discover/because-you-listen-to',
+            extractItems: (data) => data.sections || [],
+            // No per-section empty/loading copy — when there's nothing
+            // to show we leave the container blank rather than render a
+            // placeholder, matching the original no-op behavior.
+            renderEmptyState: false,
+            loadingMessage: '',
+            renderItems: (items) => items.map((s, i) => _renderByltSection(s, i)).join(''),
+            onRendered: ({ items }) => {
+                // Inject track cards into each section's carousel after
+                // the section wrappers exist in the DOM.
+                items.forEach((section, idx) => {
+                    const carousel = document.getElementById(`bylt-carousel-${idx}`);
+                    if (!carousel) return;
+                    carousel.innerHTML = section.tracks.map(t => _renderByltTrackCard(t)).join('');
+                });
+            },
+        });
+    }
+    return _byltCtrl.load();
 }
 
 // ===============================
