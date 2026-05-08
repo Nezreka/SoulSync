@@ -105,6 +105,26 @@ class PersonalizedPlaylistsService:
         from core.metadata_service import get_primary_source
         return get_primary_source()
 
+    def _get_popularity_thresholds(self, source: str) -> Tuple[Optional[int], Optional[int]]:
+        """Return (popular_min, hidden_max) thresholds for the given source.
+
+        Either value can be None to skip that filter for that source.
+
+        - Spotify: 60 / 40 (the existing 0-100 popularity scale)
+        - Deezer:  500000 / 100000 (rank values — ballpark from real data)
+        - iTunes / others: None / None (no popularity data; fall back to no
+          threshold filter, just diversity-on-random)
+
+        Sources are normalized lowercase so 'Spotify'/'spotify' both match.
+        """
+        normalized = (source or '').lower()
+        if normalized == 'spotify':
+            return 60, 40
+        if normalized == 'deezer':
+            return 500_000, 100_000
+        # iTunes, hydrabase, anything else — no usable popularity data
+        return None, None
+
     # Standard column set returned by every discovery_pool selector.
     # Callers can request additional columns via the `extra_columns` parameter
     # of `_select_discovery_tracks` (e.g. `release_date`, `artist_genres`).
@@ -131,6 +151,7 @@ class PersonalizedPlaylistsService:
         order_by: str = "RANDOM()",
         fetch_limit: int,
         extra_columns: tuple = (),
+        exclude_owned: bool = True,
     ) -> List[Dict]:
         """
         Shared selector for discovery_pool playlist methods.
@@ -145,6 +166,13 @@ class PersonalizedPlaylistsService:
             AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
             AND LOWER(artist_name) NOT IN
                 (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+
+        When `exclude_owned=True` (default) the WHERE additionally excludes
+        any discovery_pool row whose IDs already match a row in the local
+        `tracks` table — i.e. tracks the user already has in their library.
+        Without this filter, Discovery / Hidden Gems / Popular Picks etc.
+        would happily surface tracks the user owns. Note the column-name
+        asymmetry: `tracks.deezer_id` ↔ `discovery_pool.deezer_track_id`.
 
         The ID gate is mandatory and not opt-out by design — if a future
         method needs to skip it, that's a design discussion, not a flag.
@@ -168,6 +196,8 @@ class PersonalizedPlaylistsService:
                 run a diversity filter should over-fetch (e.g. `limit * 3`).
             extra_columns: additional columns to SELECT beyond
                 `_STANDARD_DISCOVERY_COLUMNS` (e.g. `('release_date',)`).
+            exclude_owned: when True (default), filter out discovery rows
+                whose IDs match any row in the local `tracks` table.
 
         Returns:
             List of track dicts via `_build_track_dict`. Returns `[]` on any
@@ -177,6 +207,18 @@ class PersonalizedPlaylistsService:
             columns = self._STANDARD_DISCOVERY_COLUMNS + tuple(extra_columns)
             select_cols = ",\n                        ".join(columns)
 
+            owned_clause = ""
+            if exclude_owned:
+                # Note column-name asymmetry: discovery_pool.deezer_track_id
+                # but tracks.deezer_id. Don't refactor without checking.
+                owned_clause = """
+                  AND NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE (t.spotify_track_id IS NOT NULL AND t.spotify_track_id = discovery_pool.spotify_track_id)
+                         OR (t.itunes_track_id IS NOT NULL AND t.itunes_track_id = discovery_pool.itunes_track_id)
+                         OR (t.deezer_id IS NOT NULL AND t.deezer_id = discovery_pool.deezer_track_id)
+                  )"""
+
             query = f"""
                 SELECT
                         {select_cols}
@@ -184,6 +226,7 @@ class PersonalizedPlaylistsService:
                 WHERE source = ?
                   AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
                   AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+                  {owned_clause}
                   {extra_where}
                 ORDER BY {order_by}
                 LIMIT ?
@@ -453,29 +496,16 @@ class PersonalizedPlaylistsService:
             logger.error(f"Error getting available genres: {e}")
             return []
 
-    def _genre_matches(self, artist_genres_json: Optional[str], search_keywords: List[str]) -> bool:
-        """Return True if any artist genre in the JSON-encoded column matches any keyword."""
-        if not artist_genres_json:
-            return False
-        try:
-            genres = json.loads(artist_genres_json)
-        except Exception:
-            return False
-        for artist_genre in genres:
-            artist_genre_lower = artist_genre.lower()
-            for keyword in search_keywords:
-                if keyword in artist_genre_lower:
-                    return True
-        return False
-
     def get_genre_playlist(self, genre: str, limit: int = 50, source: str = None) -> List[Dict]:
         """
         Get tracks from a specific genre with diversity filtering.
         Uses cached artist genres from database (populated during discovery scan).
         Supports both parent genres (e.g., "Electronic/Dance") and specific genres (e.g., "house").
 
-        The genre keyword match runs Python-side over the JSON-encoded artist_genres
-        column, so this method overfetches via the shared selector then filters.
+        The keyword match is pushed into SQL as an OR-chain of LIKE clauses
+        on `artist_genres`, so we no longer have to over-fetch the entire
+        pool to filter Python-side. SQLite's LIKE is case-insensitive for
+        ASCII, matching the previous case-insensitive Python comparison.
         """
         active_source = source or self._get_active_source()
 
@@ -488,37 +518,26 @@ class PersonalizedPlaylistsService:
             search_keywords = [genre.lower()]
             logger.info(f"Matching specific genre '{genre}' with partial matching")
 
-        # Pull every source row with non-null artist_genres through the shared
-        # selector (gets the ID gate + blacklist filter for free). Cap at a high
-        # bound — the Python keyword filter narrows the result drastically.
-        candidate_tracks = self._select_discovery_tracks(
+        # Build the SQL keyword OR-chain. One LIKE per keyword, all OR'd
+        # together inside a single parenthesized clause so the surrounding
+        # AND structure isn't broken.
+        like_clauses = " OR ".join(["artist_genres LIKE ?"] * len(search_keywords))
+        like_params = tuple(f"%{k}%" for k in search_keywords)
+
+        # Over-fetch 10x for diversity filter headroom — the SQL filter
+        # has already narrowed to genre matches, so this is bounded.
+        all_tracks = self._select_discovery_tracks(
             source=active_source,
-            extra_where="AND artist_genres IS NOT NULL",
+            extra_where=f"AND artist_genres IS NOT NULL AND ({like_clauses})",
+            extra_params=like_params,
             order_by="RANDOM()",
-            fetch_limit=1_000_000,
+            fetch_limit=limit * 10,
             extra_columns=('artist_genres',),
         )
 
-        if not candidate_tracks:
-            logger.warning(f"No tracks with genre data found for source: {active_source}")
-            return []
-
-        # `_build_track_dict` stashes the raw `artist_genres` column under
-        # `_artist_genres_raw` (since we requested it via `extra_columns`),
-        # so the keyword match can run without re-querying.
-        matching_tracks = [
-            track for track in candidate_tracks
-            if self._genre_matches(track.get('_artist_genres_raw'), search_keywords)
-        ]
-
-        if not matching_tracks:
+        if not all_tracks:
             logger.warning(f"No tracks found for genre: {genre}")
             return []
-
-        random.shuffle(matching_tracks)
-
-        # Cap candidate set at 10x limit for diversity filtering headroom.
-        all_tracks = matching_tracks[:limit * 10] if len(matching_tracks) > limit * 10 else matching_tracks
 
         max_per_album, max_per_artist = self._compute_adaptive_diversity_limits(all_tracks, relaxed=True)
         unique_artists = len(set(t['artist_name'] for t in all_tracks))
@@ -527,7 +546,6 @@ class PersonalizedPlaylistsService:
             f"limits: {max_per_album}/album, {max_per_artist}/artist"
         )
 
-        random.shuffle(all_tracks)
         diverse_tracks = self._apply_diversity_filter(
             all_tracks,
             max_per_album=max_per_album,
@@ -543,14 +561,30 @@ class PersonalizedPlaylistsService:
     # ========================================
 
     def get_popular_picks(self, limit: int = 50) -> List[Dict]:
-        """Get high popularity tracks from discovery pool with diversity (max 2 per album, 3 per artist)."""
+        """Get high popularity tracks from discovery pool with diversity (max 2 per album, 3 per artist).
+
+        Popularity threshold is source-aware via `_get_popularity_thresholds`
+        — sources without a usable popularity scale (iTunes / Hydrabase)
+        skip the threshold filter and fall back to RANDOM + diversity only.
+        """
         active_source = self._get_active_source()
+        popular_min, _ = self._get_popularity_thresholds(active_source)
+
+        if popular_min is not None:
+            extra_where = "AND popularity >= ?"
+            extra_params: tuple = (popular_min,)
+            order_by = "popularity DESC, RANDOM()"
+        else:
+            extra_where = ""
+            extra_params = ()
+            order_by = "RANDOM()"
 
         # Over-fetch 3x so the diversity filter has room to spread albums/artists.
         all_tracks = self._select_discovery_tracks(
             source=active_source,
-            extra_where="AND popularity >= 60",
-            order_by="popularity DESC, RANDOM()",
+            extra_where=extra_where,
+            extra_params=extra_params,
+            order_by=order_by,
             fetch_limit=limit * 3,
         )
 
@@ -565,31 +599,68 @@ class PersonalizedPlaylistsService:
         return diverse_tracks
 
     def get_hidden_gems(self, limit: int = 50) -> List[Dict]:
-        """Get low-popularity (underground/indie) tracks from discovery pool."""
+        """Get low-popularity (underground/indie) tracks from discovery pool with diversity.
+
+        Mirrors Popular Picks' diversity caps (2 per album, 3 per artist)
+        since both are curated-feel sections. Popularity threshold is
+        source-aware — iTunes/Hydrabase fall back to RANDOM + diversity
+        only.
+        """
         active_source = self._get_active_source()
-        tracks = self._select_discovery_tracks(
+        _, hidden_max = self._get_popularity_thresholds(active_source)
+
+        if hidden_max is not None:
+            extra_where = "AND popularity < ?"
+            extra_params: tuple = (hidden_max,)
+        else:
+            extra_where = ""
+            extra_params = ()
+
+        # Over-fetch 3x for diversity filter headroom.
+        all_tracks = self._select_discovery_tracks(
             source=active_source,
-            extra_where="AND popularity < 40",
+            extra_where=extra_where,
+            extra_params=extra_params,
             order_by="RANDOM()",
-            fetch_limit=limit,
+            fetch_limit=limit * 3,
         )
-        logger.info(f"Hidden Gems ({active_source}): selected {len(tracks)} tracks")
-        return tracks
+
+        diverse_tracks = self._apply_diversity_filter(
+            all_tracks,
+            max_per_album=2,
+            max_per_artist=3,
+            limit=limit,
+        )
+
+        logger.info(f"Hidden Gems ({active_source}): selected {len(diverse_tracks)} tracks with diversity")
+        return diverse_tracks
 
     def get_discovery_shuffle(self, limit: int = 50) -> List[Dict]:
         """
         Get random tracks from discovery pool - pure exploration.
 
-        Different every time you call it!
+        Different every time you call it! Tighter diversity than Popular
+        Picks / Hidden Gems (2 per album, 2 per artist) since shuffle
+        should feel maximally varied.
         """
         active_source = self._get_active_source()
-        tracks = self._select_discovery_tracks(
+
+        # Over-fetch 3x for diversity filter headroom.
+        all_tracks = self._select_discovery_tracks(
             source=active_source,
             order_by="RANDOM()",
-            fetch_limit=limit,
+            fetch_limit=limit * 3,
         )
-        logger.info(f"Discovery Shuffle ({active_source}): selected {len(tracks)} tracks")
-        return tracks
+
+        diverse_tracks = self._apply_diversity_filter(
+            all_tracks,
+            max_per_album=2,
+            max_per_artist=2,
+            limit=limit,
+        )
+
+        logger.info(f"Discovery Shuffle ({active_source}): selected {len(diverse_tracks)} tracks with diversity")
+        return diverse_tracks
 
     # ========================================
     # DAILY MIX (HYBRID PLAYLISTS)
