@@ -3015,35 +3015,6 @@ atexit.register(_atexit_silence_shutdown_logger_errors)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-def _handle_failed_download(batch_id, task_id, task, task_status):
-    """Handle failed download by triggering retry logic like GUI"""
-    try:
-        with tasks_lock:
-            if task_id not in download_tasks:
-                return
-                
-            retry_count = task.get('retry_count', 0)
-            task['retry_count'] = retry_count + 1
-            
-            if task['retry_count'] > 2:  # Max 3 attempts total (matches GUI)
-                # All retries exhausted, mark as permanently failed
-                logger.error(f"Task {task_id} failed after 3 retry attempts")
-                task_status['status'] = 'failed'
-                task['status'] = 'failed'
-                return
-            
-            # Show retrying status while we process retry
-            task_status['status'] = 'pending'  # Will show as pending until retry kicks in
-            logger.error(f"Triggering retry {task['retry_count']}/3 for failed task {task_id}")
-            
-        # Trigger retry with next candidate (matches GUI retry_parallel_download_with_fallback)
-        missing_download_executor.submit(download_monitor._retry_task_with_fallback, batch_id, task_id, task)
-        
-    except Exception as e:
-        logger.error(f"Error handling failed download {task_id}: {e}")
-        task_status['status'] = 'failed'
-        task['status'] = 'failed'
-
 def _update_task_status(task_id, new_status):
     """Helper to update task status and timestamp for timeout tracking"""
     with tasks_lock:
@@ -7911,6 +7882,21 @@ def download_selected_candidate(task_id):
             task.pop('download_id', None)
             task.pop('username', None)
             task.pop('filename', None)
+            # Mark this as a user-initiated manual pick. The auto-retry
+            # monitor (`_should_retry_task`) and the engine-state status
+            # fallback both check this flag and skip the "fall back to
+            # another candidate via fresh search" behavior. When the user
+            # explicitly chose THIS file, the mental model is "try this
+            # one and tell me if it failed", not "try this, then auto-
+            # pick something else if it fails". Stays set until the task
+            # reaches a terminal state.
+            task['_user_manual_pick'] = True
+            # Reset retry counters so previous auto-attempts don't
+            # immediately exhaust the manual pick.
+            task.pop('stuck_retry_count', None)
+            task.pop('error_retry_count', None)
+            task.pop('last_retry_time', None)
+            task.pop('last_error_retry_time', None)
             # Clear the selected candidate from used_sources so it won't be skipped
             used_sources = task.get('used_sources', set())
             source_key = f"{username}_{filename}"
@@ -7970,20 +7956,44 @@ def download_selected_candidate(task_id):
             popularity=0,
         )
 
-        # Submit to thread pool — don't block the request
+        track_name = track_info.get('name', 'Unknown')
+
+        # Run on a dedicated thread instead of `missing_download_executor`
+        # — that pool is shared with the batch's other in-flight tracks
+        # (3 workers total) and a saturated pool would queue the manual
+        # pick indefinitely, leaving the user stuck at "downloading 0%".
+        # Manual picks are user-initiated and infrequent; a fresh thread
+        # per pick is cheaper than starving them behind background work.
         def _run_manual_download():
-            success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
-            if not success:
+            logger.info(f"[Manual Download] worker started for task {task_id} ({username} / {track_name})")
+            try:
+                success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
+                logger.info(f"[Manual Download] worker finished for task {task_id} success={success}")
+                if not success:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = 'Manual download failed to start — source may be unavailable'
+                    if batch_id:
+                        _on_download_completed(batch_id, task_id, success=False)
+            except Exception as exc:
+                logger.exception(f"[Manual Download] worker crashed for task {task_id}: {exc}")
                 with tasks_lock:
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
-                        download_tasks[task_id]['error_message'] = 'Manual download failed to start — user may be offline'
+                        download_tasks[task_id]['error_message'] = f'Manual download crashed: {exc}'
                 if batch_id:
-                    _on_download_completed(batch_id, task_id, success=False)
+                    try:
+                        _on_download_completed(batch_id, task_id, success=False)
+                    except Exception:
+                        logger.exception("[Manual Download] _on_download_completed cleanup also failed")
 
-        missing_download_executor.submit(_run_manual_download)
+        threading.Thread(
+            target=_run_manual_download,
+            name=f"manual-download-{task_id[:8]}",
+            daemon=True,
+        ).start()
 
-        track_name = track_info.get('name', 'Unknown')
         logger.info(f"[Manual Download] User selected candidate for '{track_name}' from {username}")
         return jsonify({"success": True, "message": f"Download initiated for '{track_name}'"})
 
@@ -7996,11 +8006,24 @@ def download_selected_candidate(task_id):
 
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
 def manual_search_for_task(task_id):
-    """Run a user-driven search against one (or all) configured download sources
-    and return candidate results in the same shape as ``/candidates``. The
-    candidates modal lets the user pick one to retry the download — that retry
-    still goes through the existing ``/download-candidate`` endpoint, so all
-    AcoustID + post-download safety nets stay in the loop.
+    """Run a user-driven search against one (or all) configured download
+    sources and stream candidate results as NDJSON — one JSON object per
+    line, terminated by ``\\n``. Streaming lets the modal render results as
+    each source completes instead of blocking on the slowest source.
+
+    The candidates modal lets the user pick a result; that retry still
+    goes through ``/download-candidate``, so all AcoustID +
+    post-download safety nets stay in the loop.
+
+    Stream shape (one JSON object per line):
+    - ``{"type": "header", ...}`` — emitted first; carries ``track_info``,
+      ``download_mode``, ``available_sources``, ``query``,
+      ``sources_queried``.
+    - ``{"type": "source_results", "source": "<name>", "candidates": [...]}``
+      — one per source, emitted as that source's search completes.
+    - ``{"type": "source_error", "source": "<name>", "error": "<msg>"}``
+      — when a source's search raised.
+    - ``{"type": "done", "total": <int>}`` — terminator.
     """
     try:
         data = request.get_json(silent=True) or {}
@@ -8011,16 +8034,12 @@ def manual_search_for_task(task_id):
         if len(query) < 2:
             return jsonify({"error": "Query must be at least 2 characters"}), 400
 
-        # Validate task exists
         with tasks_lock:
             task = download_tasks.get(task_id)
             if not task:
                 return jsonify({"error": "Task not found"}), 404
             track_info = dict(task.get('track_info', {}))
 
-        # Validate source against the live configured-sources list (so users
-        # can't bypass hybrid_order and trigger a search against a source the
-        # user disabled / hasn't configured).
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
 
@@ -8031,72 +8050,81 @@ def manual_search_for_task(task_id):
                 }), 400
             sources_to_query = [source]
         else:
-            # 'all' is only meaningful in hybrid mode, but we accept it in
-            # single-source mode too (degenerates to the one configured source).
             sources_to_query = list(valid_source_ids)
 
-        if not sources_to_query:
-            return jsonify({
-                "task_id": task_id,
-                "track_info": {
-                    "name": track_info.get('name', 'Unknown'),
-                    "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
-                },
-                "candidates": [],
-                "candidate_count": 0,
-                "download_mode": download_mode,
-                "available_sources": available_sources,
-            })
+        track_payload = {
+            "name": track_info.get('name', 'Unknown'),
+            "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
+        }
 
-        # Dispatch parallel searches. Each plugin's `.search(query)` is a
-        # coroutine, so we wrap it via run_async and submit to a small thread
-        # pool — same pattern the rest of the app uses to fan out across
-        # sources without blocking the request thread.
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _search_one(src_name: str):
             client = download_orchestrator.client(src_name) if download_orchestrator else None
             if not client:
-                return src_name, []
+                return src_name, [], None
             try:
                 result = run_async(client.search(query))
                 if isinstance(result, tuple):
                     tracks = result[0] if result else []
                 else:
                     tracks = result or []
-                return src_name, tracks
+                return src_name, tracks, None
             except Exception as exc:
                 logger.warning(f"[Manual Search] {src_name} search failed for query '{query}': {exc}")
-                return src_name, []
+                return src_name, [], str(exc)
 
-        merged_candidates = []
-        max_workers = min(8, max(1, len(sources_to_query)))
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='manual-search') as executor:
-            futures = [executor.submit(_search_one, name) for name in sources_to_query]
-            for future in as_completed(futures):
-                src_name, tracks = future.result()
-                for t in tracks:
-                    serialized = _serialize_candidate(t, source_override=src_name)
-                    if serialized:
-                        merged_candidates.append(serialized)
+        def _generate():
+            yield json.dumps({
+                "type": "header",
+                "task_id": task_id,
+                "track_info": track_payload,
+                "download_mode": download_mode,
+                "available_sources": available_sources,
+                "query": query,
+                "sources_queried": sources_to_query,
+            }) + "\n"
 
-        logger.info(
-            f"[Manual Search] task={task_id} query='{query}' source={source} "
-            f"sources_queried={sources_to_query} results={len(merged_candidates)}"
+            if not sources_to_query:
+                yield json.dumps({"type": "done", "total": 0}) + "\n"
+                return
+
+            total = 0
+            max_workers = min(8, max(1, len(sources_to_query)))
+            with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='manual-search') as executor:
+                futures = [executor.submit(_search_one, name) for name in sources_to_query]
+                for future in as_completed(futures):
+                    src_name, tracks, error = future.result()
+                    if error is not None:
+                        yield json.dumps({
+                            "type": "source_error",
+                            "source": src_name,
+                            "error": error,
+                        }) + "\n"
+                        continue
+                    serialized = []
+                    for t in tracks:
+                        s = _serialize_candidate(t, source_override=src_name)
+                        if s:
+                            serialized.append(s)
+                    total += len(serialized)
+                    yield json.dumps({
+                        "type": "source_results",
+                        "source": src_name,
+                        "candidates": serialized,
+                    }) + "\n"
+
+            logger.info(
+                f"[Manual Search] task={task_id} query='{query}' source={source} "
+                f"sources_queried={sources_to_query} results={total}"
+            )
+            yield json.dumps({"type": "done", "total": total}) + "\n"
+
+        return Response(
+            _generate(),
+            mimetype='application/x-ndjson',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
         )
-
-        return jsonify({
-            "task_id": task_id,
-            "track_info": {
-                "name": track_info.get('name', 'Unknown'),
-                "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
-            },
-            "candidates": merged_candidates,
-            "candidate_count": len(merged_candidates),
-            "download_mode": download_mode,
-            "available_sources": available_sources,
-            "query": query,
-        })
 
     except Exception as e:
         logger.error(f"[Manual Search] {e}")
@@ -17697,6 +17725,9 @@ def _build_status_deps():
             _run_post_processing_worker, task_id, batch_id
         ),
         get_cached_transfer_data=get_cached_transfer_data,
+        download_orchestrator=download_orchestrator,
+        run_async=run_async,
+        on_download_completed=_on_download_completed,
     )
 
 

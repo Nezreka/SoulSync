@@ -40951,6 +40951,19 @@ div.artist-hero-badge {
     font-size: 12px;
     margin-bottom: 8px;
 }
+.candidates-manual-search-status {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    margin-bottom: 8px;
+    font-style: italic;
+}
+.candidates-manual-search-empty-note {
+    color: rgba(255, 180, 100, 0.7);
+    font-size: 11px;
+    margin-top: 6px;
+    text-align: center;
+    font-style: italic;
+}
 .candidates-source-badge {
     display: inline-block;
     background: rgba(255, 255, 255, 0.08);

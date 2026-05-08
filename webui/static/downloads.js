@@ -3059,8 +3059,11 @@ function _wireManualSearch(overlay, taskId, trackName, isHybrid) {
     const sourceSelect = overlay.querySelector('#candidates-manual-source');
     if (!input || !button || !resultsContainer) return;
 
+    // Aggregated results across all source streams for the current query.
+    // Cleared at the start of each new search.
     let currentResults = [];
     let inFlight = false;
+    let abortController = null;
 
     const updateButtonState = () => {
         const q = (input.value || '').trim();
@@ -3076,34 +3079,134 @@ function _wireManualSearch(overlay, taskId, trackName, isHybrid) {
         }
     };
 
+    const _renderTableShell = (query) => {
+        resultsContainer.innerHTML = `
+            <div class="candidates-manual-search-status" id="candidates-manual-search-status">Searching...</div>
+            <div class="candidates-table-wrapper" style="display: none;" id="candidates-manual-table-wrapper">
+                <table class="candidates-table">
+                    <thead><tr>
+                        <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
+                    </tr></thead>
+                    <tbody id="candidates-manual-tbody"></tbody>
+                </table>
+            </div>`;
+    };
+
+    const _appendRows = (newCandidates, query) => {
+        if (!newCandidates || newCandidates.length === 0) return;
+        const startIdx = currentResults.length;
+        currentResults = currentResults.concat(newCandidates);
+
+        const wrapper = resultsContainer.querySelector('#candidates-manual-table-wrapper');
+        const tbody = resultsContainer.querySelector('#candidates-manual-tbody');
+        const statusEl = resultsContainer.querySelector('#candidates-manual-search-status');
+        if (!tbody || !wrapper) return;
+
+        let rowsHtml = '';
+        newCandidates.forEach((c, i) => {
+            rowsHtml += _renderCandidateRow(c, startIdx + i, 'candidates-row-manual', isHybrid);
+        });
+        tbody.insertAdjacentHTML('beforeend', rowsHtml);
+        wrapper.style.display = '';
+        if (statusEl) {
+            statusEl.textContent = `${currentResults.length} result${currentResults.length !== 1 ? 's' : ''} so far...`;
+        }
+
+        // Wire newly-appended buttons
+        tbody.querySelectorAll('.candidates-download-btn').forEach(btn => {
+            if (btn._candidatesWired) return;
+            btn._candidatesWired = true;
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index);
+                const c = currentResults[idx];
+                if (c) downloadCandidate(taskId, c, trackName);
+            });
+        });
+    };
+
+    const _setStatus = (text) => {
+        const statusEl = resultsContainer.querySelector('#candidates-manual-search-status');
+        if (statusEl) statusEl.textContent = text;
+    };
+
+    const _setError = (msg) => {
+        resultsContainer.innerHTML = `<div class="candidates-manual-search-error">${escapeHtml(msg)}</div>`;
+    };
+
     const runSearch = async () => {
         const q = (input.value || '').trim();
         if (q.length < 2 || inFlight) return;
+
+        if (abortController) {
+            try { abortController.abort(); } catch (_) { }
+        }
+        abortController = new AbortController();
+
         const source = sourceSelect ? sourceSelect.value : 'all';
         inFlight = true;
         button.disabled = true;
         const originalLabel = button.textContent;
         button.textContent = 'Searching...';
-        resultsContainer.innerHTML = '<div class="candidates-manual-search-loading">Searching...</div>';
+        currentResults = [];
+        _renderTableShell(q);
 
         try {
             const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/manual-search`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: q, source: source })
+                body: JSON.stringify({ query: q, source: source }),
+                signal: abortController.signal,
             });
-            const payload = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                resultsContainer.innerHTML = `<div class="candidates-manual-search-error">${escapeHtml(payload.error || 'Search failed')}</div>`;
-                currentResults = [];
+                let errMsg = 'Search failed';
+                try {
+                    const payload = await resp.json();
+                    if (payload && payload.error) errMsg = payload.error;
+                } catch (_) { }
+                _setError(errMsg);
                 return;
             }
-            currentResults = Array.isArray(payload.candidates) ? payload.candidates : [];
-            _renderManualSearchResults(resultsContainer, currentResults, q, isHybrid, taskId, trackName);
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const errors = [];
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                let lineEnd;
+                while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                    const line = buffer.slice(0, lineEnd).trim();
+                    buffer = buffer.slice(lineEnd + 1);
+                    if (!line) continue;
+                    let msg;
+                    try { msg = JSON.parse(line); } catch (_) { continue; }
+
+                    if (msg.type === 'source_results') {
+                        _appendRows(msg.candidates || [], q);
+                    } else if (msg.type === 'source_error') {
+                        errors.push(`${msg.source}: ${msg.error}`);
+                    } else if (msg.type === 'done') {
+                        if (currentResults.length === 0) {
+                            const errorNote = errors.length
+                                ? `<div class="candidates-manual-search-empty-note">${errors.length} source${errors.length !== 1 ? 's' : ''} failed</div>`
+                                : '';
+                            resultsContainer.innerHTML = `
+                                <div class="candidates-manual-search-empty">No manual search results for "${escapeHtml(q)}"</div>
+                                ${errorNote}`;
+                        } else {
+                            _setStatus(`${currentResults.length} result${currentResults.length !== 1 ? 's' : ''}`);
+                        }
+                    }
+                }
+            }
         } catch (err) {
+            if (err.name === 'AbortError') return;
             console.error('Manual search failed:', err);
-            resultsContainer.innerHTML = '<div class="candidates-manual-search-error">Search request failed</div>';
-            currentResults = [];
+            _setError('Search request failed');
         } finally {
             inFlight = false;
             button.textContent = originalLabel;
@@ -3121,38 +3224,6 @@ function _wireManualSearch(overlay, taskId, trackName, isHybrid) {
     button.addEventListener('click', runSearch);
 
     updateButtonState();
-}
-
-function _renderManualSearchResults(container, results, query, isHybrid, taskId, trackName) {
-    if (!results || results.length === 0) {
-        container.innerHTML = `<div class="candidates-manual-search-empty">No manual search results for "${escapeHtml(query)}"</div>`;
-        return;
-    }
-    let rows = '';
-    results.forEach((c, i) => {
-        // Always show the source badge on manual-search rows when there's
-        // more than one possible source — covers hybrid "All" + per-source
-        // selections so the user always sees provenance.
-        rows += _renderCandidateRow(c, i, 'candidates-row-manual', isHybrid);
-    });
-    container.innerHTML = `
-        <div class="candidates-manual-search-count">${results.length} result${results.length !== 1 ? 's' : ''}</div>
-        <div class="candidates-table-wrapper">
-            <table class="candidates-table">
-                <thead><tr>
-                    <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
-                </tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
-        </div>`;
-
-    container.querySelectorAll('.candidates-row-manual .candidates-download-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const idx = parseInt(btn.dataset.index);
-            const c = results[idx];
-            if (c) downloadCandidate(taskId, c, trackName);
-        });
-    });
 }
 
 async function downloadCandidate(taskId, candidate, trackName) {
@@ -3328,8 +3399,11 @@ function processModalStatusUpdate(playlistId, data) {
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
                 }
-                // Make not_found and failed cells clickable to review search candidates
-                if ((task.status === 'not_found' || task.status === 'failed') && task.has_candidates) {
+                // Make not_found / failed / cancelled cells clickable to open
+                // the candidates modal. Always bind — even when no auto-search
+                // candidates were cached — because the modal carries the manual
+                // search bar, which is the user's recourse for empty results.
+                if (task.status === 'not_found' || task.status === 'failed' || task.status === 'cancelled') {
                     statusEl.classList.add('has-candidates');
                     statusEl.dataset.taskId = task.task_id;
                     _ensureCandidatesClickListener(statusEl);
