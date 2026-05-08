@@ -72,10 +72,11 @@
  *   in addition to the in-section error block. Default off — sections
  *   that have no recovery action shouldn't shout at the user.
  *
- *   If `renderItems` returns null / undefined, the controller leaves
- *   `contentEl` untouched. Lets a renderer do its own DOM manipulation
- *   (e.g. dynamic per-item child containers) without fighting the
- *   controller's `innerHTML` swap.
+ *   `manualDom: true` tells the controller to NOT write the
+ *   `renderItems` return value into `contentEl`. The renderer takes
+ *   full responsibility for the DOM (e.g. delegating to an existing
+ *   grid renderer that targets a child element). The renderer is
+ *   still called, just for its side-effects. Default false.
  */
 
 (function () {
@@ -101,6 +102,14 @@
         }
         if (typeof cfg.renderItems !== 'function') {
             throw new Error(`[discover:${cfg.id}] config.renderItems required (function)`);
+        }
+        // Cin standard — explicit > implicit. Each section knows its own
+        // response shape; the controller refusing to guess prevents
+        // silent wrong-key bugs (e.g. an endpoint that returns
+        // `data.results` getting auto-pulled instead of the intended
+        // `data.tracks`).
+        if (typeof cfg.extractItems !== 'function') {
+            throw new Error(`[discover:${cfg.id}] config.extractItems required (function returning array)`);
         }
     }
 
@@ -150,6 +159,11 @@
             // Errors
             verboseErrors: false,
             showErrorToast: false,  // also fire window.showToast on error
+            // Renderer takes responsibility for the DOM — controller
+            // calls renderItems but does NOT write its return value
+            // into contentEl. Use when delegating to an existing
+            // renderer that targets a child element.
+            manualDom: false,
         }, cfg);
 
         const state = {
@@ -267,13 +281,11 @@
         }
 
         function _extractItems(data) {
-            if (config.extractItems) return config.extractItems(data) || [];
-            if (Array.isArray(data?.items)) return data.items;
-            if (Array.isArray(data?.albums)) return data.albums;
-            if (Array.isArray(data?.artists)) return data.artists;
-            if (Array.isArray(data?.tracks)) return data.tracks;
-            if (Array.isArray(data?.results)) return data.results;
-            return [];
+            // Validation guarantees `extractItems` is a function. Wrap
+            // the call so a renderer-side typo (returning undefined etc)
+            // doesn't crash the loop — fall back to empty list.
+            const items = config.extractItems(data);
+            return Array.isArray(items) ? items : [];
         }
 
         function _isSuccess(data) {
@@ -384,11 +396,15 @@
 
                     _showSection();
                     const html = config.renderItems(items, data, _ctx({ items, data }));
-                    // null / undefined return = renderer is doing its own
-                    // DOM work, leave the container alone.
-                    if (html !== null && html !== undefined) {
-                        _setHtml(contentEl, html);
+                    if (!config.manualDom) {
+                        // Default: controller owns the DOM. Renderer
+                        // returns the HTML, controller swaps it in.
+                        // Falsy returns become an empty container.
+                        _setHtml(contentEl, html || '');
                     }
+                    // manualDom mode: renderer already wrote whatever
+                    // it needs into the page; controller leaves
+                    // contentEl alone.
                     state.phase = 'rendered';
 
                     if (typeof config.onRendered === 'function') {

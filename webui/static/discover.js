@@ -952,15 +952,15 @@ async function loadYourAlbums() {
                 if (downloadBtn && data.stats && data.stats.missing > 0) downloadBtn.style.display = '';
             },
             // Renderer delegates to the existing grid renderer, which
-            // writes its own DOM into `#your-albums-grid`. Returning
-            // null keeps the controller from clobbering it.
+            // writes its own DOM into `#your-albums-grid`. `manualDom`
+            // tells the controller not to clobber it.
+            manualDom: true,
             renderItems: (items, data) => {
                 yourAlbums = items;
                 yourAlbumsTotal = data.total || 0;
                 yourAlbumsPage = 1;
                 _renderYourAlbumsGrid(yourAlbums);
                 _renderYourAlbumsPagination(yourAlbumsTotal, yourAlbumsPage);
-                return null;
             },
             errorMessage: 'Failed to load your albums',
             verboseErrors: true,
