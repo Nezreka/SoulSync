@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.4.2"
+_SOULSYNC_BASE_VERSION = "2.4.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -306,6 +306,16 @@ _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 @app.context_processor
 def _inject_static_cache_bust():
     return {'static_v': _STATIC_CACHE_BUST}
+
+
+@app.context_processor
+def _inject_soulsync_version():
+    """Expose the version string to every Jinja template so the sidebar
+    version button + version-modal subtitle don't have to be manually
+    edited at every release. The base version is the source of truth at
+    `_SOULSYNC_BASE_VERSION`; bumping that single constant updates the UI
+    everywhere it's rendered."""
+    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
 
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
