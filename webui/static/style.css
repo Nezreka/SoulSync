@@ -45469,6 +45469,21 @@ textarea.enhanced-meta-field-input {
 
 .discog-card-meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
 
+.explicit-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 5px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.15); line-height: 1.4; flex-shrink: 0;
+    font-family: inherit;
+}
+.album-card-explicit {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 4px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.2); line-height: 1.4;
+    font-family: inherit; text-shadow: none;
+}
+
 .discog-card-check {
     width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;
     border: 2px solid rgba(255,255,255,0.15); transition: all 0.15s ease;

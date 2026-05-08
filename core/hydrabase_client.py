@@ -565,6 +565,7 @@ class HydrabaseClient:
                     album_type=item_type,
                     image_url=item.get('image_url'),
                     external_urls=ext_urls,
+                    explicit=item.get('explicit'),
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase artist album: {e}")

@@ -100,6 +100,8 @@ class Album:
     label: Optional[str] = None                  # Record label / publisher
     barcode: Optional[str] = None                # UPC/EAN — Discogs/MusicBrainz only
 
+    explicit: Optional[bool] = None              # True=explicit, False=clean, None=unknown
+
     # Source provenance
     source: str = ''                             # 'spotify' / 'itunes' / etc — set by converter
     external_ids: Dict[str, str] = field(default_factory=dict)
@@ -193,6 +195,8 @@ class Album:
             release_date = release_date.split('T', 1)[0]
 
         primary_genre = _str(raw.get('primaryGenreName'))
+        ce = _str(raw.get('collectionExplicitness'))
+        explicit = True if ce == 'explicit' else (False if ce in ('notExplicit', 'cleaned') else None)
         return cls(
             id=_str(raw.get('collectionId')),
             name=name,
@@ -203,6 +207,7 @@ class Album:
             image_url=_itunes_artwork(raw.get('artworkUrl100')),
             artist_id=artist_id,
             genres=[primary_genre] if primary_genre else [],
+            explicit=explicit,
             source='itunes',
             external_ids=external_ids,
             external_urls=external_urls,
@@ -238,6 +243,8 @@ class Album:
         if raw.get('link'):
             external_urls['deezer'] = _str(raw['link'])
 
+        _el = raw.get('explicit_lyrics')
+        explicit = bool(_el) if _el is not None else None
         return cls(
             id=_str(raw.get('id')),
             name=_str(raw.get('title')),
@@ -251,6 +258,7 @@ class Album:
                     if isinstance(g, dict) and g.get('name')],
             label=_str(raw.get('label')) or None,
             barcode=external_ids.get('upc'),
+            explicit=explicit,
             source='deezer',
             external_ids=external_ids,
             external_urls=external_urls,
@@ -513,6 +521,8 @@ class Album:
         if raw.get('soul_id'):
             external_ids['soul'] = _str(raw['soul_id'])
 
+        _he = raw.get('explicit')
+        explicit = bool(_he) if _he is not None else None
         return cls(
             id=_str(raw.get('id')),
             name=_str(raw.get('name') or raw.get('title')),
@@ -522,6 +532,7 @@ class Album:
             album_type=_str(raw.get('album_type'), default='album'),
             image_url=_str(raw.get('image_url') or raw.get('thumb_url')) or None,
             artist_id=_str(raw.get('artist_id')) or None,
+            explicit=explicit,
             source='hydrabase',
             external_ids=external_ids,
         )
