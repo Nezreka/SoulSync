@@ -325,7 +325,7 @@ def test_deezer_seconds_duration_converted_to_ms():
     # Deezer-style track — duration is 180 (seconds)
     tracks = [{
         'name': 'Song', 'track_number': 1, 'disc_number': 1,
-        'duration': 180, 'artists': [],
+        'duration': 180, 'artists': [], 'source': 'deezer',
     }]
     result = match_files_to_tracks(
         files, file_tags, tracks,
@@ -333,6 +333,60 @@ def test_deezer_seconds_duration_converted_to_ms():
     )
     # 180 seconds → 180_000 ms → matches file's 180_000 ms within tolerance
     assert len(result['matches']) == 1
+
+
+def test_track_duration_source_aware_dispatch():
+    """`_track_duration_ms` must route via the `source` field — not
+    fall back to magnitude heuristic — so providers with edge-case
+    durations (sub-30s real tracks, intros, interludes) don't trigger
+    false unit conversion."""
+    from core.imports.album_matching import _track_duration_ms
+
+    # Spotify-style — explicit ms field, treat as-is
+    spotify_track = {'duration_ms': 180_000, 'source': 'spotify'}
+    assert _track_duration_ms(spotify_track) == 180_000
+
+    # Deezer-style — `duration` field in seconds, convert
+    deezer_track = {'duration': 180, 'source': 'deezer'}
+    assert _track_duration_ms(deezer_track) == 180_000
+
+    # iTunes — duration_ms (their internal field is `trackTimeMillis`
+    # but `_build_album_track_entry` normalises to `duration_ms`)
+    itunes_track = {'duration_ms': 200_000, 'source': 'itunes'}
+    assert _track_duration_ms(itunes_track) == 200_000
+
+    # Source via _source alias also works (normalize_import_context legacy)
+    legacy_source = {'duration_ms': 150_000, '_source': 'spotify'}
+    assert _track_duration_ms(legacy_source) == 150_000
+
+
+def test_track_duration_short_real_track_not_misconverted_with_known_source():
+    """An actual sub-30s track on Spotify (intro/interlude/skit) —
+    duration_ms is genuinely small. Source-aware dispatch must take
+    spotify_ms_value as-is and NOT × 1000 it via the magnitude
+    heuristic. Pre-fix this would have been hit by:
+
+        20_000 ms (a 20-second intro) > 0 and < 30000 → converted to
+        20_000_000 ms = 5.5 hours. Wrong.
+
+    Post-fix: source='spotify' is in MS list, value taken as-is.
+    """
+    from core.imports.album_matching import _track_duration_ms
+
+    short_intro = {'duration_ms': 20_000, 'source': 'spotify'}
+    assert _track_duration_ms(short_intro) == 20_000
+
+
+def test_track_duration_unknown_source_falls_back_to_heuristic():
+    """No source field — apply the legacy magnitude heuristic so
+    tests / mocks without source still work. < 30000 = seconds."""
+    from core.imports.album_matching import _track_duration_ms
+
+    no_source_seconds = {'duration': 180}  # heuristic: < 30000 → seconds
+    assert _track_duration_ms(no_source_seconds) == 180_000
+
+    no_source_ms = {'duration_ms': 200_000}  # heuristic: > 30000 → ms
+    assert _track_duration_ms(no_source_ms) == 200_000
 
 
 def test_album_track_entry_propagates_isrc_and_mbid_from_source():

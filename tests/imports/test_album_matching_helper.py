@@ -164,6 +164,67 @@ def test_score_position_match_requires_both_disc_and_track():
     assert abs(score - expected) < 0.001
 
 
+def test_cross_disc_consolation_is_load_bearing_for_imperfect_titles():
+    """Pin the design rationale for ``CROSS_DISC_POSITION_WEIGHT`` so
+    the magic number isn't silently regressable.
+
+    Scenario: file has the right title spelling but the metadata
+    source returns a slightly-different version (e.g. "(Remix)"
+    suffix), AND the file's disc tag is wrong / missing while the
+    track number agrees. The bonus is sized so this case still
+    matches:
+
+        title_only_score = sim("Auntie Diaries",
+                               "Auntie Diaries (Remix)") * 0.45
+                         ≈ 0.78 * 0.45 = ~0.35   ← below MATCH_THRESHOLD
+        with cross_disc bonus  ≈ 0.35 + 0.05 = ~0.40   ← clears
+
+    Without this consolation, the imperfect-title cross-disc case
+    would silently start going unmatched. If anyone considers setting
+    ``CROSS_DISC_POSITION_WEIGHT`` to 0, this test makes the trade-off
+    explicit (this case becomes unmatched) instead of letting it
+    regress invisibly.
+    """
+    track = {
+        'name': 'Auntie Diaries (Remix)',
+        'track_number': 6, 'disc_number': 1,
+        'artists': [],
+    }
+    # File: same track number, different disc, similar but not perfect
+    # title (file has the canonical name, source has the version
+    # variant — common with deluxe / remix / live editions)
+    tags = _tags(
+        title='Auntie Diaries',
+        track=6,
+        disc=2,
+    )
+
+    # Compute the title-only contribution to verify the test's premise:
+    # title agreement is moderate, NOT high enough on its own to clear
+    # MATCH_THRESHOLD. The consolation has to be load-bearing.
+    title_only_score = _sim(
+        'Auntie Diaries', 'Auntie Diaries (Remix)',
+    ) * TITLE_WEIGHT
+    assert title_only_score < MATCH_THRESHOLD, (
+        f"Test premise broken — title sim alone ({title_only_score:.3f}) "
+        f"already clears MATCH_THRESHOLD ({MATCH_THRESHOLD}). The "
+        f"cross-disc consolation isn't load-bearing for this scenario; "
+        f"pick a less-similar title pair."
+    )
+
+    score = score_file_against_track(
+        '/a/file.flac', tags, track,
+        target_album='', similarity=_sim,
+    )
+    assert score >= MATCH_THRESHOLD, (
+        f"Cross-disc consolation ({CROSS_DISC_POSITION_WEIGHT}) is no "
+        f"longer enough to push the score across MATCH_THRESHOLD "
+        f"({MATCH_THRESHOLD}) for imperfect-title cases. Total score: "
+        f"{score:.3f}. Either bump the consolation OR drop it to 0 "
+        f"deliberately and accept that these files now go unmatched."
+    )
+
+
 def test_score_near_position_only_when_same_disc():
     """Off-by-one track number gets NEAR_POSITION bonus, but ONLY when
     disc agrees. Cross-disc off-by-one gets nothing."""
