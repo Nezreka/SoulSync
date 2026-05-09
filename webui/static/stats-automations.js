@@ -12,6 +12,13 @@ const importPageState = {
     initialized: false,
     activeTab: 'album',
     tapSelectedChip: null,    // for mobile tap-to-assign fallback
+    // Album lookup cache for click handlers. Populated by suggestions /
+    // search renderers; read by importPageSelectAlbum so the match POST
+    // can include `source` + `name` + `artist` (without these, backend
+    // can't look up cross-source IDs and falls back to a broken
+    // "Unknown Artist / album_id as title / 0 tracks" placeholder —
+    // github issue #524).
+    _albumLookup: {},         // { albumId: { id, name, artist, source } }
 };
 
 // ===============================
@@ -1218,7 +1225,13 @@ async function importPageLoadSuggestions() {
 }
 
 function _renderSuggestionCard(a) {
-    return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+    // Cache the album lookup so importPageSelectAlbum can pull source +
+    // name + artist on click (the onclick can only carry the ID string
+    // — see github issue #524 root cause).
+    importPageState._albumLookup[a.id] = {
+        id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
+    };
+    return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
         <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
@@ -1245,14 +1258,20 @@ async function importPageSearchAlbum() {
             grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found</div>';
             return;
         }
-        grid.innerHTML = data.albums.map(a => `
-            <div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+        grid.innerHTML = data.albums.map(a => {
+            // Cache album lookup so the click handler can include source
+            // + name + artist on the match POST (see #524).
+            importPageState._albumLookup[a.id] = {
+                id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
+            };
+            return `
+            <div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
                 <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
                 <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
                 <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
                 <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
         document.getElementById('import-page-album-clear-btn').classList.remove('hidden');
     } catch (err) {
         grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;
@@ -1269,8 +1288,22 @@ async function importPageSelectAlbum(albumId) {
     matchList.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Matching files to tracklist...</div>';
 
     try {
-        // Include file_paths filter if matching from an auto-group
-        const matchBody = { album_id: albumId };
+        // Include file_paths filter if matching from an auto-group.
+        // CRITICAL: include source + album_name + album_artist from the
+        // search/suggestion result. Without `source`, the backend can't
+        // route the lookup to the metadata source the album_id came
+        // from — for example a Deezer album_id needs Deezer's get_album
+        // call. Cross-source lookup fails silently, returns the
+        // failure-fallback dict with album_id-as-name + Unknown Artist
+        // + 0 tracks, then the import flow writes that broken metadata
+        // to the library DB (github issue #524).
+        const cached = importPageState._albumLookup[albumId] || {};
+        const matchBody = {
+            album_id: albumId,
+            source: cached.source || '',
+            album_name: cached.name || '',
+            album_artist: cached.artist || '',
+        };
         if (importPageState._autoGroupFilePaths) {
             matchBody.file_paths = importPageState._autoGroupFilePaths;
             importPageState._autoGroupFilePaths = null; // clear after use
