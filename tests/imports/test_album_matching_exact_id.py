@@ -311,53 +311,66 @@ def test_no_durations_anywhere_falls_through_to_fuzzy():
     assert len(result['matches']) == 1
 
 
-def test_deezer_seconds_duration_converted_to_ms():
-    """Deezer's API returns ``duration`` in seconds, not ms. The matcher
-    must convert before applying the tolerance check — otherwise a
-    180-second track looks like a 180-millisecond track and fails the
-    sanity gate against any real file."""
+def test_deezer_already_normalised_to_ms_by_client():
+    """Deezer's API returns ``duration`` in seconds — but
+    ``DeezerClient.get_album_tracks`` converts to ``duration_ms`` (in
+    actual ms) before returning. The matcher classifies Deezer as an
+    MS source so it doesn't double-convert. Pin this so the
+    classification stays in sync with the client's behavior."""
     files = ['/a/track.flac']
     file_tags = {
         '/a/track.flac': _tags(
             title='Song', track=1, disc=1, duration_ms=180_000,
         ),
     }
-    # Deezer-style track — duration is 180 (seconds)
+    # Deezer-style track AS RECEIVED FROM `get_album_tracks` — already
+    # converted to duration_ms in actual milliseconds.
     tracks = [{
         'name': 'Song', 'track_number': 1, 'disc_number': 1,
-        'duration': 180, 'artists': [], 'source': 'deezer',
+        'duration_ms': 180_000, 'artists': [], 'source': 'deezer',
     }]
     result = match_files_to_tracks(
         files, file_tags, tracks,
         target_album='', similarity=_sim, quality_rank=_qrank,
     )
-    # 180 seconds → 180_000 ms → matches file's 180_000 ms within tolerance
+    # Source-aware dispatch keeps 180_000 as-is (don't × 1000) so it
+    # matches the file's 180_000 ms. Pre-fix Deezer was wrongly
+    # classified as a seconds source → 180_000 × 1000 = 180,000,000ms,
+    # gate rejected every Deezer-primary user's matches.
     assert len(result['matches']) == 1
 
 
 def test_track_duration_source_aware_dispatch():
-    """`_track_duration_ms` must route via the `source` field — not
-    fall back to magnitude heuristic — so providers with edge-case
-    durations (sub-30s real tracks, intros, interludes) don't trigger
-    false unit conversion."""
+    """`_track_duration_ms` routes via the `source` field — values
+    from sources where the CLIENT has already normalised to ms are
+    taken as-is."""
     from core.imports.album_matching import _track_duration_ms
 
-    # Spotify-style — explicit ms field, treat as-is
     spotify_track = {'duration_ms': 180_000, 'source': 'spotify'}
     assert _track_duration_ms(spotify_track) == 180_000
 
-    # Deezer-style — `duration` field in seconds, convert
-    deezer_track = {'duration': 180, 'source': 'deezer'}
+    # Deezer — client converts seconds → ms before returning, so
+    # downstream matcher gets ms. As-is.
+    deezer_track = {'duration_ms': 180_000, 'source': 'deezer'}
     assert _track_duration_ms(deezer_track) == 180_000
 
-    # iTunes — duration_ms (their internal field is `trackTimeMillis`
-    # but `_build_album_track_entry` normalises to `duration_ms`)
     itunes_track = {'duration_ms': 200_000, 'source': 'itunes'}
     assert _track_duration_ms(itunes_track) == 200_000
 
-    # Source via _source alias also works (normalize_import_context legacy)
     legacy_source = {'duration_ms': 150_000, '_source': 'spotify'}
     assert _track_duration_ms(legacy_source) == 150_000
+
+
+def test_raw_deezer_seconds_falls_back_to_magnitude_heuristic():
+    """Edge case: if a raw Deezer item somehow reaches the matcher
+    WITHOUT going through the client's conversion (no `source` field,
+    raw `duration` key in seconds), the magnitude heuristic catches
+    it — value < 30000 is implausibly short for a real track and
+    gets × 1000."""
+    from core.imports.album_matching import _track_duration_ms
+
+    raw_deezer_no_source = {'duration': 180}  # no source field
+    assert _track_duration_ms(raw_deezer_no_source) == 180_000
 
 
 def test_track_duration_short_real_track_not_misconverted_with_known_source():
