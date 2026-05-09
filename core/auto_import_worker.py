@@ -182,7 +182,13 @@ class AutoImportWorker:
 
         # State
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
-        self._processing_paths: set = set()  # Paths currently being processed (skip on rescan)
+        # Candidates currently being processed (skip on rescan). Keyed
+        # on folder_hash, NOT path — multiple candidates can share a
+        # path (each loose-file group at staging root has the same
+        # parent directory but a distinct hash from its own audio
+        # files). Path-keyed dedup would treat siblings as duplicates
+        # and silently skip all but the first.
+        self._processing_hashes: set = set()
         self._current_folder = ''
         self._current_status = 'idle'  # 'idle' | 'scanning' | 'processing'
         # Live per-track progress so the UI can show "Processing Speak Now
@@ -296,8 +302,12 @@ class AutoImportWorker:
 
             self._current_folder = candidate.name
 
-            # Skip folders currently being processed by a previous scan cycle
-            if candidate.path in self._processing_paths:
+            # Skip candidates currently being processed by a previous
+            # scan cycle. Keyed on folder_hash because multiple
+            # candidates can share a path (loose-file groups at the
+            # same directory level each get their own candidate but
+            # share the parent directory).
+            if candidate.folder_hash in self._processing_hashes:
                 logger.debug(f"[Auto-Import] Skipping {candidate.name} — still processing from previous cycle")
                 continue
 
@@ -312,8 +322,8 @@ class AutoImportWorker:
             self._stats['scanned'] += 1
             logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
 
-            # Mark as in-progress so next scan cycle skips this folder
-            self._processing_paths.add(candidate.path)
+            # Mark as in-progress so next scan cycle skips this candidate
+            self._processing_hashes.add(candidate.folder_hash)
             try:
                 # Phase 3: Identify
                 identification = self._identify_folder(candidate)
@@ -403,7 +413,7 @@ class AutoImportWorker:
                 self._record_result(candidate, 'failed', 0.0, error_message=str(e))
                 self._stats['failed'] += 1
             finally:
-                self._processing_paths.discard(candidate.path)
+                self._processing_hashes.discard(candidate.folder_hash)
                 # Defensive: if the inner code path didn't reset live
                 # progress (early raise, etc.), clear it so the UI
                 # doesn't show stale "processing track 3/14" forever.
@@ -636,14 +646,20 @@ class AutoImportWorker:
             ))
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
-        """Check if folder contents have stopped changing."""
+        """Check if the candidate's audio files have stopped changing.
+
+        Keyed on folder_hash, NOT path — multiple candidates can share
+        a path (loose-file groups at the same directory level) so
+        path-keyed snapshots would overwrite each other's mtimes and
+        make stability checks unreliable for sibling candidates.
+        """
         try:
             current_mtime = sum(os.path.getmtime(f) for f in candidate.audio_files if os.path.exists(f))
         except OSError:
             return False
 
-        prev = self._folder_snapshots.get(candidate.path)
-        self._folder_snapshots[candidate.path] = current_mtime
+        prev = self._folder_snapshots.get(candidate.folder_hash)
+        self._folder_snapshots[candidate.folder_hash] = current_mtime
 
         if prev is None:
             return False  # First scan — wait for next cycle to confirm stability

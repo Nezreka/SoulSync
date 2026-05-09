@@ -242,6 +242,39 @@ def test_disc_folder_with_no_matching_loose_group_becomes_standalone(worker, tmp
 # ---------------------------------------------------------------------------
 
 
+def test_sibling_candidates_have_unique_folder_hashes(worker, tmp_path):
+    """Pin the dedup-collision bug: when loose files at one level
+    produce multiple candidates (one per album group), each must have
+    a unique folder_hash. The runtime's `_processing_hashes` set + the
+    DB's `auto_import_history.folder_hash` index both key on this —
+    if siblings collide, only the first one gets processed and the
+    rest silently skip as "still processing from previous cycle."
+
+    Reported on 2026-05-09 — multi-album loose root produced 3
+    candidates with the same path. Path-keyed dedup treated them as
+    duplicates and skipped two of three. Fixed by switching dedup to
+    folder_hash + ensuring each candidate's hash is unique."""
+    for i in range(1, 4):
+        _write_flac(
+            str(tmp_path / f'A_{i}.flac'),
+            album='Album A', track=i, title=f'A {i}',
+        )
+    for i in range(1, 4):
+        _write_flac(
+            str(tmp_path / f'B_{i}.flac'),
+            album='Album B', track=i, title=f'B {i}',
+        )
+
+    candidates = []
+    worker._scan_directory(str(tmp_path), candidates, staging_root=str(tmp_path))
+
+    hashes = [c.folder_hash for c in candidates]
+    assert len(hashes) == len(set(hashes)), (
+        f"Sibling candidates collided on folder_hash: {hashes}. "
+        f"Path-keyed dedup would silently skip duplicates."
+    )
+
+
 def test_disc_only_directory_still_works(worker, tmp_path):
     """No loose files, only Disc 1/Disc 2 subfolders → treat parent
     directory as the album candidate. Pre-existing behavior preserved."""
