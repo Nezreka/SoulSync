@@ -326,20 +326,64 @@ def duration_sanity_ok(file_duration_ms: int, track_duration_ms: int) -> bool:
     return abs(int(file_duration_ms) - int(track_duration_ms)) <= DURATION_TOLERANCE_MS
 
 
-def _track_duration_ms(track: Dict[str, Any]) -> int:
-    """Pull track duration in milliseconds.
+# Per-source duration field conventions. Track entries built by
+# `_build_album_track_entry` carry the source name on `source` /
+# `_source` / `provider` so we can dispatch deterministically instead
+# of guessing from value magnitude.
+_SECONDS_DURATION_SOURCES = frozenset((
+    'deezer',         # /album/{id} returns "duration" (seconds, int)
+    'discogs',        # release tracks expose duration as MM:SS strings
+    'musicbrainz',    # recording length is sometimes seconds vs ms
+                      # depending on which endpoint — defensive
+))
+_MS_DURATION_SOURCES = frozenset((
+    'spotify',        # duration_ms (canonical Spotify naming)
+    'itunes',         # trackTimeMillis → normalised to duration_ms upstream
+    'qobuz',          # duration_ms
+    'tidal',          # duration in seconds OR duration_ms — see below
+    'hydrabase',      # duration_ms
+    'hifi',           # duration_ms
+))
 
-    Spotify / iTunes return ``duration_ms``. Deezer's ``duration`` is
-    in seconds. Heuristic: anything below 30000 (would be 30 seconds in
-    ms — implausibly short for a real track) is treated as seconds and
-    converted. Beyond 30000 is already milliseconds.
+
+def _track_duration_ms(track: Dict[str, Any]) -> int:
+    """Pull track duration in milliseconds — source-aware.
+
+    Different metadata providers spell + scale duration differently:
+
+    - Spotify / iTunes / Qobuz / HiFi / Hydrabase: ``duration_ms`` (ms)
+    - Deezer / Discogs: ``duration`` (seconds, int)
+    - Tidal: depends on endpoint — usually seconds for browse, ms for
+      album tracks; defensive heuristic kicks in if source missing
+
+    Decision order:
+    1. If the track carries a source name + that source is in the
+       seconds-only list, treat raw value as seconds and × 1000.
+    2. If source is ms-only, take the value as-is.
+    3. If source unknown / missing (e.g. mocked test data), fall back
+       to a magnitude heuristic — values < 30000 treated as seconds.
+       This is the legacy behavior, kept as the safety net.
     """
     raw = track.get('duration_ms') or track.get('duration') or 0
     try:
         value = int(raw)
     except (TypeError, ValueError):
         return 0
-    if 0 < value < 30000:
+    if value <= 0:
+        return 0
+
+    source = (track.get('source') or track.get('_source') or track.get('provider') or '').strip().lower()
+
+    if source in _SECONDS_DURATION_SOURCES:
+        return value * 1000
+    if source in _MS_DURATION_SOURCES:
+        return value
+
+    # Unknown / missing source — fall back to the magnitude heuristic.
+    # Anything below 30000 (30 seconds in ms) is implausibly short for
+    # a real track and is almost certainly seconds being passed where
+    # ms was expected.
+    if value < 30000:
         return value * 1000
     return value
 
