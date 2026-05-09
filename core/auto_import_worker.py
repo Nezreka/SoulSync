@@ -961,24 +961,32 @@ class AutoImportWorker:
             for f in candidate.audio_files:
                 file_tags[f] = _read_file_tags(f)
 
-            # Resolve quality duplicates — if multiple files match same track, keep best
-            # Group by probable track (using track number from tags)
-            seen_track_nums = {}
+            # Resolve quality duplicates — if multiple files match the same
+            # (disc, track) position, keep the higher-quality one. Key on
+            # the (disc_number, track_number) tuple — keying on track_number
+            # alone breaks multi-disc albums where every disc has tracks
+            # numbered 1..N, since disc 2 track 1 looks identical to disc 1
+            # track 1 to a track-number-only dedup. (Reported on Mr. Morale
+            # & The Big Steppers — discs 1+2 dumped loose in staging, dedup
+            # collapsed every same-numbered pair into one survivor.)
+            seen_positions = {}
             deduped_files = []
             for f in candidate.audio_files:
                 tn = file_tags[f]['track_number']
+                dn = file_tags[f].get('disc_number', 1) or 1
                 ext = os.path.splitext(f)[1].lower()
-                if tn > 0 and tn in seen_track_nums:
-                    prev_f = seen_track_nums[tn]
+                position_key = (dn, tn)
+                if tn > 0 and position_key in seen_positions:
+                    prev_f = seen_positions[position_key]
                     prev_ext = os.path.splitext(prev_f)[1].lower()
                     if _quality_rank(ext) > _quality_rank(prev_ext):
                         deduped_files.remove(prev_f)
                         deduped_files.append(f)
-                        seen_track_nums[tn] = f
+                        seen_positions[position_key] = f
                 else:
                     deduped_files.append(f)
                     if tn > 0:
-                        seen_track_nums[tn] = f
+                        seen_positions[position_key] = f
 
             # Match files to tracks using weighted scoring
             matches = []
@@ -988,6 +996,15 @@ class AutoImportWorker:
             for track in tracks:
                 track_name = track.get('name', '')
                 track_num = track.get('track_number', 0)
+                # Track disc number — Spotify uses `disc_number`, Deezer
+                # `disk_number`, iTunes `discNumber`. Default to 1 when
+                # missing so single-disc albums still match.
+                track_disc = (
+                    track.get('disc_number')
+                    or track.get('disk_number')
+                    or track.get('discNumber')
+                    or 1
+                )
                 track_artists = track.get('artists', [])
                 track_artist = ''
                 if track_artists:
@@ -1012,11 +1029,27 @@ class AutoImportWorker:
                     if ft['artist'] and track_artist:
                         score += _similarity(ft['artist'], track_artist) * 0.15
 
-                    # Track number (30%)
+                    # Position match (30%) — gates the bonus on (disc, track)
+                    # tuple, NOT track_number alone. Multi-disc albums with
+                    # parallel numbering (every disc has tracks 1..N) used
+                    # to mismatch here: file with track_number=6 from disc 2
+                    # got the full bonus when matched against disc 1 track 6
+                    # because disc was ignored. Result: wrong files matched
+                    # to wrong tracks, integrity check rejected them all.
                     if ft['track_number'] > 0 and track_num > 0:
-                        if ft['track_number'] == track_num:
+                        ft_disc = ft.get('disc_number', 1) or 1
+                        if ft['track_number'] == track_num and ft_disc == track_disc:
                             score += 0.30
-                        elif abs(ft['track_number'] - track_num) <= 1:
+                        elif (
+                            ft['track_number'] == track_num
+                            and ft_disc != track_disc
+                        ):
+                            # Same track number, different disc — treat as
+                            # a mild penalty case so the title/artist
+                            # similarity has to carry the match. Cross-disc
+                            # collisions are common in deluxe releases.
+                            score += 0.05
+                        elif abs(ft['track_number'] - track_num) <= 1 and ft_disc == track_disc:
                             score += 0.12
 
                     # Album tag bonus (10%)
