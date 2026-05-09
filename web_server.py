@@ -33968,6 +33968,23 @@ def import_album_match():
         if not album_id:
             return jsonify({'success': False, 'error': 'Missing album_id'}), 400
 
+        # Without `source`, the lookup chain has to guess which metadata
+        # source the album_id came from — and a Deezer numeric id will
+        # match nothing in Spotify/iTunes/Discogs/etc., resulting in the
+        # failure-fallback dict that github issue #524 surfaced as
+        # "Unknown Artist / album_id-as-title / 0 tracks / 1991". Frontend
+        # fix in the same PR populates source on every match POST; this
+        # log catches anything that still reaches us without it (curl,
+        # third-party, regression in another caller).
+        if not source:
+            logger.warning(
+                "[Import Match] Missing 'source' on album_id=%s — lookup will "
+                "guess via primary-source priority chain. If this fires "
+                "consistently, a frontend caller is dropping source from "
+                "the match POST body.",
+                album_id,
+            )
+
         payload = build_album_import_match_payload(
             album_id,
             album_name=album_name,
