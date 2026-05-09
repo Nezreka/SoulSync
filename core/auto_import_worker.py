@@ -436,13 +436,33 @@ class AutoImportWorker:
         return candidates
 
     def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
-        """Recursively scan a directory for album folders and loose audio files."""
+        """Recursively scan a directory for album folders and loose audio files.
+
+        Loose-file handling:
+        - Read each loose file's `album` tag and group by normalised
+          album name. Each group becomes its own candidate so a chaotic
+          staging root (multiple albums dumped loose) imports correctly
+          instead of bundling everything into one fake "album."
+        - Untagged loose files become individual single candidates (they
+          have nothing to group with).
+        - Disc folders at the same level attach to the loose-file group
+          whose album tag matches the disc-folder files (typical layout:
+          loose files for disc 1 + `Disc 2/`, `Disc 3/` subfolders).
+        - Disc folders with no matching loose group become standalone
+          multi-disc candidates.
+
+        Recursion rule:
+        - Always recurse into non-disc subdirectories. The previous
+          rule "only recurse when no loose files exist" silently
+          ignored album subfolders sitting next to loose files —
+          common when a user moves some tracks out of an album folder
+          while leaving the parent album folder intact.
+        """
         try:
             entries = sorted(os.listdir(directory))
         except OSError:
             return
 
-        # Collect loose audio files at this level
         loose_files = []
         subdirs = []
 
@@ -453,83 +473,167 @@ class AutoImportWorker:
             elif os.path.isdir(full_path):
                 subdirs.append((entry, full_path))
 
+        disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
+        non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
+
+        # Build disc_structure from disc subdirs once — referenced by
+        # both the loose-files branch (to attach matching discs to the
+        # right loose-file group) and the disc-only branch.
+        disc_files_by_num: Dict[int, List[str]] = {}
+        for sub_name, sub_path in disc_subdirs:
+            disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
+            try:
+                disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
+                              if os.path.isfile(os.path.join(sub_path, f))
+                              and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+            except OSError:
+                disc_files = []
+            if disc_files:
+                disc_files_by_num[disc_num] = disc_files
+
         if loose_files:
-            # This directory has audio files — treat it as an album folder candidate
-            audio_files = loose_files
-            disc_structure = {}
+            self._build_loose_file_candidates(
+                directory, loose_files, disc_files_by_num, candidates,
+            )
+        elif disc_files_by_num and not non_disc_subdirs:
+            # Disc-only directory — treat THIS directory as the album.
+            # Common when a user drops `Disc 1/`, `Disc 2/` straight
+            # into staging without an album-level loose-file group.
+            audio_files: List[str] = []
+            disc_structure: Dict[int, List[str]] = {}
+            for disc_num, disc_files in disc_files_by_num.items():
+                disc_structure[disc_num] = disc_files
+                audio_files.extend(disc_files)
 
-            # Check if any subdirs are disc folders
-            has_disc_folders = False
-            for sub_name, sub_path in subdirs:
-                disc_match = DISC_FOLDER_RE.match(sub_name)
-                if disc_match:
-                    has_disc_folders = True
-                    disc_num = int(disc_match.group(1))
-                    disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
-                                  if os.path.isfile(os.path.join(sub_path, f))
-                                  and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-                    if disc_files:
-                        disc_structure[disc_num] = disc_files
-                        audio_files.extend(disc_files)
-
-            if has_disc_folders:
-                disc_structure[0] = loose_files  # Top-level files are disc 0
-
-            # Determine if this is a single or album
-            is_single = len(audio_files) == 1 and not has_disc_folders
-            folder_name = os.path.basename(directory)
-            folder_hash = _compute_folder_hash(audio_files)
-
-            if is_single:
-                candidates.append(FolderCandidate(
-                    path=audio_files[0], name=os.path.basename(audio_files[0]),
-                    audio_files=audio_files, folder_hash=folder_hash, is_single=True
-                ))
-            else:
+            if audio_files:
+                folder_name = os.path.basename(directory)
+                folder_hash = _compute_folder_hash(audio_files)
+                is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
                 candidates.append(FolderCandidate(
                     path=directory, name=folder_name, audio_files=audio_files,
-                    disc_structure=disc_structure, folder_hash=folder_hash
+                    disc_structure=disc_structure, folder_hash=folder_hash,
+                    is_staging_root=is_staging_root,
                 ))
-        else:
-            # No loose audio files. If the only subdirs are disc folders,
-            # treat THIS directory as the album candidate (multi-disc album
-            # with no album-level loose files — common when a user drops
-            # `Album/Disc 1/`, `Album/Disc 2/` straight into staging, or
-            # drops `Disc 1/`, `Disc 2/` with the staging dir itself as
-            # the album root).
-            disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
-            non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
 
-            if disc_subdirs and not non_disc_subdirs:
-                disc_structure = {}
-                audio_files = []
-                for sub_name, sub_path in disc_subdirs:
-                    disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
-                    try:
-                        disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
-                                      if os.path.isfile(os.path.join(sub_path, f))
-                                      and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-                    except OSError:
-                        disc_files = []
-                    if disc_files:
-                        disc_structure[disc_num] = disc_files
-                        audio_files.extend(disc_files)
+        # Always recurse into non-disc subdirectories — even when this
+        # level has loose files. Otherwise album subfolders sitting
+        # beside loose tracks get silently ignored (the bug a chaotic
+        # staging root surfaced on 2026-05-09).
+        for _sub_name, sub_path in non_disc_subdirs:
+            self._scan_directory(sub_path, candidates, staging_root=staging_root)
 
-                if audio_files:
-                    folder_name = os.path.basename(directory)
-                    folder_hash = _compute_folder_hash(audio_files)
-                    is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
-                    candidates.append(FolderCandidate(
-                        path=directory, name=folder_name, audio_files=audio_files,
-                        disc_structure=disc_structure, folder_hash=folder_hash,
-                        is_staging_root=is_staging_root,
-                    ))
-                return
+    def _build_loose_file_candidates(
+        self,
+        directory: str,
+        loose_files: List[str],
+        disc_files_by_num: Dict[int, List[str]],
+        candidates: List[FolderCandidate],
+    ) -> None:
+        """Group loose audio files by `album` tag, build one candidate
+        per album group + attach matching disc folders.
 
-            # Otherwise recurse into non-disc subdirs (disc folders only
-            # ever attach to a parent album, never stand alone).
-            for _sub_name, sub_path in non_disc_subdirs:
-                self._scan_directory(sub_path, candidates, staging_root=staging_root)
+        - Tagged files cluster by their album name (case-insensitive,
+          whitespace-stripped).
+        - Untagged files become individual single candidates (can't
+          group what we don't have a key for).
+        - Disc folders attach to whichever loose group's album tag
+          matches the first disc-folder track's album tag. Disc folders
+          with no matching loose group fall through to a standalone
+          multi-disc candidate scoped to that album.
+        - When all loose files share one album AND disc folders attach
+          to it, the result matches the previous "bundle everything"
+          behavior — so single-album staging with parallel disc folders
+          (the user's Mr. Morale layout) keeps working unchanged.
+        """
+        # Group by normalised album tag
+        groups: Dict[str, List[str]] = {}
+        untagged: List[str] = []
+        for f in loose_files:
+            try:
+                tags = _read_file_tags(f)
+            except Exception as exc:
+                logger.debug("scan tag read failed for %s: %s", f, exc)
+                tags = {}
+            album_key = (tags.get('album') or '').strip().lower()
+            if album_key:
+                groups.setdefault(album_key, []).append(f)
+            else:
+                untagged.append(f)
+
+        # Attach disc folders to matching groups. Read the first track
+        # of each disc to find its album tag and merge accordingly.
+        disc_attached_to: Dict[int, str] = {}  # disc_num → album_key
+        for disc_num, disc_files in disc_files_by_num.items():
+            try:
+                first_disc_tags = _read_file_tags(disc_files[0])
+            except Exception:
+                first_disc_tags = {}
+            disc_album_key = (first_disc_tags.get('album') or '').strip().lower()
+            if disc_album_key and disc_album_key in groups:
+                disc_attached_to[disc_num] = disc_album_key
+
+        # Track which disc nums got merged into a loose group so we
+        # don't double-count them in the standalone-disc fallback.
+        merged_disc_nums = set(disc_attached_to.keys())
+
+        # Build a candidate per loose-file group
+        for album_key, group_files in groups.items():
+            audio_files = list(group_files)
+            disc_structure: Dict[int, List[str]] = {0: list(group_files)}
+            for disc_num, attached_album in disc_attached_to.items():
+                if attached_album == album_key:
+                    audio_files.extend(disc_files_by_num[disc_num])
+                    disc_structure[disc_num] = list(disc_files_by_num[disc_num])
+
+            folder_hash = _compute_folder_hash(audio_files)
+            # Use the album tag for the candidate name so the import
+            # history shows something meaningful instead of always the
+            # parent directory name.
+            display_name = group_files[0]
+            try:
+                first_tags = _read_file_tags(group_files[0])
+                if first_tags.get('album'):
+                    display_name = first_tags['album']
+            except Exception as exc:
+                logger.debug("display-name tag read failed for %s: %s", group_files[0], exc)
+
+            candidates.append(FolderCandidate(
+                path=directory,
+                name=os.path.basename(directory) if len(groups) == 1 else str(display_name),
+                audio_files=audio_files,
+                disc_structure=disc_structure if len(disc_structure) > 1 else {},
+                folder_hash=folder_hash,
+            ))
+
+        # Untagged singles — one candidate per file. Can't group them.
+        for f in untagged:
+            audio_files = [f]
+            folder_hash = _compute_folder_hash(audio_files)
+            candidates.append(FolderCandidate(
+                path=f, name=os.path.basename(f),
+                audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+            ))
+
+        # Standalone disc folders (no loose group claimed them) — bundle
+        # into a multi-disc candidate scoped to the directory.
+        unattached_discs = {
+            n: files for n, files in disc_files_by_num.items()
+            if n not in merged_disc_nums
+        }
+        if unattached_discs:
+            audio_files = []
+            disc_structure = {}
+            for disc_num, disc_files in unattached_discs.items():
+                disc_structure[disc_num] = disc_files
+                audio_files.extend(disc_files)
+            folder_hash = _compute_folder_hash(audio_files)
+            candidates.append(FolderCandidate(
+                path=directory,
+                name=f"{os.path.basename(directory)} (loose discs)",
+                audio_files=audio_files,
+                disc_structure=disc_structure,
+                folder_hash=folder_hash,
+            ))
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
         """Check if folder contents have stopped changing."""
