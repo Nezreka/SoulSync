@@ -55,34 +55,72 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
 
 
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
-    """Read embedded tags from an audio file. Returns dict with title, artist, album, track_number, disc_number, year."""
-    result = {'title': '', 'artist': '', 'album': '', 'track_number': 0, 'disc_number': 1, 'year': ''}
+    """Read embedded tags from an audio file.
+
+    Returns dict with: title, artist, album, track_number, disc_number,
+    year, isrc, mbid, duration_ms.
+
+    The exact-identifier fields (``isrc``, ``mbid``) and the audio
+    duration enable the ID-based fast paths + duration sanity gate in
+    ``core/imports/album_matching.py``. Tagged files (Picard-tagged
+    libraries always carry MBID; most metadata sources carry ISRC) get
+    perfect-match identification without going through fuzzy scoring.
+
+    All exact-identifier fields default to empty string when the tag
+    isn't present — callers treat empty as "not available, fall back to
+    fuzzy matching".
+    """
+    result = {
+        'title': '', 'artist': '', 'album': '',
+        'track_number': 0, 'disc_number': 1, 'year': '',
+        'isrc': '', 'mbid': '', 'duration_ms': 0,
+    }
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path, easy=True)
-        if audio and audio.tags:
-            tags = audio.tags
-            result['title'] = (tags.get('title', [''])[0] or '').strip()
-            # Prefer albumartist for album-level identification (per-track artist
-            # often includes features like "Kendrick Lamar, Drake" which fragment
-            # consensus when grouping tracks into an album). Fall back to artist
-            # for files that lack albumartist.
-            result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
-            result['album'] = (tags.get('album', [''])[0] or '').strip()
-            # Date/year — try 'date' first, fall back to 'year'
-            date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
-            if date_str and len(date_str) >= 4:
-                result['year'] = date_str[:4]
-            tn = tags.get('tracknumber', ['0'])[0]
+        if audio:
+            # Audio length comes off audio.info, not tags. Mutagen returns
+            # seconds as a float; convert to int milliseconds to match the
+            # metadata-source convention (Spotify/Deezer/iTunes all return
+            # duration_ms).
+            length_s = getattr(getattr(audio, 'info', None), 'length', 0) or 0
             try:
-                result['track_number'] = int(str(tn).split('/')[0])
-            except (ValueError, TypeError):
+                result['duration_ms'] = int(round(float(length_s) * 1000))
+            except (TypeError, ValueError):
                 pass
-            dn = tags.get('discnumber', ['1'])[0]
-            try:
-                result['disc_number'] = int(str(dn).split('/')[0])
-            except (ValueError, TypeError):
-                pass
+
+            if audio.tags:
+                tags = audio.tags
+                result['title'] = (tags.get('title', [''])[0] or '').strip()
+                # Prefer albumartist for album-level identification (per-track
+                # artist often includes features like "Kendrick Lamar, Drake"
+                # which fragment consensus when grouping tracks into an album).
+                # Fall back to artist for files that lack albumartist.
+                result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
+                result['album'] = (tags.get('album', [''])[0] or '').strip()
+                # Date/year — try 'date' first, fall back to 'year'
+                date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
+                if date_str and len(date_str) >= 4:
+                    result['year'] = date_str[:4]
+                tn = tags.get('tracknumber', ['0'])[0]
+                try:
+                    result['track_number'] = int(str(tn).split('/')[0])
+                except (ValueError, TypeError):
+                    pass
+                dn = tags.get('discnumber', ['1'])[0]
+                try:
+                    result['disc_number'] = int(str(dn).split('/')[0])
+                except (ValueError, TypeError):
+                    pass
+                # ISRC — International Standard Recording Code. Per-recording
+                # unique identifier; metadata sources expose it as `isrc` on
+                # tracks. Picard / Beets both write this tag from MusicBrainz.
+                result['isrc'] = (tags.get('isrc', [''])[0] or '').strip().upper()
+                # MusicBrainz Recording ID — Picard's primary identifier.
+                # Stored in `musicbrainz_trackid` for ID3, or
+                # `MUSICBRAINZ_TRACKID` for Vorbis comments. Mutagen's easy
+                # mode normalizes the key.
+                result['mbid'] = (tags.get('musicbrainz_trackid', [''])[0] or '').strip().lower()
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
     return result
