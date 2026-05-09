@@ -320,6 +320,27 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
     if isinstance(explicit_value, str):
         explicit_value = explicit_value.lower() == 'explicit'
 
+    # Per-recording exact identifiers — drive the auto-import matcher's
+    # fast paths (`core.imports.album_matching.find_exact_id_matches`).
+    # Spotify/Deezer typically expose ISRC inside `external_ids.isrc`;
+    # iTunes uses top-level `isrc`. MusicBrainz-aware sources expose MBID
+    # similarly. Stripping these used to be invisible — until the matcher
+    # learned to use them, then it became "fast paths never trigger in
+    # production even though the unit tests pass" — pinned by the
+    # production-shape test in test_album_matching_exact_id.py.
+    external_ids = _extract_lookup_value(track_item, 'external_ids', default=None) or {}
+    isrc = (
+        _extract_lookup_value(track_item, 'isrc', default='') or ''
+        or (external_ids.get('isrc') if isinstance(external_ids, dict) else '')
+        or ''
+    )
+    mbid = (
+        _extract_lookup_value(track_item, 'musicbrainz_id', 'mbid', default='') or ''
+        or (external_ids.get('mbid') if isinstance(external_ids, dict) else '')
+        or (external_ids.get('musicbrainz') if isinstance(external_ids, dict) else '')
+        or ''
+    )
+
     return {
         'id': _extract_lookup_value(track_item, 'id', 'track_id', 'trackId', default='') or '',
         'name': _extract_lookup_value(track_item, 'name', 'track_name', 'trackName', default='Unknown Track') or 'Unknown Track',
@@ -330,6 +351,9 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
         'explicit': bool(explicit_value),
         'preview_url': _extract_lookup_value(track_item, 'preview_url', 'previewUrl'),
         'external_urls': _extract_lookup_value(track_item, 'external_urls', default={}) or {},
+        'external_ids': external_ids if isinstance(external_ids, dict) else {},
+        'isrc': str(isrc) if isrc else '',
+        'musicbrainz_id': str(mbid) if mbid else '',
         'uri': _extract_lookup_value(track_item, 'uri', default='') or '',
         'album': album_info,
         'source': source,
