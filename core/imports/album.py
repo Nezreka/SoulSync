@@ -96,16 +96,6 @@ def _normalize_album_source(album: Dict[str, Any], source: str = "") -> str:
     return str(album_source).strip().lower()
 
 
-def _strip_legacy_source_fields(payload: Any) -> Any:
-    if not isinstance(payload, dict):
-        return payload
-
-    cleaned = dict(payload)
-    cleaned.pop("_source", None)
-    cleaned.pop("provider", None)
-    return cleaned
-
-
 def _extract_track_artist_name(track: Dict[str, Any]) -> str:
     artists = track.get("artists") or []
     if isinstance(artists, (str, bytes)):
@@ -138,8 +128,6 @@ def _coerce_track_int(value: Any, default: int = 1) -> int:
 
 def _normalize_match_track(track: Dict[str, Any], source: str, album: Dict[str, Any]) -> Dict[str, Any]:
     track_album = track.get("album") if isinstance(track.get("album"), dict) else album
-    if isinstance(track_album, dict):
-        track_album = _strip_legacy_source_fields(track_album)
     track_source = _normalize_album_source(track, source)
     track_artists = _normalize_artist_entries(track.get("artists") or [])
 
@@ -284,7 +272,6 @@ def build_album_import_context(
     else:
         artist_ctx = resolve_album_artist_context(album, source)
 
-    artist_ctx = _strip_legacy_source_fields(artist_ctx)
     artist_ctx.setdefault("genres", [])
     artist_ctx.setdefault("source", source)
     artist_ctx["genres"] = artist_ctx.get("genres") or []
@@ -382,10 +369,6 @@ def build_album_import_context(
     }
 
     normalized_context = normalize_import_context(context)
-    normalized_context["artist"] = _strip_legacy_source_fields(normalized_context.get("artist"))
-    normalized_context["album"] = _strip_legacy_source_fields(normalized_context.get("album"))
-    normalized_context["track_info"] = _strip_legacy_source_fields(normalized_context.get("track_info"))
-    normalized_context["original_search_result"] = _strip_legacy_source_fields(normalized_context.get("original_search_result"))
     return normalized_context
 
 
@@ -405,7 +388,7 @@ def build_album_import_match_payload(
         source=source,
     )
 
-    album = _strip_legacy_source_fields(dict(album_response.get("album") or {}))
+    album = dict(album_response.get("album") or {})
     source = _normalize_album_source(album, album_response.get("source") or source or "")
     tracks = list(album_response.get("tracks") or [])
     if not album_response.get("success") or not tracks:

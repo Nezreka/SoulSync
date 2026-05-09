@@ -365,7 +365,7 @@ class AlbumCompletenessJob(RepairJob):
                     'track_number': tn,
                     'name': item.get('name', ''),
                     'disc_number': item.get('disc_number', 1),
-                    'source': item.get('_source', primary_source),
+                    'source': item.get('source', primary_source),
                     'source_track_id': item.get('id', ''),
                     'track_id': item.get('id', ''),
                     'spotify_track_id': item.get('id', ''),

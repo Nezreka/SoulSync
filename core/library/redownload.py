@@ -95,7 +95,7 @@ def redownload_start(track_id):
 
         # Fetch full track details from the metadata source for pipeline parity
         # This gives us track_number, disc_number, full album data
-        meta_source = metadata.get('_source', '')
+        meta_source = metadata.get('source', '')
         meta_id = metadata.get('id', '')
         full_track_details = None
         full_album_data = None

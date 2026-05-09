@@ -193,11 +193,7 @@ class WishlistService:
                     "track_name": track_name,
                     "artist_name": artist_name,
                     "album_name": album_name,
-                    "provider": (
-                        track_data.get("provider") or track_data.get("source")
-                        if isinstance(track_data, dict)
-                        else None
-                    ),
+                    "source": track_data.get("source") if isinstance(track_data, dict) else None,
                     "spotify_track_id": wishlist_track["spotify_track_id"],
                     "spotify_data": track_data,
                     "failure_reason": wishlist_track["failure_reason"],

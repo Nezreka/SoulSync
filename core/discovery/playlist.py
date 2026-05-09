@@ -184,7 +184,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     if cached_match and deps.validate_discovery_cache_artist(artist_name, cached_match):
                         extra_data = {
                             'discovered': True,
-                            'provider': discovery_source,
+                            'source': discovery_source,
                             'confidence': cached_match.get('confidence', 0.85),
                             'matched_data': cached_match,
                         }
@@ -309,7 +309,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
 
                     extra_data = {
                         'discovered': True,
-                        'provider': discovery_source,
+                        'source': discovery_source,
                         'confidence': best_confidence,
                         'matched_data': matched_data,
                     }
@@ -337,7 +337,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     stub = deps.build_discovery_wing_it_stub(track_name, artist_name, duration_ms)
                     extra_data = {
                         'discovered': True,
-                        'provider': 'wing_it_fallback',
+                        'source': 'wing_it_fallback',
                         'confidence': 0,
                         'wing_it_fallback': True,
                         'matched_data': stub,

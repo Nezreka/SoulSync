@@ -55,11 +55,11 @@ def extract_artist_name(artist: Any) -> str:
 
 
 def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Normalize an import context to neutral fields in place and drop legacy aliases."""
+    """Normalize an import context to neutral fields in place."""
     if not isinstance(context, dict):
         return {}
 
-    source = context.get("source") or context.get("_source") or ""
+    source = context.get("source") or ""
     artist = _as_dict(context.get("artist") or context.get("spotify_artist"))
     album = _as_dict(context.get("album") or context.get("spotify_album"))
     track_info = _as_dict(context.get("track_info"))
@@ -73,7 +73,6 @@ def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any
     context["album"] = album
     context["track_info"] = track_info
     context["original_search_result"] = normalized_search
-    context.pop("_source", None)
     context.pop("spotify_artist", None)
     context.pop("spotify_album", None)
 

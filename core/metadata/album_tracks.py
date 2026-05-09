@@ -60,9 +60,13 @@ def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
     primary_source = metadata_registry.get_primary_source()
     source_chain = list(metadata_registry.get_source_priority(primary_source))
     override = (options.source_override or '').strip().lower()
+    enabled_sources = tuple(source.strip().lower() for source in (options.enabled_sources or ()) if source and str(source).strip())
 
     if override:
         source_chain = [override] + [source for source in source_chain if source != override]
+
+    if enabled_sources:
+        source_chain = [source for source in source_chain if source in enabled_sources]
 
     if not options.allow_fallback:
         source_chain = source_chain[:1]
@@ -176,11 +180,12 @@ def _normalize_context_artists(artists: Any) -> List[Dict[str, Any]]:
     for artist in artists:
         if isinstance(artist, dict):
             name = _extract_lookup_value(artist, 'name', 'artist_name', 'title', default='') or ''
-            artist_id = _extract_lookup_value(artist, 'id', 'artist_id', default='') or ''
+            artist_id = _extract_lookup_value(artist, 'source_id', 'id', 'artist_id', default='') or ''
             entry: Dict[str, Any] = {}
             if name:
                 entry['name'] = str(name)
             if artist_id:
+                entry['source_id'] = str(artist_id)
                 entry['id'] = str(artist_id)
             genres = _extract_lookup_value(artist, 'genres', default=None)
             if genres is not None:
@@ -289,7 +294,7 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
         or ''
     )
     resolved_artist_id = str(
-        _extract_lookup_value(primary_artist, 'id', default='')
+        _extract_lookup_value(primary_artist, 'source_id', 'id', default='')
         or _extract_lookup_value(album_data, 'artist_id', default='')
         or ''
     ).strip()
@@ -300,8 +305,10 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
     if not image_url:
         image_url = _extract_lookup_value(album_data, 'image_url', 'thumb_url')
 
+    source_id = _extract_lookup_value(album_data, 'source_id', 'id', 'album_id', 'collectionId', 'release_id', default=album_id) or album_id
     return {
-        'id': _extract_lookup_value(album_data, 'id', 'album_id', 'collectionId', 'release_id', default=album_id) or album_id,
+        'source_id': source_id,
+        'id': source_id,
         'name': _extract_lookup_value(album_data, 'name', 'title', default=album_name or album_id) or album_name or album_id,
         'artist': resolved_artist_name or '',
         'artist_name': resolved_artist_name or '',
@@ -320,8 +327,10 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
     if isinstance(explicit_value, str):
         explicit_value = explicit_value.lower() == 'explicit'
 
+    source_id = _extract_lookup_value(track_item, 'source_id', 'id', 'track_id', 'trackId', default='') or ''
     return {
-        'id': _extract_lookup_value(track_item, 'id', 'track_id', 'trackId', default='') or '',
+        'source_id': source_id,
+        'id': source_id,
         'name': _extract_lookup_value(track_item, 'name', 'track_name', 'trackName', default='Unknown Track') or 'Unknown Track',
         'artists': _normalize_track_artists(track_item),
         'duration_ms': _extract_lookup_value(track_item, 'duration_ms', 'trackTimeMillis', default=0) or 0,
@@ -333,8 +342,6 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
         'uri': _extract_lookup_value(track_item, 'uri', default='') or '',
         'album': album_info,
         'source': source,
-        'provider': source,
-        '_source': source,
     }
 
 
@@ -351,8 +358,6 @@ def _build_album_tracks_payload(
         album_name=album_name, artist_name=artist_name, source=source,
     )
     album_info['source'] = source
-    album_info['_source'] = source
-    album_info['provider'] = source
     track_items = _extract_album_track_items(album_data, tracks_data)
     tracks = [_build_album_track_entry(track, album_info, source) for track in track_items]
 
@@ -439,7 +444,7 @@ def get_artist_albums_for_source(
         if not best:
             return albums
 
-        found_artist_id = _extract_lookup_value(best, 'id', 'artist_id')
+        found_artist_id = _extract_lookup_value(best, 'source_id', 'id', 'artist_id')
         if not found_artist_id:
             return albums
 
@@ -519,9 +524,9 @@ def resolve_album_reference(
                         for album in results:
                             candidate_name = str(_extract_lookup_value(album, 'name', 'title', default='') or '').strip().lower()
                             if candidate_name and candidate_name == str(search_title).strip().lower():
-                                return _extract_lookup_value(album, 'id', 'album_id', 'release_id'), source
+                                return _extract_lookup_value(album, 'source_id', 'id', 'album_id', 'release_id'), source
                         best = results[0]
-                        return _extract_lookup_value(best, 'id', 'album_id', 'release_id'), source
+                        return _extract_lookup_value(best, 'source_id', 'id', 'album_id', 'release_id'), source
 
             if not album_name and not artist_name:
                 return None, None
@@ -536,9 +541,9 @@ def resolve_album_reference(
                     for album in results:
                         candidate_name = str(_extract_lookup_value(album, 'name', 'title', default='') or '').strip().lower()
                         if album_name and candidate_name == album_name.strip().lower():
-                            return _extract_lookup_value(album, 'id', 'album_id', 'release_id'), source
+                            return _extract_lookup_value(album, 'source_id', 'id', 'album_id', 'release_id'), source
                     best = results[0]
-                    return _extract_lookup_value(best, 'id', 'album_id', 'release_id'), source
+                    return _extract_lookup_value(best, 'source_id', 'id', 'album_id', 'release_id'), source
     except Exception as e:
         logger.debug("Error resolving album reference %s: %s", album_id, e)
 
@@ -634,6 +639,7 @@ def get_artist_album_tracks(
             'resolved_album_id': resolved_album_id,
             'tracks': [],
             'album': {
+                'source_id': resolved_album_id,
                 'id': resolved_album_id,
                 'name': album_name or resolved_album_id,
                 'image_url': None,
@@ -652,6 +658,7 @@ def get_artist_album_tracks(
         'resolved_album_id': None,
         'tracks': [],
         'album': {
+            'source_id': album_id,
             'id': album_id,
             'name': album_name or album_id,
             'image_url': None,

@@ -1725,12 +1725,11 @@ class WatchlistScanner:
     def _match_to_itunes(self, artist_name: str) -> Optional[str]:
         """Match artist name to iTunes ID using fuzzy name comparison."""
         try:
-            if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
-            else:
-                logger.warning("Cannot match to iTunes - MetadataService not available")
+            client = get_client_for_source('itunes')
+            if not client or not hasattr(client, 'search_artists'):
+                logger.warning("Cannot match to iTunes - provider unavailable")
                 return None
-
+            results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to iTunes: {e}")
@@ -1739,17 +1738,9 @@ class WatchlistScanner:
     def _match_to_deezer(self, artist_name: str) -> Optional[str]:
         """Match artist name to Deezer ID using fuzzy name comparison."""
         try:
-            # Try MetadataService fallback client (if it's Deezer)
-            if hasattr(self, '_metadata_service') and self._metadata_service:
-                client = self._metadata_service.itunes  # Named 'itunes' but may be DeezerClient
-                from core.deezer_client import DeezerClient
-                if isinstance(client, DeezerClient):
-                    results = client.search_artists(artist_name, limit=5)
-                    return self._best_artist_match(results, artist_name)
-
-            # Fallback: use cached Deezer client
-            from core.metadata.registry import get_deezer_client
-            client = get_deezer_client()
+            client = get_client_for_source('deezer')
+            if not client or not hasattr(client, 'search_artists'):
+                return None
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:
@@ -1759,8 +1750,9 @@ class WatchlistScanner:
     def _match_to_discogs(self, artist_name: str) -> Optional[str]:
         """Match artist name to Discogs ID using fuzzy name comparison."""
         try:
-            from core.metadata.registry import get_discogs_client
-            client = get_discogs_client()
+            client = get_client_for_source('discogs')
+            if not client or not hasattr(client, 'search_artists'):
+                return None
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:

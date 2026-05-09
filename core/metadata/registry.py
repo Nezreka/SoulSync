@@ -12,20 +12,17 @@ import hashlib
 import time
 from typing import Any, Callable, Dict, Optional
 
+from core.metadata.constants import (
+    METADATA_PROVIDER_SOURCES,
+    METADATA_SOURCE_LABELS,
+    METADATA_SOURCE_PRIORITY,
+)
+from core.metadata.engine import clear_metadata_engine_cache, get_metadata_engine
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.registry")
 
 MetadataClientFactory = Callable[[], Any]
-
-METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase")
-METADATA_SOURCE_LABELS = {
-    "spotify": "Spotify",
-    "itunes": "iTunes",
-    "deezer": "Deezer",
-    "discogs": "Discogs",
-    "hydrabase": "Hydrabase",
-}
 
 _UNSET = object()
 _client_cache_lock = threading.RLock()
@@ -83,12 +80,21 @@ def clear_cached_metadata_clients() -> None:
     """
     with _client_cache_lock:
         _client_cache.clear()
+    try:
+        clear_metadata_engine_cache()
+    except Exception:
+        pass
 
 
 def clear_cached_metadata_client(cache_key: str) -> None:
     """Clear one lazily-created client singleton by cache key."""
     with _client_cache_lock:
         _client_cache.pop(cache_key, None)
+    if cache_key == "metadata_engine":
+        try:
+            clear_metadata_engine_cache()
+        except Exception:
+            pass
 
 
 def clear_cached_profile_spotify_client(profile_id: int) -> None:
@@ -106,6 +112,40 @@ def _get_config_value(key: str, default: Any = None) -> Any:
         return config_manager.get(key, default)
     except Exception:
         return default
+
+
+def _normalize_source(source: Optional[str]) -> str:
+    return (source or "").strip().lower()
+
+
+def get_enabled_metadata_sources() -> tuple[str, ...]:
+    """Return globally-enabled metadata provider sources."""
+    configured = _get_config_value("metadata.enabled_sources", None)
+    if configured is None:
+        return METADATA_SOURCE_PRIORITY
+    if isinstance(configured, str):
+        enabled = tuple(
+            source.strip().lower()
+            for source in configured.split(",")
+            if source.strip()
+        )
+        return enabled
+    try:
+        enabled = tuple(
+            source.strip().lower()
+            for source in configured
+            if str(source).strip()
+        )
+        return enabled
+    except TypeError:
+        return METADATA_SOURCE_PRIORITY
+
+
+def is_metadata_source_enabled(source: str) -> bool:
+    enabled = get_enabled_metadata_sources()
+    if not enabled:
+        return False
+    return _normalize_source(source) in enabled
 
 
 def _get_spotify_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
@@ -289,16 +329,32 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
 def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] = None) -> str:
     """Return configured primary metadata source."""
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    source = _normalize_source(source)
 
-    if source == "spotify":
-        try:
-            spotify = get_spotify_client(client_factory=spotify_client_factory)
-            if not spotify or not spotify.is_spotify_authenticated():
-                return "deezer"
-        except Exception:
-            return "deezer"
+    candidates = get_source_priority(source)
+    enabled_sources = set(get_enabled_metadata_sources())
+    for candidate in candidates:
+        if enabled_sources and candidate not in enabled_sources:
+            continue
+        if candidate == "spotify":
+            try:
+                spotify = get_spotify_client(client_factory=spotify_client_factory)
+                if spotify and spotify.is_spotify_authenticated():
+                    return candidate
+            except Exception:
+                continue
+            continue
+        if candidate == "hydrabase":
+            if is_hydrabase_enabled():
+                return candidate
+            continue
+        client = get_client_for_source(candidate)
+        if client is not None:
+            return candidate
 
-    return source
+    if enabled_sources and source in enabled_sources:
+        return source
+    return get_source_priority(source)[0]
 
 
 def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> str:
@@ -333,13 +389,29 @@ def get_primary_client(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return client for configured primary source."""
-    return get_client_for_source(
-        get_primary_source(spotify_client_factory=spotify_client_factory),
-        spotify_client_factory=spotify_client_factory,
-        itunes_client_factory=itunes_client_factory,
-        deezer_client_factory=deezer_client_factory,
-        discogs_client_factory=discogs_client_factory,
-    )
+    primary_source = get_primary_source(spotify_client_factory=spotify_client_factory)
+    if primary_source == "spotify":
+        try:
+            client = get_spotify_client(client_factory=spotify_client_factory)
+            if client and client.is_spotify_authenticated():
+                return client
+        except Exception:
+            return None
+        return None
+
+    if primary_source == "deezer":
+        return get_deezer_client(client_factory=deezer_client_factory)
+
+    if primary_source == "itunes":
+        return get_itunes_client(client_factory=itunes_client_factory)
+
+    if primary_source == "discogs":
+        return get_discogs_client(client_factory=discogs_client_factory)
+
+    if primary_source == "hydrabase":
+        return get_hydrabase_client(allow_fallback=False)
+
+    return None
 
 
 def get_primary_source_status(
@@ -350,26 +422,20 @@ def get_primary_source_status(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
-    source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    source = get_primary_source(spotify_client_factory=spotify_client_factory)
     started = time.time()
     connected = False
 
     try:
-        client = get_client_for_source(
-            source,
-            spotify_client_factory=spotify_client_factory,
-            itunes_client_factory=itunes_client_factory,
-            deezer_client_factory=deezer_client_factory,
-            discogs_client_factory=discogs_client_factory,
-        )
-        if source == "spotify":
-            connected = bool(client and client.is_spotify_authenticated())
-        elif source == "hydrabase":
+        if source == "hydrabase":
+            client = get_hydrabase_client(allow_fallback=False)
             connected = bool(client and (client.is_connected() if hasattr(client, "is_connected") else client.is_authenticated()))
-        elif client is not None and hasattr(client, "is_authenticated"):
-            connected = bool(client.is_authenticated())
+        elif source == "spotify":
+            client = get_spotify_client(client_factory=spotify_client_factory)
+            connected = bool(client and client.is_spotify_authenticated())
         else:
-            connected = client is not None
+            status = get_metadata_engine().get_provider_status(source)
+            connected = bool(status.authenticated or status.available)
     except Exception:
         connected = False
 
@@ -389,25 +455,30 @@ def get_client_for_source(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
-    if source == "spotify":
-        try:
-            client = get_spotify_client(client_factory=spotify_client_factory)
-            if client and client.is_spotify_authenticated():
-                return client
-        except Exception as e:
-            logger.debug("spotify client get_for_source: %s", e)
-        return None
-
-    if source == "deezer":
-        return get_deezer_client(client_factory=deezer_client_factory)
-
-    if source == "discogs":
-        return get_discogs_client(client_factory=discogs_client_factory)
+    source = _normalize_source(source)
 
     if source == "hydrabase":
+        if not is_metadata_source_enabled(source):
+            return None
         return get_hydrabase_client(allow_fallback=False)
 
-    if source == "itunes":
-        return get_itunes_client(client_factory=itunes_client_factory)
+    if source not in METADATA_PROVIDER_SOURCES:
+        return None
 
-    return None
+    if not is_metadata_source_enabled(source):
+        return None
+
+    engine = get_metadata_engine()
+    facade = engine.get_source_facade(source)
+    if facade is None:
+        return None
+
+    if source == "spotify":
+        try:
+            status = engine.get_provider_status(source)
+            if not status.authenticated:
+                return None
+        except Exception:
+            return None
+
+    return facade

@@ -326,7 +326,6 @@ def test_low_quality_tracks_follow_source_priority(mock_db_and_wishlist):
     assert spotify_client.search_calls == []
     assert len(ws.added) == 1
     add_args = ws.added[0]
-    assert add_args['track_data']['provider'] == 'deezer'
     assert add_args['track_data']['source'] == 'deezer'
 
 
