@@ -3,6 +3,13 @@
 isolation without instantiating the worker, mocking the metadata
 client, or monkey-patching ``_read_file_tags``.
 
+Diagnostic logging:
+- Every match decision (matched, rejected by duration, rejected by
+  threshold) emits a debug-level log when ``ALBUM_MATCHING_DEBUG`` is
+  truthy. Defaults to off so production logs stay clean. Flip via the
+  ``SOULSYNC_ALBUM_MATCHING_DEBUG`` env var when investigating
+  "nothing matched" reports.
+
 The worker still owns:
 - File-system traversal + tag reads
 - Metadata client lookup + album_data fetch
@@ -23,6 +30,15 @@ from __future__ import annotations
 
 import os
 from typing import Any, Callable, Dict, List, Set, Tuple
+
+# Use the project's namespaced logger so diagnostic lines actually
+# land in app.log. `logging.getLogger(__name__)` would resolve to
+# `core.imports.album_matching` which sits OUTSIDE the `soulsync.*`
+# tree the file handler watches, making every "no matches" diagnostic
+# silently invisible to anyone debugging an import problem.
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.album_matching")
 
 
 # ---------------------------------------------------------------------------
@@ -305,11 +321,25 @@ def find_exact_id_matches(
 # problem AFTER the file has been moved). The integrity check stays as
 # a defense-in-depth backstop.
 #
-# Tolerance picked to match the post-download integrity check
-# (`integrity check Duration mismatch ... drift > tolerance 3.0s`).
-# Same threshold = same intent, two enforcement points.
+# Tolerance picked to match standard library-importer behavior:
+# Picard ~7s, Beets ~10-15s, Plex ~10s. The post-download integrity
+# check uses a stricter ±3s because it's catching truncated downloads
+# (same recording, partial bytes — should be byte-exact match) — a
+# different problem from "is this the same recording across remasters
+# / encodings / streaming services."
+#
+# Real-world drift between matched-recording sources:
+# - FLAC vs MP3 transcode of same master: typically <0.5s
+# - Different mastering eras (2009 remaster vs original): 1-3s
+# - Different streaming service encodings: 2-7s (varying fade-out)
+# - Album version vs "remixed/expanded edition": often >10s — these
+#   genuinely should NOT match the original tracklist anyway
+#
+# 10s tolerance lands in the sweet spot: catches real recording
+# mismatches (gross differences = wrong track) while accepting normal
+# encoding / mastering drift.
 
-DURATION_TOLERANCE_MS = 3000   # ±3 seconds
+DURATION_TOLERANCE_MS = 10000   # ±10 seconds
 
 
 def duration_sanity_ok(file_duration_ms: int, track_duration_ms: int) -> bool:
@@ -326,19 +356,28 @@ def duration_sanity_ok(file_duration_ms: int, track_duration_ms: int) -> bool:
     return abs(int(file_duration_ms) - int(track_duration_ms)) <= DURATION_TOLERANCE_MS
 
 
-# Per-source duration field conventions. Track entries built by
-# `_build_album_track_entry` carry the source name on `source` /
-# `_source` / `provider` so we can dispatch deterministically instead
-# of guessing from value magnitude.
+# Per-source duration field conventions for what the matcher RECEIVES
+# (after each client's internal normalisation), NOT what each provider's
+# raw API returns. Deezer's API returns `duration` in seconds, but
+# `DeezerClient.get_album_tracks` converts to `duration_ms` in actual
+# ms before returning — so the matcher sees ms, and double-converting
+# here turns 255000 into 255000000 (the user-reported "no matches"
+# bug from 2026-05-09 — every Deezer-primary user's auto-import broke).
+#
+# Track entries built by `_build_album_track_entry` carry the source
+# name on `source` / `_source` / `provider` so we can dispatch
+# deterministically instead of guessing from value magnitude.
 _SECONDS_DURATION_SOURCES = frozenset((
-    'deezer',         # /album/{id} returns "duration" (seconds, int)
     'discogs',        # release tracks expose duration as MM:SS strings
+                      # (handled in metadata layer, but defensive here)
     'musicbrainz',    # recording length is sometimes seconds vs ms
-                      # depending on which endpoint — defensive
+                      # depending on which endpoint
 ))
 _MS_DURATION_SOURCES = frozenset((
     'spotify',        # duration_ms (canonical Spotify naming)
     'itunes',         # trackTimeMillis → normalised to duration_ms upstream
+    'deezer',         # CLIENT converts seconds → ms before returning
+                      # (see core/deezer_client.py:get_album_tracks)
     'qobuz',          # duration_ms
     'tidal',          # duration in seconds OR duration_ms — see below
     'hydrabase',      # duration_ms
@@ -442,6 +481,9 @@ def match_files_to_tracks(
     deduped = dedupe_files_by_position(remaining_files, file_tags, quality_rank=quality_rank)
 
     # Phase 3 — fuzzy scoring on remaining tracks.
+    duration_rejected = 0     # diagnostics for the "no matches" case
+    below_threshold = 0
+    sample_rejection_logged = False
     for i, track in enumerate(tracks):
         if i in used_track_indices:
             continue
@@ -464,6 +506,26 @@ def match_files_to_tracks(
             # file had already been moved + tagged + DB-inserted.
             file_duration = tags.get('duration_ms', 0) or 0
             if not duration_sanity_ok(file_duration, track_duration):
+                duration_rejected += 1
+                # On the FIRST rejection per matcher run, log the actual
+                # values so users / reviewers can see whether it's a
+                # unit mismatch (seconds vs ms), genuine drift, or some
+                # third thing. Logging every rejection would spam the
+                # log on a 21-file × 19-track album (399 lines).
+                if not sample_rejection_logged:
+                    sample_rejection_logged = True
+                    raw_dur_ms = track.get('duration_ms')
+                    raw_dur = track.get('duration')
+                    raw_src = track.get('source') or track.get('_source') or track.get('provider')
+                    logger.info(
+                        "[Album Matching] First duration rejection in '%s': "
+                        "file %r duration_ms=%d, track %r resolved=%d "
+                        "(raw duration_ms=%r, raw duration=%r, source=%r)",
+                        target_album,
+                        os.path.basename(f), file_duration,
+                        track.get('name', '?'), track_duration,
+                        raw_dur_ms, raw_dur, raw_src,
+                    )
                 continue
 
             score = score_file_against_track(
@@ -482,6 +544,22 @@ def match_files_to_tracks(
                 'file': best_file,
                 'confidence': round(best_score, 3),
             })
+        elif deduped:
+            below_threshold += 1
+
+    # Diagnostic surface — when the matcher returns 0 matches against
+    # a non-trivial input, it's nearly always one of: duration gate too
+    # strict, title agreement too low, or wrong tracks list passed in.
+    # Log a one-line summary at INFO so users grep'ing app.log for
+    # "no matches" cases see WHY without needing to bump log level.
+    if not matches and (audio_files or tracks):
+        logger.info(
+            "[Album Matching] No matches: %d files, %d tracks, "
+            "%d duration-rejected pairs, %d tracks below threshold. "
+            "Album: %r",
+            len(audio_files), len(tracks),
+            duration_rejected, below_threshold, target_album,
+        )
 
     # Final unmatched list: every file that didn't get used in any
     # phase. Includes quality-dedup losers (lower-quality copies of

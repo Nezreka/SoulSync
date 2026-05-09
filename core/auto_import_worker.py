@@ -1080,6 +1080,12 @@ class AutoImportWorker:
             # Fetch album with tracks
             client = get_client_for_source(source)
             if not client:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — no client available "
+                    "for source '%s'. Identification probably came from a source "
+                    "that's no longer configured.",
+                    candidate.name, source,
+                )
                 return None
 
             album_data = None
@@ -1095,6 +1101,13 @@ class AutoImportWorker:
                     album_data = {'id': album_id, 'name': identification.get('album_name', ''), 'tracks': tracks_data}
 
             if not album_data:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                    "no album data for id %r. Album probably exists in the "
+                    "search index but get_album endpoint can't fetch it (rate "
+                    "limit / region restriction / id-format mismatch).",
+                    candidate.name, source, album_id,
+                )
                 return None
 
             # Extract tracks — handle various response formats
@@ -1112,6 +1125,12 @@ class AutoImportWorker:
                     tracks = album_data['items']
 
             if not tracks:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                    "album data but no tracks. album_data keys: %s",
+                    candidate.name, source,
+                    list(album_data.keys()) if isinstance(album_data, dict) else type(album_data).__name__,
+                )
                 return None
 
             # Read tags for all files
