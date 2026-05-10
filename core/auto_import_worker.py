@@ -1027,6 +1027,11 @@ class AutoImportWorker:
                 'album_id': result.get('album_id') if result else None,
                 'album_name': album or (result.get('album_name') if result else None) or title,
                 'artist_name': artist,
+                # Carry the metadata-source artist ID forward when the
+                # search result had one — without this the standalone
+                # library write can't populate the source-id column on
+                # the artists row even though we know the ID.
+                'artist_id': result.get('artist_id', '') if result else '',
                 'track_name': title,
                 'image_url': result.get('image_url', '') if result else '',
                 'release_date': tags.get('year', '') or (result.get('release_date', '') if result else ''),
@@ -1102,12 +1107,17 @@ class AutoImportWorker:
                 return None
 
             r_artist = ''
+            r_artist_id = ''
             r_album = ''
             r_album_id = ''
             r_image = ''
             if hasattr(best_result, 'artists') and best_result.artists:
                 a = best_result.artists[0]
-                r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                if isinstance(a, dict):
+                    r_artist = a.get('name', str(a))
+                    r_artist_id = str(a.get('id', '') or '')
+                else:
+                    r_artist = str(a)
 
             # Extract image — try direct image_url first (Deezer), then album.images (Spotify)
             r_image = getattr(best_result, 'image_url', '') or ''
@@ -1131,6 +1141,7 @@ class AutoImportWorker:
                 'album_id': r_album_id or None,
                 'album_name': r_album or title,
                 'artist_name': r_artist or artist or '',
+                'artist_id': r_artist_id,
                 'track_name': getattr(best_result, 'name', '') or title,
                 'track_id': getattr(best_result, 'id', ''),
                 'image_url': r_image,
@@ -1284,9 +1295,20 @@ class AutoImportWorker:
                 image_url = img.get('url', '') if isinstance(img, dict) else str(img)
 
             r_artist = ''
+            r_artist_id = ''
             if hasattr(best_result, 'artists') and best_result.artists:
                 a = best_result.artists[0]
-                r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                if isinstance(a, dict):
+                    r_artist = a.get('name', str(a))
+                    # Surface the metadata-source artist ID so the
+                    # standalone-library write can land it on the right
+                    # `<source>_artist_id` column. Without this the
+                    # artists row gets created but with NULL on the
+                    # source-id, and watchlist scans can't recognise
+                    # the artist as already in library by stable ID.
+                    r_artist_id = str(a.get('id', '') or '')
+                else:
+                    r_artist = str(a)
 
             # Get release date
             release_date = getattr(best_result, 'release_date', '') or ''
@@ -1295,6 +1317,7 @@ class AutoImportWorker:
                 'album_id': best_result.id,
                 'album_name': best_result.name,
                 'artist_name': r_artist or artist or '',
+                'artist_id': r_artist_id,
                 'image_url': image_url,
                 'release_date': release_date,
                 'total_tracks': getattr(best_result, 'total_tracks', 0),
