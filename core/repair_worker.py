@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import sys
+import sqlite3
 import threading
 import time
 import uuid
@@ -2231,6 +2232,46 @@ class RepairWorker:
                             album_folder, filename_pattern, download_folder):
         """Move or copy a candidate track into the album folder and update DB."""
         try:
+            def _fallback_server_source():
+                if getattr(candidate, 'server_source', None):
+                    return candidate.server_source
+                if self._config_manager:
+                    getter = getattr(self._config_manager, 'get_active_media_server', None)
+                    if callable(getter):
+                        return getter() or 'plex'
+                    return self._config_manager.get('active_media_server', 'plex')
+                return 'plex'
+
+            def _resolve_target_context(cursor):
+                cursor.execute(
+                    """
+                    SELECT artist_id, server_source
+                    FROM tracks
+                    WHERE album_id = ?
+                    ORDER BY track_number, title
+                    LIMIT 1
+                    """,
+                    (album_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0] or candidate.artist_id, row[1] or _fallback_server_source()
+
+                try:
+                    cursor.execute(
+                        "SELECT artist_id, server_source FROM albums WHERE id = ? LIMIT 1",
+                        (album_id,),
+                    )
+                except sqlite3.OperationalError:
+                    row = None
+                else:
+                    row = cursor.fetchone()
+
+                if row:
+                    return row[0] or candidate.artist_id, row[1] or _fallback_server_source()
+
+                return candidate.artist_id, _fallback_server_source()
+
             # Resolve source file
             src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not src_path or not os.path.exists(src_path):
@@ -2264,18 +2305,15 @@ class RepairWorker:
                     # Update existing DB record to point to new album and path
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    # Get the target album's artist_id for consistency
-                    cursor.execute("SELECT artist_id FROM tracks WHERE album_id = ? LIMIT 1", (album_id,))
-                    artist_row = cursor.fetchone()
-                    target_artist_id = artist_row[0] if artist_row else candidate.artist_id
+                    target_artist_id, target_server_source = _resolve_target_context(cursor)
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?,
-                            file_path = ?, track_number = ?,
+                            file_path = ?, track_number = ?, server_source = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                     """, (album_id, target_artist_id, track_name,
-                          target_path, track_number, candidate.id))
+                          target_path, track_number, target_server_source, candidate.id))
 
                     # Clean up the source single's album if it's now empty
                     cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (candidate.album_id,))
@@ -2300,17 +2338,14 @@ class RepairWorker:
 
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    # Get artist_id from existing album tracks
-                    cursor.execute("SELECT artist_id FROM tracks WHERE album_id = ? LIMIT 1", (album_id,))
-                    artist_row = cursor.fetchone()
-                    target_artist_id = artist_row[0] if artist_row else candidate.artist_id
+                    target_artist_id, target_server_source = _resolve_target_context(cursor)
 
                     cursor.execute("""
                         INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration,
-                                            file_path, bitrate, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                            file_path, bitrate, server_source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, (new_track_id, album_id, target_artist_id, track_name, track_number,
-                          candidate.duration, target_path, candidate.bitrate))
+                          candidate.duration, target_path, candidate.bitrate, target_server_source))
                     conn.commit()
 
             finally:
