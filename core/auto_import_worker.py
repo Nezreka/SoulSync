@@ -1526,23 +1526,61 @@ class AutoImportWorker:
                 continue
 
             try:
-                # Build context matching the manual import format
+                # Build context matching the manual import format.
+                #
+                # The post-process pipeline (`_post_process_matched_download`
+                # → `record_soulsync_library_entry`) reads `source` to pick
+                # the right source-id columns on artists/albums/tracks,
+                # and reads `_download_username` to label the row in
+                # library history + provenance. Without these the SoulSync
+                # standalone library lands the file but leaves
+                # `spotify_track_id` / `deezer_id` / etc. NULL and tags the
+                # provenance row as "Soulseek" (the default fallback).
+                # SoulSync standalone is a full server replacement, so the
+                # row must carry the same field richness as a Plex/Jellyfin/
+                # Navidrome scan would write.
                 context_key = f"auto_import_{candidate.folder_hash}_{track_number}"
+                # Album-level identifiers from the metadata source response.
+                # `album_data['id']` is the source-native album id (e.g.
+                # spotify album id, deezer album id). Identification fed it
+                # into `identification['album_id']` already; prefer the
+                # album_data version since it's authoritative when both
+                # are present.
+                source_album_id = album_data.get('id') or identification.get('album_id') or ''
+                # ISRC + MusicBrainz Recording ID — propagated by the
+                # metadata layer (`_build_album_track_entry`) so files
+                # tagged with these IDs can match later watchlist scans
+                # without relying on fuzzy title comparison.
+                track_isrc = track.get('isrc', '') or ''
+                track_mbid = track.get('musicbrainz_recording_id', '') or track.get('mbid', '') or ''
                 context = {
+                    # Top-level `source` is the canonical signal that the
+                    # imports pipeline reads via `get_import_source()`.
+                    # `get_library_source_id_columns(source)` then picks
+                    # the right column on artists/albums/tracks for the
+                    # source-aware UPDATE.
+                    'source': source,
+                    # `_download_username` is read by
+                    # `record_library_history_download` +
+                    # `record_download_provenance` to label the row.
+                    # 'auto_import' maps to "Auto-Import" / "auto_import"
+                    # in those source maps so the UI doesn't show every
+                    # imported file as "Soulseek".
+                    '_download_username': 'auto_import',
                     'spotify_artist': {
-                        'id': identification.get('album_id') or 'auto_import',
+                        'id': identification.get('artist_id') or '',
                         'name': artist_name,
                         'genres': [],
                     },
                     'spotify_album': {
-                        'id': album_data.get('id') or identification.get('album_id') or '',
+                        'id': source_album_id,
                         'name': album_name,
                         'release_date': release_date,
                         'total_tracks': album_data.get('total_tracks', match_result.get('total_tracks', 0)),
                         'total_discs': total_discs,
                         'image_url': image_url,
                         'images': album_data.get('images', [{'url': image_url}] if image_url else []),
-                        'artists': [{'name': artist_name}],
+                        'artists': [{'name': artist_name, 'id': identification.get('artist_id') or ''}],
                         'album_type': album_data.get('album_type', 'album'),
                     },
                     'track_info': {
@@ -1553,6 +1591,14 @@ class AutoImportWorker:
                         'duration_ms': track.get('duration_ms', 0),
                         'artists': track.get('artists', [{'name': artist_name}]),
                         'uri': track.get('uri', ''),
+                        # Album-id back-reference + per-recording IDs so
+                        # `get_import_source_ids` can resolve them onto
+                        # the right column even when the source's API
+                        # nests them under `album.id` rather than
+                        # `track.album_id`.
+                        'album_id': source_album_id,
+                        'isrc': track_isrc,
+                        'musicbrainz_recording_id': track_mbid,
                     },
                     'original_search_result': {
                         'title': track_name,
