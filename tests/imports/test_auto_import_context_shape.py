@@ -253,3 +253,112 @@ def test_track_info_includes_album_id_back_reference(worker_with_capture, tmp_pa
 
     ti = worker_with_capture._captured[0]["track_info"]
     assert ti.get("album_id") == "ALBUM-ID-FROM-SOURCE"
+
+
+# ---------------------------------------------------------------------------
+# Artist source-id propagation — identification dict → context → DB write
+# ---------------------------------------------------------------------------
+
+
+def test_context_artist_id_uses_identification_artist_id(worker_with_capture, tmp_path):
+    """When `identification` carries `artist_id` (from the metadata
+    source's search response), it must end up on
+    `context['spotify_artist']['id']` so the standalone library write
+    populates the `<source>_artist_id` column on the artists row.
+
+    Before this fix the worker put `identification['album_id']` into
+    that field — a copy-paste bug that wrote the album ID into the
+    artist's source-ID column. Honest pin: artist_id flows from
+    identification through to context, no falsey fallback."""
+    f = tmp_path / "01.flac"
+    f.write_bytes(b"audio")
+    cand = _FakeCandidate(path=str(tmp_path), name="Album")
+    ident = _make_identification("spotify")
+    ident["artist_id"] = "SPOTIFY-ARTIST-ID-XYZ"
+    ident["album_id"] = "SPOTIFY-ALBUM-ID-DIFFERENT"
+    mr = _make_match_result("spotify", 1)
+    mr["matches"] = [{
+        "track": {"id": "t1", "name": "Track", "track_number": 1,
+                  "disc_number": 1, "duration_ms": 200000,
+                  "artists": [{"name": "A"}]},
+        "file": str(f), "confidence": 0.95,
+    }]
+
+    worker_with_capture._process_matches(cand, ident, mr)
+
+    ctx = worker_with_capture._captured[0]
+    assert ctx["spotify_artist"]["id"] == "SPOTIFY-ARTIST-ID-XYZ", (
+        "spotify_artist['id'] should hold the artist's source ID, NOT "
+        "the album_id (regression case for the prior copy-paste bug)."
+    )
+    # Album artists list must also carry the artist source ID so
+    # `get_import_source_ids` can resolve it via the album→artists
+    # fallback path.
+    assert ctx["spotify_album"]["artists"][0]["id"] == "SPOTIFY-ARTIST-ID-XYZ"
+
+
+def test_context_artist_id_is_empty_when_identification_missing_it(worker_with_capture, tmp_path):
+    """When the identification dict doesn't surface artist_id (e.g.
+    filename-only identification fallback), context falls back to
+    empty string — NOT to album_id (the prior wrong fallback)."""
+    f = tmp_path / "01.flac"
+    f.write_bytes(b"audio")
+    cand = _FakeCandidate(path=str(tmp_path), name="Album")
+    ident = _make_identification("spotify")
+    ident.pop("artist_id", None)  # force no artist_id
+    ident["album_id"] = "SOME-ALBUM-ID"
+    mr = _make_match_result("spotify", 1)
+    mr["matches"] = [{
+        "track": {"id": "t1", "name": "Track", "track_number": 1,
+                  "disc_number": 1, "duration_ms": 200000,
+                  "artists": [{"name": "A"}]},
+        "file": str(f), "confidence": 0.95,
+    }]
+
+    worker_with_capture._process_matches(cand, ident, mr)
+
+    ctx = worker_with_capture._captured[0]
+    assert ctx["spotify_artist"]["id"] == "", (
+        "spotify_artist['id'] must be empty (NULL on the artists row) "
+        "when the identification dict has no artist_id. It must NEVER "
+        "fall back to album_id — that was the bug this PR fixed."
+    )
+
+
+def test_search_metadata_source_extracts_artist_id_from_dict_artist():
+    """`_search_metadata_source` must extract the artist source ID
+    from `best_result.artists[0]['id']` so identification carries it
+    forward. Without this, the worker's context-shape contract above
+    is satisfied syntactically but the DB always sees empty."""
+    from core.auto_import_worker import AutoImportWorker, FolderCandidate
+    from unittest.mock import patch, MagicMock
+
+    fake_album = MagicMock()
+    fake_album.id = "ALBUM-ID"
+    fake_album.name = "Test Album"
+    fake_album.artists = [{"id": "ARTIST-SRC-ID", "name": "Test Artist"}]
+    fake_album.image_url = "https://img.example/cover.jpg"
+    fake_album.release_date = "2024-01-01"
+    fake_album.total_tracks = 10
+
+    fake_client = MagicMock()
+    fake_client.search_albums.return_value = [fake_album]
+
+    candidate = FolderCandidate(
+        path="/staging/album", name="Test Album",
+        audio_files=[f"/staging/album/0{i}.flac" for i in range(1, 11)],
+    )
+
+    worker = AutoImportWorker(database=MagicMock(), process_callback=lambda *a, **k: None)
+    with patch("core.metadata_service.get_primary_source", return_value="spotify"), \
+         patch("core.metadata_service.get_client_for_source", return_value=fake_client):
+        result = worker._search_metadata_source(
+            "Test Artist", "Test Album", "tags", candidate,
+        )
+
+    assert result is not None
+    assert result.get("artist_id") == "ARTIST-SRC-ID", (
+        "_search_metadata_source must extract artist_id from "
+        "best_result.artists[0]['id'] so the rest of the pipeline "
+        "can write it to the artists table."
+    )
