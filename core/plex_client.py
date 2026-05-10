@@ -1197,12 +1197,28 @@ class PlexClient(MediaServerClient):
         """Trigger Plex library scan.
 
         In all-libraries mode, fans the scan trigger across every music
-        section. Otherwise targets the named section (default ``Music``).
-        Returns True if at least one section was successfully triggered.
+        section. Otherwise targets the auto-detected music section
+        (``self.music_library`` — populated by ``_find_music_library``
+        which iterates by ``section.type == 'artist'`` and works
+        regardless of the section's display name). Falls back to
+        looking up by ``library_name`` only when auto-detection
+        hasn't run / failed (test fixtures, edge cases).
+
+        Pre-fix this method ignored ``self.music_library`` and always
+        called ``self.server.library.section(library_name)`` with the
+        hardcoded "Music" default — broke for any non-English section
+        name (Música, Musique, Musik, etc. — issue #535). Read
+        methods like ``get_artists`` already routed through
+        ``_get_music_sections`` so they didn't have the bug; this
+        aligns the scan-trigger path with the same resolution.
+
+        Returns True if at least one section was successfully
+        triggered.
         """
         if not self.ensure_connection():
             return False
 
+        section_label = library_name
         try:
             if self._all_libraries_mode:
                 sections = self._get_music_sections()
@@ -1219,19 +1235,30 @@ class PlexClient(MediaServerClient):
                 logger.info(f"Triggered Plex library scan across {triggered}/{len(sections)} music sections")
                 return triggered > 0
 
-            library = self.server.library.section(library_name)
+            # Prefer the auto-detected music section. Falls back to a
+            # literal section lookup by library_name only when
+            # auto-detection hasn't populated the cached reference.
+            if self.music_library is not None:
+                library = self.music_library
+                section_label = library.title
+            else:
+                library = self.server.library.section(library_name)
+                section_label = library_name
             library.update()  # Non-blocking scan request
-            logger.info(f"Triggered Plex library scan for '{library_name}'")
+            logger.info(f"Triggered Plex library scan for '{section_label}'")
             return True
         except Exception as e:
-            logger.error(f"Failed to trigger library scan for '{library_name}': {e}")
+            logger.error(f"Failed to trigger library scan for '{section_label}': {e}")
             return False
 
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Plex library is currently scanning.
 
         In all-libraries mode, returns True if ANY music section is
-        scanning. Otherwise checks the named section.
+        scanning. Otherwise checks the auto-detected music section
+        first (same fix as ``trigger_library_scan`` — see #535) and
+        falls back to literal ``library_name`` lookup only when
+        auto-detection hasn't populated the cached reference.
         """
         if not self.ensure_connection():
             logger.debug("Not connected to Plex, cannot check scan status")
@@ -1261,7 +1288,13 @@ class PlexClient(MediaServerClient):
                     logger.debug(f"Could not check server activities: {activities_error}")
                 return False
 
-            library = self.server.library.section(library_name)
+            # Same resolution as trigger_library_scan — prefer the
+            # auto-detected section so non-English Plex section names
+            # (Música, Musique, Musik) don't break scan-status checks.
+            if self.music_library is not None:
+                library = self.music_library
+            else:
+                library = self.server.library.section(library_name)
 
             # Check if library has a scanning attribute or is refreshing
             # The Plex API exposes this through the library's refreshing property
@@ -1272,7 +1305,12 @@ class PlexClient(MediaServerClient):
                 logger.debug("Library is refreshing")
                 return True
 
-            # Alternative method: Check server activities for scanning
+            # Alternative method: Check server activities for scanning.
+            # Match on the actual resolved section's title — NOT the
+            # `library_name` arg, which defaults to "Music" and would
+            # never match activities for non-English sections like
+            # "Música" / "Musique" / "Musik" (#535).
+            section_title = getattr(library, 'title', library_name)
             try:
                 activities = self.server.activities()
                 logger.debug("Found %s server activities", len(activities))
@@ -1284,7 +1322,7 @@ class PlexClient(MediaServerClient):
                     logger.debug("Activity - type=%s title=%s", activity_type, activity_title)
 
                     if (activity_type in ['library.scan', 'library.refresh'] and
-                        library_name.lower() in activity_title.lower()):
+                        section_title.lower() in activity_title.lower()):
                         logger.debug("Found matching scan activity: %s", activity_title)
                         return True
             except Exception as activities_error:
