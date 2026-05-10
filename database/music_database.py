@@ -1792,6 +1792,17 @@ class MusicDatabase:
             if 'musicbrainz_match_status' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_match_status TEXT")
                 columns_added = True
+            # MusicBrainz exposes alternate-spelling aliases on every artist
+            # record (Japanese kanji ↔ romanized, Cyrillic ↔ Latin, etc.).
+            # SoulSync's artist matching used to compare expected vs actual
+            # name with raw similarity — cross-script comparison scored 0%
+            # and the file got quarantined even when MusicBrainz knew both
+            # names belonged to the same artist (issue #442). Persist the
+            # alias list as JSON so the verifier + matcher can consult it
+            # without re-querying MB on every comparison.
+            if 'aliases' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN aliases TEXT")
+                columns_added = True
             if columns_added:
                 logger.info("Added MusicBrainz columns to artists table")
 
