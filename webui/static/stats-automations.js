@@ -759,26 +759,37 @@ async function _autoImportLoadStatus() {
         if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
         if (scanNowBtn) scanNowBtn.style.display = data.running ? '' : 'none';
 
-        // Live scan + per-track processing progress
+        // Live scan + per-track processing progress.
+        // `active_imports` (added when the worker switched to a bounded
+        // executor pool) is the source of truth; multiple albums can be
+        // in flight at once. Render each one on its own line; fall back
+        // to the legacy single-line summary for older backend payloads.
         if (progressEl) {
-            if (data.current_status === 'processing') {
+            const active = Array.isArray(data.active_imports) ? data.active_imports : [];
+            if (active.length > 0) {
                 progressEl.style.display = '';
                 if (progressText) {
-                    const idx = data.current_track_index || 0;
-                    const total = data.current_track_total || 0;
-                    const trackName = data.current_track_name || '';
-                    const folder = data.current_folder || '...';
-                    if (total > 0) {
-                        progressText.textContent = `Processing ${folder} — track ${idx}/${total}: ${trackName}`;
-                    } else {
-                        progressText.textContent = `Processing: ${folder}`;
-                    }
+                    const lines = active.map(a => {
+                        const folder = a.folder_name || '...';
+                        const idx = a.track_index || 0;
+                        const total = a.track_total || 0;
+                        const trackName = a.track_name || '';
+                        if (a.status === 'processing' && total > 0) {
+                            return `${folder} — track ${idx}/${total}: ${trackName}`;
+                        }
+                        if (a.status === 'matching') return `${folder} — matching tracks…`;
+                        if (a.status === 'identifying') return `${folder} — identifying…`;
+                        return `${folder} — queued`;
+                    });
+                    progressText.textContent = lines.length === 1
+                        ? `Processing ${lines[0]}`
+                        : `Processing ${lines.length} imports:\n${lines.join('\n')}`;
                 }
             } else if (data.current_status === 'scanning') {
                 progressEl.style.display = '';
                 if (progressText) {
                     const stats = data.stats || {};
-                    progressText.textContent = `Scanning: ${data.current_folder || '...'} (${stats.scanned || 0} processed)`;
+                    progressText.textContent = `Scanning… (${stats.scanned || 0} processed)`;
                 }
             } else {
                 progressEl.style.display = 'none';
@@ -894,14 +905,19 @@ async function _autoImportLoadResults() {
                 r.status === 'processing' ? 'processing' : 'neutral';
 
             // Live per-track progress for the row currently being processed.
-            // Match by folder_name since the worker only tracks one folder at a time.
+            // Match by folder_hash through the `active_imports` array
+            // — the worker now runs multiple imports in parallel via a
+            // bounded executor pool, so `current_folder` alone can't
+            // identify a row's live state.
             const liveStatus = _autoImportLastStatus;
+            const liveActive = (liveStatus && Array.isArray(liveStatus.active_imports))
+                ? liveStatus.active_imports.find(a => a.folder_hash === r.folder_hash)
+                : null;
             const isLiveProcessing = r.status === 'processing'
-                && liveStatus && liveStatus.current_status === 'processing'
-                && liveStatus.current_folder === r.folder_name;
-            const liveTrackIdx = isLiveProcessing ? (liveStatus.current_track_index || 0) : 0;
-            const liveTrackTotal = isLiveProcessing ? (liveStatus.current_track_total || 0) : 0;
-            const liveTrackName = isLiveProcessing ? (liveStatus.current_track_name || '') : '';
+                && liveActive && liveActive.status === 'processing';
+            const liveTrackIdx = isLiveProcessing ? (liveActive.track_index || 0) : 0;
+            const liveTrackTotal = isLiveProcessing ? (liveActive.track_total || 0) : 0;
+            const liveTrackName = isLiveProcessing ? (liveActive.track_name || '') : '';
 
             // Parse match data for track details
             let matchCount = 0, totalTracks = 0, trackDetails = [];

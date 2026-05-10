@@ -34349,14 +34349,38 @@ def auto_import_reject(item_id):
 
 @app.route('/api/auto-import/scan-now', methods=['POST'])
 def auto_import_scan_now():
-    """Trigger an immediate scan cycle."""
+    """Trigger an immediate scan cycle.
+
+    Routes through `trigger_scan()`, the canonical entry point shared
+    with the worker's timer loop. Pre-refactor this endpoint spawned
+    a fresh `_scan_cycle` thread per click — emergent parallelism
+    that grew unbounded with each click and produced racy access to
+    candidate-tracking state. Post-refactor:
+
+    - Manual triggers + the timer loop share one scan-lock, so only
+      one scan runs at a time
+    - Per-candidate processing happens on the worker's bounded
+      `ThreadPoolExecutor` (default 3 workers — predictable
+      concurrency, configurable via `auto_import.max_workers`)
+    - Multiple "Scan Now" clicks while a scan is in flight no-op
+      instead of stacking up parallel scanners
+
+    Runs the scan in a background thread so the HTTP response returns
+    immediately — `trigger_scan()` itself is fast (just enumeration +
+    submit), but a slow filesystem walk on a large staging dir could
+    still hold the request thread for seconds. Detached thread is
+    safe: scan-lock prevents duplicate work, executor handles
+    per-candidate processing.
+    """
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
     if not auto_import_worker.running:
         return jsonify({"success": False, "error": "Auto-import is not running"}), 400
-    # Run scan in background thread
-    import threading
-    threading.Thread(target=auto_import_worker._scan_cycle, daemon=True).start()
+    threading.Thread(
+        target=auto_import_worker.trigger_scan,
+        daemon=True,
+        name='AutoImportScanNow',
+    ).start()
     return jsonify({"success": True})
 
 

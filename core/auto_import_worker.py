@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -41,6 +42,29 @@ class FolderCandidate:
     # meaningless ("Staging", "Music", etc.) — folder-name identification must
     # be skipped or it will false-match against random albums.
     is_staging_root: bool = False
+
+
+@dataclass
+class _ActiveImport:
+    """Per-candidate UI state for an in-flight import.
+
+    Multiple instances can exist simultaneously when the executor pool
+    runs candidates in parallel. Each is keyed on `folder_hash` in the
+    worker's `_active_imports` dict; mutations are gated by
+    `_active_lock` so the polling UI sees a coherent snapshot.
+
+    Pre-refactor the worker had scalar `_current_folder` /
+    `_current_status` / `_current_track_*` fields stomped by every pool
+    worker — three concurrent imports would interleave each other's
+    folder name + track index in the UI. This dataclass + the dict
+    keyed on folder_hash makes per-candidate state isolated.
+    """
+    folder_hash: str
+    folder_name: str
+    status: str = 'queued'   # 'queued' | 'identifying' | 'matching' | 'processing'
+    track_index: int = 0
+    track_total: int = 0
+    track_name: str = ''
 
 
 def _compute_folder_hash(audio_files: List[str]) -> str:
@@ -160,13 +184,36 @@ def _quality_rank(ext: str) -> int:
 
 
 class AutoImportWorker:
-    """Background worker that watches the staging folder and auto-imports music."""
+    """Background worker that watches the staging folder and auto-imports music.
+
+    Concurrency model:
+
+    - **One scan thread** (the `_run` timer loop) enumerates the staging
+      folder periodically. Manual "Scan Now" requests share the same
+      scan via `trigger_scan()` — non-blocking lock means duplicate
+      requests no-op instead of stacking up parallel scanners.
+    - **Bounded process pool** (`ThreadPoolExecutor`, default 3 workers)
+      handles per-candidate work: identification, matching, file move,
+      tagging, DB write. Each candidate runs to completion in its own
+      pool thread; multiple candidates run in parallel up to the pool
+      size.
+    - The scan thread is FAST (just enumeration + submit), the pool
+      threads are SLOW (per-candidate work).
+
+    Pre-refactor, the manual-scan endpoint spawned a fresh
+    `threading.Thread(target=_scan_cycle)` per click — emergent
+    parallelism with no upper bound, no shared queue, no graceful
+    shutdown. Fixed by routing both the timer + the manual button
+    through `trigger_scan()` and submitting per-candidate work to a
+    shared executor.
+    """
 
     def __init__(self, database, staging_path: str = './Staging',
                  transfer_path: str = './Transfer',
                  process_callback: Optional[Callable] = None,
                  config_manager: Any = None,
-                 automation_engine: Any = None):
+                 automation_engine: Any = None,
+                 max_workers: int = 3):
         self.database = database
         self.staging_path = staging_path
         self.transfer_path = transfer_path
@@ -174,33 +221,173 @@ class AutoImportWorker:
         self._config_manager = config_manager
         self._automation_engine = automation_engine
 
+        # Pool size — defaults to 3 to match the existing pool patterns
+        # (`missing_download_executor`, `sync_executor`,
+        # `import_singles_executor`). Configurable via the
+        # `auto_import.max_workers` config key on init; not hot-
+        # reloadable (the executor is created once and lives for the
+        # worker's lifetime).
+        if config_manager:
+            max_workers = config_manager.get('auto_import.max_workers', max_workers)
+        self._max_workers = max(1, int(max_workers))
+
         self.running = False
         self.paused = False
         self.should_stop = False
         self._thread = None
         self._stop_event = threading.Event()
+        # Bounded executor for per-candidate processing work. Created
+        # in `start()` so a stopped+restarted worker gets a fresh pool.
+        self._executor: Optional[ThreadPoolExecutor] = None
+        # Non-blocking lock that gates concurrent scans. Both the timer
+        # loop and the manual "Scan Now" endpoint route through
+        # `trigger_scan()`; a `try-acquire` here means whichever caller
+        # gets there first runs the scan and the rest no-op.
+        self._scan_lock = threading.Lock()
 
         # State
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
-        # Candidates currently being processed (skip on rescan). Keyed
-        # on folder_hash, NOT path — multiple candidates can share a
-        # path (each loose-file group at staging root has the same
-        # parent directory but a distinct hash from its own audio
-        # files). Path-keyed dedup would treat siblings as duplicates
-        # and silently skip all but the first.
-        self._processing_hashes: set = set()
-        self._current_folder = ''
-        self._current_status = 'idle'  # 'idle' | 'scanning' | 'processing'
-        # Live per-track progress so the UI can show "Processing Speak Now
-        # (3/14: Mine)" while a multi-track album is being post-processed.
-        # Without this, auto-import goes silent for the entire processing
-        # window (which can be 5+ minutes for a full album) since
-        # ``_record_result`` only fires after every track is done.
-        self._current_track_index = 0
-        self._current_track_total = 0
-        self._current_track_name = ''
+        # Candidates currently submitted to the pool OR running in a
+        # pool worker. Keyed on folder_hash, NOT path — multiple
+        # candidates can share a path (each loose-file group at staging
+        # root has the same parent directory but a distinct hash from
+        # its own audio files). Path-keyed dedup would treat siblings
+        # as duplicates and silently skip all but the first.
+        # Rebranded from `_processing_hashes` to `_submitted_hashes`
+        # because submission to the pool happens immediately (queued
+        # OR running) — both states need to gate next-scan submissions.
+        self._submitted_hashes: set = set()
+        self._submitted_lock = threading.Lock()
+
+        # Per-candidate UI state, keyed on folder_hash. Multiple pool
+        # workers populate this dict simultaneously; `_active_lock`
+        # gates every read/write so the polling UI sees a coherent
+        # snapshot. Replaces the scalar `_current_folder` /
+        # `_current_status` / `_current_track_*` fields — those were
+        # safe under the old sequential model but stomped each other
+        # under parallel executor workers.
+        self._active_imports: Dict[str, _ActiveImport] = {}
+        self._active_lock = threading.Lock()
+
+        # Whether a scan-cycle (enumeration phase) is currently
+        # running. Distinct from per-candidate processing — the scan
+        # is fast (seconds) and runs at most once at a time
+        # (gated by `_scan_lock`). Per-candidate work runs concurrently
+        # in the pool, tracked in `_active_imports`.
+        self._scan_in_progress = False
+
+        # `_stats[x] += 1` from multiple pool threads is read-modify-
+        # write — under load the counters drift. `_stats_lock` gates
+        # every mutation via `_bump_stat`.
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
+        self._stats_lock = threading.Lock()
         self._last_scan_time = None
+
+    # ── Per-candidate UI state helpers ──
+
+    def _register_active(self, candidate: 'FolderCandidate', status: str = 'queued') -> None:
+        """Insert/refresh the active-import entry for a candidate."""
+        with self._active_lock:
+            entry = self._active_imports.get(candidate.folder_hash)
+            if entry is None:
+                entry = _ActiveImport(
+                    folder_hash=candidate.folder_hash,
+                    folder_name=candidate.name,
+                    status=status,
+                )
+                self._active_imports[candidate.folder_hash] = entry
+            else:
+                # Refresh in case the candidate name changed across scans
+                entry.folder_name = candidate.name
+                entry.status = status
+
+    def _update_active(self, folder_hash: str, **fields: Any) -> None:
+        """Mutate fields on an active-import entry. No-op if the entry
+        isn't registered (e.g. test calling helpers directly without
+        going through `_register_active`)."""
+        with self._active_lock:
+            entry = self._active_imports.get(folder_hash)
+            if entry is None:
+                return
+            for key, value in fields.items():
+                if hasattr(entry, key):
+                    setattr(entry, key, value)
+
+    def _unregister_active(self, folder_hash: str) -> None:
+        with self._active_lock:
+            self._active_imports.pop(folder_hash, None)
+
+    def _snapshot_active(self) -> List[Dict[str, Any]]:
+        """Coherent list snapshot for the UI poller. Order is insertion
+        order so the legacy single-import fields (which read the first
+        entry) are stable for any given UI poll cycle."""
+        with self._active_lock:
+            return [
+                {
+                    'folder_hash': e.folder_hash,
+                    'folder_name': e.folder_name,
+                    'status': e.status,
+                    'track_index': e.track_index,
+                    'track_total': e.track_total,
+                    'track_name': e.track_name,
+                }
+                for e in self._active_imports.values()
+            ]
+
+    def _bump_stat(self, key: str) -> None:
+        """Thread-safe increment of `_stats[key]`. Pool workers call
+        this from multiple threads; raw `self._stats[k] += 1` is read-
+        modify-write and drops counts under load."""
+        with self._stats_lock:
+            self._stats[key] = self._stats.get(key, 0) + 1
+
+    # Read-only back-compat properties — the test fixture (and the
+    # polling UI's legacy fields) read these. Resolve to the FIRST
+    # active import so the existing single-track-progress UI keeps
+    # working when only one candidate is in flight (the common case).
+    # When N candidates run in parallel the UI should iterate
+    # `active_imports` from `get_status()` instead.
+
+    @property
+    def _current_folder(self) -> str:
+        with self._active_lock:
+            if not self._active_imports:
+                return ''
+            return next(iter(self._active_imports.values())).folder_name
+
+    @property
+    def _current_status(self) -> str:
+        with self._active_lock:
+            for e in self._active_imports.values():
+                if e.status == 'processing':
+                    return 'processing'
+            if self._active_imports:
+                # An active import that hasn't reached 'processing' yet
+                # is still in identification/matching — keep showing
+                # 'scanning' for the legacy UI (no separate state).
+                return 'scanning'
+        return 'scanning' if self._scan_in_progress else 'idle'
+
+    @property
+    def _current_track_index(self) -> int:
+        with self._active_lock:
+            if not self._active_imports:
+                return 0
+            return next(iter(self._active_imports.values())).track_index
+
+    @property
+    def _current_track_total(self) -> int:
+        with self._active_lock:
+            if not self._active_imports:
+                return 0
+            return next(iter(self._active_imports.values())).track_total
+
+    @property
+    def _current_track_name(self) -> str:
+        with self._active_lock:
+            if not self._active_imports:
+                return ''
+            return next(iter(self._active_imports.values())).track_name
 
     def start(self):
         if self.running:
@@ -208,9 +395,15 @@ class AutoImportWorker:
         self.should_stop = False
         self._stop_event.clear()
         self.running = True
+        # Fresh pool per start so a stop+start cycle gets a clean
+        # executor (the previous one is shut down in `stop()`).
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._max_workers,
+            thread_name_prefix='AutoImport',
+        )
         self._thread = threading.Thread(target=self._run, daemon=True, name='AutoImportWorker')
         self._thread.start()
-        logger.info("Auto-import worker started")
+        logger.info(f"Auto-import worker started (max_workers={self._max_workers})")
 
     def stop(self):
         self.should_stop = True
@@ -218,6 +411,13 @@ class AutoImportWorker:
         self.running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
+        # Wait for in-flight pool work to finish before reporting
+        # stopped. Without `wait=True` we'd return while file moves /
+        # tag writes / DB inserts are still mid-flight, which can
+        # corrupt state on shutdown.
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
         logger.info("Auto-import worker stopped")
 
     def pause(self):
@@ -229,15 +429,32 @@ class AutoImportWorker:
         logger.info("Auto-import worker resumed")
 
     def get_status(self) -> dict:
+        active = self._snapshot_active()
+        # Aggregate top-level status: 'processing' if any active import
+        # is in the per-track loop, else 'scanning' if a scan or any
+        # earlier-phase import is in flight, else 'idle'.
+        if any(a['status'] == 'processing' for a in active):
+            current_status = 'processing'
+        elif active or self._scan_in_progress:
+            current_status = 'scanning'
+        else:
+            current_status = 'idle'
+        # Legacy single-import scalars — pulled from the first active
+        # entry so the existing UI keeps rendering one folder at a
+        # time. Multi-import-aware UIs should read `active_imports`.
+        first = active[0] if active else None
+        with self._stats_lock:
+            stats_snapshot = self._stats.copy()
         return {
             'running': self.running,
             'paused': self.paused,
-            'current_folder': self._current_folder,
-            'current_status': self._current_status,
-            'current_track_index': self._current_track_index,
-            'current_track_total': self._current_track_total,
-            'current_track_name': self._current_track_name,
-            'stats': self._stats.copy(),
+            'current_status': current_status,
+            'current_folder': first['folder_name'] if first else '',
+            'current_track_index': first['track_index'] if first else 0,
+            'current_track_total': first['track_total'] if first else 0,
+            'current_track_name': first['track_name'] if first else '',
+            'active_imports': active,
+            'stats': stats_snapshot,
             'last_scan_time': self._last_scan_time,
         }
 
@@ -246,7 +463,7 @@ class AutoImportWorker:
         return self._stop_event.wait(seconds)
 
     def _run(self):
-        """Main worker loop."""
+        """Main worker loop — calls `trigger_scan()` periodically."""
         interval = 60
         if self._config_manager:
             interval = self._config_manager.get('auto_import.scan_interval', 60)
@@ -262,31 +479,113 @@ class AutoImportWorker:
                     enabled = self._config_manager.get('auto_import.enabled', False)
 
                 if enabled:
-                    try:
-                        self._current_status = 'scanning'
-                        self._scan_cycle()
-                        self._last_scan_time = datetime.now().isoformat()
-                    except Exception as e:
-                        logger.error(f"Auto-import scan cycle error: {e}")
-                    finally:
-                        self._current_status = 'idle'
-                        self._current_folder = ''
+                    self.trigger_scan()
 
             if self._interruptible_sleep(interval):
                 break
 
-    def _scan_cycle(self):
-        """One full scan of the staging folder."""
+    def trigger_scan(self):
+        """Run one scan cycle — single canonical entry point for both
+        the timer loop AND the manual "Scan Now" endpoint.
+
+        Non-blocking: if a scan is already running, returns immediately
+        without spawning a duplicate. The in-flight scan will pick up
+        any new files anyway, and stacking parallel scanners caused
+        unbounded thread growth pre-refactor (each "Scan Now" click
+        spawned a fresh `_scan_cycle` thread).
+
+        Per-candidate processing happens on the bounded executor pool
+        — this method just enumerates + submits, so it returns fast.
+        """
+        if not self._scan_lock.acquire(blocking=False):
+            logger.debug("[Auto-Import] Scan already running, skipping duplicate trigger")
+            return
+
+        try:
+            self._scan_in_progress = True
+            self._scan_and_submit()
+            self._last_scan_time = datetime.now().isoformat()
+        except Exception as e:
+            logger.error(f"Auto-import scan cycle error: {e}")
+        finally:
+            self._scan_in_progress = False
+            self._scan_lock.release()
+
+    def _scan_and_submit(self):
+        """Enumerate staging candidates + submit each to the executor.
+
+        Fast — does NOT block on per-candidate processing. The pool
+        runs `_process_one_candidate` in parallel up to `max_workers`.
+        """
         staging = self._resolve_staging_path()
         if not staging or not os.path.isdir(staging):
             logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
             return
 
-        # Find folder candidates
         candidates = self._enumerate_folders(staging)
         logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:
             return
+
+        if self._executor is None:
+            logger.warning("[Auto-Import] Executor not initialized — skipping scan")
+            return
+
+        for candidate in candidates:
+            if self.should_stop or self.paused:
+                break
+
+            # Skip if already processed (DB-level dedup)
+            if self._is_already_processed(candidate.folder_hash):
+                continue
+
+            # Skip if already submitted to / running in the pool. This
+            # de-dupes across the timer loop + manual scan triggers
+            # (both share the `_submitted_hashes` set).
+            with self._submitted_lock:
+                if candidate.folder_hash in self._submitted_hashes:
+                    logger.debug(
+                        f"[Auto-Import] Skipping {candidate.name} — "
+                        f"already queued in pool"
+                    )
+                    continue
+
+            # Stability gate (files not changing). Done OUTSIDE the
+            # submitted-hashes critical section so a slow stat() call
+            # doesn't hold the lock across other candidates.
+            if not self._is_folder_stable(candidate):
+                continue
+
+            with self._submitted_lock:
+                # Re-check inside the lock — another scanner could have
+                # claimed this candidate between the first check + here.
+                if candidate.folder_hash in self._submitted_hashes:
+                    continue
+                self._submitted_hashes.add(candidate.folder_hash)
+
+            try:
+                self._executor.submit(self._process_one_candidate, candidate)
+            except RuntimeError as exc:
+                # Executor was shut down while we were submitting —
+                # release our claim so a future scan can retry.
+                logger.debug("[Auto-Import] Executor rejected submit: %s", exc)
+                with self._submitted_lock:
+                    self._submitted_hashes.discard(candidate.folder_hash)
+
+    def _process_one_candidate(self, candidate: 'FolderCandidate'):
+        """Per-candidate processing — runs in a pool worker thread.
+
+        Identical logic to the old `_scan_cycle` for-loop body, just
+        moved into a method so the executor can run multiple
+        candidates in parallel.
+
+        Each pool worker registers its candidate in `_active_imports`
+        on entry + unregisters on exit. UI status fields are scoped
+        per-candidate so concurrent workers don't stomp each other.
+        """
+        self._bump_stat('scanned')
+        self._register_active(candidate, status='identifying')
+        logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
 
         threshold = 0.9
         if self._config_manager:
@@ -296,134 +595,96 @@ class AutoImportWorker:
         if self._config_manager:
             auto_process = self._config_manager.get('auto_import.auto_process', True)
 
-        for candidate in candidates:
-            if self.should_stop or self.paused:
-                break
+        try:
+            # Phase 3: Identify
+            identification = self._identify_folder(candidate)
+            if not identification:
+                self._record_result(candidate, 'needs_identification', 0.0,
+                                    error_message='Could not identify album from tags, folder name, or fingerprint')
+                self._bump_stat('failed')
+                return
 
-            self._current_folder = candidate.name
+            # Phase 4: Match tracks
+            self._update_active(candidate.folder_hash, status='matching')
+            match_result = self._match_tracks(candidate, identification)
+            if not match_result:
+                self._record_result(candidate, 'needs_identification', 0.0,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    error_message='Could not match tracks to album tracklist')
+                self._bump_stat('failed')
+                return
 
-            # Skip candidates currently being processed by a previous
-            # scan cycle. Keyed on folder_hash because multiple
-            # candidates can share a path (loose-file groups at the
-            # same directory level each get their own candidate but
-            # share the parent directory).
-            if candidate.folder_hash in self._processing_hashes:
-                logger.debug(f"[Auto-Import] Skipping {candidate.name} — still processing from previous cycle")
-                continue
+            confidence = match_result['confidence']
+            status = 'matched'
 
-            # Check if already processed
-            if self._is_already_processed(candidate.folder_hash):
-                continue
+            # Check if individual track matches are strong even if overall confidence
+            # is low (e.g. only 2 of 18 album tracks present → low coverage kills
+            # overall score, but the 2 tracks match perfectly and should still import)
+            high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
+            has_strong_individual_matches = len(high_conf_matches) > 0
 
-            # Check stability (files not changing)
-            if not self._is_folder_stable(candidate):
-                continue
+            if (confidence >= threshold or has_strong_individual_matches) and auto_process:
+                # Phase 5: Auto-process — insert an in-progress row
+                # so the UI sees the import the moment it starts,
+                # then update it with the final status when done.
+                effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
+                logger.info(f"[Auto-Import] Processing {candidate.name} — "
+                            f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
+                            f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
 
-            self._stats['scanned'] += 1
-            logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
+                in_progress_row_id = self._record_in_progress(
+                    candidate, identification, match_result,
+                )
+                self._update_active(candidate.folder_hash, status='processing')
 
-            # Mark as in-progress so next scan cycle skips this candidate
-            self._processing_hashes.add(candidate.folder_hash)
-            try:
-                # Phase 3: Identify
-                identification = self._identify_folder(candidate)
-                if not identification:
-                    self._record_result(candidate, 'needs_identification', 0.0,
-                                        error_message='Could not identify album from tags, folder name, or fingerprint')
-                    self._stats['failed'] += 1
-                    continue
-
-                # Phase 4: Match tracks
-                match_result = self._match_tracks(candidate, identification)
-                if not match_result:
-                    self._record_result(candidate, 'needs_identification', 0.0,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        error_message='Could not match tracks to album tracklist')
-                    self._stats['failed'] += 1
-                    continue
-
-                confidence = match_result['confidence']
-                status = 'matched'
-
-                # Check if individual track matches are strong even if overall confidence
-                # is low (e.g. only 2 of 18 album tracks present → low coverage kills
-                # overall score, but the 2 tracks match perfectly and should still import)
-                high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
-                has_strong_individual_matches = len(high_conf_matches) > 0
-
-                if (confidence >= threshold or has_strong_individual_matches) and auto_process:
-                    # Phase 5: Auto-process — insert an in-progress row
-                    # so the UI sees the import the moment it starts,
-                    # then update it with the final status when done.
-                    effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
-                    logger.info(f"[Auto-Import] Processing {candidate.name} — "
-                                f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
-                                f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
-
-                    in_progress_row_id = self._record_in_progress(
-                        candidate, identification, match_result,
-                    )
-                    self._current_status = 'processing'
-
-                    success = self._process_matches(candidate, identification, match_result)
-                    status = 'completed' if success else 'failed'
-                    confidence = max(confidence, effective_conf)
-                    if success:
-                        self._stats['auto_processed'] += 1
-                    else:
-                        self._stats['failed'] += 1
-
-                    # Reset live progress state regardless of outcome
-                    self._current_track_index = 0
-                    self._current_track_total = 0
-                    self._current_track_name = ''
-                    self._current_status = 'scanning' if not self.should_stop else 'idle'
-
-                    # Update the in-progress row in place — UI shows the
-                    # final result without a separate insert race.
-                    self._finalize_result(in_progress_row_id, status, confidence)
-                elif confidence >= 0.7:
-                    status = 'pending_review'
-                    self._stats['pending_review'] += 1
-                    logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
-                    self._record_result(candidate, status, confidence,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        identification_method=identification.get('method'),
-                                        match_data=match_result)
+                success = self._process_matches(candidate, identification, match_result)
+                status = 'completed' if success else 'failed'
+                confidence = max(confidence, effective_conf)
+                if success:
+                    self._bump_stat('auto_processed')
                 else:
-                    status = 'needs_identification'
-                    self._stats['failed'] += 1
-                    logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
-                    self._record_result(candidate, status, confidence,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        identification_method=identification.get('method'),
-                                        match_data=match_result)
+                    self._bump_stat('failed')
 
-            except Exception as e:
-                logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
-                self._record_result(candidate, 'failed', 0.0, error_message=str(e))
-                self._stats['failed'] += 1
-            finally:
-                self._processing_hashes.discard(candidate.folder_hash)
-                # Defensive: if the inner code path didn't reset live
-                # progress (early raise, etc.), clear it so the UI
-                # doesn't show stale "processing track 3/14" forever.
-                self._current_track_index = 0
-                self._current_track_total = 0
-                self._current_track_name = ''
+                # Update the in-progress row in place — UI shows the
+                # final result without a separate insert race.
+                self._finalize_result(in_progress_row_id, status, confidence)
+            elif confidence >= 0.7:
+                status = 'pending_review'
+                self._bump_stat('pending_review')
+                logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
+                self._record_result(candidate, status, confidence,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    identification_method=identification.get('method'),
+                                    match_data=match_result)
+            else:
+                status = 'needs_identification'
+                self._bump_stat('failed')
+                logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
+                self._record_result(candidate, status, confidence,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    identification_method=identification.get('method'),
+                                    match_data=match_result)
 
-            # Rate limit between folders
-            if self._interruptible_sleep(2):
-                break
+        except Exception as e:
+            logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
+            self._record_result(candidate, 'failed', 0.0, error_message=str(e))
+            self._bump_stat('failed')
+        finally:
+            with self._submitted_lock:
+                self._submitted_hashes.discard(candidate.folder_hash)
+            # Per-candidate UI state goes away with the candidate.
+            # No stale "processing track 3/14" because the entry is
+            # gone — the UI's polling read returns an empty array.
+            self._unregister_active(candidate.folder_hash)
 
     # ── Scanning ──
 
@@ -1233,9 +1494,14 @@ class AutoImportWorker:
         processed = 0
         errors = []
         all_matches = list(match_result.get('matches', []))
+        # Ensure an active-import entry exists for this candidate.
+        # Callers from `_process_one_candidate` already registered, but
+        # tests invoke `_process_matches` directly without going
+        # through the pool — the auto-register makes both paths safe.
+        self._register_active(candidate, status='processing')
         # Surface track total for the UI's live-progress widget. Matches
         # the loop denominator so users see "3/14" while it's working.
-        self._current_track_total = len(all_matches)
+        self._update_active(candidate.folder_hash, track_total=len(all_matches))
 
         for index, match in enumerate(all_matches, start=1):
             track = match['track']
@@ -1249,8 +1515,11 @@ class AutoImportWorker:
             # Update live progress BEFORE the per-track work so the UI
             # sees the right "now processing track N: <name>" the
             # moment polling fires (every 5s).
-            self._current_track_index = index
-            self._current_track_name = track_name
+            self._update_active(
+                candidate.folder_hash,
+                track_index=index,
+                track_name=track_name,
+            )
 
             if not os.path.exists(file_path):
                 errors.append(f"File not found: {os.path.basename(file_path)}")
