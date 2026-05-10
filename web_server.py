@@ -19743,6 +19743,18 @@ def search_spotify_tracks():
                 hydrabase_worker.enqueue(query, 'tracks')
             tracks = spotify_client.search_tracks(query, limit=limit)
 
+        # Local rerank — same helper Deezer + iTunes use. Spotify's
+        # ranking is usually clean but karaoke / cover variants do
+        # leak through; this is the safety net so all three sources
+        # behave consistently from the user's perspective.
+        if track_q or artist_q:
+            from core.metadata.relevance import rerank_tracks
+            tracks = rerank_tracks(
+                tracks,
+                expected_title=track_q,
+                expected_artist=artist_q,
+            )
+
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
@@ -19761,7 +19773,16 @@ def search_spotify_tracks():
 
 @app.route('/api/itunes/search_tracks', methods=['GET'])
 def search_itunes_tracks():
-    """Search for tracks on iTunes - used by discovery fix modal when iTunes is the source"""
+    """Search for tracks on iTunes — used by the import-modal
+    "Search for Match" dialog and by discovery-fix flows.
+
+    iTunes API doesn't expose a field-scoped search syntax, so the
+    query stays as a free-text join of track + artist. But the
+    response often still contains karaoke / cover / tribute variants
+    (just usually fewer than Deezer), so the same
+    ``core.metadata.relevance.rerank_tracks`` pass applies. Boosts
+    exact-artist-match + penalises known cover/karaoke patterns.
+    """
     try:
         # Support field-specific search params or legacy combined query
         track_q = request.args.get('track', '').strip()
@@ -19792,6 +19813,17 @@ def search_itunes_tracks():
             tracks = fallback_client.search_tracks(query, limit=limit)
             source = _get_metadata_fallback_source()
 
+        # Local rerank — same helper Deezer uses, applied wherever we
+        # have an expected title/artist signal. Catches karaoke / cover
+        # / tribute results that slip through iTunes's own ranking.
+        if track_q or artist_q:
+            from core.metadata.relevance import rerank_tracks
+            tracks = rerank_tracks(
+                tracks,
+                expected_title=track_q,
+                expected_artist=artist_q,
+            )
+
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
@@ -19811,28 +19843,51 @@ def search_itunes_tracks():
 
 @app.route('/api/deezer/search_tracks', methods=['GET'])
 def search_deezer_tracks():
-    """Search for tracks on Deezer - used by discovery fix modal when Deezer is the source"""
+    """Search for tracks on Deezer — used by the import-modal "Search
+    for Match" dialog and by discovery-fix flows.
+
+    Field-scoped path (`track=` + `artist=`) builds Deezer's advanced
+    search syntax `track:"X" artist:"Y"`. Massively tighter relevance
+    than the free-text path because the API matches each term in the
+    right field instead of fuzzy-matching across title / lyrics /
+    artist / album / contributors. Without it, Deezer's ranking
+    buries the canonical recording under karaoke / cover / "originally
+    performed by" variants — see issue #534.
+
+    Results then go through ``core.metadata.relevance.rerank_tracks``
+    which penalises any cover / karaoke / tribute / re-recorded
+    patterns we can detect locally + boosts exact-artist-match. Two
+    layers stacked because Deezer's ranking is rough even on advanced
+    queries (compilations rank well by global popularity); the local
+    rerank is the safety net.
+    """
     try:
         track_q = request.args.get('track', '').strip()
         artist_q = request.args.get('artist', '').strip()
         legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
+        client = _get_deezer_client()
         if track_q or artist_q:
-            parts = []
-            if track_q:
-                parts.append(track_q)
-            if artist_q:
-                parts.append(artist_q)
-            query = ' '.join(parts)
+            # Field-scoped — pass kwargs through so the client builds
+            # the advanced-syntax query.
+            tracks = client.search_tracks(track=track_q or None,
+                                          artist=artist_q or None,
+                                          limit=limit)
         elif legacy_query:
-            query = legacy_query
+            tracks = client.search_tracks(legacy_query, limit=limit)
         else:
             return jsonify({"error": "Query parameter is required"}), 400
 
-        from core.deezer_client import DeezerClient
-        client = _get_deezer_client()
-        tracks = client.search_tracks(query, limit=limit)
+        # Local rerank — only when we have an expected title/artist
+        # signal. Free-text searches have nothing to rank against.
+        if track_q or artist_q:
+            from core.metadata.relevance import rerank_tracks
+            tracks = rerank_tracks(
+                tracks,
+                expected_title=track_q,
+                expected_artist=artist_q,
+            )
 
         tracks_dict = [{
             'id': t.id,
