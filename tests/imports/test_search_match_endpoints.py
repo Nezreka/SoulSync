@@ -52,10 +52,14 @@ def fake_track():
 
 
 class TestDeezerSearchTracksEndpoint:
-    def test_passes_track_and_artist_as_kwargs(self, app_test_client, fake_track):
-        """Endpoint must call client.search_tracks(track=..., artist=...)
-        — NOT join into a single positional query. Field-scoped path
-        is what triggers Deezer's advanced search syntax."""
+    def test_joins_track_and_artist_into_free_text_query(self, app_test_client, fake_track):
+        """Endpoint sends the joined `track artist` string as Deezer's
+        free-text `q`. Field-scoped advanced-syntax queries were
+        initially considered, but live-API testing showed Deezer's
+        advanced-query ranking misses canonical recordings on some
+        searches. Free-text + local rerank is the more reliable
+        combination at this endpoint. Client-level kwarg support
+        remains for future opt-in callers."""
         fake_client = MagicMock()
         fake_client.search_tracks.return_value = [
             fake_track('Dirty White Boy', 'Foreigner'),
@@ -65,10 +69,9 @@ class TestDeezerSearchTracksEndpoint:
                 '/api/deezer/search_tracks?track=Dirty+White+Boy&artist=Foreigner&limit=20'
             )
         assert resp.status_code == 200
-        # Field-scoped kwargs reach the client
         call = fake_client.search_tracks.call_args
-        assert call.kwargs.get('track') == 'Dirty White Boy'
-        assert call.kwargs.get('artist') == 'Foreigner'
+        # First positional arg is the joined free-text query
+        assert call.args[0] == 'Dirty White Boy Foreigner'
         assert call.kwargs.get('limit') == 20
 
     def test_reranks_results_burying_karaoke(self, app_test_client, fake_track):
