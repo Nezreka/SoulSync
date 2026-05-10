@@ -89,6 +89,12 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             "deezer_dl": "Deezer",
             "lidarr": "Lidarr",
             "soundcloud": "SoundCloud",
+            # Auto-import isn't a download source, but flows through the
+            # same post-process pipeline (file lands → record provenance
+            # + history → write to library DB). Tagging it as "Auto-Import"
+            # in history avoids mislabeling staging-folder imports as
+            # Soulseek downloads.
+            "auto_import": "Auto-Import",
         }
         download_source = source_map.get(username, "Soulseek")
 
@@ -161,6 +167,13 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             "deezer_dl": "deezer",
             "lidarr": "lidarr",
             "soundcloud": "soundcloud",
+            # Auto-import: surfaced in provenance so the redownload modal
+            # can tell the user "this came from staging on <date>" instead
+            # of falsely listing soulseek as the source. The underlying
+            # metadata source (spotify / deezer / itunes) is recorded
+            # separately via the source-aware ID columns on the tracks
+            # row itself.
+            "auto_import": "auto_import",
         }.get(username, "soulseek")
 
         ti = context.get("track_info") or context.get("search_result") or {}
@@ -416,14 +429,28 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 if ta_name and ta_name.lower() != artist_name.lower():
                     track_artist = ta_name
 
+            # Per-recording identifiers — scanner picks `musicbrainz_recording_id`
+            # off the Navidrome track wrapper; auto-import has the same field
+            # available from the metadata-source response (Spotify exposes
+            # `musicbrainz_recording_id` via the MusicBrainz client, Picard-
+            # tagged files surface it via `_read_file_tags`). `isrc` is even
+            # better signal for cross-source dedup — it's the per-recording
+            # ID labels embed in the audio. Both land in dedicated columns
+            # so the watchlist scanner's stable-ID match path recognises
+            # auto-imported tracks the next time the user adds the artist
+            # to a watchlist.
+            track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
+            track_isrc = (track_info.get("isrc") or "").strip().upper() or None
+
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             if not cursor.fetchone():
                 cursor.execute(
                     """
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, file_size, track_artist, server_source,
+                                        duration, file_path, bitrate, file_size, track_artist,
+                                        musicbrainz_recording_id, isrc, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         track_id,
@@ -436,6 +463,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         bitrate,
                         file_size,
                         track_artist,
+                        track_mbid,
+                        track_isrc,
                     ),
                 )
                 track_source_col = source_columns.get("track")
