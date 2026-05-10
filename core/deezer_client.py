@@ -332,7 +332,8 @@ class DeezerClient:
         """
         # Build the actual API query — advanced syntax when callers pass
         # field hints, raw query otherwise.
-        if track or artist or album:
+        used_advanced = bool(track or artist or album)
+        if used_advanced:
             api_query = self._build_advanced_query(track=track, artist=artist, album=album)
         else:
             api_query = query
@@ -340,6 +341,33 @@ class DeezerClient:
         if not api_query:
             return []
 
+        tracks = self._search_tracks_with_query(api_query, limit)
+
+        # Safety net: Deezer's advanced syntax is `artist:"X"`-style
+        # substring match, but in practice it's brittle on artist name
+        # variants ("Foreigner [US]", "The Foreigner", etc.) and on
+        # tracks indexed under non-canonical title spellings. When the
+        # advanced query returns nothing, fall back to a free-text join
+        # so the user sees the prior (less-relevant but non-empty) result
+        # set rather than "No matches" — same behaviour as pre-fix for
+        # this edge case. Caller-side rerank still tightens the result.
+        if not tracks and used_advanced:
+            fallback_parts = [p for p in (track, artist, album) if p]
+            fallback_query = ' '.join(fallback_parts)
+            if fallback_query and fallback_query != api_query:
+                logger.debug(
+                    "[Deezer] Advanced query returned 0 results, falling back "
+                    "to free-text: %r → %r", api_query, fallback_query,
+                )
+                tracks = self._search_tracks_with_query(fallback_query, limit)
+
+        return tracks
+
+    def _search_tracks_with_query(self, api_query: str, limit: int) -> List[Track]:
+        """Cache-aware single API call. Pulled out so the
+        ``search_tracks`` orchestration can call this twice (advanced
+        query → free-text fallback) without duplicating the cache +
+        parse + store dance."""
         cache = get_metadata_cache()
         cached_results = cache.get_search_results('deezer', 'track', api_query, limit)
         if cached_results is not None:

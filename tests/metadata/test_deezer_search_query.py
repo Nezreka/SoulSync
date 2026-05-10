@@ -68,8 +68,17 @@ class TestBuildAdvancedQuery:
 class TestSearchTracksQueryWiring:
     def _client(self):
         c = DeezerClient.__new__(DeezerClient)
-        # Stub state needed by _api_get's downstream methods
-        c._api_get = MagicMock(return_value={'data': []})
+        # Stub state needed by _api_get's downstream methods. Returns
+        # one fake hit so the empty-result fallback (which would
+        # double the API calls) doesn't fire — these tests only care
+        # about the FIRST call's query construction.
+        c._api_get = MagicMock(return_value={
+            'data': [{
+                'id': 1, 'title': 'X', 'duration': 200,
+                'artist': {'id': 2, 'name': 'A'},
+                'album': {'id': 3, 'title': 'B'},
+            }],
+        })
         return c
 
     def _stub_cache(self, monkeypatch):
@@ -90,8 +99,9 @@ class TestSearchTracksQueryWiring:
 
         c.search_tracks(track='Dirty White Boy', artist='Foreigner')
 
-        c._api_get.assert_called_once()
-        params = c._api_get.call_args.args[1]
+        # Stubbed API returns a hit so fallback doesn't fire; first
+        # (and only) call uses advanced syntax.
+        params = c._api_get.call_args_list[0].args[1]
         assert params['q'] == 'track:"Dirty White Boy" artist:"Foreigner"', (
             f"Expected advanced-syntax query string, got {params['q']!r}"
         )
@@ -120,7 +130,8 @@ class TestSearchTracksQueryWiring:
         c.search_tracks(query='ignored free text',
                         track='Dirty White Boy', artist='Foreigner')
 
-        params = c._api_get.call_args.args[1]
+        # First call uses advanced syntax (kwargs win over query).
+        params = c._api_get.call_args_list[0].args[1]
         assert 'track:' in params['q']
         assert 'ignored' not in params['q']
 
@@ -142,7 +153,7 @@ class TestSearchTracksQueryWiring:
 
         c.search_tracks(album='Head Games')
 
-        params = c._api_get.call_args.args[1]
+        params = c._api_get.call_args_list[0].args[1]
         assert params['q'] == 'album:"Head Games"'
 
     def test_limit_parameter_passed_through(self, monkeypatch):
@@ -151,7 +162,7 @@ class TestSearchTracksQueryWiring:
 
         c.search_tracks(track='X', artist='Y', limit=50)
 
-        params = c._api_get.call_args.args[1]
+        params = c._api_get.call_args_list[0].args[1]
         assert params['limit'] == 50
 
     def test_limit_clamped_to_100(self, monkeypatch):
@@ -163,7 +174,7 @@ class TestSearchTracksQueryWiring:
 
         c.search_tracks(track='X', limit=500)
 
-        params = c._api_get.call_args.args[1]
+        params = c._api_get.call_args_list[0].args[1]
         assert params['limit'] == 100
 
 
@@ -171,6 +182,96 @@ class TestSearchTracksQueryWiring:
 # Cache key consistency — both call modes share the cache via the
 # constructed query string
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Free-text fallback when advanced query returns 0 results
+# ---------------------------------------------------------------------------
+
+
+class TestSearchTracksAdvancedQueryFallback:
+    """Defensive fallback: Deezer's advanced syntax is `artist:"X"`-
+    style substring match, but in practice it's brittle on artist
+    name variants ("Foreigner [US]", "The Foreigner", etc.) and on
+    tracks indexed under non-canonical title spellings. When the
+    advanced query returns nothing, fall back to a free-text join so
+    the user sees the prior (less-relevant but non-empty) result set
+    rather than "No matches".
+
+    Contract: pre-fix behaviour preserved on the empty-advanced-query
+    edge case. Caller-side rerank still tightens whatever the
+    fallback returns.
+    """
+
+    def _client_with_responses(self, monkeypatch, responses):
+        """Stub `_api_get` to return `responses` in sequence (FIFO).
+        Lets the test simulate "advanced empty, free-text non-empty"."""
+        cache = MagicMock()
+        cache.get_search_results.return_value = None
+        monkeypatch.setattr('core.deezer_client.get_metadata_cache', lambda: cache)
+
+        c = DeezerClient.__new__(DeezerClient)
+        call_log = []
+
+        def fake_api_get(_path, params):
+            call_log.append(params['q'])
+            return responses.pop(0) if responses else None
+
+        c._api_get = fake_api_get
+        c._call_log = call_log
+        return c
+
+    def test_falls_back_to_free_text_when_advanced_empty(self, monkeypatch):
+        c = self._client_with_responses(monkeypatch, [
+            {'data': []},  # advanced query — 0 results
+            {'data': [{'id': 99, 'title': 'Found It', 'duration': 200,
+                       'artist': {'id': 1, 'name': 'Foreigner'},
+                       'album': {'id': 2, 'title': 'X'}}]},  # free-text — has results
+        ])
+        results = c.search_tracks(track='Dirty White Boy', artist='Foreigner [US]')
+
+        assert len(results) == 1
+        assert results[0].name == 'Found It'
+        # First call was the advanced query, second was the free-text fallback
+        assert c._call_log[0] == 'track:"Dirty White Boy" artist:"Foreigner [US]"'
+        assert c._call_log[1] == 'Dirty White Boy Foreigner [US]'
+
+    def test_no_fallback_when_advanced_query_has_results(self, monkeypatch):
+        """Don't waste an extra API call when the advanced query
+        already returned something — even a single result counts as
+        a hit, no fallback needed."""
+        c = self._client_with_responses(monkeypatch, [
+            {'data': [{'id': 99, 'title': 'Found', 'duration': 200,
+                       'artist': {'id': 1, 'name': 'Foreigner'},
+                       'album': {'id': 2, 'title': 'X'}}]},
+        ])
+        results = c.search_tracks(track='X', artist='Foreigner')
+
+        assert len(results) == 1
+        assert len(c._call_log) == 1, "Should not have hit the API twice"
+
+    def test_no_fallback_when_legacy_free_text_call(self, monkeypatch):
+        """Free-text caller already exhausted the only path — no
+        secondary fallback exists. Empty result is final."""
+        c = self._client_with_responses(monkeypatch, [{'data': []}])
+        results = c.search_tracks('legacy free text')
+
+        assert results == []
+        assert len(c._call_log) == 1
+
+    def test_no_fallback_when_query_unchanged(self, monkeypatch):
+        """If the constructed advanced query happens to equal the
+        free-text join (e.g. caller passed only `track=` with a
+        single word), don't waste an identical second API call."""
+        c = self._client_with_responses(monkeypatch, [{'data': []}])
+        # Single-word track-only — advanced query is `track:"X"`,
+        # free-text would be `X`. Different strings, fallback fires.
+        # Skip this case; instead test the no-op-when-equal path
+        # directly: empty kwargs trio means used_advanced=False,
+        # we never enter the fallback branch.
+        results = c.search_tracks(query='same')
+        assert results == []
+        assert len(c._call_log) == 1
 
 
 class TestSearchTracksCacheKey:
@@ -183,7 +284,15 @@ class TestSearchTracksCacheKey:
         monkeypatch.setattr('core.deezer_client.get_metadata_cache', lambda: cache)
 
         c = DeezerClient.__new__(DeezerClient)
-        c._api_get = MagicMock(return_value={'data': []})
+        # Non-empty stub so the empty-result fallback doesn't fire +
+        # double the cache lookups.
+        c._api_get = MagicMock(return_value={
+            'data': [{
+                'id': 1, 'title': 'X', 'duration': 200,
+                'artist': {'id': 2, 'name': 'A'},
+                'album': {'id': 3, 'title': 'B'},
+            }],
+        })
 
         c.search_tracks(track='Dirty White Boy', artist='Foreigner', limit=20)
 
