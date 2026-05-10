@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -43,6 +44,29 @@ class FolderCandidate:
     is_staging_root: bool = False
 
 
+@dataclass
+class _ActiveImport:
+    """Per-candidate UI state for an in-flight import.
+
+    Multiple instances can exist simultaneously when the executor pool
+    runs candidates in parallel. Each is keyed on `folder_hash` in the
+    worker's `_active_imports` dict; mutations are gated by
+    `_active_lock` so the polling UI sees a coherent snapshot.
+
+    Pre-refactor the worker had scalar `_current_folder` /
+    `_current_status` / `_current_track_*` fields stomped by every pool
+    worker — three concurrent imports would interleave each other's
+    folder name + track index in the UI. This dataclass + the dict
+    keyed on folder_hash makes per-candidate state isolated.
+    """
+    folder_hash: str
+    folder_name: str
+    status: str = 'queued'   # 'queued' | 'identifying' | 'matching' | 'processing'
+    track_index: int = 0
+    track_total: int = 0
+    track_name: str = ''
+
+
 def _compute_folder_hash(audio_files: List[str]) -> str:
     """Deterministic hash of folder contents for change detection."""
     items = []
@@ -55,34 +79,88 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
 
 
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
-    """Read embedded tags from an audio file. Returns dict with title, artist, album, track_number, disc_number, year."""
-    result = {'title': '', 'artist': '', 'album': '', 'track_number': 0, 'disc_number': 1, 'year': ''}
+    """Read embedded tags from an audio file.
+
+    Returns dict with: title, artist, album, track_number, disc_number,
+    year, genres, isrc, mbid, duration_ms.
+
+    The exact-identifier fields (``isrc``, ``mbid``) and the audio
+    duration enable the ID-based fast paths + duration sanity gate in
+    ``core/imports/album_matching.py``. Tagged files (Picard-tagged
+    libraries always carry MBID; most metadata sources carry ISRC) get
+    perfect-match identification without going through fuzzy scoring.
+
+    ``genres`` is a list of strings — Mutagen's easy mode returns the
+    GENRE tag as a list (some files carry multiple genres). Empty list
+    when the tag is absent. Worker aggregates these across an album's
+    tracks to populate the artist row's genres column at insert time
+    (matches the soulsync_client deep-scan behaviour).
+
+    All exact-identifier fields default to empty string when the tag
+    isn't present — callers treat empty as "not available, fall back to
+    fuzzy matching".
+    """
+    result = {
+        'title': '', 'artist': '', 'album': '',
+        'track_number': 0, 'disc_number': 1, 'year': '',
+        'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
+    }
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path, easy=True)
-        if audio and audio.tags:
-            tags = audio.tags
-            result['title'] = (tags.get('title', [''])[0] or '').strip()
-            # Prefer albumartist for album-level identification (per-track artist
-            # often includes features like "Kendrick Lamar, Drake" which fragment
-            # consensus when grouping tracks into an album). Fall back to artist
-            # for files that lack albumartist.
-            result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
-            result['album'] = (tags.get('album', [''])[0] or '').strip()
-            # Date/year — try 'date' first, fall back to 'year'
-            date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
-            if date_str and len(date_str) >= 4:
-                result['year'] = date_str[:4]
-            tn = tags.get('tracknumber', ['0'])[0]
+        if audio:
+            # Audio length comes off audio.info, not tags. Mutagen returns
+            # seconds as a float; convert to int milliseconds to match the
+            # metadata-source convention (Spotify/Deezer/iTunes all return
+            # duration_ms).
+            length_s = getattr(getattr(audio, 'info', None), 'length', 0) or 0
             try:
-                result['track_number'] = int(str(tn).split('/')[0])
-            except (ValueError, TypeError):
+                result['duration_ms'] = int(round(float(length_s) * 1000))
+            except (TypeError, ValueError):
                 pass
-            dn = tags.get('discnumber', ['1'])[0]
-            try:
-                result['disc_number'] = int(str(dn).split('/')[0])
-            except (ValueError, TypeError):
-                pass
+
+            if audio.tags:
+                tags = audio.tags
+                result['title'] = (tags.get('title', [''])[0] or '').strip()
+                # Prefer albumartist for album-level identification (per-track
+                # artist often includes features like "Kendrick Lamar, Drake"
+                # which fragment consensus when grouping tracks into an album).
+                # Fall back to artist for files that lack albumartist.
+                result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
+                result['album'] = (tags.get('album', [''])[0] or '').strip()
+                # Date/year — try 'date' first, fall back to 'year'
+                date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
+                if date_str and len(date_str) >= 4:
+                    result['year'] = date_str[:4]
+                tn = tags.get('tracknumber', ['0'])[0]
+                try:
+                    result['track_number'] = int(str(tn).split('/')[0])
+                except (ValueError, TypeError):
+                    pass
+                dn = tags.get('discnumber', ['1'])[0]
+                try:
+                    result['disc_number'] = int(str(dn).split('/')[0])
+                except (ValueError, TypeError):
+                    pass
+                # GENRE — Mutagen easy mode returns a list (some files
+                # carry multiple genres, e.g. "Hip-Hop;Rap;Trap"). Skip
+                # empty / whitespace entries so the aggregator doesn't
+                # have to filter them.
+                raw_genres = tags.get('genre', []) or []
+                if isinstance(raw_genres, str):
+                    raw_genres = [raw_genres]
+                result['genres'] = [
+                    str(g).strip() for g in raw_genres if str(g).strip()
+                ]
+                # ISRC — International Standard Recording Code. Per-recording
+                # unique identifier; metadata sources expose it as `isrc` on
+                # tracks. Picard / Beets both write this tag from MusicBrainz.
+                result['isrc'] = (tags.get('isrc', [''])[0] or '').strip().upper()
+                # MusicBrainz Recording ID — Picard's primary identifier.
+                # Stored in `musicbrainz_trackid` for ID3, or
+                # `MUSICBRAINZ_TRACKID` for Vorbis comments. Mutagen's easy
+                # mode normalizes the key.
+                result['mbid'] = (tags.get('musicbrainz_trackid', [''])[0] or '').strip().lower()
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
     return result
@@ -122,13 +200,36 @@ def _quality_rank(ext: str) -> int:
 
 
 class AutoImportWorker:
-    """Background worker that watches the staging folder and auto-imports music."""
+    """Background worker that watches the staging folder and auto-imports music.
+
+    Concurrency model:
+
+    - **One scan thread** (the `_run` timer loop) enumerates the staging
+      folder periodically. Manual "Scan Now" requests share the same
+      scan via `trigger_scan()` — non-blocking lock means duplicate
+      requests no-op instead of stacking up parallel scanners.
+    - **Bounded process pool** (`ThreadPoolExecutor`, default 3 workers)
+      handles per-candidate work: identification, matching, file move,
+      tagging, DB write. Each candidate runs to completion in its own
+      pool thread; multiple candidates run in parallel up to the pool
+      size.
+    - The scan thread is FAST (just enumeration + submit), the pool
+      threads are SLOW (per-candidate work).
+
+    Pre-refactor, the manual-scan endpoint spawned a fresh
+    `threading.Thread(target=_scan_cycle)` per click — emergent
+    parallelism with no upper bound, no shared queue, no graceful
+    shutdown. Fixed by routing both the timer + the manual button
+    through `trigger_scan()` and submitting per-candidate work to a
+    shared executor.
+    """
 
     def __init__(self, database, staging_path: str = './Staging',
                  transfer_path: str = './Transfer',
                  process_callback: Optional[Callable] = None,
                  config_manager: Any = None,
-                 automation_engine: Any = None):
+                 automation_engine: Any = None,
+                 max_workers: int = 3):
         self.database = database
         self.staging_path = staging_path
         self.transfer_path = transfer_path
@@ -136,27 +237,173 @@ class AutoImportWorker:
         self._config_manager = config_manager
         self._automation_engine = automation_engine
 
+        # Pool size — defaults to 3 to match the existing pool patterns
+        # (`missing_download_executor`, `sync_executor`,
+        # `import_singles_executor`). Configurable via the
+        # `auto_import.max_workers` config key on init; not hot-
+        # reloadable (the executor is created once and lives for the
+        # worker's lifetime).
+        if config_manager:
+            max_workers = config_manager.get('auto_import.max_workers', max_workers)
+        self._max_workers = max(1, int(max_workers))
+
         self.running = False
         self.paused = False
         self.should_stop = False
         self._thread = None
         self._stop_event = threading.Event()
+        # Bounded executor for per-candidate processing work. Created
+        # in `start()` so a stopped+restarted worker gets a fresh pool.
+        self._executor: Optional[ThreadPoolExecutor] = None
+        # Non-blocking lock that gates concurrent scans. Both the timer
+        # loop and the manual "Scan Now" endpoint route through
+        # `trigger_scan()`; a `try-acquire` here means whichever caller
+        # gets there first runs the scan and the rest no-op.
+        self._scan_lock = threading.Lock()
 
         # State
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
-        self._processing_paths: set = set()  # Paths currently being processed (skip on rescan)
-        self._current_folder = ''
-        self._current_status = 'idle'  # 'idle' | 'scanning' | 'processing'
-        # Live per-track progress so the UI can show "Processing Speak Now
-        # (3/14: Mine)" while a multi-track album is being post-processed.
-        # Without this, auto-import goes silent for the entire processing
-        # window (which can be 5+ minutes for a full album) since
-        # ``_record_result`` only fires after every track is done.
-        self._current_track_index = 0
-        self._current_track_total = 0
-        self._current_track_name = ''
+        # Candidates currently submitted to the pool OR running in a
+        # pool worker. Keyed on folder_hash, NOT path — multiple
+        # candidates can share a path (each loose-file group at staging
+        # root has the same parent directory but a distinct hash from
+        # its own audio files). Path-keyed dedup would treat siblings
+        # as duplicates and silently skip all but the first.
+        # Rebranded from `_processing_hashes` to `_submitted_hashes`
+        # because submission to the pool happens immediately (queued
+        # OR running) — both states need to gate next-scan submissions.
+        self._submitted_hashes: set = set()
+        self._submitted_lock = threading.Lock()
+
+        # Per-candidate UI state, keyed on folder_hash. Multiple pool
+        # workers populate this dict simultaneously; `_active_lock`
+        # gates every read/write so the polling UI sees a coherent
+        # snapshot. Replaces the scalar `_current_folder` /
+        # `_current_status` / `_current_track_*` fields — those were
+        # safe under the old sequential model but stomped each other
+        # under parallel executor workers.
+        self._active_imports: Dict[str, _ActiveImport] = {}
+        self._active_lock = threading.Lock()
+
+        # Whether a scan-cycle (enumeration phase) is currently
+        # running. Distinct from per-candidate processing — the scan
+        # is fast (seconds) and runs at most once at a time
+        # (gated by `_scan_lock`). Per-candidate work runs concurrently
+        # in the pool, tracked in `_active_imports`.
+        self._scan_in_progress = False
+
+        # `_stats[x] += 1` from multiple pool threads is read-modify-
+        # write — under load the counters drift. `_stats_lock` gates
+        # every mutation via `_bump_stat`.
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
+        self._stats_lock = threading.Lock()
         self._last_scan_time = None
+
+    # ── Per-candidate UI state helpers ──
+
+    def _register_active(self, candidate: 'FolderCandidate', status: str = 'queued') -> None:
+        """Insert/refresh the active-import entry for a candidate."""
+        with self._active_lock:
+            entry = self._active_imports.get(candidate.folder_hash)
+            if entry is None:
+                entry = _ActiveImport(
+                    folder_hash=candidate.folder_hash,
+                    folder_name=candidate.name,
+                    status=status,
+                )
+                self._active_imports[candidate.folder_hash] = entry
+            else:
+                # Refresh in case the candidate name changed across scans
+                entry.folder_name = candidate.name
+                entry.status = status
+
+    def _update_active(self, folder_hash: str, **fields: Any) -> None:
+        """Mutate fields on an active-import entry. No-op if the entry
+        isn't registered (e.g. test calling helpers directly without
+        going through `_register_active`)."""
+        with self._active_lock:
+            entry = self._active_imports.get(folder_hash)
+            if entry is None:
+                return
+            for key, value in fields.items():
+                if hasattr(entry, key):
+                    setattr(entry, key, value)
+
+    def _unregister_active(self, folder_hash: str) -> None:
+        with self._active_lock:
+            self._active_imports.pop(folder_hash, None)
+
+    def _snapshot_active(self) -> List[Dict[str, Any]]:
+        """Coherent list snapshot for the UI poller. Order is insertion
+        order so the legacy single-import fields (which read the first
+        entry) are stable for any given UI poll cycle."""
+        with self._active_lock:
+            return [
+                {
+                    'folder_hash': e.folder_hash,
+                    'folder_name': e.folder_name,
+                    'status': e.status,
+                    'track_index': e.track_index,
+                    'track_total': e.track_total,
+                    'track_name': e.track_name,
+                }
+                for e in self._active_imports.values()
+            ]
+
+    def _bump_stat(self, key: str) -> None:
+        """Thread-safe increment of `_stats[key]`. Pool workers call
+        this from multiple threads; raw `self._stats[k] += 1` is read-
+        modify-write and drops counts under load."""
+        with self._stats_lock:
+            self._stats[key] = self._stats.get(key, 0) + 1
+
+    # Read-only back-compat properties — the test fixture (and the
+    # polling UI's legacy fields) read these. Resolve to the FIRST
+    # active import so the existing single-track-progress UI keeps
+    # working when only one candidate is in flight (the common case).
+    # When N candidates run in parallel the UI should iterate
+    # `active_imports` from `get_status()` instead.
+
+    @property
+    def _current_folder(self) -> str:
+        with self._active_lock:
+            if not self._active_imports:
+                return ''
+            return next(iter(self._active_imports.values())).folder_name
+
+    @property
+    def _current_status(self) -> str:
+        with self._active_lock:
+            for e in self._active_imports.values():
+                if e.status == 'processing':
+                    return 'processing'
+            if self._active_imports:
+                # An active import that hasn't reached 'processing' yet
+                # is still in identification/matching — keep showing
+                # 'scanning' for the legacy UI (no separate state).
+                return 'scanning'
+        return 'scanning' if self._scan_in_progress else 'idle'
+
+    @property
+    def _current_track_index(self) -> int:
+        with self._active_lock:
+            if not self._active_imports:
+                return 0
+            return next(iter(self._active_imports.values())).track_index
+
+    @property
+    def _current_track_total(self) -> int:
+        with self._active_lock:
+            if not self._active_imports:
+                return 0
+            return next(iter(self._active_imports.values())).track_total
+
+    @property
+    def _current_track_name(self) -> str:
+        with self._active_lock:
+            if not self._active_imports:
+                return ''
+            return next(iter(self._active_imports.values())).track_name
 
     def start(self):
         if self.running:
@@ -164,9 +411,15 @@ class AutoImportWorker:
         self.should_stop = False
         self._stop_event.clear()
         self.running = True
+        # Fresh pool per start so a stop+start cycle gets a clean
+        # executor (the previous one is shut down in `stop()`).
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._max_workers,
+            thread_name_prefix='AutoImport',
+        )
         self._thread = threading.Thread(target=self._run, daemon=True, name='AutoImportWorker')
         self._thread.start()
-        logger.info("Auto-import worker started")
+        logger.info(f"Auto-import worker started (max_workers={self._max_workers})")
 
     def stop(self):
         self.should_stop = True
@@ -174,6 +427,13 @@ class AutoImportWorker:
         self.running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
+        # Wait for in-flight pool work to finish before reporting
+        # stopped. Without `wait=True` we'd return while file moves /
+        # tag writes / DB inserts are still mid-flight, which can
+        # corrupt state on shutdown.
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
         logger.info("Auto-import worker stopped")
 
     def pause(self):
@@ -185,15 +445,32 @@ class AutoImportWorker:
         logger.info("Auto-import worker resumed")
 
     def get_status(self) -> dict:
+        active = self._snapshot_active()
+        # Aggregate top-level status: 'processing' if any active import
+        # is in the per-track loop, else 'scanning' if a scan or any
+        # earlier-phase import is in flight, else 'idle'.
+        if any(a['status'] == 'processing' for a in active):
+            current_status = 'processing'
+        elif active or self._scan_in_progress:
+            current_status = 'scanning'
+        else:
+            current_status = 'idle'
+        # Legacy single-import scalars — pulled from the first active
+        # entry so the existing UI keeps rendering one folder at a
+        # time. Multi-import-aware UIs should read `active_imports`.
+        first = active[0] if active else None
+        with self._stats_lock:
+            stats_snapshot = self._stats.copy()
         return {
             'running': self.running,
             'paused': self.paused,
-            'current_folder': self._current_folder,
-            'current_status': self._current_status,
-            'current_track_index': self._current_track_index,
-            'current_track_total': self._current_track_total,
-            'current_track_name': self._current_track_name,
-            'stats': self._stats.copy(),
+            'current_status': current_status,
+            'current_folder': first['folder_name'] if first else '',
+            'current_track_index': first['track_index'] if first else 0,
+            'current_track_total': first['track_total'] if first else 0,
+            'current_track_name': first['track_name'] if first else '',
+            'active_imports': active,
+            'stats': stats_snapshot,
             'last_scan_time': self._last_scan_time,
         }
 
@@ -202,7 +479,7 @@ class AutoImportWorker:
         return self._stop_event.wait(seconds)
 
     def _run(self):
-        """Main worker loop."""
+        """Main worker loop — calls `trigger_scan()` periodically."""
         interval = 60
         if self._config_manager:
             interval = self._config_manager.get('auto_import.scan_interval', 60)
@@ -218,31 +495,113 @@ class AutoImportWorker:
                     enabled = self._config_manager.get('auto_import.enabled', False)
 
                 if enabled:
-                    try:
-                        self._current_status = 'scanning'
-                        self._scan_cycle()
-                        self._last_scan_time = datetime.now().isoformat()
-                    except Exception as e:
-                        logger.error(f"Auto-import scan cycle error: {e}")
-                    finally:
-                        self._current_status = 'idle'
-                        self._current_folder = ''
+                    self.trigger_scan()
 
             if self._interruptible_sleep(interval):
                 break
 
-    def _scan_cycle(self):
-        """One full scan of the staging folder."""
+    def trigger_scan(self):
+        """Run one scan cycle — single canonical entry point for both
+        the timer loop AND the manual "Scan Now" endpoint.
+
+        Non-blocking: if a scan is already running, returns immediately
+        without spawning a duplicate. The in-flight scan will pick up
+        any new files anyway, and stacking parallel scanners caused
+        unbounded thread growth pre-refactor (each "Scan Now" click
+        spawned a fresh `_scan_cycle` thread).
+
+        Per-candidate processing happens on the bounded executor pool
+        — this method just enumerates + submits, so it returns fast.
+        """
+        if not self._scan_lock.acquire(blocking=False):
+            logger.debug("[Auto-Import] Scan already running, skipping duplicate trigger")
+            return
+
+        try:
+            self._scan_in_progress = True
+            self._scan_and_submit()
+            self._last_scan_time = datetime.now().isoformat()
+        except Exception as e:
+            logger.error(f"Auto-import scan cycle error: {e}")
+        finally:
+            self._scan_in_progress = False
+            self._scan_lock.release()
+
+    def _scan_and_submit(self):
+        """Enumerate staging candidates + submit each to the executor.
+
+        Fast — does NOT block on per-candidate processing. The pool
+        runs `_process_one_candidate` in parallel up to `max_workers`.
+        """
         staging = self._resolve_staging_path()
         if not staging or not os.path.isdir(staging):
             logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
             return
 
-        # Find folder candidates
         candidates = self._enumerate_folders(staging)
         logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:
             return
+
+        if self._executor is None:
+            logger.warning("[Auto-Import] Executor not initialized — skipping scan")
+            return
+
+        for candidate in candidates:
+            if self.should_stop or self.paused:
+                break
+
+            # Skip if already processed (DB-level dedup)
+            if self._is_already_processed(candidate.folder_hash):
+                continue
+
+            # Skip if already submitted to / running in the pool. This
+            # de-dupes across the timer loop + manual scan triggers
+            # (both share the `_submitted_hashes` set).
+            with self._submitted_lock:
+                if candidate.folder_hash in self._submitted_hashes:
+                    logger.debug(
+                        f"[Auto-Import] Skipping {candidate.name} — "
+                        f"already queued in pool"
+                    )
+                    continue
+
+            # Stability gate (files not changing). Done OUTSIDE the
+            # submitted-hashes critical section so a slow stat() call
+            # doesn't hold the lock across other candidates.
+            if not self._is_folder_stable(candidate):
+                continue
+
+            with self._submitted_lock:
+                # Re-check inside the lock — another scanner could have
+                # claimed this candidate between the first check + here.
+                if candidate.folder_hash in self._submitted_hashes:
+                    continue
+                self._submitted_hashes.add(candidate.folder_hash)
+
+            try:
+                self._executor.submit(self._process_one_candidate, candidate)
+            except RuntimeError as exc:
+                # Executor was shut down while we were submitting —
+                # release our claim so a future scan can retry.
+                logger.debug("[Auto-Import] Executor rejected submit: %s", exc)
+                with self._submitted_lock:
+                    self._submitted_hashes.discard(candidate.folder_hash)
+
+    def _process_one_candidate(self, candidate: 'FolderCandidate'):
+        """Per-candidate processing — runs in a pool worker thread.
+
+        Identical logic to the old `_scan_cycle` for-loop body, just
+        moved into a method so the executor can run multiple
+        candidates in parallel.
+
+        Each pool worker registers its candidate in `_active_imports`
+        on entry + unregisters on exit. UI status fields are scoped
+        per-candidate so concurrent workers don't stomp each other.
+        """
+        self._bump_stat('scanned')
+        self._register_active(candidate, status='identifying')
+        logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
 
         threshold = 0.9
         if self._config_manager:
@@ -252,130 +611,96 @@ class AutoImportWorker:
         if self._config_manager:
             auto_process = self._config_manager.get('auto_import.auto_process', True)
 
-        for candidate in candidates:
-            if self.should_stop or self.paused:
-                break
+        try:
+            # Phase 3: Identify
+            identification = self._identify_folder(candidate)
+            if not identification:
+                self._record_result(candidate, 'needs_identification', 0.0,
+                                    error_message='Could not identify album from tags, folder name, or fingerprint')
+                self._bump_stat('failed')
+                return
 
-            self._current_folder = candidate.name
+            # Phase 4: Match tracks
+            self._update_active(candidate.folder_hash, status='matching')
+            match_result = self._match_tracks(candidate, identification)
+            if not match_result:
+                self._record_result(candidate, 'needs_identification', 0.0,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    error_message='Could not match tracks to album tracklist')
+                self._bump_stat('failed')
+                return
 
-            # Skip folders currently being processed by a previous scan cycle
-            if candidate.path in self._processing_paths:
-                logger.debug(f"[Auto-Import] Skipping {candidate.name} — still processing from previous cycle")
-                continue
+            confidence = match_result['confidence']
+            status = 'matched'
 
-            # Check if already processed
-            if self._is_already_processed(candidate.folder_hash):
-                continue
+            # Check if individual track matches are strong even if overall confidence
+            # is low (e.g. only 2 of 18 album tracks present → low coverage kills
+            # overall score, but the 2 tracks match perfectly and should still import)
+            high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
+            has_strong_individual_matches = len(high_conf_matches) > 0
 
-            # Check stability (files not changing)
-            if not self._is_folder_stable(candidate):
-                continue
+            if (confidence >= threshold or has_strong_individual_matches) and auto_process:
+                # Phase 5: Auto-process — insert an in-progress row
+                # so the UI sees the import the moment it starts,
+                # then update it with the final status when done.
+                effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
+                logger.info(f"[Auto-Import] Processing {candidate.name} — "
+                            f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
+                            f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
 
-            self._stats['scanned'] += 1
-            logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
+                in_progress_row_id = self._record_in_progress(
+                    candidate, identification, match_result,
+                )
+                self._update_active(candidate.folder_hash, status='processing')
 
-            # Mark as in-progress so next scan cycle skips this folder
-            self._processing_paths.add(candidate.path)
-            try:
-                # Phase 3: Identify
-                identification = self._identify_folder(candidate)
-                if not identification:
-                    self._record_result(candidate, 'needs_identification', 0.0,
-                                        error_message='Could not identify album from tags, folder name, or fingerprint')
-                    self._stats['failed'] += 1
-                    continue
-
-                # Phase 4: Match tracks
-                match_result = self._match_tracks(candidate, identification)
-                if not match_result:
-                    self._record_result(candidate, 'needs_identification', 0.0,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        error_message='Could not match tracks to album tracklist')
-                    self._stats['failed'] += 1
-                    continue
-
-                confidence = match_result['confidence']
-                status = 'matched'
-
-                # Check if individual track matches are strong even if overall confidence
-                # is low (e.g. only 2 of 18 album tracks present → low coverage kills
-                # overall score, but the 2 tracks match perfectly and should still import)
-                high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
-                has_strong_individual_matches = len(high_conf_matches) > 0
-
-                if (confidence >= threshold or has_strong_individual_matches) and auto_process:
-                    # Phase 5: Auto-process — insert an in-progress row
-                    # so the UI sees the import the moment it starts,
-                    # then update it with the final status when done.
-                    effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
-                    logger.info(f"[Auto-Import] Processing {candidate.name} — "
-                                f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
-                                f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
-
-                    in_progress_row_id = self._record_in_progress(
-                        candidate, identification, match_result,
-                    )
-                    self._current_status = 'processing'
-
-                    success = self._process_matches(candidate, identification, match_result)
-                    status = 'completed' if success else 'failed'
-                    confidence = max(confidence, effective_conf)
-                    if success:
-                        self._stats['auto_processed'] += 1
-                    else:
-                        self._stats['failed'] += 1
-
-                    # Reset live progress state regardless of outcome
-                    self._current_track_index = 0
-                    self._current_track_total = 0
-                    self._current_track_name = ''
-                    self._current_status = 'scanning' if not self.should_stop else 'idle'
-
-                    # Update the in-progress row in place — UI shows the
-                    # final result without a separate insert race.
-                    self._finalize_result(in_progress_row_id, status, confidence)
-                elif confidence >= 0.7:
-                    status = 'pending_review'
-                    self._stats['pending_review'] += 1
-                    logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
-                    self._record_result(candidate, status, confidence,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        identification_method=identification.get('method'),
-                                        match_data=match_result)
+                success = self._process_matches(candidate, identification, match_result)
+                status = 'completed' if success else 'failed'
+                confidence = max(confidence, effective_conf)
+                if success:
+                    self._bump_stat('auto_processed')
                 else:
-                    status = 'needs_identification'
-                    self._stats['failed'] += 1
-                    logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
-                    self._record_result(candidate, status, confidence,
-                                        album_id=identification.get('album_id'),
-                                        album_name=identification.get('album_name'),
-                                        artist_name=identification.get('artist_name'),
-                                        image_url=identification.get('image_url'),
-                                        identification_method=identification.get('method'),
-                                        match_data=match_result)
+                    self._bump_stat('failed')
 
-            except Exception as e:
-                logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
-                self._record_result(candidate, 'failed', 0.0, error_message=str(e))
-                self._stats['failed'] += 1
-            finally:
-                self._processing_paths.discard(candidate.path)
-                # Defensive: if the inner code path didn't reset live
-                # progress (early raise, etc.), clear it so the UI
-                # doesn't show stale "processing track 3/14" forever.
-                self._current_track_index = 0
-                self._current_track_total = 0
-                self._current_track_name = ''
+                # Update the in-progress row in place — UI shows the
+                # final result without a separate insert race.
+                self._finalize_result(in_progress_row_id, status, confidence)
+            elif confidence >= 0.7:
+                status = 'pending_review'
+                self._bump_stat('pending_review')
+                logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
+                self._record_result(candidate, status, confidence,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    identification_method=identification.get('method'),
+                                    match_data=match_result)
+            else:
+                status = 'needs_identification'
+                self._bump_stat('failed')
+                logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
+                self._record_result(candidate, status, confidence,
+                                    album_id=identification.get('album_id'),
+                                    album_name=identification.get('album_name'),
+                                    artist_name=identification.get('artist_name'),
+                                    image_url=identification.get('image_url'),
+                                    identification_method=identification.get('method'),
+                                    match_data=match_result)
 
-            # Rate limit between folders
-            if self._interruptible_sleep(2):
-                break
+        except Exception as e:
+            logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
+            self._record_result(candidate, 'failed', 0.0, error_message=str(e))
+            self._bump_stat('failed')
+        finally:
+            with self._submitted_lock:
+                self._submitted_hashes.discard(candidate.folder_hash)
+            # Per-candidate UI state goes away with the candidate.
+            # No stale "processing track 3/14" because the entry is
+            # gone — the UI's polling read returns an empty array.
+            self._unregister_active(candidate.folder_hash)
 
     # ── Scanning ──
 
@@ -398,13 +723,33 @@ class AutoImportWorker:
         return candidates
 
     def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
-        """Recursively scan a directory for album folders and loose audio files."""
+        """Recursively scan a directory for album folders and loose audio files.
+
+        Loose-file handling:
+        - Read each loose file's `album` tag and group by normalised
+          album name. Each group becomes its own candidate so a chaotic
+          staging root (multiple albums dumped loose) imports correctly
+          instead of bundling everything into one fake "album."
+        - Untagged loose files become individual single candidates (they
+          have nothing to group with).
+        - Disc folders at the same level attach to the loose-file group
+          whose album tag matches the disc-folder files (typical layout:
+          loose files for disc 1 + `Disc 2/`, `Disc 3/` subfolders).
+        - Disc folders with no matching loose group become standalone
+          multi-disc candidates.
+
+        Recursion rule:
+        - Always recurse into non-disc subdirectories. The previous
+          rule "only recurse when no loose files exist" silently
+          ignored album subfolders sitting next to loose files —
+          common when a user moves some tracks out of an album folder
+          while leaving the parent album folder intact.
+        """
         try:
             entries = sorted(os.listdir(directory))
         except OSError:
             return
 
-        # Collect loose audio files at this level
         loose_files = []
         subdirs = []
 
@@ -415,93 +760,183 @@ class AutoImportWorker:
             elif os.path.isdir(full_path):
                 subdirs.append((entry, full_path))
 
+        disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
+        non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
+
+        # Build disc_structure from disc subdirs once — referenced by
+        # both the loose-files branch (to attach matching discs to the
+        # right loose-file group) and the disc-only branch.
+        disc_files_by_num: Dict[int, List[str]] = {}
+        for sub_name, sub_path in disc_subdirs:
+            disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
+            try:
+                disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
+                              if os.path.isfile(os.path.join(sub_path, f))
+                              and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+            except OSError:
+                disc_files = []
+            if disc_files:
+                disc_files_by_num[disc_num] = disc_files
+
         if loose_files:
-            # This directory has audio files — treat it as an album folder candidate
-            audio_files = loose_files
-            disc_structure = {}
+            self._build_loose_file_candidates(
+                directory, loose_files, disc_files_by_num, candidates,
+            )
+        elif disc_files_by_num and not non_disc_subdirs:
+            # Disc-only directory — treat THIS directory as the album.
+            # Common when a user drops `Disc 1/`, `Disc 2/` straight
+            # into staging without an album-level loose-file group.
+            audio_files: List[str] = []
+            disc_structure: Dict[int, List[str]] = {}
+            for disc_num, disc_files in disc_files_by_num.items():
+                disc_structure[disc_num] = disc_files
+                audio_files.extend(disc_files)
 
-            # Check if any subdirs are disc folders
-            has_disc_folders = False
-            for sub_name, sub_path in subdirs:
-                disc_match = DISC_FOLDER_RE.match(sub_name)
-                if disc_match:
-                    has_disc_folders = True
-                    disc_num = int(disc_match.group(1))
-                    disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
-                                  if os.path.isfile(os.path.join(sub_path, f))
-                                  and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-                    if disc_files:
-                        disc_structure[disc_num] = disc_files
-                        audio_files.extend(disc_files)
-
-            if has_disc_folders:
-                disc_structure[0] = loose_files  # Top-level files are disc 0
-
-            # Determine if this is a single or album
-            is_single = len(audio_files) == 1 and not has_disc_folders
-            folder_name = os.path.basename(directory)
-            folder_hash = _compute_folder_hash(audio_files)
-
-            if is_single:
-                candidates.append(FolderCandidate(
-                    path=audio_files[0], name=os.path.basename(audio_files[0]),
-                    audio_files=audio_files, folder_hash=folder_hash, is_single=True
-                ))
-            else:
+            if audio_files:
+                folder_name = os.path.basename(directory)
+                folder_hash = _compute_folder_hash(audio_files)
+                is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
                 candidates.append(FolderCandidate(
                     path=directory, name=folder_name, audio_files=audio_files,
-                    disc_structure=disc_structure, folder_hash=folder_hash
+                    disc_structure=disc_structure, folder_hash=folder_hash,
+                    is_staging_root=is_staging_root,
                 ))
-        else:
-            # No loose audio files. If the only subdirs are disc folders,
-            # treat THIS directory as the album candidate (multi-disc album
-            # with no album-level loose files — common when a user drops
-            # `Album/Disc 1/`, `Album/Disc 2/` straight into staging, or
-            # drops `Disc 1/`, `Disc 2/` with the staging dir itself as
-            # the album root).
-            disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
-            non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
 
-            if disc_subdirs and not non_disc_subdirs:
-                disc_structure = {}
-                audio_files = []
-                for sub_name, sub_path in disc_subdirs:
-                    disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
-                    try:
-                        disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
-                                      if os.path.isfile(os.path.join(sub_path, f))
-                                      and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-                    except OSError:
-                        disc_files = []
-                    if disc_files:
-                        disc_structure[disc_num] = disc_files
-                        audio_files.extend(disc_files)
+        # Always recurse into non-disc subdirectories — even when this
+        # level has loose files. Otherwise album subfolders sitting
+        # beside loose tracks get silently ignored (the bug a chaotic
+        # staging root surfaced on 2026-05-09).
+        for _sub_name, sub_path in non_disc_subdirs:
+            self._scan_directory(sub_path, candidates, staging_root=staging_root)
 
-                if audio_files:
-                    folder_name = os.path.basename(directory)
-                    folder_hash = _compute_folder_hash(audio_files)
-                    is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
-                    candidates.append(FolderCandidate(
-                        path=directory, name=folder_name, audio_files=audio_files,
-                        disc_structure=disc_structure, folder_hash=folder_hash,
-                        is_staging_root=is_staging_root,
-                    ))
-                return
+    def _build_loose_file_candidates(
+        self,
+        directory: str,
+        loose_files: List[str],
+        disc_files_by_num: Dict[int, List[str]],
+        candidates: List[FolderCandidate],
+    ) -> None:
+        """Group loose audio files by `album` tag, build one candidate
+        per album group + attach matching disc folders.
 
-            # Otherwise recurse into non-disc subdirs (disc folders only
-            # ever attach to a parent album, never stand alone).
-            for _sub_name, sub_path in non_disc_subdirs:
-                self._scan_directory(sub_path, candidates, staging_root=staging_root)
+        - Tagged files cluster by their album name (case-insensitive,
+          whitespace-stripped).
+        - Untagged files become individual single candidates (can't
+          group what we don't have a key for).
+        - Disc folders attach to whichever loose group's album tag
+          matches the first disc-folder track's album tag. Disc folders
+          with no matching loose group fall through to a standalone
+          multi-disc candidate scoped to that album.
+        - When all loose files share one album AND disc folders attach
+          to it, the result matches the previous "bundle everything"
+          behavior — so single-album staging with parallel disc folders
+          (the user's Mr. Morale layout) keeps working unchanged.
+        """
+        # Group by normalised album tag
+        groups: Dict[str, List[str]] = {}
+        untagged: List[str] = []
+        for f in loose_files:
+            try:
+                tags = _read_file_tags(f)
+            except Exception as exc:
+                logger.debug("scan tag read failed for %s: %s", f, exc)
+                tags = {}
+            album_key = (tags.get('album') or '').strip().lower()
+            if album_key:
+                groups.setdefault(album_key, []).append(f)
+            else:
+                untagged.append(f)
+
+        # Attach disc folders to matching groups. Read the first track
+        # of each disc to find its album tag and merge accordingly.
+        disc_attached_to: Dict[int, str] = {}  # disc_num → album_key
+        for disc_num, disc_files in disc_files_by_num.items():
+            try:
+                first_disc_tags = _read_file_tags(disc_files[0])
+            except Exception:
+                first_disc_tags = {}
+            disc_album_key = (first_disc_tags.get('album') or '').strip().lower()
+            if disc_album_key and disc_album_key in groups:
+                disc_attached_to[disc_num] = disc_album_key
+
+        # Track which disc nums got merged into a loose group so we
+        # don't double-count them in the standalone-disc fallback.
+        merged_disc_nums = set(disc_attached_to.keys())
+
+        # Build a candidate per loose-file group
+        for album_key, group_files in groups.items():
+            audio_files = list(group_files)
+            disc_structure: Dict[int, List[str]] = {0: list(group_files)}
+            for disc_num, attached_album in disc_attached_to.items():
+                if attached_album == album_key:
+                    audio_files.extend(disc_files_by_num[disc_num])
+                    disc_structure[disc_num] = list(disc_files_by_num[disc_num])
+
+            folder_hash = _compute_folder_hash(audio_files)
+            # Use the album tag for the candidate name so the import
+            # history shows something meaningful instead of always the
+            # parent directory name.
+            display_name = group_files[0]
+            try:
+                first_tags = _read_file_tags(group_files[0])
+                if first_tags.get('album'):
+                    display_name = first_tags['album']
+            except Exception as exc:
+                logger.debug("display-name tag read failed for %s: %s", group_files[0], exc)
+
+            candidates.append(FolderCandidate(
+                path=directory,
+                name=os.path.basename(directory) if len(groups) == 1 else str(display_name),
+                audio_files=audio_files,
+                disc_structure=disc_structure if len(disc_structure) > 1 else {},
+                folder_hash=folder_hash,
+            ))
+
+        # Untagged singles — one candidate per file. Can't group them.
+        for f in untagged:
+            audio_files = [f]
+            folder_hash = _compute_folder_hash(audio_files)
+            candidates.append(FolderCandidate(
+                path=f, name=os.path.basename(f),
+                audio_files=audio_files, folder_hash=folder_hash, is_single=True,
+            ))
+
+        # Standalone disc folders (no loose group claimed them) — bundle
+        # into a multi-disc candidate scoped to the directory.
+        unattached_discs = {
+            n: files for n, files in disc_files_by_num.items()
+            if n not in merged_disc_nums
+        }
+        if unattached_discs:
+            audio_files = []
+            disc_structure = {}
+            for disc_num, disc_files in unattached_discs.items():
+                disc_structure[disc_num] = disc_files
+                audio_files.extend(disc_files)
+            folder_hash = _compute_folder_hash(audio_files)
+            candidates.append(FolderCandidate(
+                path=directory,
+                name=f"{os.path.basename(directory)} (loose discs)",
+                audio_files=audio_files,
+                disc_structure=disc_structure,
+                folder_hash=folder_hash,
+            ))
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
-        """Check if folder contents have stopped changing."""
+        """Check if the candidate's audio files have stopped changing.
+
+        Keyed on folder_hash, NOT path — multiple candidates can share
+        a path (loose-file groups at the same directory level) so
+        path-keyed snapshots would overwrite each other's mtimes and
+        make stability checks unreliable for sibling candidates.
+        """
         try:
             current_mtime = sum(os.path.getmtime(f) for f in candidate.audio_files if os.path.exists(f))
         except OSError:
             return False
 
-        prev = self._folder_snapshots.get(candidate.path)
-        self._folder_snapshots[candidate.path] = current_mtime
+        prev = self._folder_snapshots.get(candidate.folder_hash)
+        self._folder_snapshots[candidate.folder_hash] = current_mtime
 
         if prev is None:
             return False  # First scan — wait for next cycle to confirm stability
@@ -608,6 +1043,11 @@ class AutoImportWorker:
                 'album_id': result.get('album_id') if result else None,
                 'album_name': album or (result.get('album_name') if result else None) or title,
                 'artist_name': artist,
+                # Carry the metadata-source artist ID forward when the
+                # search result had one — without this the standalone
+                # library write can't populate the source-id column on
+                # the artists row even though we know the ID.
+                'artist_id': result.get('artist_id', '') if result else '',
                 'track_name': title,
                 'image_url': result.get('image_url', '') if result else '',
                 'release_date': tags.get('year', '') or (result.get('release_date', '') if result else ''),
@@ -683,12 +1123,17 @@ class AutoImportWorker:
                 return None
 
             r_artist = ''
+            r_artist_id = ''
             r_album = ''
             r_album_id = ''
             r_image = ''
             if hasattr(best_result, 'artists') and best_result.artists:
                 a = best_result.artists[0]
-                r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                if isinstance(a, dict):
+                    r_artist = a.get('name', str(a))
+                    r_artist_id = str(a.get('id', '') or '')
+                else:
+                    r_artist = str(a)
 
             # Extract image — try direct image_url first (Deezer), then album.images (Spotify)
             r_image = getattr(best_result, 'image_url', '') or ''
@@ -712,6 +1157,7 @@ class AutoImportWorker:
                 'album_id': r_album_id or None,
                 'album_name': r_album or title,
                 'artist_name': r_artist or artist or '',
+                'artist_id': r_artist_id,
                 'track_name': getattr(best_result, 'name', '') or title,
                 'track_id': getattr(best_result, 'id', ''),
                 'image_url': r_image,
@@ -865,9 +1311,20 @@ class AutoImportWorker:
                 image_url = img.get('url', '') if isinstance(img, dict) else str(img)
 
             r_artist = ''
+            r_artist_id = ''
             if hasattr(best_result, 'artists') and best_result.artists:
                 a = best_result.artists[0]
-                r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                if isinstance(a, dict):
+                    r_artist = a.get('name', str(a))
+                    # Surface the metadata-source artist ID so the
+                    # standalone-library write can land it on the right
+                    # `<source>_artist_id` column. Without this the
+                    # artists row gets created but with NULL on the
+                    # source-id, and watchlist scans can't recognise
+                    # the artist as already in library by stable ID.
+                    r_artist_id = str(a.get('id', '') or '')
+                else:
+                    r_artist = str(a)
 
             # Get release date
             release_date = getattr(best_result, 'release_date', '') or ''
@@ -876,6 +1333,7 @@ class AutoImportWorker:
                 'album_id': best_result.id,
                 'album_name': best_result.name,
                 'artist_name': r_artist or artist or '',
+                'artist_id': r_artist_id,
                 'image_url': image_url,
                 'release_date': release_date,
                 'total_tracks': getattr(best_result, 'total_tracks', 0),
@@ -922,6 +1380,12 @@ class AutoImportWorker:
             # Fetch album with tracks
             client = get_client_for_source(source)
             if not client:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — no client available "
+                    "for source '%s'. Identification probably came from a source "
+                    "that's no longer configured.",
+                    candidate.name, source,
+                )
                 return None
 
             album_data = None
@@ -937,6 +1401,13 @@ class AutoImportWorker:
                     album_data = {'id': album_id, 'name': identification.get('album_name', ''), 'tracks': tracks_data}
 
             if not album_data:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                    "no album data for id %r. Album probably exists in the "
+                    "search index but get_album endpoint can't fetch it (rate "
+                    "limit / region restriction / id-format mismatch).",
+                    candidate.name, source, album_id,
+                )
                 return None
 
             # Extract tracks — handle various response formats
@@ -954,6 +1425,12 @@ class AutoImportWorker:
                     tracks = album_data['items']
 
             if not tracks:
+                logger.warning(
+                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                    "album data but no tracks. album_data keys: %s",
+                    candidate.name, source,
+                    list(album_data.keys()) if isinstance(album_data, dict) else type(album_data).__name__,
+                )
                 return None
 
             # Read tags for all files
@@ -961,79 +1438,23 @@ class AutoImportWorker:
             for f in candidate.audio_files:
                 file_tags[f] = _read_file_tags(f)
 
-            # Resolve quality duplicates — if multiple files match same track, keep best
-            # Group by probable track (using track number from tags)
-            seen_track_nums = {}
-            deduped_files = []
-            for f in candidate.audio_files:
-                tn = file_tags[f]['track_number']
-                ext = os.path.splitext(f)[1].lower()
-                if tn > 0 and tn in seen_track_nums:
-                    prev_f = seen_track_nums[tn]
-                    prev_ext = os.path.splitext(prev_f)[1].lower()
-                    if _quality_rank(ext) > _quality_rank(prev_ext):
-                        deduped_files.remove(prev_f)
-                        deduped_files.append(f)
-                        seen_track_nums[tn] = f
-                else:
-                    deduped_files.append(f)
-                    if tn > 0:
-                        seen_track_nums[tn] = f
-
-            # Match files to tracks using weighted scoring
-            matches = []
-            used_files = set()
+            # Dedupe + match — both lifted into core.imports.album_matching
+            # so the matching algorithm is unit-testable in isolation
+            # (no worker instantiation, no metadata-client mocking, no
+            # _read_file_tags monkeypatch). Worker still owns I/O +
+            # metadata fetch; the helper is a pure function over dicts.
+            from core.imports.album_matching import match_files_to_tracks
             target_album = identification.get('album_name', '')
-
-            for track in tracks:
-                track_name = track.get('name', '')
-                track_num = track.get('track_number', 0)
-                track_artists = track.get('artists', [])
-                track_artist = ''
-                if track_artists:
-                    a = track_artists[0]
-                    track_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
-
-                best_file = None
-                best_score = 0
-
-                for f in deduped_files:
-                    if f in used_files:
-                        continue
-
-                    ft = file_tags[f]
-                    score = 0
-
-                    # Title similarity (45%)
-                    title = ft['title'] or os.path.splitext(os.path.basename(f))[0]
-                    score += _similarity(title, track_name) * 0.45
-
-                    # Artist similarity (15%)
-                    if ft['artist'] and track_artist:
-                        score += _similarity(ft['artist'], track_artist) * 0.15
-
-                    # Track number (30%)
-                    if ft['track_number'] > 0 and track_num > 0:
-                        if ft['track_number'] == track_num:
-                            score += 0.30
-                        elif abs(ft['track_number'] - track_num) <= 1:
-                            score += 0.12
-
-                    # Album tag bonus (10%)
-                    if ft['album']:
-                        score += _similarity(ft['album'], target_album) * 0.10
-
-                    if score > best_score and score >= 0.4:
-                        best_score = score
-                        best_file = f
-
-                if best_file:
-                    used_files.add(best_file)
-                    matches.append({
-                        'track': track,
-                        'file': best_file,
-                        'confidence': round(best_score, 3),
-                    })
+            match_result = match_files_to_tracks(
+                candidate.audio_files,
+                file_tags,
+                tracks,
+                target_album=target_album,
+                similarity=_similarity,
+                quality_rank=_quality_rank,
+            )
+            matches = match_result['matches']
+            unmatched_files = match_result['unmatched_files']
 
             if not matches:
                 return None
@@ -1046,7 +1467,7 @@ class AutoImportWorker:
 
             return {
                 'matches': matches,
-                'unmatched_files': [f for f in deduped_files if f not in used_files],
+                'unmatched_files': unmatched_files,
                 'total_tracks': len(tracks),
                 'matched_count': len(matches),
                 'coverage': round(coverage, 3),
@@ -1112,9 +1533,47 @@ class AutoImportWorker:
         processed = 0
         errors = []
         all_matches = list(match_result.get('matches', []))
+
+        # Album total duration — sum of every matched track's duration.
+        # Mirrors `SoulSyncAlbum.duration` in soulsync_client (which is
+        # `sum(t.duration for t in self._tracks)`). Without this, the
+        # album row gets whatever the FIRST imported track's duration
+        # was — random per album (would be track 1 for a normal in-
+        # order import, but no guarantee).
+        album_total_duration_ms = sum(
+            int(m.get('track', {}).get('duration_ms', 0) or 0)
+            for m in all_matches
+        )
+        # Ensure an active-import entry exists for this candidate.
+        # Callers from `_process_one_candidate` already registered, but
+        # tests invoke `_process_matches` directly without going
+        # through the pool — the auto-register makes both paths safe.
+        self._register_active(candidate, status='processing')
         # Surface track total for the UI's live-progress widget. Matches
         # the loop denominator so users see "3/14" while it's working.
-        self._current_track_total = len(all_matches)
+        self._update_active(candidate.folder_hash, track_total=len(all_matches))
+
+        # Aggregate genres from track tags so the standalone library
+        # write can populate the artists row's `genres` column with
+        # something meaningful. Mirrors what `soulsync_client._scan_transfer`
+        # does at deep-scan time — collects the set of genres across
+        # every track in the album. Without this the artists row gets
+        # genres=[] and feels empty compared to a Plex/Jellyfin scan.
+        # Sorted for deterministic ordering (genre-filter dedup uses
+        # set semantics so this is just for stable JSON output).
+        aggregated_genres: List[str] = []
+        seen_genres: set = set()
+        for _m in all_matches:
+            try:
+                _file_tags = _read_file_tags(_m['file'])
+            except Exception as _tag_err:
+                logger.debug("genre tag read failed for %s: %s", _m.get('file'), _tag_err)
+                continue
+            for g in _file_tags.get('genres', []) or []:
+                key = g.lower()
+                if key and key not in seen_genres:
+                    seen_genres.add(key)
+                    aggregated_genres.append(g)
 
         for index, match in enumerate(all_matches, start=1):
             track = match['track']
@@ -1128,32 +1587,95 @@ class AutoImportWorker:
             # Update live progress BEFORE the per-track work so the UI
             # sees the right "now processing track N: <name>" the
             # moment polling fires (every 5s).
-            self._current_track_index = index
-            self._current_track_name = track_name
+            self._update_active(
+                candidate.folder_hash,
+                track_index=index,
+                track_name=track_name,
+            )
 
             if not os.path.exists(file_path):
                 errors.append(f"File not found: {os.path.basename(file_path)}")
                 continue
 
             try:
-                # Build context matching the manual import format
+                # Build context matching the manual import format.
+                #
+                # The post-process pipeline (`_post_process_matched_download`
+                # → `record_soulsync_library_entry`) reads `source` to pick
+                # the right source-id columns on artists/albums/tracks,
+                # and reads `_download_username` to label the row in
+                # library history + provenance. Without these the SoulSync
+                # standalone library lands the file but leaves
+                # `spotify_track_id` / `deezer_id` / etc. NULL and tags the
+                # provenance row as "Soulseek" (the default fallback).
+                # SoulSync standalone is a full server replacement, so the
+                # row must carry the same field richness as a Plex/Jellyfin/
+                # Navidrome scan would write.
                 context_key = f"auto_import_{candidate.folder_hash}_{track_number}"
+                # Album-level identifiers from the metadata source response.
+                # `album_data['id']` is the source-native album id (e.g.
+                # spotify album id, deezer album id). Identification fed it
+                # into `identification['album_id']` already; prefer the
+                # album_data version since it's authoritative when both
+                # are present.
+                source_album_id = album_data.get('id') or identification.get('album_id') or ''
+                # ISRC + MusicBrainz Recording ID — propagated by the
+                # metadata layer (`_build_album_track_entry`) so files
+                # tagged with these IDs can match later watchlist scans
+                # without relying on fuzzy title comparison.
+                # Defensive `str()` cast — `_build_album_track_entry`
+                # already coerces these to str, but if a future source
+                # client returns a non-string (int, None) the
+                # downstream `.strip()` in side_effects would
+                # AttributeError. Cheap insurance.
+                track_isrc = str(track.get('isrc', '') or '')
+                track_mbid = str(
+                    track.get('musicbrainz_recording_id', '')
+                    or track.get('mbid', '')
+                    or ''
+                )
                 context = {
+                    # Top-level `source` is the canonical signal that the
+                    # imports pipeline reads via `get_import_source()`.
+                    # `get_library_source_id_columns(source)` then picks
+                    # the right column on artists/albums/tracks for the
+                    # source-aware UPDATE.
+                    'source': source,
+                    # `_download_username` is read by
+                    # `record_library_history_download` +
+                    # `record_download_provenance` to label the row.
+                    # 'auto_import' maps to "Auto-Import" / "auto_import"
+                    # in those source maps so the UI doesn't show every
+                    # imported file as "Soulseek".
+                    '_download_username': 'auto_import',
                     'spotify_artist': {
-                        'id': identification.get('album_id') or 'auto_import',
+                        'id': identification.get('artist_id') or '',
                         'name': artist_name,
-                        'genres': [],
+                        # Genres aggregated from the matched files'
+                        # GENRE tags (deduped, original-case preserved).
+                        # Mirrors soulsync_client deep-scan behaviour
+                        # so the standalone library write populates
+                        # the artists row's genres column instead of
+                        # leaving it empty.
+                        'genres': list(aggregated_genres),
                     },
                     'spotify_album': {
-                        'id': album_data.get('id') or identification.get('album_id') or '',
+                        'id': source_album_id,
                         'name': album_name,
                         'release_date': release_date,
                         'total_tracks': album_data.get('total_tracks', match_result.get('total_tracks', 0)),
                         'total_discs': total_discs,
                         'image_url': image_url,
                         'images': album_data.get('images', [{'url': image_url}] if image_url else []),
-                        'artists': [{'name': artist_name}],
+                        'artists': [{'name': artist_name, 'id': identification.get('artist_id') or ''}],
                         'album_type': album_data.get('album_type', 'album'),
+                        # Album total duration in ms (sum of every
+                        # matched track). Read by side_effects to
+                        # populate the album row's `duration` column —
+                        # without this the album row gets whatever
+                        # the first-imported track's duration happened
+                        # to be.
+                        'duration_ms': album_total_duration_ms,
                     },
                     'track_info': {
                         'name': track_name,
@@ -1163,6 +1685,14 @@ class AutoImportWorker:
                         'duration_ms': track.get('duration_ms', 0),
                         'artists': track.get('artists', [{'name': artist_name}]),
                         'uri': track.get('uri', ''),
+                        # Album-id back-reference + per-recording IDs so
+                        # `get_import_source_ids` can resolve them onto
+                        # the right column even when the source's API
+                        # nests them under `album.id` rather than
+                        # `track.album_id`.
+                        'album_id': source_album_id,
+                        'isrc': track_isrc,
+                        'musicbrainz_recording_id': track_mbid,
                     },
                     'original_search_result': {
                         'title': track_name,
