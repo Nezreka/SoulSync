@@ -325,6 +325,135 @@ def test_context_artist_id_is_empty_when_identification_missing_it(worker_with_c
     )
 
 
+# ---------------------------------------------------------------------------
+# Genre aggregation — soulsync standalone parity with deep-scan behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_context_aggregates_genres_from_track_tags(worker_with_capture, tmp_path, monkeypatch):
+    """Worker reads GENRE tag from each matched file and surfaces a
+    deduped list on `spotify_artist['genres']`. Mirrors what
+    `soulsync_client._scan_transfer` does at deep-scan time so the
+    standalone library write populates the artists row's genres
+    column instead of leaving it empty (which is what plex/jellyfin/
+    navidrome scans would have provided)."""
+    from core import auto_import_worker as worker_mod
+
+    files = []
+    for i in range(1, 4):
+        f = tmp_path / f"0{i}.flac"
+        f.write_bytes(b"audio")
+        files.append(f)
+
+    # Stub `_read_file_tags` so we don't need real audio. Each file
+    # carries a different (overlapping) genre set — deduped result
+    # should preserve insertion order + original casing.
+    fake_tags = {
+        str(files[0]): {'genres': ['Hip-Hop', 'Rap'], 'isrc': '', 'mbid': '',
+                        'duration_ms': 200000, 'title': 'A', 'artist': 'X',
+                        'album': 'Album', 'track_number': 1, 'disc_number': 1, 'year': ''},
+        str(files[1]): {'genres': ['Rap', 'Trap'], 'isrc': '', 'mbid': '',
+                        'duration_ms': 200000, 'title': 'B', 'artist': 'X',
+                        'album': 'Album', 'track_number': 2, 'disc_number': 1, 'year': ''},
+        str(files[2]): {'genres': ['hip-hop'], 'isrc': '', 'mbid': '',  # case-insensitive dup
+                        'duration_ms': 200000, 'title': 'C', 'artist': 'X',
+                        'album': 'Album', 'track_number': 3, 'disc_number': 1, 'year': ''},
+    }
+    monkeypatch.setattr(worker_mod, '_read_file_tags',
+                        lambda path: fake_tags.get(str(path), {'genres': []}))
+
+    cand = _FakeCandidate(path=str(tmp_path), name="Album",
+                          audio_files=[str(f) for f in files])
+    ident = _make_identification("spotify")
+    mr = _make_match_result("spotify", 3)
+    mr["matches"] = [
+        {"track": {"id": f"t{i}", "name": f"Track {i}", "track_number": i,
+                   "disc_number": 1, "duration_ms": 200000,
+                   "artists": [{"name": "X"}]},
+         "file": str(files[i - 1]), "confidence": 0.95}
+        for i in range(1, 4)
+    ]
+
+    worker_with_capture._process_matches(cand, ident, mr)
+
+    ctx = worker_with_capture._captured[0]
+    genres = ctx["spotify_artist"]["genres"]
+    # Insertion-order preserved: Hip-Hop (file 1), Rap (file 1), Trap (file 2).
+    # 'hip-hop' from file 3 deduped against 'Hip-Hop' (case-insensitive).
+    assert genres == ["Hip-Hop", "Rap", "Trap"], (
+        f"Expected deduped insertion-order genres, got {genres}"
+    )
+
+
+def test_context_genres_empty_when_no_tags(worker_with_capture, tmp_path, monkeypatch):
+    """No GENRE tag on any file → empty list. Standalone library write
+    handles empty list gracefully (genres column stays empty / NULL)."""
+    from core import auto_import_worker as worker_mod
+
+    f = tmp_path / "01.flac"
+    f.write_bytes(b"audio")
+    monkeypatch.setattr(worker_mod, '_read_file_tags',
+                        lambda path: {'genres': [], 'isrc': '', 'mbid': '',
+                                      'duration_ms': 200000, 'title': '', 'artist': '',
+                                      'album': '', 'track_number': 1, 'disc_number': 1, 'year': ''})
+
+    cand = _FakeCandidate(path=str(tmp_path), name="Album", audio_files=[str(f)])
+    ident = _make_identification("spotify")
+    mr = _make_match_result("spotify", 1)
+    mr["matches"] = [{
+        "track": {"id": "t1", "name": "Track", "track_number": 1,
+                  "disc_number": 1, "duration_ms": 200000,
+                  "artists": [{"name": "A"}]},
+        "file": str(f), "confidence": 0.95,
+    }]
+
+    worker_with_capture._process_matches(cand, ident, mr)
+
+    assert worker_with_capture._captured[0]["spotify_artist"]["genres"] == []
+
+
+# ---------------------------------------------------------------------------
+# Defensive ISRC/MBID type coercion
+# ---------------------------------------------------------------------------
+
+
+def test_context_isrc_mbid_coerced_to_string(worker_with_capture, tmp_path):
+    """If a metadata source returns ISRC or MBID as int / non-string
+    (no current source does, but defensive against future drift),
+    the worker coerces to string before assignment so the side-effects
+    layer's `.strip()` doesn't AttributeError."""
+    f = tmp_path / "01.flac"
+    f.write_bytes(b"audio")
+    cand = _FakeCandidate(path=str(tmp_path), name="Album", audio_files=[str(f)])
+    ident = _make_identification("deezer")
+    mr = _make_match_result("deezer", 1)
+    mr["matches"] = [{
+        "track": {
+            "id": "111",
+            "name": "Track",
+            "track_number": 1,
+            "disc_number": 1,
+            "duration_ms": 200000,
+            "artists": [{"name": "A"}],
+            # Hostile types: ints / None — must not propagate
+            # through to side_effects un-cast.
+            "isrc": 12345678,
+            "mbid": None,
+            "musicbrainz_recording_id": 999,
+        },
+        "file": str(f), "confidence": 0.95,
+    }]
+
+    worker_with_capture._process_matches(cand, ident, mr)
+
+    ti = worker_with_capture._captured[0]["track_info"]
+    assert isinstance(ti["isrc"], str)
+    assert isinstance(ti["musicbrainz_recording_id"], str)
+    # int 12345678 → "12345678", int 999 → "999"
+    assert ti["isrc"] == "12345678"
+    assert ti["musicbrainz_recording_id"] == "999"
+
+
 def test_search_metadata_source_extracts_artist_id_from_dict_artist():
     """`_search_metadata_source` must extract the artist source ID
     from `best_result.artists[0]['id']` so identification carries it

@@ -82,13 +82,19 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     """Read embedded tags from an audio file.
 
     Returns dict with: title, artist, album, track_number, disc_number,
-    year, isrc, mbid, duration_ms.
+    year, genres, isrc, mbid, duration_ms.
 
     The exact-identifier fields (``isrc``, ``mbid``) and the audio
     duration enable the ID-based fast paths + duration sanity gate in
     ``core/imports/album_matching.py``. Tagged files (Picard-tagged
     libraries always carry MBID; most metadata sources carry ISRC) get
     perfect-match identification without going through fuzzy scoring.
+
+    ``genres`` is a list of strings — Mutagen's easy mode returns the
+    GENRE tag as a list (some files carry multiple genres). Empty list
+    when the tag is absent. Worker aggregates these across an album's
+    tracks to populate the artist row's genres column at insert time
+    (matches the soulsync_client deep-scan behaviour).
 
     All exact-identifier fields default to empty string when the tag
     isn't present — callers treat empty as "not available, fall back to
@@ -97,7 +103,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     result = {
         'title': '', 'artist': '', 'album': '',
         'track_number': 0, 'disc_number': 1, 'year': '',
-        'isrc': '', 'mbid': '', 'duration_ms': 0,
+        'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
     }
     try:
         from mutagen import File as MutagenFile
@@ -136,6 +142,16 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                     result['disc_number'] = int(str(dn).split('/')[0])
                 except (ValueError, TypeError):
                     pass
+                # GENRE — Mutagen easy mode returns a list (some files
+                # carry multiple genres, e.g. "Hip-Hop;Rap;Trap"). Skip
+                # empty / whitespace entries so the aggregator doesn't
+                # have to filter them.
+                raw_genres = tags.get('genre', []) or []
+                if isinstance(raw_genres, str):
+                    raw_genres = [raw_genres]
+                result['genres'] = [
+                    str(g).strip() for g in raw_genres if str(g).strip()
+                ]
                 # ISRC — International Standard Recording Code. Per-recording
                 # unique identifier; metadata sources expose it as `isrc` on
                 # tracks. Picard / Beets both write this tag from MusicBrainz.
@@ -1526,6 +1542,28 @@ class AutoImportWorker:
         # the loop denominator so users see "3/14" while it's working.
         self._update_active(candidate.folder_hash, track_total=len(all_matches))
 
+        # Aggregate genres from track tags so the standalone library
+        # write can populate the artists row's `genres` column with
+        # something meaningful. Mirrors what `soulsync_client._scan_transfer`
+        # does at deep-scan time — collects the set of genres across
+        # every track in the album. Without this the artists row gets
+        # genres=[] and feels empty compared to a Plex/Jellyfin scan.
+        # Sorted for deterministic ordering (genre-filter dedup uses
+        # set semantics so this is just for stable JSON output).
+        aggregated_genres: List[str] = []
+        seen_genres: set = set()
+        for _m in all_matches:
+            try:
+                _file_tags = _read_file_tags(_m['file'])
+            except Exception as _tag_err:
+                logger.debug("genre tag read failed for %s: %s", _m.get('file'), _tag_err)
+                continue
+            for g in _file_tags.get('genres', []) or []:
+                key = g.lower()
+                if key and key not in seen_genres:
+                    seen_genres.add(key)
+                    aggregated_genres.append(g)
+
         for index, match in enumerate(all_matches, start=1):
             track = match['track']
             file_path = match['file']
@@ -1574,8 +1612,17 @@ class AutoImportWorker:
                 # metadata layer (`_build_album_track_entry`) so files
                 # tagged with these IDs can match later watchlist scans
                 # without relying on fuzzy title comparison.
-                track_isrc = track.get('isrc', '') or ''
-                track_mbid = track.get('musicbrainz_recording_id', '') or track.get('mbid', '') or ''
+                # Defensive `str()` cast — `_build_album_track_entry`
+                # already coerces these to str, but if a future source
+                # client returns a non-string (int, None) the
+                # downstream `.strip()` in side_effects would
+                # AttributeError. Cheap insurance.
+                track_isrc = str(track.get('isrc', '') or '')
+                track_mbid = str(
+                    track.get('musicbrainz_recording_id', '')
+                    or track.get('mbid', '')
+                    or ''
+                )
                 context = {
                     # Top-level `source` is the canonical signal that the
                     # imports pipeline reads via `get_import_source()`.
@@ -1593,7 +1640,13 @@ class AutoImportWorker:
                     'spotify_artist': {
                         'id': identification.get('artist_id') or '',
                         'name': artist_name,
-                        'genres': [],
+                        # Genres aggregated from the matched files'
+                        # GENRE tags (deduped, original-case preserved).
+                        # Mirrors soulsync_client deep-scan behaviour
+                        # so the standalone library write populates
+                        # the artists row's genres column instead of
+                        # leaving it empty.
+                        'genres': list(aggregated_genres),
                     },
                     'spotify_album': {
                         'id': source_album_id,
