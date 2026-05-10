@@ -330,3 +330,114 @@ class TestWorkerAliasEnrichment:
         worker.mb_service.update_artist_aliases.assert_not_called()
         # And the match was still counted
         assert worker.stats['matched'] == 1
+
+
+# ---------------------------------------------------------------------------
+# lookup_artist_aliases — multi-tier resolution (library → cache → live)
+# ---------------------------------------------------------------------------
+
+
+class TestLookupArtistAliasesMultiTier:
+    def test_tier1_library_db_hit(self, service, temp_db):
+        """Fast path: artist already enriched in library DB.
+        No MB API call fired."""
+        _seed_artist(temp_db, 'Hiroyuki Sawano',
+                     aliases=json.dumps(['澤野弘之', 'SawanoHiroyuki']))
+
+        aliases = service.lookup_artist_aliases('Hiroyuki Sawano')
+
+        assert '澤野弘之' in aliases
+        service.mb_client.search_artist.assert_not_called()
+        service.mb_client.get_artist.assert_not_called()
+
+    def test_tier3_live_mb_lookup_when_not_in_library(self, service, temp_db):
+        """Cache miss + library miss → MB search → fetch by MBID →
+        cache the result."""
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-sawano', 'name': 'Hiroyuki Sawano', 'score': 100},
+        ]
+        service.mb_client.get_artist.return_value = {
+            'aliases': [{'name': '澤野弘之'}, {'name': 'SawanoHiroyuki'}],
+        }
+
+        aliases = service.lookup_artist_aliases('Hiroyuki Sawano')
+
+        assert '澤野弘之' in aliases
+        service.mb_client.search_artist.assert_called_once()
+        service.mb_client.get_artist.assert_called_once_with(
+            'mb-sawano', includes=['aliases'],
+        )
+
+    def test_tier2_cache_hit_skips_live_lookup(self, service, temp_db):
+        """Second call for same artist hits the cache, doesn't
+        re-query MB. Critical for the verifier path — 100 quarantine
+        candidates with the same artist must NOT trigger 100 MB
+        calls."""
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-x', 'name': 'X', 'score': 100},
+        ]
+        service.mb_client.get_artist.return_value = {
+            'aliases': [{'name': 'X-alias'}],
+        }
+
+        # First call — populates cache
+        first = service.lookup_artist_aliases('X')
+        # Second call — should be cached
+        second = service.lookup_artist_aliases('X')
+
+        assert first == second == ['X-alias']
+        # Only ONE round-trip to MB despite two calls
+        assert service.mb_client.search_artist.call_count == 1
+        assert service.mb_client.get_artist.call_count == 1
+
+    def test_empty_name_returns_empty_no_api_call(self, service):
+        assert service.lookup_artist_aliases('') == []
+        assert service.lookup_artist_aliases(None) == []
+        service.mb_client.search_artist.assert_not_called()
+
+    def test_search_failure_returns_empty(self, service):
+        """Network outage on search — return empty, cache the empty
+        result so we don't keep retrying."""
+        service.mb_client.search_artist.side_effect = Exception("network down")
+        aliases = service.lookup_artist_aliases('Anyone')
+        assert aliases == []
+
+    def test_no_search_results_returns_empty(self, service):
+        """Artist not found on MB — empty return, cached so we
+        don't re-search the same name forever."""
+        service.mb_client.search_artist.return_value = []
+        aliases = service.lookup_artist_aliases('NeverHeardOf')
+        assert aliases == []
+        # Second call should hit cache, not re-search
+        service.lookup_artist_aliases('NeverHeardOf')
+        assert service.mb_client.search_artist.call_count == 1
+
+    def test_low_confidence_match_skipped(self, service):
+        """Search returned something but the name similarity is too
+        low — don't trust it. Could pull in aliases for the wrong
+        artist (e.g. searching 'John Smith' returns a different
+        John Smith). Empty return + cached."""
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-different', 'name': 'Completely Different Artist', 'score': 30},
+        ]
+        aliases = service.lookup_artist_aliases('Hiroyuki Sawano')
+        assert aliases == []
+        # Didn't even try fetching aliases for the bad match
+        service.mb_client.get_artist.assert_not_called()
+
+    def test_library_with_empty_aliases_falls_through_to_live(self, service, temp_db):
+        """Edge case: library has the artist but `aliases` column is
+        NULL (worker hasn't enriched yet). Don't get stuck — fall
+        through to live MB lookup."""
+        _seed_artist(temp_db, 'Hiroyuki Sawano')  # no aliases
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-sawano', 'name': 'Hiroyuki Sawano', 'score': 100},
+        ]
+        service.mb_client.get_artist.return_value = {
+            'aliases': [{'name': '澤野弘之'}],
+        }
+
+        aliases = service.lookup_artist_aliases('Hiroyuki Sawano')
+
+        assert '澤野弘之' in aliases
+        service.mb_client.search_artist.assert_called_once()
