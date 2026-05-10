@@ -388,6 +388,113 @@ class MusicBrainzService:
             logger.error(f"Error matching recording '{track_name}': {e}")
             return None
     
+    def fetch_artist_aliases(self, mbid: str) -> list:
+        """Fetch the alias list for an artist from MusicBrainz.
+
+        Issue #442 — Japanese kanji / Cyrillic / etc. spellings of an
+        artist's name are stored as `aliases` on the MusicBrainz
+        artist record. Pull them so SoulSync can recognise that
+        `澤野弘之` and `Hiroyuki Sawano` refer to the same artist.
+
+        Returns the deduplicated list of alias `name` strings. Returns
+        empty list (NOT None) on any failure — caller should treat
+        empty as "no aliases available, fall back to direct match" so
+        a transient MB outage never causes a stricter verification
+        decision than today.
+        """
+        if not mbid:
+            return []
+        try:
+            data = self.mb_client.get_artist(mbid, includes=['aliases'])
+        except Exception as e:
+            logger.debug("fetch_artist_aliases: get_artist(%s) raised: %s", mbid, e)
+            return []
+        if not data:
+            return []
+        raw_aliases = data.get('aliases') or []
+        # MB returns each alias as a dict with `name`, `sort-name`,
+        # `locale`, `primary`, `type`, etc. We only care about the
+        # display name — that's what `actual` artist strings will
+        # match against.
+        seen = set()
+        cleaned = []
+        for entry in raw_aliases:
+            if not isinstance(entry, dict):
+                continue
+            name = (entry.get('name') or '').strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+        return cleaned
+
+    def update_artist_aliases(self, artist_id: int, aliases: list) -> None:
+        """Persist the alias list to `artists.aliases` as a JSON array.
+
+        Idempotent — overwrites any existing value. Empty list
+        clears the column (caller may want this if MB has no aliases
+        for the artist anymore).
+        """
+        if artist_id is None:
+            return
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE artists SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(aliases) if aliases else None, artist_id),
+            )
+            conn.commit()
+            logger.debug("Updated artist %s aliases (%d entries)", artist_id, len(aliases or []))
+        except Exception as e:
+            logger.error(f"Error updating artist aliases for {artist_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
+    def get_artist_aliases(self, artist_name: str) -> list:
+        """Look up cached aliases for an artist by NAME (not id).
+
+        Used by the verifier where the expected artist comes from a
+        download's metadata-source data — we don't have a library
+        row's `id` to query, just the display name. Returns empty
+        list when the artist isn't in the library or has no aliases
+        recorded. The verifier falls back to live MB lookup in that
+        case.
+        """
+        if not artist_name:
+            return []
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT aliases FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1",
+                (artist_name,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return []
+            try:
+                parsed = json.loads(row[0])
+            except (TypeError, json.JSONDecodeError):
+                return []
+            if not isinstance(parsed, list):
+                return []
+            return [str(x).strip() for x in parsed if x]
+        except Exception as e:
+            logger.debug("get_artist_aliases lookup failed for %r: %s", artist_name, e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def update_artist_mbid(self, artist_id: int, mbid: Optional[str], status: str):
         """Update artist with MusicBrainz ID"""
         conn = None
