@@ -1533,6 +1533,17 @@ class AutoImportWorker:
         processed = 0
         errors = []
         all_matches = list(match_result.get('matches', []))
+
+        # Album total duration — sum of every matched track's duration.
+        # Mirrors `SoulSyncAlbum.duration` in soulsync_client (which is
+        # `sum(t.duration for t in self._tracks)`). Without this, the
+        # album row gets whatever the FIRST imported track's duration
+        # was — random per album (would be track 1 for a normal in-
+        # order import, but no guarantee).
+        album_total_duration_ms = sum(
+            int(m.get('track', {}).get('duration_ms', 0) or 0)
+            for m in all_matches
+        )
         # Ensure an active-import entry exists for this candidate.
         # Callers from `_process_one_candidate` already registered, but
         # tests invoke `_process_matches` directly without going
@@ -1658,6 +1669,13 @@ class AutoImportWorker:
                         'images': album_data.get('images', [{'url': image_url}] if image_url else []),
                         'artists': [{'name': artist_name, 'id': identification.get('artist_id') or ''}],
                         'album_type': album_data.get('album_type', 'album'),
+                        # Album total duration in ms (sum of every
+                        # matched track). Read by side_effects to
+                        # populate the album row's `duration` column —
+                        # without this the album row gets whatever
+                        # the first-imported track's duration happened
+                        # to be.
+                        'duration_ms': album_total_duration_ms,
                     },
                     'track_info': {
                         'name': track_name,
