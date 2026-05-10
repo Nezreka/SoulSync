@@ -388,6 +388,84 @@ class MusicBrainzService:
             logger.error(f"Error matching recording '{track_name}': {e}")
             return None
     
+    def lookup_artist_aliases(self, artist_name: str) -> list:
+        """Find alternate-spelling aliases for an artist by NAME.
+
+        Multi-tier resolution:
+        1. Library DB row (`artists.aliases` populated by the MB
+           worker when the artist was enriched). Fast path — no
+           network.
+        2. Existing musicbrainz_cache entry (entity_type='artist_aliases')
+           — caches a prior live MB lookup for this name.
+        3. Live MB lookup: search artist → fetch aliases for the best
+           MBID → cache the result.
+
+        Always returns a list (possibly empty) — never raises. Empty
+        result on any tier means "no alternate spellings found, fall
+        back to direct match" which is identical to pre-fix behaviour.
+
+        Used by the AcoustID verifier when an artist comparison fails
+        the direct similarity check. Caching means each unique artist
+        name only hits MB once per cache TTL even if 100 download
+        candidates fail verification with that artist.
+        """
+        if not artist_name:
+            return []
+
+        # Tier 1: library DB
+        library = self.get_artist_aliases(artist_name)
+        if library:
+            return library
+
+        # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
+        cached = self._check_cache('artist_aliases', artist_name)
+        if cached:
+            metadata = cached.get('metadata') or {}
+            aliases = metadata.get('aliases') if isinstance(metadata, dict) else None
+            if isinstance(aliases, list):
+                return [str(x).strip() for x in aliases if x]
+            # Cache hit with empty result — respect it (don't re-query)
+            return []
+
+        # Tier 3: live MB lookup. Search → fetch by MBID → cache.
+        try:
+            results = self.mb_client.search_artist(artist_name, limit=3)
+        except Exception as e:
+            logger.debug("lookup_artist_aliases: search_artist(%r) raised: %s", artist_name, e)
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        if not results:
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        # Pick the best match — highest combined score of MB's relevance
+        # and our name-similarity check (mirrors `match_artist`).
+        best_mbid = None
+        best_score = 0
+        for result in results:
+            mb_name = result.get('name', '')
+            mb_score = result.get('score', 0)
+            sim = self._calculate_similarity(artist_name, mb_name)
+            combined = (sim * 0.7) + (mb_score / 100 * 0.3)
+            if combined > best_score:
+                best_score = combined
+                best_mbid = result.get('id')
+
+        # Threshold: only trust the lookup when name + MB-relevance
+        # combined is reasonably high. Otherwise we're guessing,
+        # which could pull in aliases for the wrong artist.
+        if not best_mbid or best_score < 0.6:
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        aliases = self.fetch_artist_aliases(best_mbid)
+        self._save_to_cache(
+            'artist_aliases', artist_name, None, best_mbid,
+            {'aliases': aliases}, int(best_score * 100),
+        )
+        return aliases
+
     def fetch_artist_aliases(self, mbid: str) -> list:
         """Fetch the alias list for an artist from MusicBrainz.
 
