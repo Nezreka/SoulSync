@@ -313,6 +313,24 @@ class MusicBrainzWorker:
                 result = self.mb_service.match_artist(item_name)
                 if result and result.get('mbid'):
                     self.mb_service.update_artist_mbid(item_id, result['mbid'], 'matched')
+                    # Issue #442 — pull alternate-spelling aliases (Japanese
+                    # kanji, Cyrillic, etc.) so the verifier can recognise
+                    # cross-script artist names without re-querying MB on
+                    # every quarantine candidate. Best-effort: failures are
+                    # swallowed inside `fetch_artist_aliases` (returns
+                    # empty list) so a transient MB outage never regresses
+                    # the enrichment outcome.
+                    try:
+                        aliases = self.mb_service.fetch_artist_aliases(result['mbid'])
+                        if aliases:
+                            self.mb_service.update_artist_aliases(item_id, aliases)
+                            logger.debug(
+                                "Stored %d aliases for artist '%s'", len(aliases), item_name,
+                            )
+                    except Exception as alias_err:
+                        logger.debug(
+                            "Alias enrichment failed for artist '%s': %s", item_name, alias_err,
+                        )
                     self.stats['matched'] += 1
                     logger.info(f"Matched artist '{item_name}' → MBID: {result['mbid']}")
                 else:
