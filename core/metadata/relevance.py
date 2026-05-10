@@ -98,6 +98,13 @@ VARIANT_TAG_PATTERNS = (
     'club mix',
     'a cappella',
     'acapella',
+    # Remaster — softer than karaoke (user might want it) but still
+    # demoted vs. the original recording. Verified against live Deezer
+    # API behaviour where "(2008 Remaster)" outranks the Head Games
+    # original on `track:"X" artist:"Y"` advanced queries.
+    'remaster',
+    'remastered',
+    'reissue',
 )
 
 VARIANT_TAG_PENALTY = 0.4

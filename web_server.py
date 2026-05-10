@@ -19846,20 +19846,25 @@ def search_deezer_tracks():
     """Search for tracks on Deezer — used by the import-modal "Search
     for Match" dialog and by discovery-fix flows.
 
-    Field-scoped path (`track=` + `artist=`) builds Deezer's advanced
-    search syntax `track:"X" artist:"Y"`. Massively tighter relevance
-    than the free-text path because the API matches each term in the
-    right field instead of fuzzy-matching across title / lyrics /
-    artist / album / contributors. Without it, Deezer's ranking
-    buries the canonical recording under karaoke / cover / "originally
-    performed by" variants — see issue #534.
+    Issue #534: Deezer's free-text ranking buries canonical recordings
+    under karaoke / cover / "originally performed by" variants in some
+    regions. The fix here is the local relevance rerank
+    (``core.metadata.relevance.rerank_tracks``) which penalises cover /
+    karaoke / tribute / remaster patterns + boosts exact-artist-match.
+    Catches the user-reported case (karaoke at top) and the inverse
+    (live-version compilation noise) regardless of which Deezer
+    region's ranking the user hits.
 
-    Results then go through ``core.metadata.relevance.rerank_tracks``
-    which penalises any cover / karaoke / tribute / re-recorded
-    patterns we can detect locally + boosts exact-artist-match. Two
-    layers stacked because Deezer's ranking is rough even on advanced
-    queries (compilations rank well by global popularity); the local
-    rerank is the safety net.
+    Field-scoped advanced-syntax queries (`track:"X" artist:"Y"`) were
+    initially considered as a second tightening layer, but live-API
+    testing showed Deezer's advanced-query ranking has its own bias —
+    e.g. it surfaced a 2008 Remaster on `track:"Dirty White Boy"
+    artist:"Foreigner"` and didn't return the canonical Head Games cut
+    at all. The free-text path actually returns the canonical
+    recording first more reliably, so this endpoint stays free-text +
+    local rerank. Client-level kwarg support remains in
+    ``DeezerClient.search_tracks`` for future callers (e.g. exact-match
+    flows where filtering is more important than ranking).
     """
     try:
         track_q = request.args.get('track', '').strip()
@@ -19867,20 +19872,18 @@ def search_deezer_tracks():
         legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        client = _get_deezer_client()
         if track_q or artist_q:
-            # Field-scoped — pass kwargs through so the client builds
-            # the advanced-syntax query.
-            tracks = client.search_tracks(track=track_q or None,
-                                          artist=artist_q or None,
-                                          limit=limit)
+            query = ' '.join(p for p in (track_q, artist_q) if p)
         elif legacy_query:
-            tracks = client.search_tracks(legacy_query, limit=limit)
+            query = legacy_query
         else:
             return jsonify({"error": "Query parameter is required"}), 400
 
+        client = _get_deezer_client()
+        tracks = client.search_tracks(query, limit=limit)
+
         # Local rerank — only when we have an expected title/artist
-        # signal. Free-text searches have nothing to rank against.
+        # signal. Free-text-only searches have nothing to rank against.
         if track_q or artist_q:
             from core.metadata.relevance import rerank_tracks
             tracks = rerank_tracks(
