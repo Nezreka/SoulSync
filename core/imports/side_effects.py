@@ -50,6 +50,115 @@ def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
 
+# Tiny SQL allowlist for the fill-empty helpers — prevents accidental
+# SQL injection through the f-string column-name interpolation. Only
+# columns the soulsync library write path ever updates are listed.
+_SOULSYNC_FILLABLE_COLUMNS = {
+    "artists": frozenset({"thumb_url", "genres", "summary", "spotify_artist_id",
+                          "itunes_artist_id", "deezer_id", "discogs_id", "soul_id",
+                          "hifi_artist_id"}),
+    "albums": frozenset({"thumb_url", "genres", "year", "track_count", "duration",
+                         "spotify_album_id", "itunes_album_id", "deezer_id",
+                         "discogs_id", "soul_id", "hifi_album_id"}),
+}
+
+
+def _fill_empty_columns(cursor, table: str, row_id: Any, fields: Dict[str, Any]) -> None:
+    """UPDATE only the columns whose current value is NULL or empty.
+
+    Conservative: never overwrites populated values. Lets a re-import
+    fill metadata gaps (e.g. cover art that wasn't available the first
+    time) without trampling enrichment data the metadata workers wrote
+    later. Mirrors how the media-server scanner refreshes rows on each
+    pass, but with the safety belt of "don't clobber".
+
+    Empty-check happens in Python (not SQL) because SQLite's
+    `NULLIF(text_col, 0)` returns the original text value instead of
+    NULL — type-coercion mismatch makes the SQL-only conditional
+    unreliable. Reading the row first, comparing in Python, then
+    issuing only the necessary SET clauses sidesteps that entirely.
+
+    Column names are validated against `_SOULSYNC_FILLABLE_COLUMNS`
+    before any f-string interpolation — defense against accidental
+    misuse adding new columns without an allowlist update.
+    """
+    allowed = _SOULSYNC_FILLABLE_COLUMNS.get(table, frozenset())
+    safe_fields = {col: val for col, val in fields.items() if col in allowed}
+    if not safe_fields:
+        return
+    # Read current values so we can decide per-column whether a fill
+    # is needed. Single SELECT instead of one-per-column saves
+    # round-trips.
+    col_list = ", ".join(safe_fields.keys())
+    try:
+        cursor.execute(f"SELECT {col_list} FROM {table} WHERE id = ?", (row_id,))
+    except Exception as e:
+        logger.debug("fill-empty SELECT on %s failed: %s", table, e)
+        return
+    row = cursor.fetchone()
+    if not row:
+        return
+    set_clauses: list[str] = []
+    values: list[Any] = []
+    for col, new_value in safe_fields.items():
+        # Skip when payload itself is empty — no point writing NULL → NULL.
+        # For numeric columns (year, duration, track_count) 0 means
+        # "unknown" so treat as no-op too.
+        if new_value in (None, "", 0):
+            continue
+        # Read current value; only fill when it's empty/zero.
+        try:
+            current = row[col]
+        except (KeyError, IndexError):
+            continue
+        if current not in (None, "", 0):
+            continue
+        set_clauses.append(f"{col} = ?")
+        values.append(new_value)
+    if not set_clauses:
+        return
+    values.append(row_id)
+    try:
+        cursor.execute(
+            f"UPDATE {table} SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            values,
+        )
+    except Exception as e:
+        logger.debug("fill-empty UPDATE on %s failed: %s", table, e)
+
+
+def _fill_empty_source_id(cursor, table: str, column: str, value: str, row_id: Any) -> None:
+    """Single-column variant of _fill_empty_columns for the
+    `<source>_<entity>_id` columns whose names come from
+    `get_library_source_id_columns(source)`."""
+    if column not in _SOULSYNC_FILLABLE_COLUMNS.get(table, frozenset()):
+        logger.debug("skipping non-allowlisted source-id column %s.%s", table, column)
+        return
+    if not value:
+        return
+    try:
+        cursor.execute(f"SELECT {column} FROM {table} WHERE id = ?", (row_id,))
+        row = cursor.fetchone()
+    except Exception as e:
+        logger.debug("fill-empty source-id SELECT on %s.%s failed: %s", table, column, e)
+        return
+    if not row:
+        return
+    try:
+        current = row[column]
+    except (KeyError, IndexError):
+        return
+    if current not in (None, ""):
+        return
+    try:
+        cursor.execute(
+            f"UPDATE {table} SET {column} = ? WHERE id = ?",
+            (value, row_id),
+        )
+    except Exception as e:
+        logger.debug("fill-empty source-id UPDATE on %s.%s failed: %s", table, column, e)
+
+
 def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> None:
     """Emit the track_downloaded automation event."""
     try:
@@ -352,71 +461,136 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         album_id = _stable_soulsync_id(f"{artist_name}::{album_name}".lower().strip())
         track_id = _stable_soulsync_id(final_path)
         total_tracks = album_ctx.get("total_tracks", 0) or 0
+        # Album total duration — auto-import passes the sum of every
+        # matched track's duration via `album.duration_ms`, mirroring
+        # what soulsync_client's deep scan computes. Falls back to
+        # the per-track duration for callers that don't provide an
+        # album total (legacy direct-download flow).
+        album_total_duration_ms = int(
+            album_ctx.get("duration_ms") or duration_ms or 0
+        )
 
         db = get_database()
         with db._get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = 'soulsync'", (artist_id,))
-            if not cursor.fetchone():
+            # ── Artist row: insert-or-fill-empty-fields ────────────
+            #
+            # Pre-refactor was insert-only: subsequent imports of the
+            # same artist (same name, second album) found the existing
+            # row via the name-fallback SELECT and skipped completely.
+            # That meant artist genres / thumb / source-id reflected
+            # whatever the FIRST imported album supplied, never
+            # refreshing as more albums by that artist landed.
+            #
+            # Conservative fix: when an existing row matches, run an
+            # UPDATE that only fills NULL/empty fields (`thumb_url IS
+            # NULL OR thumb_url = ''`). Never overwrites populated
+            # values — protects manual edits + enrichment-worker
+            # writes.
+            artist_source_col = source_columns.get("artist")
+
+            cursor.execute(
+                "SELECT id FROM artists WHERE id = ? AND server_source = 'soulsync'",
+                (artist_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 cursor.execute(
                     "SELECT id FROM artists WHERE name COLLATE NOCASE = ? AND server_source = 'soulsync' LIMIT 1",
                     (artist_name,),
                 )
-                existing_by_name = cursor.fetchone()
-                if existing_by_name:
-                    artist_id = existing_by_name[0]
-                else:
-                    cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
-                    if cursor.fetchone():
-                        artist_id = _stable_soulsync_id(artist_name.lower().strip() + "::soulsync")
-                    cursor.execute(
-                        """
-                        INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """,
-                        (artist_id, artist_name, genres_json, image_url),
-                    )
-                    artist_source_col = source_columns.get("artist")
-                    if artist_source_col and artist_source_id:
-                        try:
-                            cursor.execute(
-                                f"UPDATE artists SET {artist_source_col} = ? WHERE id = ?",
-                                (artist_source_id, artist_id),
-                            )
-                        except Exception as e:
-                            logger.debug("artist source-id update failed: %s", e)
+                row = cursor.fetchone()
+                if row:
+                    artist_id = row[0]
 
-            cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'", (album_id,))
-            if not cursor.fetchone():
+            if row:
+                _fill_empty_columns(
+                    cursor,
+                    table="artists",
+                    row_id=artist_id,
+                    fields={
+                        "thumb_url": image_url,
+                        "genres": genres_json,
+                    },
+                )
+                if artist_source_col and artist_source_id:
+                    _fill_empty_source_id(cursor, "artists", artist_source_col, artist_source_id, artist_id)
+            else:
+                # Hash collision protection — if the stable ID is
+                # already in use by a different server's row, mint a
+                # soulsync-suffixed ID so we don't trample.
+                cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
+                if cursor.fetchone():
+                    artist_id = _stable_soulsync_id(artist_name.lower().strip() + "::soulsync")
+                cursor.execute(
+                    """
+                    INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (artist_id, artist_name, genres_json, image_url),
+                )
+                if artist_source_col and artist_source_id:
+                    try:
+                        cursor.execute(
+                            f"UPDATE artists SET {artist_source_col} = ? WHERE id = ?",
+                            (artist_source_id, artist_id),
+                        )
+                    except Exception as e:
+                        logger.debug("artist source-id update failed: %s", e)
+
+            # ── Album row: same insert-or-fill-empty-fields shape ──
+            album_source_col = source_columns.get("album")
+
+            cursor.execute(
+                "SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'",
+                (album_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 cursor.execute(
                     "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? AND server_source = 'soulsync' LIMIT 1",
                     (album_name, artist_id),
                 )
-                existing_album_by_name = cursor.fetchone()
-                if existing_album_by_name:
-                    album_id = existing_album_by_name[0]
-                else:
-                    cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
-                    if cursor.fetchone():
-                        album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::soulsync".lower().strip())
-                    cursor.execute(
-                        """
-                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                            duration, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """,
-                        (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, duration_ms),
-                    )
-                    album_source_col = source_columns.get("album")
-                    if album_source_col and album_source_id:
-                        try:
-                            cursor.execute(
-                                f"UPDATE albums SET {album_source_col} = ? WHERE id = ?",
-                                (album_source_id, album_id),
-                            )
-                        except Exception as e:
-                            logger.debug("album source-id update failed: %s", e)
+                row = cursor.fetchone()
+                if row:
+                    album_id = row[0]
+
+            if row:
+                _fill_empty_columns(
+                    cursor,
+                    table="albums",
+                    row_id=album_id,
+                    fields={
+                        "thumb_url": image_url,
+                        "genres": genres_json,
+                        "year": year,
+                        "track_count": total_tracks,
+                        "duration": album_total_duration_ms,
+                    },
+                )
+                if album_source_col and album_source_id:
+                    _fill_empty_source_id(cursor, "albums", album_source_col, album_source_id, album_id)
+            else:
+                cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
+                if cursor.fetchone():
+                    album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::soulsync".lower().strip())
+                cursor.execute(
+                    """
+                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
+                                        duration, server_source, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, album_total_duration_ms),
+                )
+                if album_source_col and album_source_id:
+                    try:
+                        cursor.execute(
+                            f"UPDATE albums SET {album_source_col} = ? WHERE id = ?",
+                            (album_source_id, album_id),
+                        )
+                    except Exception as e:
+                        logger.debug("album source-id update failed: %s", e)
 
             track_artist = None
             track_artists_list = track_info.get("artists", []) or original_search.get("artists", [])
