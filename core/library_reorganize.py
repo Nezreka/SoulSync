@@ -174,6 +174,45 @@ def authed_sources() -> List[dict]:
     return out
 
 
+_UNKNOWN_ARTIST_NAMES = {'unknown artist', 'unknown', ''}
+
+
+def _is_unknown_artist(artist_name: Optional[str]) -> bool:
+    if not artist_name:
+        return True
+    return str(artist_name).strip().lower() in _UNKNOWN_ARTIST_NAMES
+
+
+def _looks_like_album_id_title(album_title: Optional[str]) -> bool:
+    """Pre-#524 manual-import bug left some albums with a numeric
+    album_id stored as `albums.title`. Detect that shape so reorganize
+    can point the user at Unknown Artist Fixer instead of the generic
+    'run enrichment' hint."""
+    if not album_title:
+        return False
+    stripped = str(album_title).strip()
+    return len(stripped) >= 6 and stripped.isdigit()
+
+
+def _unresolvable_reason(album_data: dict, primary_source: str, strict_source: bool) -> str:
+    """Reason text for albums reorganize can't place. Surfaces the
+    Unknown Artist Fixer hint when the row matches the bad-metadata
+    shape (Unknown Artist OR album-id-as-title) — that fixer reads
+    file tags + re-resolves metadata, which reorganize itself doesn't
+    do."""
+    artist = album_data.get('artist_name')
+    title = album_data.get('title')
+    if _is_unknown_artist(artist) or _looks_like_album_id_title(title):
+        return (
+            "Album has placeholder metadata (Unknown Artist or numeric "
+            "title) — run the 'Fix Unknown Artists' repair job to "
+            "recover real artist/album from file tags before reorganize"
+        )
+    if strict_source:
+        return f"Source '{primary_source}' has no usable tracklist for this album"
+    return "No metadata source ID for this album"
+
+
 def _resolve_source(album_data: dict, primary_source: str, strict_source: bool = False):
     """Walk the configured source priority looking for the first source
     we have an ID for AND that returns a usable tracklist.
@@ -552,11 +591,7 @@ def plan_album_reorganize(
         album_data, primary_source, strict_source=strict_source
     )
     if not source:
-        reason = (
-            f"Source '{primary_source}' has no usable tracklist for this album"
-            if strict_source else
-            "No metadata source ID for this album"
-        )
+        reason = _unresolvable_reason(album_data, primary_source, strict_source)
         return {
             'status': 'no_source_id', 'source': None, 'api_album': None,
             'total_discs': 1,
@@ -1225,13 +1260,19 @@ def reorganize_album(
     )
     if plan['status'] == 'no_source_id':
         summary['status'] = 'no_source_id'
-        summary['errors'].append({
-            'error': (
+        if _is_unknown_artist(album_data.get('artist_name')) or _looks_like_album_id_title(album_data.get('title')):
+            err_text = (
+                f"Album '{album_data.get('title', '?')}' has placeholder metadata "
+                "(Unknown Artist or numeric title) — run the 'Fix Unknown Artists' "
+                "repair job to recover real artist/album from file tags first."
+            )
+        else:
+            err_text = (
                 f"No reachable metadata source ID for '{album_data.get('title', '?')}' — "
                 "run enrichment first to populate at least one of "
                 "spotify_album_id / itunes_album_id / deezer_id / discogs_id / soul_id."
-            ),
-        })
+            )
+        summary['errors'].append({'error': err_text})
         return summary
 
     source = plan['source']
