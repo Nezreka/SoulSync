@@ -324,11 +324,50 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                     logger.debug("upgrade spotify image url failed: %s", e)
             elif art_url and "mzstatic.com" in art_url:
                 art_url = re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
+            elif art_url and "dzcdn" in art_url:
+                # Deezer's API returns cover_xl URLs at 1000×1000 but
+                # the underlying CDN serves up to 1900×1900 by rewriting
+                # the size segment in the URL path. Without this upgrade
+                # users embedding cover art via Deezer get visibly
+                # blurry covers in their library / phone player (Discord
+                # report from Tim, 2026-05). Same shape as the iTunes
+                # mzstatic upgrade above + Spotify scdn upgrade.
+                try:
+                    from core.deezer_client import _upgrade_deezer_cover_url
+
+                    art_url = _upgrade_deezer_cover_url(art_url)
+                except Exception as e:
+                    logger.debug("upgrade deezer image url failed: %s", e)
             if not art_url:
                 logger.warning("No cover art URL available for download.")
                 return
-            with urllib.request.urlopen(art_url, timeout=10) as response:
-                image_data = response.read()
+            # Fetch with one fallback level: if we upgraded a Deezer
+            # URL above and the CDN happens to refuse the larger size
+            # for this specific album, retry with the original URL so
+            # we never regress vs. pre-upgrade behavior. Empirically
+            # 1900 works for every album tested but defending against
+            # the edge case keeps the fix strictly non-regressive.
+            original_url = album_info.get("album_image_url")
+            if context and not original_url:
+                album_ctx = get_import_context_album(context)
+                original_url = album_ctx.get("image_url") or original_url
+            try:
+                with urllib.request.urlopen(art_url, timeout=10) as response:
+                    image_data = response.read()
+            except Exception as fetch_err:
+                if (
+                    "dzcdn" in art_url
+                    and original_url
+                    and original_url != art_url
+                ):
+                    logger.info(
+                        "Deezer CDN refused upgraded cover URL (%s); "
+                        "retrying with original size", fetch_err,
+                    )
+                    with urllib.request.urlopen(original_url, timeout=10) as response:
+                        image_data = response.read()
+                else:
+                    raise
 
         if not image_data:
             return
