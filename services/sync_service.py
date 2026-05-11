@@ -171,7 +171,7 @@ class PlaylistSyncService:
                 failed_tracks=failed_tracks
             ))
     
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None) -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
         self._active_profile_id = profile_id
         # Check if THIS specific playlist is already syncing
         if playlist.name in self.syncing_playlists:
@@ -314,9 +314,20 @@ class PlaylistSyncService:
                 logger.error("No active media client available for playlist sync")
                 sync_success = False
             else:
-                logger.info(f"Syncing playlist '{playlist.name}' to {server_type.upper()} server")
-                # THE FIX: Ensure we are passing the correct, native track objects to the client
-                sync_success = media_client.update_playlist(playlist.name, valid_tracks)
+                logger.info(
+                    f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
+                    f"(mode: {sync_mode})"
+                )
+                # sync_mode == 'append' preserves user-added tracks on the server
+                # playlist (CJFC discord report) — never deletes, only adds new
+                # ones via the per-server `append_to_playlist`. The sync UI
+                # hides the Sync button entirely on SoulSync standalone (which
+                # has no playlist methods), so every client that reaches this
+                # point implements both methods.
+                if sync_mode == 'append':
+                    sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                else:
+                    sync_success = media_client.update_playlist(playlist.name, valid_tracks)
             
             synced_tracks = len(plex_tracks) if sync_success else 0
             failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks

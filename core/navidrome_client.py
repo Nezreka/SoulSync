@@ -974,6 +974,73 @@ class NavidromeClient(MediaServerClient):
                 matches.append(playlist)
         return matches
 
+    def append_to_playlist(self, playlist_name: str, tracks) -> bool:
+        """Append tracks to an existing playlist (creates it if missing).
+
+        Differs from `update_playlist`: never deletes existing tracks,
+        never recreates the playlist, no backup. Used by sync mode
+        'append' so user-added tracks on the server playlist survive
+        re-syncing the source. Dedupe-by-id ensures we don't re-add
+        tracks the playlist already contains."""
+        if not self.ensure_connection():
+            return False
+
+        try:
+            existing_playlists = self.get_playlists_by_name(playlist_name)
+            if not existing_playlists:
+                logger.info(
+                    f"Navidrome append: playlist '{playlist_name}' doesn't exist yet — "
+                    f"creating with {len(tracks)} tracks"
+                )
+                return self.create_playlist(playlist_name, tracks)
+
+            primary = existing_playlists[0]
+            existing_tracks = self.get_playlist_tracks(primary.id)
+            existing_ids = {
+                str(t.id) for t in existing_tracks if hasattr(t, 'id') and t.id
+            }
+
+            new_track_ids = []
+            for t in tracks:
+                tid = None
+                if hasattr(t, 'ratingKey'):
+                    tid = str(t.ratingKey)
+                elif hasattr(t, 'id'):
+                    tid = str(t.id) if t.id else None
+                elif isinstance(t, dict):
+                    tid = str(t.get('id') or '')
+                if tid and tid not in existing_ids:
+                    new_track_ids.append(tid)
+
+            if not new_track_ids:
+                logger.info(
+                    f"Navidrome append: no new tracks to add to '{playlist_name}' "
+                    f"(all matched tracks already present)"
+                )
+                return True
+
+            # Subsonic updatePlaylist: `songIdToAdd` accepts repeated values
+            # (requests serializes list values as repeated query/form params).
+            params = {
+                'playlistId': primary.id,
+                'songIdToAdd': new_track_ids,
+            }
+            response = self._make_request('updatePlaylist', params)
+            if response and response.get('status') == 'ok':
+                logger.info(
+                    f"Navidrome append: added {len(new_track_ids)} new tracks to "
+                    f"'{playlist_name}' (skipped {len(tracks) - len(new_track_ids)} "
+                    f"already present)"
+                )
+                return True
+            logger.error(
+                f"Failed to append to Navidrome playlist '{playlist_name}'"
+            )
+            return False
+        except Exception as e:
+            logger.error(f"Error appending to Navidrome playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist. Handles duplicates."""
         if not self.ensure_connection():

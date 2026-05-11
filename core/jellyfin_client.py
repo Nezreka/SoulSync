@@ -1533,6 +1533,78 @@ class JellyfinClient(MediaServerClient):
             logger.debug(f"Could not set playlist poster for '{playlist_name}': {e}")
         return False
 
+    def append_to_playlist(self, playlist_name: str, tracks) -> bool:
+        """Append tracks to an existing playlist (creates it if missing).
+
+        Differs from `update_playlist`: never deletes existing tracks,
+        never recreates the playlist, no backup. Used by sync mode
+        'append' so user-added tracks on the server playlist survive
+        re-syncing the source. Dedupe-by-Id ensures we don't re-add
+        tracks the playlist already contains."""
+        if not self.ensure_connection():
+            return False
+
+        try:
+            existing_playlist = self.get_playlist_by_name(playlist_name)
+            if not existing_playlist:
+                logger.info(
+                    f"Jellyfin append: playlist '{playlist_name}' doesn't exist yet — "
+                    f"creating with {len(tracks)} tracks"
+                )
+                return self.create_playlist(playlist_name, tracks)
+
+            playlist_id = existing_playlist.id
+            existing_tracks = self.get_playlist_tracks(playlist_id)
+            existing_ids = {
+                str(t.id) for t in existing_tracks if hasattr(t, 'id') and t.id
+            }
+
+            new_track_ids = []
+            for t in tracks:
+                tid = None
+                if hasattr(t, 'id'):
+                    tid = str(t.id) if t.id else None
+                elif isinstance(t, dict):
+                    tid = str(t.get('Id') or t.get('id') or '')
+                if tid and tid not in existing_ids and self._is_valid_guid(tid):
+                    new_track_ids.append(tid)
+
+            if not new_track_ids:
+                logger.info(
+                    f"Jellyfin append: no new tracks to add to '{playlist_name}' "
+                    f"(all matched tracks already present)"
+                )
+                return True
+
+            import requests
+            batch_size = 100
+            total_added = 0
+            for i in range(0, len(new_track_ids), batch_size):
+                batch = new_track_ids[i:i + batch_size]
+                add_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
+                add_params = {'Ids': ','.join(batch), 'UserId': self.user_id}
+                resp = requests.post(
+                    add_url, params=add_params,
+                    headers={'X-Emby-Token': self.api_key}, timeout=30,
+                )
+                if resp.status_code in (200, 204):
+                    total_added += len(batch)
+                else:
+                    logger.error(
+                        f"Jellyfin append batch failed: HTTP {resp.status_code} - "
+                        f"{resp.text[:200]}"
+                    )
+                    return False
+
+            logger.info(
+                f"Jellyfin append: added {total_added} new tracks to '{playlist_name}' "
+                f"(skipped {len(tracks) - total_added} already present or invalid)"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error appending to Jellyfin playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist"""
         if not self.ensure_connection():
