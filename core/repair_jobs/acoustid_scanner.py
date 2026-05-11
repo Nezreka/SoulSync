@@ -274,8 +274,20 @@ class AcoustIDScannerJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # Discord report (Skowl): compilation albums like "High Tea
+            # Music: Vol 1" have a different artist per track but the
+            # `tracks.artist_id` foreign key points at the ALBUM artist
+            # (curator / label-name applied to every track). AcoustID
+            # returns the actual per-track artist → 12% similarity →
+            # Wrong Song flag. Fix: prefer `tracks.track_artist` (the
+            # per-track artist, populated by every server-scan + auto-
+            # import path when different from album artist) and fall
+            # back to the album artist only when the per-track column
+            # is NULL or empty (legacy rows / single-artist albums).
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path, t.track_number,
+                SELECT t.id, t.title,
+                       COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
+                       t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
