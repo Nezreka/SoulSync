@@ -45,6 +45,50 @@ def rate_limited(func):
     return wrapper
 
 
+# Pattern matches Deezer's CDN cover/picture URL: a numeric width-x-height
+# segment in the path (e.g. ``/1000x1000-000000-80-0-0.jpg``). Captures
+# both halves so the replacement can use a single dimension and preserve
+# the rest of the path verbatim.
+_DEEZER_CDN_SIZE_PATTERN = re.compile(r'/(\d+)x(\d+)-')
+
+# Maximum size Deezer's CDN serves before returning 403. Verified
+# empirically against multiple albums — 1900 works reliably, 2000+
+# returns Forbidden. CDN serves the source-native size when it's
+# smaller than requested, so asking for 1900 is safe even on albums
+# whose source upload was lower-res (no upscaling, just same bytes).
+_DEEZER_MAX_COVER_SIZE = 1900
+
+
+def _upgrade_deezer_cover_url(url: str, target_size: int = _DEEZER_MAX_COVER_SIZE) -> str:
+    """Rewrite a Deezer CDN cover/picture URL to request a larger size.
+
+    Deezer's API returns ``cover_xl`` / ``picture_xl`` URLs at
+    1000×1000, but the underlying CDN serves up to 1900×1900 by
+    rewriting the size segment in the URL path. This helper does the
+    rewrite — same idea as ``_upgrade_spotify_image_url`` in
+    ``spotify_client`` and the ``mzstatic.com`` size-replacement in
+    ``download_cover_art``.
+
+    Defensive on every input shape:
+    - Empty / None URL → returned as-is
+    - Non-Deezer URL (no ``dzcdn`` host, no size segment) → returned as-is
+    - Already at or above target size → returned as-is (no point rewriting)
+
+    The CDN returns the source-native image bytes when source < target,
+    so asking for 1900 on an album whose source was uploaded at 600
+    just returns the 600-pixel image — no upscaling, no failure.
+    """
+    if not url or 'dzcdn' not in url:
+        return url
+    match = _DEEZER_CDN_SIZE_PATTERN.search(url)
+    if not match:
+        return url
+    current = int(match.group(1))
+    if current >= target_size:
+        return url
+    return _DEEZER_CDN_SIZE_PATTERN.sub(f'/{target_size}x{target_size}-', url, count=1)
+
+
 # ==================== Dataclasses (match iTunesClient / SpotifyClient format) ====================
 
 @dataclass
@@ -298,10 +342,78 @@ class DeezerClient:
     # can serve as a drop-in fallback metadata source in SpotifyClient.
 
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
-        """Search for tracks — returns Track dataclass list (metadata source interface)"""
+    def search_tracks(
+        self,
+        query: str = '',
+        limit: int = 20,
+        *,
+        track: Optional[str] = None,
+        artist: Optional[str] = None,
+        album: Optional[str] = None,
+    ) -> List[Track]:
+        """Search for tracks — returns Track dataclass list (metadata source interface).
+
+        Two call modes:
+
+        1. **Free-text** (`query='Foreigner Dirty White Boy'`) — legacy
+           shape, passes the string straight to Deezer's `q` param.
+           Same behaviour as before, kept for backward compat.
+
+        2. **Field-scoped** (`track='Dirty White Boy', artist='Foreigner'`) —
+           builds Deezer's advanced search syntax (`track:"X" artist:"Y"`).
+           Massively tighter relevance than the free-text path because
+           the API matches each term in the right field instead of
+           anywhere across title / lyrics / artist / album / contributors.
+           Without this, the Deezer ranking buries the canonical track
+           under karaoke / cover / "originally performed by" variants
+           — see issue #534.
+
+        Field-scoped form is used whenever ``track`` or ``artist`` is
+        provided. ``query`` is ignored in that case (the field params
+        are authoritative). When both are missing, falls through to
+        ``query``. The cache key is the constructed query string in
+        either case so the two paths share entries naturally.
+        """
+        # Build the actual API query — advanced syntax when callers pass
+        # field hints, raw query otherwise.
+        used_advanced = bool(track or artist or album)
+        if used_advanced:
+            api_query = self._build_advanced_query(track=track, artist=artist, album=album)
+        else:
+            api_query = query
+
+        if not api_query:
+            return []
+
+        tracks = self._search_tracks_with_query(api_query, limit)
+
+        # Safety net: Deezer's advanced syntax is `artist:"X"`-style
+        # substring match, but in practice it's brittle on artist name
+        # variants ("Foreigner [US]", "The Foreigner", etc.) and on
+        # tracks indexed under non-canonical title spellings. When the
+        # advanced query returns nothing, fall back to a free-text join
+        # so the user sees the prior (less-relevant but non-empty) result
+        # set rather than "No matches" — same behaviour as pre-fix for
+        # this edge case. Caller-side rerank still tightens the result.
+        if not tracks and used_advanced:
+            fallback_parts = [p for p in (track, artist, album) if p]
+            fallback_query = ' '.join(fallback_parts)
+            if fallback_query and fallback_query != api_query:
+                logger.debug(
+                    "[Deezer] Advanced query returned 0 results, falling back "
+                    "to free-text: %r → %r", api_query, fallback_query,
+                )
+                tracks = self._search_tracks_with_query(fallback_query, limit)
+
+        return tracks
+
+    def _search_tracks_with_query(self, api_query: str, limit: int) -> List[Track]:
+        """Cache-aware single API call. Pulled out so the
+        ``search_tracks`` orchestration can call this twice (advanced
+        query → free-text fallback) without duplicating the cache +
+        parse + store dance."""
         cache = get_metadata_cache()
-        cached_results = cache.get_search_results('deezer', 'track', query, limit)
+        cached_results = cache.get_search_results('deezer', 'track', api_query, limit)
         if cached_results is not None:
             tracks = []
             for raw in cached_results:
@@ -312,24 +424,53 @@ class DeezerClient:
             if tracks:
                 return tracks
 
-        data = self._api_get('search/track', {'q': query, 'limit': min(limit, 100)})
+        data = self._api_get('search/track', {'q': api_query, 'limit': min(limit, 100)})
         if not data or 'data' not in data:
             return []
 
         tracks = []
         raw_items = []
         for track_data in data['data']:
-            track = Track.from_deezer_track(track_data)
-            tracks.append(track)
+            track_obj = Track.from_deezer_track(track_data)
+            tracks.append(track_obj)
             raw_items.append(track_data)
 
         entries = [(str(td.get('id', '')), td) for td in raw_items if td.get('id')]
         if entries:
             cache.store_entities_bulk('deezer', 'track', entries)
-            cache.store_search_results('deezer', 'track', query, limit,
+            cache.store_search_results('deezer', 'track', api_query, limit,
                                        [str(td.get('id', '')) for td in raw_items if td.get('id')])
 
         return tracks
+
+    @staticmethod
+    def _build_advanced_query(
+        *,
+        track: Optional[str] = None,
+        artist: Optional[str] = None,
+        album: Optional[str] = None,
+    ) -> str:
+        """Compose Deezer's advanced search syntax from field hints.
+
+        Per Deezer's docs:
+        https://developers.deezer.com/api/search
+
+            q=track:"X" artist:"Y" album:"Z"
+
+        Quotes around each value preserve multi-word phrases. Empty
+        fields are skipped. Embedded double-quotes get stripped (no
+        escape mechanism in Deezer's syntax) — rare in practice, but
+        a search for `O"Hara` would otherwise produce a malformed
+        query.
+        """
+        parts = []
+        if track:
+            parts.append(f'track:"{track.replace(chr(34), "")}"')
+        if artist:
+            parts.append(f'artist:"{artist.replace(chr(34), "")}"')
+        if album:
+            parts.append(f'album:"{album.replace(chr(34), "")}"')
+        return ' '.join(parts)
 
     @rate_limited
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:

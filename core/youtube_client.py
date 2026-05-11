@@ -156,10 +156,27 @@ class YouTubeClient(DownloadSourcePlugin):
         self.matching_engine = MusicMatchingEngine()
         logger.info("Initialized production MusicMatchingEngine")
 
-        # Check for ffmpeg (REQUIRED for MP3 conversion)
-        if not self._check_ffmpeg():
-            logger.error("ffmpeg is required but not found")
-            logger.error("The client will attempt to auto-download ffmpeg on first use")
+        # NOTE: deliberately don't call `_check_ffmpeg()` here. That call
+        # has a side effect — it auto-downloads a ~388 MB ffmpeg/ffprobe
+        # bundle into ./tools/ when system ffmpeg isn't on PATH. Firing
+        # that during __init__ means importing web_server (which any
+        # test does — see tests/test_tidal_auth_instructions.py) triggers
+        # the download, leaves the binaries in the repo workspace, and
+        # if the CI runner does its docker build right after, the
+        # binaries get baked into the image (and duplicated again by the
+        # chown layer). Cin reported the resulting size doubling on
+        # 2026-05-08 so we moved the check off the import path.
+        #
+        # `_check_ffmpeg()` still runs lazily — `is_available()` calls
+        # it before reporting True, and the actual download flow checks
+        # it before invoking yt-dlp. Both are call paths the user opted
+        # into by choosing YouTube as a download source.
+        if not self._locate_ffmpeg():
+            logger.warning(
+                "ffmpeg not found on PATH or in tools/ — will auto-download "
+                "on first YouTube use. (Skipping eager download to keep "
+                "test/import side-effects out of the repo workspace.)"
+            )
 
         # Configure yt-dlp options with bot detection bypass
         self.download_opts = {
@@ -205,18 +222,46 @@ class YouTubeClient(DownloadSourcePlugin):
 
         Returns:
             bool: True if YouTube downloads can work, False otherwise
+
+        Note: this is called polymorphically from registry / orchestrator /
+        engine boot probes via ``is_configured()`` — i.e. it runs every
+        time something imports web_server. We therefore call
+        ``_check_ffmpeg`` (which CAN auto-download) but skip the download
+        side-effect when running under pytest / explicit no-download mode
+        — that side-effect is what was leaking ffmpeg binaries into the
+        workspace and bloating docker images via CI test runs.
         """
         try:
-            # Check yt-dlp
-            import yt_dlp
-
-            # Check ffmpeg (will auto-download if needed)
-            ffmpeg_ok = self._check_ffmpeg()
-
-            return ffmpeg_ok
+            import yt_dlp  # noqa: F401
         except ImportError:
             logger.error("yt-dlp is not installed")
             return False
+
+        return self._check_ffmpeg()
+
+    @staticmethod
+    def _auto_download_disabled() -> bool:
+        """Skip the ffmpeg auto-download when running under pytest or
+        when ``SOULSYNC_NO_FFMPEG_DOWNLOAD`` is set. Lets test runs +
+        CI builds probe ``is_available()`` without dragging a 388 MB
+        binary into the workspace.
+
+        Three detection paths:
+        - ``SOULSYNC_NO_FFMPEG_DOWNLOAD=1`` env var (explicit opt-out
+          — set in CI workflows for belt-and-suspenders defense)
+        - ``PYTEST_CURRENT_TEST`` env var (set by pytest during test
+          execution — covers `is_available` calls fired from within a
+          test fixture / test body)
+        - ``'pytest' in sys.modules`` (covers calls fired during pytest
+          collection / import phase, before the per-test env var is set
+          — which is exactly when registry.py probes is_configured at
+          web_server import)
+        """
+        return bool(
+            os.environ.get('SOULSYNC_NO_FFMPEG_DOWNLOAD')
+            or os.environ.get('PYTEST_CURRENT_TEST')
+            or 'pytest' in sys.modules
+        )
 
     def reload_settings(self):
         """Reload YouTube settings from config (called when settings are saved)."""
@@ -372,6 +417,37 @@ class YouTubeClient(DownloadSourcePlugin):
         """
         return self.current_download_progress.copy()
 
+    def _locate_ffmpeg(self) -> bool:
+        """Check whether ffmpeg is already available WITHOUT side effects.
+
+        Used at __init__ time to log a warning if ffmpeg is missing.
+        Does NOT trigger the auto-download — that lives in
+        ``_check_ffmpeg`` and only fires from call paths the user opted
+        into (``is_available()`` and the actual download dispatch).
+        """
+        import shutil
+
+        if shutil.which('ffmpeg'):
+            return True
+
+        tools_dir = Path(__file__).parent.parent / 'tools'
+        if platform.system().lower() == 'windows':
+            ffmpeg_path = tools_dir / 'ffmpeg.exe'
+            ffprobe_path = tools_dir / 'ffprobe.exe'
+        else:
+            ffmpeg_path = tools_dir / 'ffmpeg'
+            ffprobe_path = tools_dir / 'ffprobe'
+
+        if ffmpeg_path.exists() and ffprobe_path.exists():
+            # Make sure yt-dlp can find them — same PATH bump
+            # _check_ffmpeg does on the happy path.
+            tools_dir_str = str(tools_dir.absolute())
+            if tools_dir_str not in os.environ.get('PATH', ''):
+                os.environ['PATH'] = tools_dir_str + os.pathsep + os.environ.get('PATH', '')
+            return True
+
+        return False
+
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available (system PATH or auto-download to tools folder)"""
         import shutil
@@ -403,6 +479,18 @@ class YouTubeClient(DownloadSourcePlugin):
             tools_dir_str = str(tools_dir.absolute())
             os.environ['PATH'] = tools_dir_str + os.pathsep + os.environ.get('PATH', '')
             return True
+
+        # Skip the auto-download when running under pytest or when the
+        # opt-out env var is set — keeps test runs / CI builds from
+        # leaking the binary into the repo workspace where docker would
+        # then bake it into the image.
+        if self._auto_download_disabled():
+            logger.warning(
+                "ffmpeg not found and auto-download is disabled "
+                "(pytest / SOULSYNC_NO_FFMPEG_DOWNLOAD). YouTube downloads "
+                "will not work until ffmpeg is on PATH."
+            )
+            return False
 
         # Auto-download ffmpeg binary
         logger.info(f"⬇️  ffmpeg not found - downloading for {system}...")

@@ -388,6 +388,216 @@ class MusicBrainzService:
             logger.error(f"Error matching recording '{track_name}': {e}")
             return None
     
+    def lookup_artist_aliases(self, artist_name: str) -> list:
+        """Find alternate-spelling aliases for an artist by NAME.
+
+        Multi-tier resolution:
+        1. Library DB row (`artists.aliases` populated by the MB
+           worker when the artist was enriched). Fast path — no
+           network.
+        2. Existing musicbrainz_cache entry (entity_type='artist_aliases')
+           — caches a prior live MB lookup for this name.
+        3. Live MB lookup: search artist → fetch aliases for the best
+           MBID → cache the result.
+
+        Always returns a list (possibly empty) — never raises. Empty
+        result on any tier means "no alternate spellings found, fall
+        back to direct match" which is identical to pre-fix behaviour.
+
+        Used by the AcoustID verifier when an artist comparison fails
+        the direct similarity check. Caching means each unique artist
+        name only hits MB once per cache TTL even if 100 download
+        candidates fail verification with that artist.
+        """
+        if not artist_name:
+            return []
+
+        # Tier 1: library DB
+        library = self.get_artist_aliases(artist_name)
+        if library:
+            return library
+
+        # Tier 2: cached live lookup (re-uses musicbrainz_cache table)
+        cached = self._check_cache('artist_aliases', artist_name)
+        if cached:
+            metadata = cached.get('metadata') or {}
+            aliases = metadata.get('aliases') if isinstance(metadata, dict) else None
+            if isinstance(aliases, list):
+                return [str(x).strip() for x in aliases if x]
+            # Cache hit with empty result — respect it (don't re-query)
+            return []
+
+        # Tier 3: live MB lookup. Search → fetch by MBID → cache.
+        try:
+            results = self.mb_client.search_artist(artist_name, limit=3)
+        except Exception as e:
+            logger.debug("lookup_artist_aliases: search_artist(%r) raised: %s", artist_name, e)
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        if not results:
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        # Score each result: combined of name-similarity + MB's own
+        # relevance. Score range 0.0-1.0.
+        scored = []
+        for result in results:
+            mb_name = result.get('name', '')
+            mb_score = result.get('score', 0)
+            sim = self._calculate_similarity(artist_name, mb_name)
+            combined = (sim * 0.7) + (mb_score / 100 * 0.3)
+            mbid = result.get('id')
+            if mbid:
+                scored.append((combined, mbid))
+
+        if not scored:
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        scored.sort(key=lambda x: -x[0])
+        best_score, best_mbid = scored[0]
+
+        # Strict trust threshold: real matches for distinctive cross-
+        # script artists (the user-reported case) score >= 0.95.
+        # Anything below 0.85 is ambiguous and not worth the false-
+        # positive risk of pulling in aliases for the wrong artist.
+        if best_score < 0.85:
+            logger.debug(
+                "lookup_artist_aliases: best match for %r below trust "
+                "threshold (score=%.2f)", artist_name, best_score,
+            )
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        # Ambiguity detection: when 2+ results both score high (within
+        # 0.1 of the best), the search hit multiple distinct artists
+        # with similar names ("John Smith" returning 10 different
+        # John Smiths all at score 100). Pulling aliases for one of
+        # them could produce wrong matches. Skip + cache empty.
+        if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < 0.1:
+            logger.debug(
+                "lookup_artist_aliases: ambiguous match for %r — top "
+                "two results within 0.1 (%.2f / %.2f). Skipping alias lookup.",
+                artist_name, scored[0][0], scored[1][0],
+            )
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        aliases = self.fetch_artist_aliases(best_mbid)
+        self._save_to_cache(
+            'artist_aliases', artist_name, None, best_mbid,
+            {'aliases': aliases}, int(best_score * 100),
+        )
+        return aliases
+
+    def fetch_artist_aliases(self, mbid: str) -> list:
+        """Fetch the alias list for an artist from MusicBrainz.
+
+        Issue #442 — Japanese kanji / Cyrillic / etc. spellings of an
+        artist's name are stored as `aliases` on the MusicBrainz
+        artist record. Pull them so SoulSync can recognise that
+        `澤野弘之` and `Hiroyuki Sawano` refer to the same artist.
+
+        Returns the deduplicated list of alias `name` strings. Returns
+        empty list (NOT None) on any failure — caller should treat
+        empty as "no aliases available, fall back to direct match" so
+        a transient MB outage never causes a stricter verification
+        decision than today.
+        """
+        if not mbid:
+            return []
+        try:
+            data = self.mb_client.get_artist(mbid, includes=['aliases'])
+        except Exception as e:
+            logger.debug("fetch_artist_aliases: get_artist(%s) raised: %s", mbid, e)
+            return []
+        if not data:
+            return []
+        raw_aliases = data.get('aliases') or []
+        # MB returns each alias as a dict with `name`, `sort-name`,
+        # `locale`, `primary`, `type`, etc. We only care about the
+        # display name — that's what `actual` artist strings will
+        # match against.
+        seen = set()
+        cleaned = []
+        for entry in raw_aliases:
+            if not isinstance(entry, dict):
+                continue
+            name = (entry.get('name') or '').strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(name)
+        return cleaned
+
+    def update_artist_aliases(self, artist_id: int, aliases: list) -> None:
+        """Persist the alias list to `artists.aliases` as a JSON array.
+
+        Idempotent — overwrites any existing value. Empty list
+        clears the column (caller may want this if MB has no aliases
+        for the artist anymore).
+        """
+        if artist_id is None:
+            return
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE artists SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(aliases) if aliases else None, artist_id),
+            )
+            conn.commit()
+            logger.debug("Updated artist %s aliases (%d entries)", artist_id, len(aliases or []))
+        except Exception as e:
+            logger.error(f"Error updating artist aliases for {artist_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
+    def get_artist_aliases(self, artist_name: str) -> list:
+        """Look up cached aliases for an artist by NAME (not id).
+
+        Used by the verifier where the expected artist comes from a
+        download's metadata-source data — we don't have a library
+        row's `id` to query, just the display name. Returns empty
+        list when the artist isn't in the library or has no aliases
+        recorded. The verifier falls back to live MB lookup in that
+        case.
+        """
+        if not artist_name:
+            return []
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT aliases FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1",
+                (artist_name,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return []
+            try:
+                parsed = json.loads(row[0])
+            except (TypeError, json.JSONDecodeError):
+                return []
+            if not isinstance(parsed, list):
+                return []
+            return [str(x).strip() for x in parsed if x]
+        except Exception as e:
+            logger.debug("get_artist_aliases lookup failed for %r: %s", artist_name, e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def update_artist_mbid(self, artist_id: int, mbid: Optional[str], status: str):
         """Update artist with MusicBrainz ID"""
         conn = None

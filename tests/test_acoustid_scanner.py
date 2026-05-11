@@ -86,3 +86,277 @@ def test_scan_handles_mixed_track_id_types(monkeypatch):
 
     assert result.scanned == 1
     assert scanned_track_ids == ["42"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-value artist credit — Foxxify Discord report
+# ---------------------------------------------------------------------------
+#
+# AcoustID returns the FULL artist credit while the library DB
+# carries only the primary artist. Pre-fix raw SequenceMatcher
+# scored 43% — below the 0.6 threshold — and the scanner created a
+# Wrong Song finding even though the audio was correct. Post-fix the
+# scanner routes through `artist_names_match` which splits the credit
+# and finds the primary artist at 100%, suppressing the false flag.
+
+
+def _make_finding_capturing_context(track_row, captured):
+    """Context that captures any create_finding calls into the
+    `captured` list. Tests assert against this list to verify whether
+    the scanner created a finding (false positive) or correctly
+    skipped (multi-value match resolved)."""
+    conn = _FakeConnection([track_row])
+    config_manager = SimpleNamespace(
+        get=lambda key, default=None: default,
+        set=lambda *args, **kwargs: None,
+    )
+    db = SimpleNamespace(_get_connection=lambda: conn)
+
+    def fake_create_finding(**kwargs):
+        captured.append(kwargs)
+        return True
+
+    return SimpleNamespace(
+        db=db,
+        transfer_folder="/music",
+        config_manager=config_manager,
+        acoustid_client=object(),
+        create_finding=fake_create_finding,
+        report_progress=lambda **kwargs: None,
+        update_progress=lambda *args, **kwargs: None,
+        check_stop=lambda: False,
+        wait_if_paused=lambda: False,
+        sleep_or_stop=lambda *args, **kwargs: False,
+    )
+
+
+def test_scanner_no_finding_when_primary_artist_in_acoustid_credit():
+    """Reporter's exact case verbatim:
+
+        Library DB:   title='Tea Parties With Dale Earnhardt' artist='Okayracer'
+        AcoustID:     title='Tea Parties With Dale Earnhardt'
+                      artist='Okayracer, aldrch & poptropicaslutz!'
+        Pre-fix:      artist_sim=43% → Wrong Song finding
+        Post-fix:     'Okayracer' found in credit → 100% → no finding
+    """
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("69241726", "Tea Parties With Dale Earnhardt", "Okayracer",
+                   "/music/track.opus", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{
+                'title': 'Tea Parties With Dale Earnhardt',
+                'artist': 'Okayracer, aldrch & poptropicaslutz!',
+            }],
+        },
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.opus',
+        '69241726',
+        {'title': 'Tea Parties With Dale Earnhardt', 'artist': 'Okayracer'},
+        fake_acoustid,
+        context,
+        result,
+        fp_threshold=0.85,
+        title_threshold=0.85,
+        artist_threshold=0.6,
+    )
+
+    assert captured_findings == [], (
+        f"Expected no finding (primary artist in credit); got {captured_findings}"
+    )
+
+
+def test_scanner_still_flags_genuine_artist_mismatch():
+    """Sanity: multi-value path doesn't suppress legitimate
+    mismatches. If expected artist is NOT in the credit at all,
+    finding still fires."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Some Track", "Foreigner",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{
+                'title': 'Some Track',
+                'artist': 'Different Band, Other Person & Random Featuring',
+            }],
+        },
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.flac',
+        '99',
+        {'title': 'Some Track', 'artist': 'Foreigner'},
+        fake_acoustid,
+        context,
+        result,
+        fp_threshold=0.85,
+        title_threshold=0.85,
+        artist_threshold=0.6,
+    )
+
+    assert len(captured_findings) == 1, (
+        f"Expected a finding for genuine mismatch; got {len(captured_findings)}"
+    )
+    assert captured_findings[0]['finding_type'] == 'acoustid_mismatch'
+
+
+class JobResultStub:
+    """Minimal JobResult-like stub for the scanner integration tests
+    above. The real JobResult tracks scanned/skipped/findings_created
+    counters via attribute assignment — same shape works here."""
+    findings_created = 0
+    findings_skipped_dedup = 0
+    errors = 0
+    scanned = 0
+    skipped = 0
+
+
+# ---------------------------------------------------------------------------
+# Compilation albums — Skowl Discord report
+# ---------------------------------------------------------------------------
+#
+# Compilation albums (e.g. "High Tea Music: Vol 1") have different
+# artists per track but `tracks.artist_id` points at the ALBUM artist
+# (curator / label name applied to every row). The scanner used to
+# compare AcoustID's per-track artist against the album artist →
+# 12% sim → Wrong Song flag on every track. The `tracks.track_artist`
+# column already holds the correct per-track artist for these cases
+# (populated by every server-scan + auto-import path) — scanner just
+# wasn't reading it. Post-fix `_load_db_tracks` prefers track_artist
+# via `COALESCE(NULLIF(t.track_artist, ''), ar.name)`.
+
+
+def _make_real_db_context(tmp_path):
+    """Build a context with a REAL SQLite DB so the scanner's
+    multi-table JOIN runs against actual schema. SimpleNamespace
+    fakes can't simulate the JOIN."""
+    import sqlite3
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.executescript("""
+        CREATE TABLE artists (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            thumb_url TEXT
+        );
+        CREATE TABLE albums (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            thumb_url TEXT
+        );
+        CREATE TABLE tracks (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            artist_id TEXT,
+            album_id TEXT,
+            file_path TEXT,
+            track_number INTEGER,
+            track_artist TEXT
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    class _RealDB:
+        def _get_connection(self):
+            c = sqlite3.connect(str(db_path))
+            c.row_factory = sqlite3.Row
+            return c
+
+    return _RealDB()
+
+
+def test_load_db_tracks_prefers_track_artist_for_compilation():
+    """Reporter's exact case (Skowl) — compilation album where
+    every track has a different artist credited via track_artist
+    column, while artist_id points at the album-level curator."""
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    db = _make_real_db_context(tmp)
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO artists (id, name) VALUES ('andro', 'Andromedik')")
+    cursor.execute(
+        "INSERT INTO albums (id, title) VALUES ('hightea', 'High Tea Music: Vol 1')"
+    )
+    cursor.execute(
+        "INSERT INTO tracks (id, title, artist_id, album_id, file_path, track_artist) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ('city-lights', 'City Lights', 'andro', 'hightea',
+         '/music/citylights.mp3', 'Eclypse'),
+    )
+    cursor.execute(
+        "INSERT INTO tracks (id, title, artist_id, album_id, file_path, track_artist) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ('invasion', 'Invasion', 'andro', 'hightea',
+         '/music/invasion.mp3', None),  # NULL track_artist falls back
+    )
+    conn.commit()
+    conn.close()
+
+    job = AcoustIDScannerJob()
+    context = SimpleNamespace(
+        db=db,
+        config_manager=SimpleNamespace(get=lambda *a, **k: None),
+    )
+    tracks = job._load_db_tracks(context)
+
+    # Track with track_artist populated → Eclypse (per-track), NOT
+    # Andromedik (album-artist via artist_id).
+    assert tracks['city-lights']['artist'] == 'Eclypse', (
+        f"Compilation track must use track_artist; got {tracks['city-lights']['artist']!r}"
+    )
+    # Track with NULL track_artist → falls back to album artist
+    # via COALESCE. Backward compat for legacy rows + single-artist
+    # albums where track_artist isn't populated.
+    assert tracks['invasion']['artist'] == 'Andromedik'
+
+
+def test_load_db_tracks_falls_back_when_track_artist_empty_string():
+    """Defensive: NULLIF treats empty string as NULL too. Some
+    legacy rows might have stored '' instead of NULL."""
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    db = _make_real_db_context(tmp)
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO artists (id, name) VALUES ('a', 'Album Artist')")
+    cursor.execute("INSERT INTO albums (id, title) VALUES ('alb', 'Album')")
+    cursor.execute(
+        "INSERT INTO tracks (id, title, artist_id, album_id, file_path, track_artist) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ('t1', 'T1', 'a', 'alb', '/music/t1.mp3', ''),  # empty string
+    )
+    conn.commit()
+    conn.close()
+
+    job = AcoustIDScannerJob()
+    context = SimpleNamespace(
+        db=db,
+        config_manager=SimpleNamespace(get=lambda *a, **k: None),
+    )
+    tracks = job._load_db_tracks(context)
+
+    # Empty string in track_artist → NULLIF returns NULL → COALESCE
+    # falls back to album artist
+    assert tracks['t1']['artist'] == 'Album Artist'
