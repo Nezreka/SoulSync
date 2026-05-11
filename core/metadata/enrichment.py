@@ -110,9 +110,21 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("title"):
                     audio_file.tags.add(symbols.TIT2(encoding=3, text=[metadata["title"]]))
                 if metadata.get("artist"):
+                    # TPE1 = display artist string (already joined by
+                    # source.py with the configured separator, or
+                    # primary-only when feat_in_title is on).
                     audio_file.tags.add(symbols.TPE1(encoding=3, text=[metadata["artist"]]))
+                    # When write_multi_artist is on, ALSO write the
+                    # multi-value list to a TXXX:Artists frame (Picard
+                    # convention). Keeps TPE1 as the display string AND
+                    # exposes the per-artist list for media servers
+                    # that read ARTISTS. Pre-fix this path overwrote
+                    # TPE1 with the list, which clobbered the
+                    # configured separator + feat_in_title semantics.
                     if write_multi and len(artists_list) > 1:
-                        audio_file.tags.add(symbols.TPE1(encoding=3, text=artists_list))
+                        audio_file.tags.add(
+                            symbols.TXXX(encoding=3, desc='Artists', text=list(artists_list))
+                        )
                 if metadata.get("album_artist"):
                     audio_file.tags.add(symbols.TPE2(encoding=3, text=[metadata["album_artist"]]))
                 if metadata.get("album"):
