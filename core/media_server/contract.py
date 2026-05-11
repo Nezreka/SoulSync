@@ -97,6 +97,7 @@ KNOWN_PER_SERVER_METHODS = (
     'get_library_stats',
     'create_playlist',
     'update_playlist',
+    'append_to_playlist',
     'copy_playlist',
     'get_all_playlists',
     'get_playlist_by_name',
