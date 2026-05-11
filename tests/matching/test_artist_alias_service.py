@@ -498,6 +498,50 @@ class TestLookupArtistAliasesMultiTier:
         # Didn't even try fetching aliases for the bad match
         service.mb_client.get_artist.assert_not_called()
 
+    def test_moderate_confidence_match_now_skipped_strict_threshold(self, service):
+        """Threshold tightened to 0.85 (was 0.6) — moderate matches
+        (sim ~0.7) are no longer trusted. Reduces false-positive
+        risk on ambiguous artist names."""
+        service.mb_client.search_artist.return_value = [
+            # Different name, MB matched on weak signal — combined
+            # score lands around 0.6-0.7, below the new 0.85 floor.
+            {'id': 'mb-x', 'name': 'John Williams', 'score': 50},
+        ]
+        aliases = service.lookup_artist_aliases('John Smith')
+        assert aliases == []
+        service.mb_client.get_artist.assert_not_called()
+
+    def test_ambiguous_results_skipped(self, service):
+        """When MB search returns multiple results with similar high
+        scores (within 0.1 of each other), the artist name is
+        ambiguous — common name with multiple distinct artists
+        ('John Smith' returning 10 different John Smiths). Pulling
+        aliases for one could mismatch the wrong artist's data
+        against our file. Skip + cache empty."""
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-smith-1', 'name': 'John Smith', 'score': 100},
+            {'id': 'mb-smith-2', 'name': 'John Smith', 'score': 100},
+            {'id': 'mb-smith-3', 'name': 'John Smith', 'score': 100},
+        ]
+        aliases = service.lookup_artist_aliases('John Smith')
+        assert aliases == []
+        # Didn't fetch aliases for either ambiguous candidate
+        service.mb_client.get_artist.assert_not_called()
+
+    def test_unambiguous_high_confidence_match_succeeds(self, service):
+        """Sanity: a clear winner (top result high, no near-tie with
+        runner-up) still triggers alias fetch — the ambiguity gate
+        doesn't break the legit case."""
+        service.mb_client.search_artist.return_value = [
+            {'id': 'mb-sawano', 'name': 'Hiroyuki Sawano', 'score': 100},
+            {'id': 'mb-other', 'name': 'Unrelated Artist', 'score': 30},
+        ]
+        service.mb_client.get_artist.return_value = {
+            'aliases': [{'name': '澤野弘之'}],
+        }
+        aliases = service.lookup_artist_aliases('Hiroyuki Sawano')
+        assert '澤野弘之' in aliases
+
     def test_library_with_empty_aliases_falls_through_to_live(self, service, temp_db):
         """Edge case: library has the artist but `aliases` column is
         NULL (worker hasn't enriched yet). Don't get stuck — fall

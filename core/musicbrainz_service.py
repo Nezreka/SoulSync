@@ -439,23 +439,48 @@ class MusicBrainzService:
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
-        # Pick the best match — highest combined score of MB's relevance
-        # and our name-similarity check (mirrors `match_artist`).
-        best_mbid = None
-        best_score = 0
+        # Score each result: combined of name-similarity + MB's own
+        # relevance. Score range 0.0-1.0.
+        scored = []
         for result in results:
             mb_name = result.get('name', '')
             mb_score = result.get('score', 0)
             sim = self._calculate_similarity(artist_name, mb_name)
             combined = (sim * 0.7) + (mb_score / 100 * 0.3)
-            if combined > best_score:
-                best_score = combined
-                best_mbid = result.get('id')
+            mbid = result.get('id')
+            if mbid:
+                scored.append((combined, mbid))
 
-        # Threshold: only trust the lookup when name + MB-relevance
-        # combined is reasonably high. Otherwise we're guessing,
-        # which could pull in aliases for the wrong artist.
-        if not best_mbid or best_score < 0.6:
+        if not scored:
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        scored.sort(key=lambda x: -x[0])
+        best_score, best_mbid = scored[0]
+
+        # Strict trust threshold: real matches for distinctive cross-
+        # script artists (the user-reported case) score >= 0.95.
+        # Anything below 0.85 is ambiguous and not worth the false-
+        # positive risk of pulling in aliases for the wrong artist.
+        if best_score < 0.85:
+            logger.debug(
+                "lookup_artist_aliases: best match for %r below trust "
+                "threshold (score=%.2f)", artist_name, best_score,
+            )
+            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
+            return []
+
+        # Ambiguity detection: when 2+ results both score high (within
+        # 0.1 of the best), the search hit multiple distinct artists
+        # with similar names ("John Smith" returning 10 different
+        # John Smiths all at score 100). Pulling aliases for one of
+        # them could produce wrong matches. Skip + cache empty.
+        if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < 0.1:
+            logger.debug(
+                "lookup_artist_aliases: ambiguous match for %r — top "
+                "two results within 0.1 (%.2f / %.2f). Skipping alias lookup.",
+                artist_name, scored[0][0], scored[1][0],
+            )
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
