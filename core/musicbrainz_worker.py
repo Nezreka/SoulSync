@@ -283,6 +283,31 @@ class MusicBrainzWorker:
             if conn:
                 conn.close()
 
+    def _artist_aliases_empty(self, artist_id: Any) -> bool:
+        """Check if `artists.aliases` for this row is NULL or empty.
+
+        Used by the existing-MBID backfill path to skip the MB call
+        when aliases are already populated (re-scan cycles after
+        backfill complete should be no-ops). Defensive: returns True
+        on any error so the backfill attempt happens — a redundant MB
+        call is cheaper than missing the backfill entirely.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT aliases FROM artists WHERE id = ? LIMIT 1", (artist_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False  # Row doesn't exist — nothing to backfill
+            value = row[0]
+            return value is None or value == '' or value == '[]'
+        except Exception:
+            return True
+        finally:
+            if conn:
+                conn.close()
+
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
         try:
@@ -301,6 +326,27 @@ class MusicBrainzWorker:
                 try:
                     if item_type == 'artist':
                         self.mb_service.update_artist_mbid(item_id, existing_id, 'matched')
+                        # Issue #442 — one-time backfill for artists
+                        # enriched before alias support landed. Users with
+                        # pre-existing libraries on day-one of this PR have
+                        # MBIDs but NULL aliases. Fetch ONLY when the
+                        # column is empty so re-scan cycles after backfill
+                        # don't re-query MB. Best-effort: failures are
+                        # logged at debug, don't regress the match outcome.
+                        try:
+                            if self._artist_aliases_empty(item_id):
+                                aliases = self.mb_service.fetch_artist_aliases(existing_id)
+                                if aliases:
+                                    self.mb_service.update_artist_aliases(item_id, aliases)
+                                    logger.debug(
+                                        "Backfilled %d aliases for artist '%s'",
+                                        len(aliases), item_name,
+                                    )
+                        except Exception as backfill_err:
+                            logger.debug(
+                                "Alias backfill failed for artist '%s': %s",
+                                item_name, backfill_err,
+                            )
                     elif item_type == 'album':
                         self.mb_service.update_album_mbid(item_id, existing_id, 'matched')
                     elif item_type == 'track':

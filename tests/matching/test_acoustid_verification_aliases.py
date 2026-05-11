@@ -274,3 +274,128 @@ class TestAliasLookupCalledOncePerVerify:
         verifier.verify_audio_file('/fake/path.mp3', 'X', 'Hiroyuki Sawano')
 
         assert fake_service.lookup_artist_aliases.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Lazy alias resolution — happy path skips MB lookup entirely
+# ---------------------------------------------------------------------------
+
+
+class TestLazyAliasResolution:
+    """Issue #442 perf followup: alias lookup should ONLY fire when
+    the direct artist comparison fails. Verifications where artist
+    names already match (the 95% common case for same-script
+    libraries) must NOT trigger the lookup chain — no wasted DB
+    query, no wasted MB call."""
+
+    def test_no_lookup_when_direct_artist_match_passes(self, stubbed_verifier):
+        """Exact-match Latin-script artist passes verification with
+        zero alias lookups — no DB query, no MB call. Same-script
+        libraries (the 95% common case) inherit zero perf cost from
+        this PR."""
+        verifier, fake_service = stubbed_verifier
+
+        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+            'best_score': 0.95,
+            'recordings': [
+                {'title': 'Dirty White Boy', 'artist': 'Foreigner'},
+            ],
+        }
+
+        result, _ = verifier.verify_audio_file(
+            '/fake/path.mp3', 'Dirty White Boy', 'Foreigner',
+        )
+
+        assert result == VerificationResult.PASS
+        # Critical — alias lookup must NOT have been called for the
+        # happy path. Otherwise every successful verification adds a
+        # DB query for nothing.
+        fake_service.lookup_artist_aliases.assert_not_called()
+
+    def test_lookup_fires_only_when_direct_artist_match_fails(self, stubbed_verifier):
+        """Cross-script case where direct sim is 0% → lookup fires
+        as expected."""
+        verifier, fake_service = stubbed_verifier
+
+        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+            'best_score': 0.95,
+            'recordings': [
+                {'title': 'YAMANAIAME', 'artist': '澤野弘之'},
+            ],
+        }
+        fake_service.lookup_artist_aliases.return_value = ['澤野弘之']
+
+        result, _ = verifier.verify_audio_file(
+            '/fake/path.mp3', 'YAMANAIAME', 'Hiroyuki Sawano',
+        )
+
+        assert result == VerificationResult.PASS
+        # Lookup fired BECAUSE direct match would have failed
+        fake_service.lookup_artist_aliases.assert_called_once()
+
+    def test_lookup_memoised_across_three_comparison_sites(self, stubbed_verifier):
+        """When lookup DOES fire, the result must be reused across
+        the three artist-comparison sites in the verifier (best-match
+        scoring, secondary scan, fallback scan). One resolution per
+        verification — not three."""
+        verifier, fake_service = stubbed_verifier
+
+        # Force a code path that hits multiple sites: title matches
+        # several recordings but the best-match's artist sim is below
+        # threshold (forces secondary scan path).
+        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+            'best_score': 0.95,
+            'recordings': [
+                {'title': 'X', 'artist': 'Different Latin Artist'},  # 0 alias hit
+                {'title': 'X', 'artist': '澤野弘之'},                 # alias hit
+            ],
+        }
+        fake_service.lookup_artist_aliases.return_value = ['澤野弘之']
+
+        verifier.verify_audio_file('/fake/path.mp3', 'X', 'Hiroyuki Sawano')
+
+        # Memoised — one resolution shared across all sites
+        assert fake_service.lookup_artist_aliases.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Provider-callable contract on the helper
+# ---------------------------------------------------------------------------
+
+
+class TestAliasProviderCallable:
+    """Pin the dual-shape contract on `_alias_aware_artist_sim`:
+    accepts an iterable OR a callable. Callable resolves lazily."""
+
+    def test_iterable_passed_directly(self):
+        """Plain list — used as-is, no lazy semantics."""
+        score = _alias_aware_artist_sim(
+            'Hiroyuki Sawano', '澤野弘之', aliases=['澤野弘之'],
+        )
+        assert score == 1.0
+
+    def test_callable_resolves_lazily_only_when_direct_fails(self):
+        """Callable provider — invoked ONLY when direct sim falls
+        below threshold."""
+        call_count = [0]
+
+        def provider():
+            call_count[0] += 1
+            return ['澤野弘之']
+
+        # Direct match passes → provider NOT called
+        _alias_aware_artist_sim('Foreigner', 'Foreigner', aliases=provider)
+        assert call_count[0] == 0
+
+        # Direct match fails → provider IS called
+        _alias_aware_artist_sim('Hiroyuki Sawano', '澤野弘之', aliases=provider)
+        assert call_count[0] == 1
+
+    def test_callable_returning_empty_list_falls_back_to_direct(self):
+        """Provider returns empty (e.g. MB had no aliases) →
+        score = direct sim, no error."""
+        score = _alias_aware_artist_sim(
+            'Hiroyuki Sawano', '澤野弘之', aliases=lambda: [],
+        )
+        # ~0 because direct cross-script comparison fails
+        assert score < 0.1
