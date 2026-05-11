@@ -31,14 +31,37 @@ direct similarity comparison — identical to the pre-fix behaviour.
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 
 
 # Default threshold matches the existing ARTIST_MATCH_THRESHOLD in
 # core/acoustid_verification.py. Callers can override but the helper
 # defaults are tuned to preserve current verifier behaviour.
 DEFAULT_ARTIST_MATCH_THRESHOLD = 0.6
+
+
+# Multi-value credit-string separators. AcoustID returns the FULL
+# artist credit ("Okayracer, aldrch & poptropicaslutz!") while the
+# library DB carries only the primary artist ("Okayracer"). Raw string
+# similarity scores ~40% — the primary IS in the credit but split by
+# punctuation. Splitting on these tokens lets each contributor compare
+# individually so the primary-artist match wins at near-100%.
+#
+# Two patterns because the punctuation separators (comma, ampersand,
+# slash, etc.) don't need surrounding whitespace, but the keyword
+# separators ("feat", "ft", "vs", etc.) MUST be whitespace-bounded —
+# otherwise we'd split "JAY-X" or any artist with "x" / "with" etc.
+# in their name.
+_CREDIT_PUNCT_SPLITTER = r'\s*[,&;/+]\s*'
+_CREDIT_KEYWORD_SPLITTER = (
+    r'\s+(?:feat\.?|ft\.?|featuring|with|vs\.?|x)\s+'
+)
+_CREDIT_SPLITTER = re.compile(
+    rf'(?:{_CREDIT_PUNCT_SPLITTER}|{_CREDIT_KEYWORD_SPLITTER})',
+    re.IGNORECASE,
+)
 
 
 def _default_normalize(text: str) -> str:
@@ -62,6 +85,24 @@ def _default_similarity(a: str, b: str) -> float:
     if na == nb:
         return 1.0
     return SequenceMatcher(None, na, nb).ratio()
+
+
+def split_artist_credit(credit: str) -> List[str]:
+    """Split a multi-value artist credit string into individual names.
+
+    Examples:
+    - ``"Okayracer, aldrch & poptropicaslutz!"`` → ``["Okayracer", "aldrch", "poptropicaslutz!"]``
+    - ``"Daft Punk feat. Pharrell"`` → ``["Daft Punk", "Pharrell"]``
+    - ``"Artist1 / Artist2 / Artist3"`` → ``["Artist1", "Artist2", "Artist3"]``
+    - ``"Solo Artist"`` → ``["Solo Artist"]`` (no separators → single-entry list)
+
+    Empty string / whitespace-only entries dropped. Always returns at
+    least one entry when input is non-empty (the single-artist case).
+    """
+    if not credit:
+        return []
+    parts = _CREDIT_SPLITTER.split(str(credit))
+    return [p.strip() for p in parts if p and p.strip()]
 
 
 def _coerce_aliases(aliases: Optional[Iterable[str]]) -> Tuple[str, ...]:
@@ -129,8 +170,27 @@ def artist_names_match(
     if direct_score >= threshold:
         return True, direct_score
 
+    # Multi-value credit compare: AcoustID + media-server clients
+    # often surface the FULL credit ("Artist1, Artist2 & Artist3")
+    # while the library DB carries only the primary artist. Split
+    # `actual` into its constituent contributors and check each against
+    # `expected`. Skipped when actual is single-token (no separators
+    # present) — _split_credit returns [actual] in that case which
+    # equals the direct compare we already did, so don't recompute.
+    actual_credits = split_artist_credit(actual)
+    if len(actual_credits) > 1:
+        for credit in actual_credits:
+            score = sim(expected, credit)
+            if score > best_score:
+                best_score = score
+            if score >= threshold:
+                return True, score
+
     # Alias compare: each alias is a known alternate spelling of the
     # EXPECTED artist; match it against the ACTUAL name we observed.
+    # Also check each alias against each credit token from above so
+    # cross-script primary-in-collab cases (e.g. expected='Hiroyuki
+    # Sawano', actual='澤野弘之, FeaturedJp') still bridge.
     # Highest score wins.
     for alias in _coerce_aliases(aliases):
         score = sim(alias, actual)
@@ -138,6 +198,13 @@ def artist_names_match(
             best_score = score
         if score >= threshold:
             return True, score
+        if len(actual_credits) > 1:
+            for credit in actual_credits:
+                token_score = sim(alias, credit)
+                if token_score > best_score:
+                    best_score = token_score
+                if token_score >= threshold:
+                    return True, token_score
 
     return False, best_score
 
