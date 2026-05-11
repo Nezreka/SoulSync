@@ -3397,6 +3397,32 @@ async function authenticateTidal() {
     }
 }
 
+async function disconnectTidal() {
+    // Clear saved Tidal token. Use when re-authentication doesn't pick
+    // up newly-added scopes (existing token predates a scope expansion
+    // and `prompt=consent` alone isn't forcing fresh consent on this
+    // user's auth flow). After disconnect, click Authenticate again
+    // for a clean grant.
+    if (!confirm('Disconnect Tidal? Saved token will be cleared and you\'ll need to re-authenticate.')) {
+        return;
+    }
+    try {
+        showLoadingOverlay('Disconnecting Tidal...');
+        const resp = await fetch('/api/tidal/disconnect', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok && data.success) {
+            showToast('Tidal disconnected. Click Authenticate to reconnect with current scopes.', 'success');
+        } else {
+            showToast(`Disconnect failed: ${data.error || 'unknown error'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error disconnecting Tidal:', error);
+        showToast('Failed to disconnect Tidal', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
 async function authenticateDeezer() {
     try {
         showLoadingOverlay('Saving credentials and starting Deezer authentication...');
