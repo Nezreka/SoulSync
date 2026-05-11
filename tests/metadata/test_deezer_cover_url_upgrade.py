@@ -138,3 +138,68 @@ class TestEmptyInputs:
 
     def test_none(self):
         assert _upgrade_deezer_cover_url(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Download fallback — if upgraded URL 403s, retry with original
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadFallbackOnCdnRefusal:
+    """If Deezer CDN refuses the upgraded 1900×1900 URL for some
+    specific album (rare but possible — empirically tested 4 albums
+    and none hit this, but defending the edge keeps the fix
+    strictly non-regressive vs. pre-upgrade behaviour)."""
+
+    def test_tag_writer_retries_with_original_on_failure(self, monkeypatch):
+        """tag_writer.download_cover_art must fall back to the
+        original URL when the upgraded URL fails."""
+        from core import tag_writer
+
+        original_url = 'https://cdn-images.dzcdn.net/images/cover/abc/1000x1000-000000-80-0-0.jpg'
+        upgraded_url = 'https://cdn-images.dzcdn.net/images/cover/abc/1900x1900-000000-80-0-0.jpg'
+
+        call_log = []
+
+        class _FakeResponse:
+            def read(self): return b'cover-bytes'
+            def info(self):
+                class _Info:
+                    def get_content_type(_self): return 'image/jpeg'
+                return _Info()
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        def fake_urlopen(url, timeout=None):
+            call_log.append(url)
+            if url == upgraded_url:
+                raise Exception("403 Forbidden")
+            return _FakeResponse()
+
+        monkeypatch.setattr('core.tag_writer.urllib.request.urlopen', fake_urlopen)
+
+        result = tag_writer.download_cover_art(original_url)
+
+        assert result == (b'cover-bytes', 'image/jpeg')
+        # Tried upgraded first, then fell back to original
+        assert call_log == [upgraded_url, original_url]
+
+    def test_tag_writer_no_fallback_for_non_dzcdn_url(self, monkeypatch):
+        """Non-Deezer URLs go through unchanged — no upgrade, no
+        fallback. Fast path preserved."""
+        from core import tag_writer
+
+        spotify_url = 'https://i.scdn.co/image/abc'
+        call_log = []
+
+        def fake_urlopen(url, timeout=None):
+            call_log.append(url)
+            raise Exception("network error")
+
+        monkeypatch.setattr('core.tag_writer.urllib.request.urlopen', fake_urlopen)
+
+        result = tag_writer.download_cover_art(spotify_url)
+
+        assert result is None
+        # Single attempt — no Deezer fallback path triggered
+        assert call_log == [spotify_url]
