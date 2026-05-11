@@ -19,6 +19,7 @@ from core.matching.artist_aliases import (
     DEFAULT_ARTIST_MATCH_THRESHOLD,
     artist_names_match,
     best_alias_match,
+    split_artist_credit,
 )
 
 
@@ -262,3 +263,130 @@ class TestBackwardCompatNoAliases:
     def test_no_alias_path_matches_direct_similarity(self, expected, actual, should_match):
         matched, _ = artist_names_match(expected, actual)
         assert matched is should_match
+
+
+# ---------------------------------------------------------------------------
+# Multi-value artist credit — Discord report from Foxxify
+# ---------------------------------------------------------------------------
+#
+# AcoustID returns the FULL artist credit ("Okayracer, aldrch &
+# poptropicaslutz!") while the library DB carries only the primary
+# artist ("Okayracer"). Pre-fix raw similarity scored ~43% — well
+# below the 0.6 threshold — and the scanner flagged the track as
+# Wrong Song. Post-fix the helper splits the credit and the primary
+# match wins at near-100%.
+
+
+class TestSplitArtistCredit:
+    @pytest.mark.parametrize('credit,expected', [
+        ('Okayracer, aldrch & poptropicaslutz!',
+         ['Okayracer', 'aldrch', 'poptropicaslutz!']),
+        ('Daft Punk feat. Pharrell',
+         ['Daft Punk', 'Pharrell']),
+        ('Daft Punk ft. Pharrell',
+         ['Daft Punk', 'Pharrell']),
+        ('Daft Punk featuring Pharrell',
+         ['Daft Punk', 'Pharrell']),
+        ('Beyoncé with JAY-Z',
+         ['Beyoncé', 'JAY-Z']),
+        ('Eminem vs. Jay-Z',
+         ['Eminem', 'Jay-Z']),
+        ('Artist1 / Artist2 / Artist3',
+         ['Artist1', 'Artist2', 'Artist3']),
+        ('Artist1; Artist2; Artist3',
+         ['Artist1', 'Artist2', 'Artist3']),
+        ('Artist1 + Artist2',
+         ['Artist1', 'Artist2']),
+        ('A x B',
+         ['A', 'B']),
+        ('Solo Artist',
+         ['Solo Artist']),  # single-token = self
+        ('',
+         []),
+    ])
+    def test_splits_on_known_separators(self, credit, expected):
+        assert split_artist_credit(credit) == expected
+
+    def test_drops_empty_tokens(self):
+        # Trailing / leading separators don't introduce empty entries
+        assert split_artist_credit('Artist,, Other') == ['Artist', 'Other']
+
+    def test_strips_whitespace_per_token(self):
+        assert split_artist_credit('  A  ,  B  ') == ['A', 'B']
+
+
+class TestMultiValueCreditMatching:
+    def test_reporters_exact_case_okayracer(self):
+        """Discord report from Foxxify — verbatim from the screenshot:
+
+            Expected: Okayracer
+            AcoustID: Okayracer, aldrch & poptropicaslutz!
+            Pre-fix:  artist match 43% → Wrong Song flag
+            Post-fix: primary in credit → 100% match
+        """
+        matched, score = artist_names_match(
+            'Okayracer',
+            'Okayracer, aldrch & poptropicaslutz!',
+        )
+        assert matched is True, (
+            f"Expected primary-in-credit match; got matched=False score={score}"
+        )
+        assert score == 1.0
+
+    def test_primary_in_middle_of_credit(self):
+        """Primary artist isn't always first in the credit."""
+        matched, score = artist_names_match(
+            'Pharrell',
+            'Daft Punk feat. Pharrell',
+        )
+        assert matched is True
+        assert score == 1.0
+
+    def test_primary_at_end_of_credit(self):
+        matched, score = artist_names_match(
+            'JAY-Z',
+            'Beyoncé with JAY-Z',
+        )
+        assert matched is True
+
+    def test_no_match_when_expected_artist_not_in_credit(self):
+        """Multi-value path doesn't mask genuine mismatches. If
+        expected isn't in the credit, the comparison should still
+        fail."""
+        matched, _ = artist_names_match(
+            'Madonna',
+            'Daft Punk feat. Pharrell',
+        )
+        assert matched is False
+
+    def test_single_token_actual_falls_through_to_direct(self):
+        """When actual has no separators, multi-value path is a
+        no-op — same as the direct compare."""
+        matched, _ = artist_names_match('Foreigner', 'Foreigner')
+        assert matched is True
+        # And different artists still fail
+        matched, _ = artist_names_match('Foreigner', 'Khalil Turk')
+        assert matched is False
+
+    def test_multi_value_combines_with_aliases(self):
+        """Combination case: expected is romanized, actual credit
+        contains the kanji form alongside other artists. Both the
+        alias path AND the multi-value path must collaborate."""
+        matched, score = artist_names_match(
+            'Hiroyuki Sawano',
+            '澤野弘之, FeaturedJp Artist',
+            aliases=['澤野弘之', 'SawanoHiroyuki'],
+        )
+        assert matched is True
+        assert score == 1.0
+
+    def test_threshold_still_respected(self):
+        """Multi-value path doesn't bypass the threshold — fuzzy
+        in-credit matches still need to clear it."""
+        matched, score = artist_names_match(
+            'XXXXXX',
+            'YYYYYY, ZZZZZZ',
+            threshold=0.99,
+        )
+        assert matched is False
+        assert score < 0.5
