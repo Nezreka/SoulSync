@@ -917,8 +917,55 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 all_artists.append(artist_item)
             else:
                 all_artists.append(str(artist_item))
-        metadata["artist"] = ", ".join(all_artists)
-        logger.info("Metadata: Using all artists: '%s'", metadata["artist"])
+        # Store the multi-artist list so the enrichment writer can emit
+        # proper multi-value ARTIST tags (TPE1 multi-value for ID3,
+        # "artists" key for Vorbis) when `write_multi_artist` is on.
+        # Without this assignment the field was always empty and the
+        # multi-artist write path silently no-op'd.
+        metadata["_artists_list"] = list(all_artists)
+
+        # `feat_in_title` (when true): pull featured artists out of the
+        # ARTIST tag entirely and append "(feat. X, Y)" to the title.
+        # Matches Picard / Beets convention and lets media servers
+        # group by primary artist instead of treating "A, B & C" as a
+        # distinct artist string.
+        # `artist_separator`: when feat_in_title is off (or there's
+        # only one artist) and write_multi_artist is on, this is the
+        # delimiter used to join all artists into the single ARTIST
+        # string. Picard defaults to "; " — we default to ", " to
+        # preserve historical behavior for users who haven't touched
+        # the setting.
+        feat_in_title = cfg.get("metadata_enhancement.tags.feat_in_title", False)
+        artist_separator = cfg.get("metadata_enhancement.tags.artist_separator", ", ")
+
+        if feat_in_title and len(all_artists) > 1:
+            metadata["artist"] = all_artists[0]
+            featured = all_artists[1:]
+            existing_title = metadata.get("title", "") or ""
+            # Don't double-append if the title already carries the
+            # featured artists. Source titles vary: "(feat. X)",
+            # "(featuring X)", "(ft. X)", "ft. X" (no parens), "[feat X]"
+            # (no period, brackets), etc. Word-boundary regex catches
+            # `feat`, `feat.`, `featuring`, `ft`, `ft.` regardless of
+            # surrounding punctuation. Case-insensitive.
+            import re as _feat_re
+            already_has_feat = bool(_feat_re.search(
+                r'\b(?:feat|feat\.|featuring|ft|ft\.)\b',
+                existing_title,
+                _feat_re.IGNORECASE,
+            ))
+            if existing_title and not already_has_feat:
+                metadata["title"] = f"{existing_title} (feat. {', '.join(featured)})"
+            logger.info(
+                "Metadata: feat_in_title — primary='%s', featured=%s, title='%s'",
+                metadata["artist"], featured, metadata["title"],
+            )
+        else:
+            metadata["artist"] = artist_separator.join(all_artists)
+            logger.info(
+                "Metadata: Using all artists joined with %r: '%s'",
+                artist_separator, metadata["artist"],
+            )
     else:
         metadata["artist"] = artist_dict.get("name", "") or get_import_clean_artist(context)
         logger.info("Metadata: Using primary artist: '%s'", metadata["artist"])
