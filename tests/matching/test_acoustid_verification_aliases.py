@@ -399,3 +399,100 @@ class TestAliasProviderCallable:
         )
         # ~0 because direct cross-script comparison fails
         assert score < 0.1
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic logging — alias rescues are visible in logs
+# ---------------------------------------------------------------------------
+
+
+class TestAliasRescueLogging:
+    """When an alias bridges a comparison that direct similarity
+    would have failed, log it at INFO level. Future bug reports
+    where a file passed verification incorrectly can be traced back
+    to which alias triggered which decision.
+
+    Uses a directly-attached handler instead of pytest's caplog —
+    full-suite caplog is intermittently flaky for soulsync namespace
+    loggers (handler ordering, parallel test state). An owned
+    handler on the specific logger sidesteps both issues, same
+    pattern as the prior watchdog-test fix.
+    """
+
+    @staticmethod
+    def _capture_records():
+        """Attach an owned ListHandler to the verifier's logger.
+        Returns (records list, teardown callable)."""
+        import logging as _logging
+        records: list = []
+
+        class _ListHandler(_logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = _ListHandler(level=_logging.INFO)
+        # Logger name is `soulsync.acoustid.verification` per
+        # `core.acoustid_verification`'s `get_logger("acoustid_verification")`
+        # — dot-separated, NOT underscored.
+        verifier_logger = _logging.getLogger('soulsync.acoustid.verification')
+        verifier_logger.addHandler(handler)
+        prior_level = verifier_logger.level
+        verifier_logger.setLevel(_logging.INFO)
+
+        def teardown():
+            verifier_logger.removeHandler(handler)
+            verifier_logger.setLevel(prior_level)
+
+        return records, teardown
+
+    def test_alias_rescue_emits_info_log(self):
+        records, teardown = self._capture_records()
+        try:
+            _alias_aware_artist_sim(
+                'Hiroyuki Sawano', '澤野弘之', aliases=['澤野弘之'],
+            )
+        finally:
+            teardown()
+
+        rescue_logs = [
+            r.getMessage() for r in records
+            if 'alias rescued' in r.getMessage().lower()
+        ]
+        assert len(rescue_logs) >= 1, (
+            f"Expected an INFO log line about alias rescue; got "
+            f"{[r.getMessage() for r in records]}"
+        )
+
+    def test_no_log_when_direct_match_succeeds(self):
+        """Happy path doesn't spam logs — only rescue cases log."""
+        records, teardown = self._capture_records()
+        try:
+            _alias_aware_artist_sim(
+                'Foreigner', 'Foreigner', aliases=['ignored-alias'],
+            )
+        finally:
+            teardown()
+
+        rescue_logs = [
+            r.getMessage() for r in records
+            if 'alias rescued' in r.getMessage().lower()
+        ]
+        assert rescue_logs == []
+
+    def test_no_log_when_alias_doesnt_help(self):
+        """If aliases were available but didn't bridge the gap (still
+        below threshold), no rescue log — there was no rescue."""
+        records, teardown = self._capture_records()
+        try:
+            _alias_aware_artist_sim(
+                'Hiroyuki Sawano', 'Khalil Turk',
+                aliases=['Sergey Lazarev'],  # unrelated alias
+            )
+        finally:
+            teardown()
+
+        rescue_logs = [
+            r.getMessage() for r in records
+            if 'alias rescued' in r.getMessage().lower()
+        ]
+        assert rescue_logs == []

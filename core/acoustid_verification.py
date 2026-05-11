@@ -115,6 +115,12 @@ def _alias_aware_artist_sim(
       needed. Verifications where the direct match already passes
       never trigger the lookup chain — no wasted DB query for the
       happy path.
+
+    Diagnostic logging: emits an INFO line whenever an alias rescues
+    a comparison that direct similarity would have failed. Lets
+    future bug reports trace which alias triggered which PASS
+    decision (e.g. "this file passed because alias `澤野弘之` matched
+    the file's artist tag").
     """
     from core.matching.artist_aliases import artist_names_match
 
@@ -140,6 +146,22 @@ def _alias_aware_artist_sim(
         threshold=ARTIST_MATCH_THRESHOLD,
         similarity=_similarity,
     )
+
+    # Diagnostic — alias rescued a comparison that direct would
+    # have failed. Worth logging at INFO since it's a user-visible
+    # decision (file PASS instead of FAIL). One line per rescue
+    # within a single verify call.
+    if score >= ARTIST_MATCH_THRESHOLD and direct < ARTIST_MATCH_THRESHOLD:
+        from core.matching.artist_aliases import best_alias_match
+        winner, _ = best_alias_match(
+            expected_artist, actual_artist, resolved, similarity=_similarity,
+        )
+        logger.info(
+            "Artist alias rescued comparison: expected=%r vs actual=%r "
+            "(direct sim=%.2f, alias %r → score=%.2f)",
+            expected_artist, actual_artist, direct, winner, score,
+        )
+
     return score
 
 
