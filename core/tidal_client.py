@@ -1076,6 +1076,121 @@ class TidalClient:
             return None
 
     @rate_limited
+    def get_album_tracks(self, album_id: str, limit: Optional[int] = None) -> List[Track]:
+        """Fetch every track on an album with full artist + name + duration
+        metadata hydrated.
+
+        Two-phase: walk `/v2/albums/{id}/relationships/items?include=items`
+        cursor chain to enumerate track IDs (with their position metadata —
+        `meta.trackNumber` + `meta.volumeNumber` for multi-disc), then
+        feed the IDs through the existing `_get_tracks_batch` helper for
+        artist + album-name resolution.
+
+        Returns a list of `Track` dataclasses with `track_number` and
+        `disc_number` attached as ad-hoc attributes so callers that need
+        per-position info (download modal, virtual playlist build) can
+        read them. Backend `/api/discover/album/<source>/<album_id>`
+        serializes these to the same shape Spotify/Deezer return."""
+        if not self._ensure_valid_token():
+            return []
+
+        # Phase 1: enumerate track IDs + position metadata via cursor pagination.
+        # The relationship endpoint pages at 20 items by default. The `meta`
+        # dict on each ref carries `trackNumber` + `volumeNumber` (multi-disc).
+        track_meta_by_id: Dict[str, Dict[str, int]] = {}
+        track_ids: List[str] = []
+        next_path: Optional[str] = None
+
+        while True:
+            if next_path:
+                url = (next_path if next_path.startswith('http')
+                       else f"https://openapi.tidal.com/v2{next_path}")
+                params = None
+            else:
+                url = f"{self.base_url}/albums/{album_id}/relationships/items"
+                params = {'countryCode': 'US', 'include': 'items'}
+
+            try:
+                resp = self.session.get(
+                    url, params=params,
+                    headers={'accept': 'application/vnd.api+json'},
+                    timeout=15,
+                )
+            except Exception as e:
+                logger.debug(f"Tidal album-tracks page request failed: {e}")
+                break
+
+            if resp.status_code != 200:
+                if resp.status_code == 429:
+                    raise Exception("Rate limited (429) on get_album_tracks")
+                logger.debug(
+                    f"Tidal album-tracks page returned {resp.status_code}: {resp.text[:200]}"
+                )
+                break
+
+            try:
+                data = resp.json()
+            except ValueError:
+                break
+
+            for item in data.get('data', []):
+                if item.get('type') != 'tracks':
+                    continue
+                tid = item.get('id')
+                if not tid:
+                    continue
+                tid = str(tid)
+                meta = item.get('meta', {}) or {}
+                track_meta_by_id[tid] = {
+                    'track_number': int(meta.get('trackNumber') or 0),
+                    'disc_number': int(meta.get('volumeNumber') or 1),
+                }
+                track_ids.append(tid)
+                if limit is not None and len(track_ids) >= limit:
+                    break
+
+            if limit is not None and len(track_ids) >= limit:
+                break
+
+            next_path = data.get('links', {}).get('next')
+            if not next_path:
+                break
+
+            time.sleep(0.3)
+
+        if not track_ids:
+            return []
+
+        # Phase 2: batch hydrate via existing helper (artists + album names).
+        # Annotate each Track with position metadata so callers can build the
+        # per-track-number payload the download pipeline expects.
+        hydrated: List[Track] = []
+        for i in range(0, len(track_ids), self._COLLECTION_BATCH_SIZE):
+            batch_ids = track_ids[i:i + self._COLLECTION_BATCH_SIZE]
+            try:
+                batch_tracks = self._get_tracks_batch(batch_ids)
+            except Exception as e:
+                logger.debug(f"Tidal album-tracks batch hydration failed: {e}")
+                continue
+            for t in batch_tracks:
+                meta = track_meta_by_id.get(str(t.id), {})
+                t.track_number = meta.get('track_number', 0)
+                t.disc_number = meta.get('disc_number', 1)
+                hydrated.append(t)
+
+        # Tidal's relationship walk returns tracks in album order; the
+        # batch endpoint may not preserve order. Sort by (disc, track)
+        # so the modal renders the album top-down.
+        hydrated.sort(key=lambda t: (
+            getattr(t, 'disc_number', 1),
+            getattr(t, 'track_number', 0),
+        ))
+        logger.info(
+            f"Retrieved {len(hydrated)}/{len(track_ids)} tracks for Tidal album {album_id}"
+        )
+        return hydrated
+
+    @rate_limited
     def get_track(self, track_id: str) -> Optional[Dict]:
         """Get full track details by Tidal ID."""
         try:
