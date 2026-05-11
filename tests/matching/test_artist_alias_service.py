@@ -305,6 +305,79 @@ class TestWorkerAliasEnrichment:
         worker.mb_service.fetch_artist_aliases.assert_not_called()
         worker.mb_service.update_artist_aliases.assert_not_called()
 
+    def test_existing_mbid_path_backfills_aliases_when_column_empty(self, temp_db):
+        """Issue #442 perf followup: existing-MBID short-circuit path
+        was skipping alias enrichment entirely. Users with libraries
+        enriched BEFORE this PR shipped have MBIDs but NULL aliases.
+        Worker should fetch aliases on the existing-id path too —
+        one-time backfill on first re-scan post-deploy."""
+        from core.musicbrainz_worker import MusicBrainzWorker
+        artist_id = _seed_artist(temp_db, 'Hiroyuki Sawano')
+
+        worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
+        worker.database = temp_db
+        worker.db = temp_db  # _artist_aliases_empty uses self.db
+        worker.mb_service = MagicMock()
+        worker.mb_service.fetch_artist_aliases.return_value = ['澤野弘之', 'SawanoHiroyuki']
+        worker.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
+        # Existing MBID path
+        worker._get_existing_id = MagicMock(return_value='mb-existing-id')
+
+        worker._process_item({'type': 'artist', 'id': artist_id, 'name': 'Hiroyuki Sawano'})
+
+        # MBID was preserved
+        worker.mb_service.update_artist_mbid.assert_called_once_with(
+            artist_id, 'mb-existing-id', 'matched',
+        )
+        # Aliases backfilled
+        worker.mb_service.fetch_artist_aliases.assert_called_once_with('mb-existing-id')
+        worker.mb_service.update_artist_aliases.assert_called_once_with(
+            artist_id, ['澤野弘之', 'SawanoHiroyuki'],
+        )
+
+    def test_existing_mbid_path_skips_backfill_when_aliases_already_set(self, temp_db):
+        """If aliases are already populated, don't re-fetch — re-scan
+        cycles after backfill complete should be no-ops."""
+        from core.musicbrainz_worker import MusicBrainzWorker
+        artist_id = _seed_artist(
+            temp_db, 'X', aliases=json.dumps(['existing-alias']),
+        )
+
+        worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
+        worker.database = temp_db
+        worker.db = temp_db
+        worker.mb_service = MagicMock()
+        worker.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
+        worker._get_existing_id = MagicMock(return_value='mb-x')
+
+        worker._process_item({'type': 'artist', 'id': artist_id, 'name': 'X'})
+
+        # No alias work — column already populated
+        worker.mb_service.fetch_artist_aliases.assert_not_called()
+        worker.mb_service.update_artist_aliases.assert_not_called()
+
+    def test_existing_mbid_backfill_failure_does_not_break_match(self, temp_db):
+        """Backfill is best-effort — failure to fetch aliases must
+        NOT prevent the MBID-preservation update from happening."""
+        from core.musicbrainz_worker import MusicBrainzWorker
+        artist_id = _seed_artist(temp_db, 'X')
+
+        worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
+        worker.database = temp_db
+        worker.db = temp_db
+        worker.mb_service = MagicMock()
+        worker.mb_service.fetch_artist_aliases.side_effect = Exception("MB down")
+        worker.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
+        worker._get_existing_id = MagicMock(return_value='mb-x')
+
+        # Should NOT raise
+        worker._process_item({'type': 'artist', 'id': artist_id, 'name': 'X'})
+
+        # MBID still preserved despite alias backfill failure
+        worker.mb_service.update_artist_mbid.assert_called_once_with(
+            artist_id, 'mb-x', 'matched',
+        )
+
     def test_alias_fetch_failure_does_not_break_match(self, temp_db):
         """If alias fetch raises (network error, malformed response,
         whatever), the artist match still gets recorded — alias
