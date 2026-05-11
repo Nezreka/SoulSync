@@ -19,6 +19,18 @@ import secrets
 
 logger = get_logger("tidal_client")
 
+# Virtual playlist identity for the user's Favorite Tracks (Tidal's
+# "My Collection" view). Treated like a normal playlist by every
+# get_playlist consumer (mirror auto-refresh, discovery, sync UI) —
+# the client recognizes the ID and dispatches to the dedicated
+# `userCollectionTracks` endpoint internally. ID intentionally has no
+# colon: the sync-services.js renderer interpolates IDs into CSS
+# selectors via template literals (e.g. `#tidal-card-${p.id} .foo`)
+# and a `:` in the ID would be parsed as a CSS pseudo-class operator.
+COLLECTION_PLAYLIST_ID = "tidal-favorites"
+COLLECTION_PLAYLIST_NAME = "Favorite Tracks"
+COLLECTION_PLAYLIST_DESCRIPTION = "Your favorited tracks on Tidal"
+
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
@@ -254,14 +266,21 @@ class TidalClient:
             # Generate PKCE challenge
             self._generate_pkce_challenge()
             
-            # Create OAuth URL with PKCE
+            # Create OAuth URL with PKCE.
+            # `prompt=consent` forces Tidal to display the consent
+            # screen even when the app is already authorized — without
+            # it, re-authenticating with newly-added scopes (e.g.
+            # `collection.read` added in v2.4.3) can silently return a
+            # token carrying only the ORIGINAL scope set because Tidal
+            # treats the existing authorization as still valid.
             params = {
                 'response_type': 'code',
                 'client_id': self.client_id,
                 'redirect_uri': self.redirect_uri,
-                'scope': 'user.read playlists.read', # Updated with the required scope
+                'scope': 'user.read playlists.read collection.read', # collection.read needed for userCollectionTracks endpoint
                 'code_challenge': self.code_challenge,
-                'code_challenge_method': 'S256'
+                'code_challenge_method': 'S256',
+                'prompt': 'consent',
             }
             
             auth_url = f"{self.auth_url}?" + urllib.parse.urlencode(params)
@@ -520,6 +539,26 @@ class TidalClient:
             return result
 
         return False
+
+    def disconnect(self):
+        """Clear all saved Tidal auth state so the next OAuth flow
+        starts fresh with the current scope set.
+
+        Used when a previously-authorized token doesn't carry a newly-
+        added scope (e.g. `collection.read`): even with `prompt=consent`
+        on the auth URL, some users hit a Tidal flow that rebinds the
+        existing grant. Disconnect first → re-authenticate forces a
+        clean slate."""
+        self.access_token = None
+        self.refresh_token = None
+        self.token_expires_at = 0
+        self._collection_needs_reconnect = False
+        self.session.headers.pop('Authorization', None)
+        try:
+            config_manager.set('tidal_tokens', {})
+        except Exception as e:
+            logger.warning(f"Failed to clear tidal_tokens config: {e}")
+        logger.info("Tidal client disconnected — saved tokens cleared")
     
     def _get_user_id(self):
         """Get current user's ID from /users/me endpoint"""
@@ -1071,8 +1110,31 @@ class TidalClient:
 
     @rate_limited
     def get_playlist(self, playlist_id: str) -> Optional[Playlist]:
-        """Get playlist details including tracks using JSON:API format"""
+        """Get playlist details including tracks using JSON:API format.
+
+        Recognizes the virtual ``tidal-favorites`` ID and dispatches
+        to ``get_collection_tracks`` so every caller that already
+        accepts a playlist ID (mirror auto-refresh, discovery start,
+        per-playlist detail endpoint) gets Favorite Tracks support
+        for free without per-site special-casing.
+
+        ID intentionally has no colon — the sync-services.js renderer
+        builds CSS selectors via template literal interpolation
+        (``#tidal-card-${p.id} .playlist-card-track-count``) and a
+        ``:`` in the ID would be parsed as a CSS pseudo-class operator.
+        """
         try:
+            if playlist_id == COLLECTION_PLAYLIST_ID:
+                collection_tracks = self.get_collection_tracks()
+                return Playlist(
+                    id=COLLECTION_PLAYLIST_ID,
+                    name=COLLECTION_PLAYLIST_NAME,
+                    description=COLLECTION_PLAYLIST_DESCRIPTION,
+                    tracks=collection_tracks,
+                    owner={'name': 'You'},
+                    public=False,
+                )
+
             if not self._ensure_valid_token():
                 logger.error("Not authenticated with Tidal")
                 return None
@@ -1630,6 +1692,191 @@ class TidalClient:
             return albums
         except Exception as e:
             logger.error(f"Error fetching Tidal favorite albums: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # User Collection ("Favorite Tracks" — Tidal calls this "My Collection")
+    # ------------------------------------------------------------------
+    #
+    # Tidal V2 exposes the user's favorited tracks via a separate
+    # cursor-paginated endpoint:
+    #
+    #   GET /v2/userCollectionTracks/me/relationships/items
+    #         ?countryCode=US&locale=en-US&include=items
+    #
+    # Each page returns up to 20 entries in `data[]` (track refs with
+    # `id` + `type='tracks'` + `meta.addedAt`) and an OPTIONAL `links.next`
+    # URL for the next page. The included track resources only carry the
+    # track-level attributes (title, isrc, duration, mediaTags) — artists
+    # and album NAMES come back as relationship-link stubs only, not
+    # embedded data.
+    #
+    # We split the work in two phases:
+    #   1) `_iter_collection_track_ids()` — enumerates every collection
+    #      entry by following the cursor chain. Cheap (just IDs + types).
+    #   2) Hydration — feeds the IDs through the existing
+    #      `_get_tracks_batch` helper which already knows how to
+    #      `include=artists,albums` and produce fully-populated `Track`
+    #      objects matching the rest of the codebase. No new parsing,
+    #      no new dataclass shape, no duplication of the JSON:API parse.
+    #
+    # Reference: https://github.com/Nezreka/SoulSync/issues/502 — reporter
+    # Yug1900 located the working endpoint after the prior `/v2/favorites`
+    # filter approach returned empty data for personal favorites.
+    #
+    # Auth state — calling code (web_server.py listing endpoint) needs
+    # to know whether an empty result means "user has no favorites" or
+    # "token lacks `collection.read` scope and needs reconnect". The
+    # iter helper sets `self._collection_needs_reconnect = True` when
+    # the endpoint returns 401/403 so the listing endpoint can surface
+    # a user-actionable hint instead of silently hiding the row.
+
+    _COLLECTION_TRACKS_PATH = "userCollectionTracks/me/relationships/items"
+    _COLLECTION_BATCH_SIZE = 20  # Tidal `filter[id]` page cap
+
+    @rate_limited
+    def _iter_collection_track_ids(self, max_ids: Optional[int] = None) -> List[str]:
+        """Walk the cursor-paginated collection endpoint and return the
+        list of track IDs in the user's Favorite Tracks.
+
+        ``max_ids`` caps the walk early — used by callers that only
+        need a count or a partial list. Returns ``[]`` when not
+        authenticated or when the endpoint refuses (e.g. token without
+        ``collection.read`` scope). On 401/403 also flips
+        ``self._collection_needs_reconnect = True`` so the caller can
+        distinguish 'empty collection' from 'missing scope'."""
+        # Reset on every call so a successful walk clears any stale flag
+        # left from a prior failed attempt.
+        self._collection_needs_reconnect = False
+
+        if not self._ensure_valid_token():
+            logger.debug("Tidal not authenticated — cannot fetch collection tracks")
+            return []
+
+        track_ids: List[str] = []
+        next_path: Optional[str] = None
+
+        while True:
+            if next_path:
+                # `links.next` from Tidal is path-relative to /v2 root,
+                # already carries every query param we need (cursor + countryCode + locale + include).
+                url = next_path if next_path.startswith('http') else f"https://openapi.tidal.com/v2{next_path}"
+                params = None
+            else:
+                url = f"{self.base_url}/{self._COLLECTION_TRACKS_PATH}"
+                params = {
+                    'countryCode': 'US',
+                    'locale': 'en-US',
+                    'include': 'items',
+                }
+
+            try:
+                headers = {
+                    'accept': 'application/vnd.api+json',
+                    'Authorization': f'Bearer {self.access_token}',
+                }
+                logger.info(
+                    f"Tidal collection request: GET {url} (params={params})"
+                )
+                resp = requests.get(url, params=params, headers=headers, timeout=15)
+                logger.info(
+                    f"Tidal collection response: status={resp.status_code} "
+                    f"body[:300]={resp.text[:300]!r}"
+                )
+            except Exception as e:
+                logger.warning(f"Tidal collection page request failed: {e}")
+                break
+
+            if resp.status_code != 200:
+                # 401/403 = scope/permission issue. Token predates the
+                # `collection.read` scope expansion or the user revoked
+                # it — flag for the UI hint and bail.
+                if resp.status_code in (401, 403):
+                    self._collection_needs_reconnect = True
+                    logger.info(
+                        "Tidal collection endpoint returned %s — reconnect Tidal "
+                        "in Settings → Connections to grant `collection.read` scope.",
+                        resp.status_code,
+                    )
+                else:
+                    logger.warning(
+                        f"Tidal collection page returned {resp.status_code}: {resp.text[:500]}"
+                    )
+                break
+
+            try:
+                data = resp.json()
+            except ValueError as e:
+                logger.debug(f"Tidal collection response not JSON: {e}")
+                break
+
+            for item in data.get('data', []):
+                if item.get('type') != 'tracks':
+                    continue
+                tid = item.get('id')
+                if tid:
+                    track_ids.append(str(tid))
+                    if max_ids is not None and len(track_ids) >= max_ids:
+                        return track_ids
+
+            next_path = data.get('links', {}).get('next')
+            if not next_path:
+                break
+
+            time.sleep(0.3)  # Cursor pagination courtesy delay
+
+        return track_ids
+
+    def collection_needs_reconnect(self) -> bool:
+        """True when the most recent collection fetch hit a 401/403 —
+        i.e. the saved token doesn't have `collection.read` scope and
+        the user needs to reconnect Tidal in Settings → Connections.
+
+        Reset to False at the start of every `_iter_collection_track_ids`
+        call so a successful walk clears stale flags."""
+        return getattr(self, '_collection_needs_reconnect', False)
+
+    def get_collection_tracks_count(self) -> int:
+        """Total count of tracks in the user's Favorite Tracks.
+
+        Tidal's cursor pagination doesn't expose a `meta.total` so we
+        walk the full ID list. Cheap relative to hydration (one small
+        request per 20 tracks, no per-track lookups), but linear in
+        collection size — call sparingly."""
+        try:
+            return len(self._iter_collection_track_ids())
+        except Exception as e:
+            logger.debug(f"Failed to get Tidal collection tracks count: {e}")
+            return 0
+
+    def get_collection_tracks(self, limit: Optional[int] = None) -> List[Track]:
+        """Fetch user's favorited tracks with full artist + album
+        metadata hydrated via `_get_tracks_batch`.
+
+        Returns the same `Track` shape every other Tidal playlist
+        method returns, so the virtual-playlist plumbing in
+        `web_server.py` can reuse the existing serialization path."""
+        try:
+            track_ids = self._iter_collection_track_ids(max_ids=limit)
+            if not track_ids:
+                return []
+
+            hydrated: List[Track] = []
+            for i in range(0, len(track_ids), self._COLLECTION_BATCH_SIZE):
+                batch = track_ids[i:i + self._COLLECTION_BATCH_SIZE]
+                try:
+                    hydrated.extend(self._get_tracks_batch(batch))
+                except Exception as e:
+                    logger.debug(
+                        f"Tidal collection batch hydration failed for IDs {batch}: {e}"
+                    )
+
+            logger.info(
+                f"Retrieved {len(hydrated)}/{len(track_ids)} tracks from Tidal Favorite Tracks"
+            )
+            return hydrated
+        except Exception as e:
+            logger.error(f"Error fetching Tidal collection tracks: {e}")
             return []
 
 # Global instance
