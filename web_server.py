@@ -5641,15 +5641,23 @@ def auth_tidal():
         with tidal_oauth_lock:
             tidal_oauth_state["profile_id"] = profile_id if profile_id and profile_id != '1' else None
 
-        # Create OAuth URL
+        # Create OAuth URL.
+        # `collection.read` is required for the `userCollectionTracks`
+        # endpoint that powers the virtual "Favorite Tracks" playlist
+        # (issue #502). `prompt=consent` forces Tidal to display the
+        # consent screen even when the app is already authorized — without
+        # it, re-authenticating after a scope expansion can silently
+        # return a token carrying only the ORIGINAL scope set because
+        # Tidal treats the existing authorization as still valid.
         import urllib.parse
         params = {
             'response_type': 'code',
             'client_id': temp_tidal_client.client_id,
             'redirect_uri': temp_tidal_client.redirect_uri,
-            'scope': 'user.read playlists.read',
+            'scope': 'user.read playlists.read collection.read',
             'code_challenge': temp_tidal_client.code_challenge,
-            'code_challenge_method': 'S256'
+            'code_challenge_method': 'S256',
+            'prompt': 'consent',
         }
         
         auth_url = f"{temp_tidal_client.auth_url}?" + urllib.parse.urlencode(params)
@@ -20680,6 +20688,26 @@ def qobuz_auth_logout():
 # TIDAL PLAYLIST API ENDPOINTS
 # ===================================================================
 
+@app.route('/api/tidal/disconnect', methods=['POST'])
+def tidal_disconnect():
+    """Clear saved Tidal auth state. Use when re-authentication doesn't
+    pick up newly-added scopes (e.g. existing token predates a scope
+    expansion and `prompt=consent` alone isn't enough to force fresh
+    consent on this user's auth flow)."""
+    if not tidal_client:
+        return jsonify({"error": "Tidal client not available."}), 500
+    try:
+        tidal_client.disconnect()
+        return jsonify({
+            'success': True,
+            'message': 'Tidal disconnected. Re-authenticate from Settings → Connections.',
+            'authenticated': False,
+        })
+    except Exception as e:
+        logger.error(f"Tidal disconnect error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/tidal/playlists', methods=['GET'])
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
@@ -20716,7 +20744,56 @@ def get_tidal_playlists():
                 } for t in p.tracks]
                 
             playlist_data.append(playlist_dict)
-            
+
+        # Append virtual "Favorite Tracks" playlist at the END (mirrors
+        # Spotify's "Liked Songs" treatment — count-only here, full
+        # track fetch deferred to the per-playlist detail endpoint).
+        # When the saved Tidal token doesn't have `collection.read`
+        # scope (existing tokens predate the scope expansion), the
+        # endpoint returns 401 — we still surface the entry but with
+        # a `needs_reconnect` flag + a reconnect-hint name so the user
+        # has something visible to act on instead of a silently missing
+        # row.
+        try:
+            from core.tidal_client import (
+                COLLECTION_PLAYLIST_ID,
+                COLLECTION_PLAYLIST_NAME,
+                COLLECTION_PLAYLIST_DESCRIPTION,
+            )
+            collection_count = tidal_client.get_collection_tracks_count()
+            needs_reconnect = tidal_client.collection_needs_reconnect()
+
+            if needs_reconnect:
+                playlist_data.append({
+                    "id": COLLECTION_PLAYLIST_ID,
+                    "name": f"{COLLECTION_PLAYLIST_NAME} (reconnect Tidal to enable)",
+                    "owner": "You",
+                    "track_count": 0,
+                    "image_url": None,
+                    "description": "Reconnect Tidal in Settings → Connections to grant the new collection.read scope.",
+                    "needs_reconnect": True,
+                    "tracks": [],
+                })
+                logger.info(
+                    "Tidal Favorite Tracks: token missing `collection.read` scope — surfacing reconnect hint."
+                )
+            elif collection_count > 0:
+                playlist_data.append({
+                    "id": COLLECTION_PLAYLIST_ID,
+                    "name": COLLECTION_PLAYLIST_NAME,
+                    "owner": "You",
+                    "track_count": collection_count,
+                    "image_url": None,
+                    "description": COLLECTION_PLAYLIST_DESCRIPTION,
+                    "tracks": [],
+                })
+                logger.info(
+                    f"Added virtual '{COLLECTION_PLAYLIST_NAME}' playlist with {collection_count} tracks (count only)"
+                )
+        except Exception as collection_error:
+            logger.error(f"Failed to add Tidal Favorite Tracks playlist: {collection_error}")
+            # Don't fail the entire request if Favorite Tracks fails
+
         logger.info(f"Loaded {len(playlist_data)} Tidal playlists with track data")
         return jsonify(playlist_data)
     except Exception as e:
@@ -20730,7 +20807,10 @@ def get_tidal_playlist_tracks(playlist_id):
     try:
         logger.info(f"Getting full Tidal playlist with tracks for: {playlist_id}")
 
-        # Fetch this single playlist directly — no need to re-fetch all playlists
+        # Fetch this single playlist directly — no need to re-fetch all playlists.
+        # `get_playlist` recognizes the virtual `tidal-favorites` ID and
+        # dispatches to the userCollectionTracks endpoint internally, so
+        # the rest of this handler treats it identically to a real playlist.
         full_playlist = tidal_client.get_playlist(playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
