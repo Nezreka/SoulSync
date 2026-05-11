@@ -341,8 +341,33 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
             if not art_url:
                 logger.warning("No cover art URL available for download.")
                 return
-            with urllib.request.urlopen(art_url, timeout=10) as response:
-                image_data = response.read()
+            # Fetch with one fallback level: if we upgraded a Deezer
+            # URL above and the CDN happens to refuse the larger size
+            # for this specific album, retry with the original URL so
+            # we never regress vs. pre-upgrade behavior. Empirically
+            # 1900 works for every album tested but defending against
+            # the edge case keeps the fix strictly non-regressive.
+            original_url = album_info.get("album_image_url")
+            if context and not original_url:
+                album_ctx = get_import_context_album(context)
+                original_url = album_ctx.get("image_url") or original_url
+            try:
+                with urllib.request.urlopen(art_url, timeout=10) as response:
+                    image_data = response.read()
+            except Exception as fetch_err:
+                if (
+                    "dzcdn" in art_url
+                    and original_url
+                    and original_url != art_url
+                ):
+                    logger.info(
+                        "Deezer CDN refused upgraded cover URL (%s); "
+                        "retrying with original size", fetch_err,
+                    )
+                    with urllib.request.urlopen(original_url, timeout=10) as response:
+                        image_data = response.read()
+                else:
+                    raise
 
         if not image_data:
             return

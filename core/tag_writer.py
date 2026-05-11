@@ -209,10 +209,14 @@ def download_cover_art(cover_url: str) -> Optional[Tuple[bytes, str]]:
     max). Mirrors the same upgrade in
     ``core.metadata.artwork.download_cover_art`` so the
     enhanced-library-view "Write Tags to File" feature embeds the same
-    high-resolution cover the auto post-process flow does.
+    high-resolution cover the auto post-process flow does. Falls back
+    to the original URL if the CDN refuses the upgraded size for a
+    specific album — keeps the fix strictly non-regressive vs. the
+    pre-upgrade behaviour.
     """
     if not cover_url:
         return None
+    original_url = cover_url
     if 'dzcdn' in cover_url:
         try:
             from core.deezer_client import _upgrade_deezer_cover_url
@@ -226,6 +230,21 @@ def download_cover_art(cover_url: str) -> Optional[Tuple[bytes, str]]:
         if image_data:
             return (image_data, mime_type)
     except Exception as e:
+        # Deezer CDN refused upgraded size for this album — retry with
+        # original URL so we never get less than pre-upgrade behaviour.
+        if 'dzcdn' in cover_url and cover_url != original_url:
+            logger.info(
+                "Deezer CDN refused upgraded cover URL (%s); retrying with original size", e,
+            )
+            try:
+                with urllib.request.urlopen(original_url, timeout=15) as response:
+                    image_data = response.read()
+                    mime_type = response.info().get_content_type() or 'image/jpeg'
+                if image_data:
+                    return (image_data, mime_type)
+            except Exception as fallback_err:
+                logger.error(f"Error downloading cover art (fallback): {fallback_err}")
+                return None
         logger.error(f"Error downloading cover art from {cover_url}: {e}")
     return None
 
