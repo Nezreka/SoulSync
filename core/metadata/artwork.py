@@ -324,6 +324,20 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                     logger.debug("upgrade spotify image url failed: %s", e)
             elif art_url and "mzstatic.com" in art_url:
                 art_url = re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
+            elif art_url and "dzcdn" in art_url:
+                # Deezer's API returns cover_xl URLs at 1000×1000 but
+                # the underlying CDN serves up to 1900×1900 by rewriting
+                # the size segment in the URL path. Without this upgrade
+                # users embedding cover art via Deezer get visibly
+                # blurry covers in their library / phone player (Discord
+                # report from Tim, 2026-05). Same shape as the iTunes
+                # mzstatic upgrade above + Spotify scdn upgrade.
+                try:
+                    from core.deezer_client import _upgrade_deezer_cover_url
+
+                    art_url = _upgrade_deezer_cover_url(art_url)
+                except Exception as e:
+                    logger.debug("upgrade deezer image url failed: %s", e)
             if not art_url:
                 logger.warning("No cover art URL available for download.")
                 return

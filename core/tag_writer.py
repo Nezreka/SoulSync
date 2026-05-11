@@ -204,9 +204,21 @@ def download_cover_art(cover_url: str) -> Optional[Tuple[bytes, str]]:
     """
     Download cover art once. Returns (image_data, mime_type) or None on failure.
     Call this once per album, then pass the result to write_tags_to_file for each track.
+
+    For Deezer CDN URLs, upgrades the size segment to 1900×1900 (CDN
+    max). Mirrors the same upgrade in
+    ``core.metadata.artwork.download_cover_art`` so the
+    enhanced-library-view "Write Tags to File" feature embeds the same
+    high-resolution cover the auto post-process flow does.
     """
     if not cover_url:
         return None
+    if 'dzcdn' in cover_url:
+        try:
+            from core.deezer_client import _upgrade_deezer_cover_url
+            cover_url = _upgrade_deezer_cover_url(cover_url)
+        except Exception as e:
+            logger.debug("upgrade deezer image url failed: %s", e)
     try:
         with urllib.request.urlopen(cover_url, timeout=15) as response:
             image_data = response.read()

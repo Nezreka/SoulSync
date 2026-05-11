@@ -45,6 +45,50 @@ def rate_limited(func):
     return wrapper
 
 
+# Pattern matches Deezer's CDN cover/picture URL: a numeric width-x-height
+# segment in the path (e.g. ``/1000x1000-000000-80-0-0.jpg``). Captures
+# both halves so the replacement can use a single dimension and preserve
+# the rest of the path verbatim.
+_DEEZER_CDN_SIZE_PATTERN = re.compile(r'/(\d+)x(\d+)-')
+
+# Maximum size Deezer's CDN serves before returning 403. Verified
+# empirically against multiple albums — 1900 works reliably, 2000+
+# returns Forbidden. CDN serves the source-native size when it's
+# smaller than requested, so asking for 1900 is safe even on albums
+# whose source upload was lower-res (no upscaling, just same bytes).
+_DEEZER_MAX_COVER_SIZE = 1900
+
+
+def _upgrade_deezer_cover_url(url: str, target_size: int = _DEEZER_MAX_COVER_SIZE) -> str:
+    """Rewrite a Deezer CDN cover/picture URL to request a larger size.
+
+    Deezer's API returns ``cover_xl`` / ``picture_xl`` URLs at
+    1000×1000, but the underlying CDN serves up to 1900×1900 by
+    rewriting the size segment in the URL path. This helper does the
+    rewrite — same idea as ``_upgrade_spotify_image_url`` in
+    ``spotify_client`` and the ``mzstatic.com`` size-replacement in
+    ``download_cover_art``.
+
+    Defensive on every input shape:
+    - Empty / None URL → returned as-is
+    - Non-Deezer URL (no ``dzcdn`` host, no size segment) → returned as-is
+    - Already at or above target size → returned as-is (no point rewriting)
+
+    The CDN returns the source-native image bytes when source < target,
+    so asking for 1900 on an album whose source was uploaded at 600
+    just returns the 600-pixel image — no upscaling, no failure.
+    """
+    if not url or 'dzcdn' not in url:
+        return url
+    match = _DEEZER_CDN_SIZE_PATTERN.search(url)
+    if not match:
+        return url
+    current = int(match.group(1))
+    if current >= target_size:
+        return url
+    return _DEEZER_CDN_SIZE_PATTERN.sub(f'/{target_size}x{target_size}-', url, count=1)
+
+
 # ==================== Dataclasses (match iTunesClient / SpotifyClient format) ====================
 
 @dataclass
