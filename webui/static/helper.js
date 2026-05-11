@@ -3413,6 +3413,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.5.1': [
+        // --- post-release patch work on the 2.5.1 line — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.5.1 patch work' },
+        { title: 'Server Playlist Sync: Append Mode (Stop Overwriting User-Added Tracks)', desc: 'discord report (cjfc, 2026-04-26): syncing a spotify playlist to your server overwrote anything you\'d manually added to the server-side playlist. now there\'s a per-sync mode picker next to the Sync button on the playlist details modal: "Replace" (default, current behavior — delete + recreate) or "Append only" (preserve existing, only add tracks not already there). useful when the source platform caps playlist size (spotify 100-track limit) and you\'re manually building beyond it on the server. each server client (plex / jellyfin / navidrome) gets a new `append_to_playlist(name, tracks)` method that uses the server\'s native append api — plex `addItems`, jellyfin `POST /Playlists/<id>/Items`, navidrome subsonic `updatePlaylist?songIdToAdd=...`. no delete-recreate, no backup playlist created in append mode (preserves playlist creation date + metadata + non-soulsync-managed tracks). dedup-by-id ensures we never add a track that\'s already on the playlist (matched by ratingKey for plex, jellyfin guid id for jellyfin, song id for navidrome — server-native identity, not fuzzy title+artist match). falls back to `create_playlist` when the playlist doesn\'t exist yet (first sync). sync_service dispatches via the new mode flag through /api/sync/start; soulsync standalone has no playlist methods at all so the dispatch falls back to update_playlist with a warning log when append is requested against it. 15 new tests pin: missing playlist → create delegation, dedup filtering (existing ids skipped), short-circuit on no-new-tracks (no api call), failure paths return False without raising, contract listing for each server client.', page: 'sync' },
+    ],
     '2.5.0': [
         // --- May 10, 2026 — 2.5.0 release ---
         { date: 'May 10, 2026 — 2.5.0 release' },

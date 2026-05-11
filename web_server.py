@@ -23836,10 +23836,11 @@ def _build_sync_deps():
     )
 
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url=''):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', sync_mode='replace'):
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
+        sync_mode=sync_mode,
     )
 
 
@@ -23855,14 +23856,22 @@ def start_playlist_sync():
     playlist_name = data.get('playlist_name')
     tracks_json = data.get('tracks') # Pass the full track list
     playlist_image_url = data.get('image_url', '')
+    # 'replace' (default) deletes the server playlist and recreates it from
+    # the source. 'append' preserves user-added tracks already on the server
+    # playlist — only adds tracks that aren't there yet. Per-server clients
+    # implement append via native add APIs (Plex addItems, Jellyfin POST
+    # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
+    sync_mode = data.get('sync_mode', 'replace')
+    if sync_mode not in ('replace', 'append'):
+        sync_mode = 'replace'
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
 
     # Add activity for sync start
-    add_activity_item("", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
+    add_activity_item("", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
-    logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks")
+    logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks (mode: {sync_mode})")
     logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
     with sync_lock:
@@ -23875,7 +23884,7 @@ def start_playlist_sync():
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url)
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url, sync_mode)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         logger.info(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")

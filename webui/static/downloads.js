@@ -4098,9 +4098,21 @@ async function cancelTrackDownload(playlistId, trackIndex) {
 }
 
 // Find and REPLACE the old startPlaylistSyncFromModal function
-async function startPlaylistSync(playlistId) {
+async function startPlaylistSync(playlistId, syncModeOverride = null) {
     const startTime = Date.now();
-    console.log(`🚀 [${new Date().toTimeString().split(' ')[0]}] Starting sync for playlist: ${playlistId}`);
+    // Sync mode: prefer explicit override (e.g. from automation/discover code paths
+    // that don't render the modal selector), else read the per-playlist <select>
+    // rendered next to the Sync button, else default 'replace' to preserve
+    // historical behavior for any caller that hasn't been updated yet.
+    let syncMode = syncModeOverride;
+    if (!syncMode) {
+        const modeSelect = document.getElementById(`sync-mode-${playlistId}`);
+        syncMode = (modeSelect && modeSelect.value) || 'replace';
+    }
+    if (syncMode !== 'replace' && syncMode !== 'append') {
+        syncMode = 'replace';
+    }
+    console.log(`🚀 [${new Date().toTimeString().split(' ')[0]}] Starting sync for playlist: ${playlistId} (mode: ${syncMode})`);
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
         console.error(`❌ Could not find playlist data for ID: ${playlistId}`);
@@ -4160,7 +4172,8 @@ async function startPlaylistSync(playlistId) {
                 playlist_id: playlist.id,
                 playlist_name: playlist.name,
                 tracks: tracks, // Send the full track list
-                image_url: playlist.image_url || ''
+                image_url: playlist.image_url || '',
+                sync_mode: syncMode
             })
         });
 
