@@ -917,6 +917,35 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 all_artists.append(artist_item)
             else:
                 all_artists.append(str(artist_item))
+
+        # Deezer upgrade path: Deezer's `/search` endpoint only returns
+        # the primary artist for each track. The full contributors
+        # array (feat., remix collaborators, producers credited as
+        # artists) lives on `/track/<id>` and gets parsed by
+        # `_build_enhanced_track`. Without this upgrade Deezer-sourced
+        # tracks never get multi-artist tags even with the right
+        # settings on. One extra API call per Deezer-sourced track,
+        # only when the search response had a single artist (so it's
+        # a no-op when search already returned multiple).
+        if (source == "deezer" and len(all_artists) == 1
+                and source_ids.get("track_id")):
+            try:
+                from core.metadata import get_deezer_client
+                deezer = get_deezer_client()
+                if deezer:
+                    full = deezer.get_track_details(str(source_ids["track_id"]))
+                    if full and isinstance(full.get("artists"), list) and len(full["artists"]) > 1:
+                        upgraded = [a for a in full["artists"] if a]
+                        if upgraded:
+                            logger.info(
+                                "Metadata: Deezer contributors upgrade — search returned "
+                                "%d artist, /track/<id> returned %d (%s)",
+                                len(all_artists), len(upgraded), upgraded,
+                            )
+                            all_artists = upgraded
+            except Exception as e:
+                logger.debug("Deezer contributors upgrade failed: %s", e)
+
         # Store the multi-artist list so the enrichment writer can emit
         # proper multi-value ARTIST tags (TPE1 multi-value for ID3,
         # "artists" key for Vorbis) when `write_multi_artist` is on.
