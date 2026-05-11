@@ -270,7 +270,7 @@ class TidalClient:
             # `prompt=consent` forces Tidal to display the consent
             # screen even when the app is already authorized — without
             # it, re-authenticating with newly-added scopes (e.g.
-            # `collection.read` added in v2.4.3) can silently return a
+            # `collection.read` added in v2.5.0) can silently return a
             # token carrying only the ORIGINAL scope set because Tidal
             # treats the existing authorization as still valid.
             params = {
