@@ -200,42 +200,45 @@ class AudioDBWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
-            # Priority 4: Retry 'not_found' artists after retry_days
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
+            # Priority 4: Retry 'not_found' OR 'error' artists after retry_days.
+            # 'error' status covers transient AudioDB outages (timeouts, 500s)
+            # that the issue-#553 fix marks rather than leaving NULL — without
+            # this retry path those rows would stay errored forever.
+            retry_cutoff = datetime.now() - timedelta(days=self.retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE audiodb_match_status = 'not_found' AND audiodb_last_attempted < ?
+                WHERE audiodb_match_status IN ('not_found', 'error') AND audiodb_last_attempted < ?
                 ORDER BY audiodb_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff,))
+            """, (retry_cutoff,))
             row = cursor.fetchone()
             if row:
                 logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 5: Retry 'not_found' albums
+            # Priority 5: Retry 'not_found' OR 'error' albums
             cursor.execute("""
                 SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.audiodb_match_status = 'not_found' AND a.audiodb_last_attempted < ?
+                WHERE a.audiodb_match_status IN ('not_found', 'error') AND a.audiodb_last_attempted < ?
                 ORDER BY a.audiodb_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff,))
+            """, (retry_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
-            # Priority 6: Retry 'not_found' tracks
+            # Priority 6: Retry 'not_found' OR 'error' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.audiodb_match_status = 'not_found' AND t.audiodb_last_attempted < ?
+                WHERE t.audiodb_match_status IN ('not_found', 'error') AND t.audiodb_last_attempted < ?
                 ORDER BY t.audiodb_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff,))
+            """, (retry_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
@@ -374,8 +377,22 @@ class AudioDBWorker:
                             return
                     except Exception as e:
                         logger.warning(f"Direct lookup failed for existing AudioDB ID {existing_id}: {e}")
-                    # Direct lookup failed — don't overwrite manual match
-                    logger.debug(f"Preserving manual match for {item_type} '{item_name}' (AudioDB ID: {existing_id})")
+                    # Direct lookup returned no metadata (None) or raised — don't
+                    # fall through to the name-search path below, which could
+                    # overwrite a manually-matched audiodb_id with a wrong guess.
+                    # Mark status='error' so the queue's NULL-status filter stops
+                    # re-picking this row on every tick (issue #553: AudioDB
+                    # `track.php` timeouts caused infinite enrichment loops as
+                    # the row was repeatedly picked + re-attempted because it
+                    # never left the NULL state). The error-retry priority block
+                    # in `_get_next_item` re-attempts after `retry_days` so
+                    # transient AudioDB outages still recover automatically.
+                    self._mark_status(item_type, item_id, 'error')
+                    self.stats['errors'] += 1
+                    logger.debug(
+                        f"Preserving manual match for {item_type} '{item_name}' "
+                        f"(AudioDB ID: {existing_id}); marked error pending retry"
+                    )
                     return
 
             if item_type == 'artist':
