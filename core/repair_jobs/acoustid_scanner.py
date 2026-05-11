@@ -199,7 +199,29 @@ class AcoustIDScannerJob(RepairJob):
         norm_aid_artist = _normalize(aid_artist)
 
         title_sim = SequenceMatcher(None, norm_expected_title, norm_aid_title).ratio()
-        artist_sim = SequenceMatcher(None, norm_expected_artist, norm_aid_artist).ratio() if norm_expected_artist else 1.0
+        # Issue (Foxxify Discord report): AcoustID returns the FULL artist
+        # credit (e.g. `Okayracer, aldrch & poptropicaslutz!`) while the
+        # library DB carries only the primary artist (`Okayracer`). Raw
+        # similarity scores ~43% — well below threshold — so multi-artist
+        # tracks get flagged as Wrong Song even though the primary IS in
+        # the credit. Route through the shared `artist_names_match` helper
+        # which splits the credit on common separators (comma, ampersand,
+        # feat./ft./with/vs., etc.) and checks each token. Primary-in-
+        # credit cases now resolve at 100% match instead of 43%.
+        #
+        # Pass RAW artist strings (not pre-normalised) so the splitter
+        # can recognise the separators. The helper applies its own
+        # case + whitespace normalisation internally per token.
+        if norm_expected_artist:
+            from core.matching.artist_aliases import artist_names_match
+
+            _, artist_sim = artist_names_match(
+                expected['artist'],
+                aid_artist,
+                threshold=artist_threshold,
+            )
+        else:
+            artist_sim = 1.0
 
         if title_sim >= title_threshold and artist_sim >= artist_threshold:
             return
@@ -252,8 +274,20 @@ class AcoustIDScannerJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # Discord report (Skowl): compilation albums like "High Tea
+            # Music: Vol 1" have a different artist per track but the
+            # `tracks.artist_id` foreign key points at the ALBUM artist
+            # (curator / label-name applied to every track). AcoustID
+            # returns the actual per-track artist → 12% similarity →
+            # Wrong Song flag. Fix: prefer `tracks.track_artist` (the
+            # per-track artist, populated by every server-scan + auto-
+            # import path when different from album artist) and fall
+            # back to the album artist only when the per-track column
+            # is NULL or empty (legacy rows / single-artist albums).
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path, t.track_number,
+                SELECT t.id, t.title,
+                       COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
+                       t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id

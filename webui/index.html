@@ -273,7 +273,7 @@
 
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v2.4.1</button>
+                <button class="version-button" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
             </div>
 
             <!-- Status Section -->
@@ -2985,17 +2985,6 @@
                         </div>
                     </div>
 
-                    <!-- Recently Added Section -->
-                    <div class="discover-section" style="display: none;">
-                        <div class="discover-section-header">
-                            <h2 class="discover-section-title">🆕 Recently Added</h2>
-                            <p class="discover-section-subtitle">Latest additions to your library</p>
-                        </div>
-                        <div class="discover-playlist-container compact" id="personalized-recently-added">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-
                     <!-- Daily Mixes Section -->
                     <div class="discover-section" style="display: none;">
                         <div class="discover-section-header">
@@ -3188,28 +3177,6 @@
                         </div>
                     </div>
 
-                    <!-- Your Top 50 Section -->
-                    <div class="discover-section" style="display: none;">
-                        <div class="discover-section-header">
-                            <h2 class="discover-section-title">🏆 Your Top 50</h2>
-                            <p class="discover-section-subtitle">All-time favorites from your library</p>
-                        </div>
-                        <div class="discover-playlist-container compact" id="personalized-top-tracks">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-
-                    <!-- Forgotten Favorites Section -->
-                    <div class="discover-section" style="display: none;">
-                        <div class="discover-section-header">
-                            <h2 class="discover-section-title">💎 Forgotten Favorites</h2>
-                            <p class="discover-section-subtitle">Rediscover tracks you used to love</p>
-                        </div>
-                        <div class="discover-playlist-container compact" id="personalized-forgotten-favorites">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-
                     <!-- Discovery Shuffle Section -->
                     <div class="discover-section" style="display: none;">
                         <div class="discover-section-header">
@@ -3251,50 +3218,6 @@
                             </div>
                         </div>
                         <div class="discover-playlist-container compact" id="personalized-discovery-shuffle">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-
-                    <!-- Familiar Favorites Section -->
-                    <div class="discover-section" style="display: none;">
-                        <div class="discover-section-header">
-                            <div>
-                                <h2 class="discover-section-title">❤️ Familiar Favorites</h2>
-                                <p class="discover-section-subtitle">Your reliable go-to tracks</p>
-                            </div>
-                            <div class="discover-section-actions">
-                                <button class="action-button secondary"
-                                    onclick="openDownloadModalForDiscoverPlaylist('familiar_favorites', 'Familiar Favorites')"
-                                    title="Download missing tracks">
-                                    <span class="button-icon">↓</span>
-                                    <span class="button-text">Download</span>
-                                </button>
-                                <button class="action-button primary" id="familiar-favorites-sync-btn"
-                                    onclick="startDiscoverPlaylistSync('familiar_favorites', 'Familiar Favorites')"
-                                    title="Sync to media server">
-                                    <span class="button-icon">⟳</span>
-                                    <span class="button-text">Sync</span>
-                                </button>
-                            </div>
-                        </div>
-                        <!-- Sync Status Display -->
-                        <div class="discover-sync-status" id="familiar-favorites-sync-status" style="display: none;">
-                            <div class="sync-status-content">
-                                <div class="sync-status-label">
-                                    <span class="sync-icon">⟳</span>
-                                    <span>Syncing to media server...</span>
-                                </div>
-                                <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span
-                                            id="familiar-favorites-sync-completed">0</span></span>
-                                    <span class="sync-stat">⏳ <span id="familiar-favorites-sync-pending">0</span></span>
-                                    <span class="sync-stat">✗ <span id="familiar-favorites-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span
-                                            id="familiar-favorites-sync-percentage">0</span>%)</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="discover-playlist-container compact" id="personalized-familiar-favorites">
                             <!-- Content will be populated dynamically -->
                         </div>
                     </div>
@@ -3843,6 +3766,8 @@
                                         <div class="form-actions">
                                             <button class="auth-button" onclick="authenticateTidal()">🔐
                                                 Authenticate</button>
+                                            <button class="auth-button" onclick="disconnectTidal()" style="margin-left: 8px;">
+                                                Disconnect</button>
                                         </div>
                                     </div>
                                 </div>
@@ -7182,7 +7107,7 @@
             <!-- Header -->
             <div class="version-modal-header">
                 <h2 class="version-modal-title">What's New in SoulSync</h2>
-                <div class="version-modal-subtitle">Version 2.4.1 — Latest Changes</div>
+                <div class="version-modal-subtitle">Version {{ soulsync_base_version }} — Latest Changes</div>
             </div>
 
             <!-- Content Area with Scroll -->
@@ -7908,6 +7833,7 @@
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>

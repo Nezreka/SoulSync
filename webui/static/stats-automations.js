@@ -12,6 +12,13 @@ const importPageState = {
     initialized: false,
     activeTab: 'album',
     tapSelectedChip: null,    // for mobile tap-to-assign fallback
+    // Album lookup cache for click handlers. Populated by suggestions /
+    // search renderers; read by importPageSelectAlbum so the match POST
+    // can include `source` + `name` + `artist` (without these, backend
+    // can't look up cross-source IDs and falls back to a broken
+    // "Unknown Artist / album_id as title / 0 tracks" placeholder —
+    // github issue #524).
+    _albumLookup: {},         // { albumId: { id, name, artist, source } }
 };
 
 // ===============================
@@ -752,26 +759,37 @@ async function _autoImportLoadStatus() {
         if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
         if (scanNowBtn) scanNowBtn.style.display = data.running ? '' : 'none';
 
-        // Live scan + per-track processing progress
+        // Live scan + per-track processing progress.
+        // `active_imports` (added when the worker switched to a bounded
+        // executor pool) is the source of truth; multiple albums can be
+        // in flight at once. Render each one on its own line; fall back
+        // to the legacy single-line summary for older backend payloads.
         if (progressEl) {
-            if (data.current_status === 'processing') {
+            const active = Array.isArray(data.active_imports) ? data.active_imports : [];
+            if (active.length > 0) {
                 progressEl.style.display = '';
                 if (progressText) {
-                    const idx = data.current_track_index || 0;
-                    const total = data.current_track_total || 0;
-                    const trackName = data.current_track_name || '';
-                    const folder = data.current_folder || '...';
-                    if (total > 0) {
-                        progressText.textContent = `Processing ${folder} — track ${idx}/${total}: ${trackName}`;
-                    } else {
-                        progressText.textContent = `Processing: ${folder}`;
-                    }
+                    const lines = active.map(a => {
+                        const folder = a.folder_name || '...';
+                        const idx = a.track_index || 0;
+                        const total = a.track_total || 0;
+                        const trackName = a.track_name || '';
+                        if (a.status === 'processing' && total > 0) {
+                            return `${folder} — track ${idx}/${total}: ${trackName}`;
+                        }
+                        if (a.status === 'matching') return `${folder} — matching tracks…`;
+                        if (a.status === 'identifying') return `${folder} — identifying…`;
+                        return `${folder} — queued`;
+                    });
+                    progressText.textContent = lines.length === 1
+                        ? `Processing ${lines[0]}`
+                        : `Processing ${lines.length} imports:\n${lines.join('\n')}`;
                 }
             } else if (data.current_status === 'scanning') {
                 progressEl.style.display = '';
                 if (progressText) {
                     const stats = data.stats || {};
-                    progressText.textContent = `Scanning: ${data.current_folder || '...'} (${stats.scanned || 0} processed)`;
+                    progressText.textContent = `Scanning… (${stats.scanned || 0} processed)`;
                 }
             } else {
                 progressEl.style.display = 'none';
@@ -887,14 +905,19 @@ async function _autoImportLoadResults() {
                 r.status === 'processing' ? 'processing' : 'neutral';
 
             // Live per-track progress for the row currently being processed.
-            // Match by folder_name since the worker only tracks one folder at a time.
+            // Match by folder_hash through the `active_imports` array
+            // — the worker now runs multiple imports in parallel via a
+            // bounded executor pool, so `current_folder` alone can't
+            // identify a row's live state.
             const liveStatus = _autoImportLastStatus;
+            const liveActive = (liveStatus && Array.isArray(liveStatus.active_imports))
+                ? liveStatus.active_imports.find(a => a.folder_hash === r.folder_hash)
+                : null;
             const isLiveProcessing = r.status === 'processing'
-                && liveStatus && liveStatus.current_status === 'processing'
-                && liveStatus.current_folder === r.folder_name;
-            const liveTrackIdx = isLiveProcessing ? (liveStatus.current_track_index || 0) : 0;
-            const liveTrackTotal = isLiveProcessing ? (liveStatus.current_track_total || 0) : 0;
-            const liveTrackName = isLiveProcessing ? (liveStatus.current_track_name || '') : '';
+                && liveActive && liveActive.status === 'processing';
+            const liveTrackIdx = isLiveProcessing ? (liveActive.track_index || 0) : 0;
+            const liveTrackTotal = isLiveProcessing ? (liveActive.track_total || 0) : 0;
+            const liveTrackName = isLiveProcessing ? (liveActive.track_name || '') : '';
 
             // Parse match data for track details
             let matchCount = 0, totalTracks = 0, trackDetails = [];
@@ -1218,7 +1241,13 @@ async function importPageLoadSuggestions() {
 }
 
 function _renderSuggestionCard(a) {
-    return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+    // Cache the album lookup so importPageSelectAlbum can pull source +
+    // name + artist on click (the onclick can only carry the ID string
+    // — see github issue #524 root cause).
+    importPageState._albumLookup[a.id] = {
+        id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
+    };
+    return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
         <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
@@ -1245,14 +1274,20 @@ async function importPageSearchAlbum() {
             grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found</div>';
             return;
         }
-        grid.innerHTML = data.albums.map(a => `
-            <div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+        grid.innerHTML = data.albums.map(a => {
+            // Cache album lookup so the click handler can include source
+            // + name + artist on the match POST (see #524).
+            importPageState._albumLookup[a.id] = {
+                id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
+            };
+            return `
+            <div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
                 <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
                 <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
                 <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
                 <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
         document.getElementById('import-page-album-clear-btn').classList.remove('hidden');
     } catch (err) {
         grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;
@@ -1269,8 +1304,22 @@ async function importPageSelectAlbum(albumId) {
     matchList.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Matching files to tracklist...</div>';
 
     try {
-        // Include file_paths filter if matching from an auto-group
-        const matchBody = { album_id: albumId };
+        // Include file_paths filter if matching from an auto-group.
+        // CRITICAL: include source + album_name + album_artist from the
+        // search/suggestion result. Without `source`, the backend can't
+        // route the lookup to the metadata source the album_id came
+        // from — for example a Deezer album_id needs Deezer's get_album
+        // call. Cross-source lookup fails silently, returns the
+        // failure-fallback dict with album_id-as-name + Unknown Artist
+        // + 0 tracks, then the import flow writes that broken metadata
+        // to the library DB (github issue #524).
+        const cached = importPageState._albumLookup[albumId] || {};
+        const matchBody = {
+            album_id: albumId,
+            source: cached.source || '',
+            album_name: cached.name || '',
+            album_artist: cached.artist || '',
+        };
         if (importPageState._autoGroupFilePaths) {
             matchBody.file_paths = importPageState._autoGroupFilePaths;
             importPageState._autoGroupFilePaths = null; // clear after use

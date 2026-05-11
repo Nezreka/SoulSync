@@ -174,6 +174,45 @@ def authed_sources() -> List[dict]:
     return out
 
 
+_UNKNOWN_ARTIST_NAMES = {'unknown artist', 'unknown', ''}
+
+
+def _is_unknown_artist(artist_name: Optional[str]) -> bool:
+    if not artist_name:
+        return True
+    return str(artist_name).strip().lower() in _UNKNOWN_ARTIST_NAMES
+
+
+def _looks_like_album_id_title(album_title: Optional[str]) -> bool:
+    """Pre-#524 manual-import bug left some albums with a numeric
+    album_id stored as `albums.title`. Detect that shape so reorganize
+    can point the user at Unknown Artist Fixer instead of the generic
+    'run enrichment' hint."""
+    if not album_title:
+        return False
+    stripped = str(album_title).strip()
+    return len(stripped) >= 6 and stripped.isdigit()
+
+
+def _unresolvable_reason(album_data: dict, primary_source: str, strict_source: bool) -> str:
+    """Reason text for albums reorganize can't place. Surfaces the
+    Unknown Artist Fixer hint when the row matches the bad-metadata
+    shape (Unknown Artist OR album-id-as-title) — that fixer reads
+    file tags + re-resolves metadata, which reorganize itself doesn't
+    do."""
+    artist = album_data.get('artist_name')
+    title = album_data.get('title')
+    if _is_unknown_artist(artist) or _looks_like_album_id_title(title):
+        return (
+            "Album has placeholder metadata (Unknown Artist or numeric "
+            "title) — run the 'Fix Unknown Artists' repair job to "
+            "recover real artist/album from file tags before reorganize"
+        )
+    if strict_source:
+        return f"Source '{primary_source}' has no usable tracklist for this album"
+    return "No metadata source ID for this album"
+
+
 def _resolve_source(album_data: dict, primary_source: str, strict_source: bool = False):
     """Walk the configured source priority looking for the first source
     we have an ID for AND that returns a usable tracklist.
@@ -552,11 +591,7 @@ def plan_album_reorganize(
         album_data, primary_source, strict_source=strict_source
     )
     if not source:
-        reason = (
-            f"Source '{primary_source}' has no usable tracklist for this album"
-            if strict_source else
-            "No metadata source ID for this album"
-        )
+        reason = _unresolvable_reason(album_data, primary_source, strict_source)
         return {
             'status': 'no_source_id', 'source': None, 'api_album': None,
             'total_discs': 1,
@@ -1051,6 +1086,23 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
     with ctx.state_lock:
         ctx.src_dirs_touched.add(os.path.dirname(resolved_src))
         ctx.dst_dirs_touched.add(os.path.dirname(new_path))
+
+    # Discord report (Foxxify): users with lossy-copy enabled have
+    # `track.flac` AND `track.opus` side-by-side. The DB tracks ONE
+    # (the lossy copy). Reorganize used to move only the canonical
+    # and leave the orphan behind, blocking empty-folder cleanup.
+    # Move sibling-format audio to the same destination dir BEFORE
+    # removing the canonical source, preserving both formats with
+    # the canonical's renamed stem.
+    siblings = _find_sibling_audio_files(resolved_src)
+    for sibling_src in siblings:
+        moved_to = _move_sibling_to_destination(sibling_src, new_path)
+        if moved_to:
+            logger.debug(
+                "[Reorganize] Moved sibling-format file alongside canonical: %s",
+                moved_to,
+            )
+
     try:
         os.remove(resolved_src)
     except OSError as rm_err:
@@ -1208,13 +1260,19 @@ def reorganize_album(
     )
     if plan['status'] == 'no_source_id':
         summary['status'] = 'no_source_id'
-        summary['errors'].append({
-            'error': (
+        if _is_unknown_artist(album_data.get('artist_name')) or _looks_like_album_id_title(album_data.get('title')):
+            err_text = (
+                f"Album '{album_data.get('title', '?')}' has placeholder metadata "
+                "(Unknown Artist or numeric title) — run the 'Fix Unknown Artists' "
+                "repair job to recover real artist/album from file tags first."
+            )
+        else:
+            err_text = (
                 f"No reachable metadata source ID for '{album_data.get('title', '?')}' — "
                 "run enrichment first to populate at least one of "
                 "spotify_album_id / itunes_album_id / deezer_id / discogs_id / soul_id."
-            ),
-        })
+            )
+        summary['errors'].append({'error': err_text})
         return summary
 
     source = plan['source']
@@ -1448,6 +1506,80 @@ _ALBUM_SIDECARS = (
 _AUDIO_EXTS = frozenset(
     {'.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma', '.mp4'}
 )
+
+
+def _find_sibling_audio_files(audio_path: str) -> list:
+    """Find OTHER audio files at the same source directory that share
+    the canonical file's stem.
+
+    Discord report (Foxxify): users with the lossy-copy feature
+    enabled end up with `track.flac` AND `track.opus` side-by-side.
+    Reorganize is DB-driven and only knows about ONE file per track
+    (the lossy copy in library), so the other format gets left behind
+    in the old location while the canonical moves to the new
+    destination. Cleanup never fires because the source dir still has
+    audio.
+
+    This helper returns the orphan-format paths so the caller can
+    move them alongside the canonical to the new destination dir.
+    Same stem + audio extension + NOT the canonical itself.
+
+    Returns empty list when source dir doesn't exist or read fails
+    (defensive — never raises).
+    """
+    src_dir = os.path.dirname(audio_path)
+    if not os.path.isdir(src_dir):
+        return []
+    stem = os.path.splitext(os.path.basename(audio_path))[0]
+    canonical_basename = os.path.basename(audio_path)
+    siblings = []
+    try:
+        entries = os.listdir(src_dir)
+    except OSError:
+        return []
+    for name in entries:
+        if name == canonical_basename:
+            continue
+        sibling_stem, ext = os.path.splitext(name)
+        if sibling_stem != stem:
+            continue
+        if ext.lower() not in _AUDIO_EXTS:
+            continue
+        full = os.path.join(src_dir, name)
+        if os.path.isfile(full):
+            siblings.append(full)
+    return siblings
+
+
+def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Optional[str]:
+    """Move a sibling-format audio file to the same destination
+    directory as the canonical, preserving its extension.
+
+    Example: canonical at ``/library/Artist/Album/01 Track.opus`` +
+    sibling source ``/old/01 Track.flac`` → destination ``/library/
+    Artist/Album/01 Track.flac``. The destination filename uses the
+    canonical's stem (post-template-rename) + the sibling's original
+    extension — so a renamed canonical gets matching siblings.
+
+    Returns the destination path on success, None on failure (logged
+    at warning, doesn't raise — sibling moves are best-effort).
+    """
+    dst_dir = os.path.dirname(canonical_dst)
+    canonical_stem = os.path.splitext(os.path.basename(canonical_dst))[0]
+    _, sibling_ext = os.path.splitext(sibling_src)
+    sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
+    if os.path.normpath(sibling_src) == os.path.normpath(sibling_dst):
+        return sibling_dst  # already at the right place
+    try:
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.move(sibling_src, sibling_dst)
+        return sibling_dst
+    except OSError as e:
+        logger.warning(
+            "[Reorganize] Couldn't move sibling-format file %s → %s: %s",
+            sibling_src, sibling_dst, e,
+        )
+        return None
 
 
 def _delete_track_sidecars(audio_path: str) -> None:

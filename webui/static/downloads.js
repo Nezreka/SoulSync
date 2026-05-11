@@ -2903,6 +2903,45 @@ async function showCandidatesModal(taskId) {
     }
 }
 
+// Format helpers used by both auto-candidates and manual-search rendering.
+function _candidatesFmtSize(bytes) {
+    if (!bytes) return '-';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let s = bytes, u = 0;
+    while (s >= 1024 && u < units.length - 1) { s /= 1024; u++; }
+    return `${s.toFixed(1)} ${units[u]}`;
+}
+
+function _candidatesFmtDur(ms) {
+    if (!ms) return '-';
+    const sec = Math.floor(ms / 1000);
+    return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
+}
+
+// Build a single <tr> for the candidates table. ``rowClass`` lets the
+// manual-search renderer distinguish its rows from the auto-candidates
+// rows (different click binding scope). ``showSourceBadge`` adds a small
+// per-row source pill — used in hybrid "All sources" mode where the user
+// otherwise can't tell which source a row came from.
+function _renderCandidateRow(c, index, rowClass, showSourceBadge) {
+    const shortFile = c.filename ? c.filename.split(/[/\\]/).pop() : '-';
+    const qBadge = c.quality
+        ? `<span class="candidates-quality-badge candidates-quality-${c.quality.toLowerCase()}">${c.quality.toUpperCase()}</span>`
+        : '';
+    const sourceBadge = (showSourceBadge && c.source)
+        ? `<span class="candidates-source-badge" title="Source">${escapeHtml(c.source)}</span> `
+        : '';
+    return `<tr class="${rowClass}">
+        <td class="candidates-col-index">${index + 1}</td>
+        <td class="candidates-col-file" title="${escapeHtml(c.filename || '')}">${sourceBadge}${escapeHtml(shortFile)}</td>
+        <td class="candidates-col-quality">${qBadge}${c.bitrate ? ` ${c.bitrate}kbps` : ''}</td>
+        <td class="candidates-col-size">${_candidatesFmtSize(c.size)}</td>
+        <td class="candidates-col-duration">${_candidatesFmtDur(c.duration)}</td>
+        <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
+        <td class="candidates-col-action"><button class="candidates-download-btn" data-index="${index}" title="Download this file">⬇</button></td>
+    </tr>`;
+}
+
 function _renderCandidatesModal(data) {
     let overlay = document.getElementById('candidates-modal-overlay');
     if (overlay) overlay.remove();
@@ -2911,41 +2950,56 @@ function _renderCandidatesModal(data) {
     const trackArtist = data.track_info?.artist || 'Unknown Artist';
     const candidates = data.candidates || [];
     const errorMsg = data.error_message || '';
-
-    const fmtSize = (bytes) => {
-        if (!bytes) return '-';
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let s = bytes, u = 0;
-        while (s >= 1024 && u < units.length - 1) { s /= 1024; u++; }
-        return `${s.toFixed(1)} ${units[u]}`;
-    };
-    const fmtDur = (ms) => {
-        if (!ms) return '-';
-        const sec = Math.floor(ms / 1000);
-        return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
-    };
+    const downloadMode = data.download_mode || 'soulseek';
+    const availableSources = Array.isArray(data.available_sources) ? data.available_sources : [];
+    // Hybrid mode shows the dropdown; everything else implies a single source.
+    const isHybrid = downloadMode === 'hybrid';
 
     let tableRows = '';
     if (candidates.length === 0) {
         tableRows = `<tr><td colspan="7" style="text-align:center; color: rgba(255,255,255,0.5); padding: 30px;">
             No candidates were found during search.</td></tr>`;
     } else {
+        // Auto-candidates only show source badges in hybrid mode (where the
+        // user can't infer source from the dropdown).
         candidates.forEach((c, i) => {
-            const shortFile = c.filename ? c.filename.split(/[/\\]/).pop() : '-';
-            const qBadge = c.quality
-                ? `<span class="candidates-quality-badge candidates-quality-${c.quality.toLowerCase()}">${c.quality.toUpperCase()}</span>`
-                : '';
-            tableRows += `<tr>
-                <td class="candidates-col-index">${i + 1}</td>
-                <td class="candidates-col-file" title="${escapeHtml(c.filename || '')}">${escapeHtml(shortFile)}</td>
-                <td class="candidates-col-quality">${qBadge}${c.bitrate ? ` ${c.bitrate}kbps` : ''}</td>
-                <td class="candidates-col-size">${fmtSize(c.size)}</td>
-                <td class="candidates-col-duration">${fmtDur(c.duration)}</td>
-                <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
-                <td class="candidates-col-action"><button class="candidates-download-btn" data-index="${i}" title="Download this file">⬇</button></td>
-            </tr>`;
+            tableRows += _renderCandidateRow(c, i, 'candidates-row-auto', isHybrid);
         });
     }
+
+    // ----- Manual search bar -----
+    let sourceControl;
+    if (isHybrid && availableSources.length > 0) {
+        const optionsHtml = ['<option value="all">All sources</option>']
+            .concat(availableSources.map(s =>
+                `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)}</option>`
+            ))
+            .join('');
+        sourceControl = `<select class="candidates-manual-source" id="candidates-manual-source">${optionsHtml}</select>`;
+    } else {
+        // Single-source mode — render a small static label, not a dropdown.
+        const onlySrc = availableSources[0];
+        const label = onlySrc ? onlySrc.label : (downloadMode || 'configured source');
+        sourceControl = `<span class="candidates-manual-source-label">Searching ${escapeHtml(label)}</span>`;
+    }
+
+    const manualSearchHtml = `
+        <div class="candidates-manual-search">
+            <div class="candidates-manual-search-header">Manual search</div>
+            <div class="candidates-manual-search-controls">
+                <input type="text"
+                       class="candidates-manual-search-input"
+                       id="candidates-manual-search-input"
+                       placeholder="Search for a different track..."
+                       maxlength="200" />
+                ${sourceControl}
+                <button class="candidates-manual-search-btn"
+                        id="candidates-manual-search-btn"
+                        disabled>Search</button>
+            </div>
+            <div class="candidates-manual-search-hint" id="candidates-manual-search-hint">Type at least 2 characters</div>
+            <div class="candidates-manual-search-results" id="candidates-manual-search-results"></div>
+        </div>`;
 
     overlay = document.createElement('div');
     overlay.id = 'candidates-modal-overlay';
@@ -2962,14 +3016,17 @@ function _renderCandidatesModal(data) {
             </div>
             <div class="candidates-modal-body">
                 ${errorMsg ? `<div class="candidates-error-summary">${escapeHtml(errorMsg)}</div>` : ''}
-                <div class="candidates-count">${candidates.length} candidate${candidates.length !== 1 ? 's' : ''} found${candidates.length > 0 ? ' but none passed filters' : ''}</div>
-                <div class="candidates-table-wrapper">
-                    <table class="candidates-table">
-                        <thead><tr>
-                            <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
-                        </tr></thead>
-                        <tbody>${tableRows}</tbody>
-                    </table>
+                ${manualSearchHtml}
+                <div class="candidates-auto-section">
+                    <div class="candidates-count">${candidates.length} candidate${candidates.length !== 1 ? 's' : ''} found${candidates.length > 0 ? ' but none passed filters' : ''}</div>
+                    <div class="candidates-table-wrapper">
+                        <table class="candidates-table">
+                            <thead><tr>
+                                <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
+                            </tr></thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -2977,14 +3034,196 @@ function _renderCandidatesModal(data) {
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('visible'));
 
-    // Bind download buttons
-    overlay.querySelectorAll('.candidates-download-btn').forEach(btn => {
+    // Bind auto-candidate download buttons (existing behavior, scoped to
+    // .candidates-row-auto so manual-search rows don't double-trigger).
+    overlay.querySelectorAll('.candidates-row-auto .candidates-download-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const idx = parseInt(btn.dataset.index);
             const c = candidates[idx];
             if (c) downloadCandidate(data.task_id, c, trackName);
         });
     });
+
+    // Wire manual search controls.
+    _wireManualSearch(overlay, data.task_id, trackName, isHybrid);
+}
+
+// Manual-search wiring — input/button/dropdown. Kept separate from
+// _renderCandidatesModal so the existing render path stays readable and
+// any future refactor can lift this into its own module.
+function _wireManualSearch(overlay, taskId, trackName, isHybrid) {
+    const input = overlay.querySelector('#candidates-manual-search-input');
+    const button = overlay.querySelector('#candidates-manual-search-btn');
+    const hint = overlay.querySelector('#candidates-manual-search-hint');
+    const resultsContainer = overlay.querySelector('#candidates-manual-search-results');
+    const sourceSelect = overlay.querySelector('#candidates-manual-source');
+    if (!input || !button || !resultsContainer) return;
+
+    // Aggregated results across all source streams for the current query.
+    // Cleared at the start of each new search.
+    let currentResults = [];
+    let inFlight = false;
+    let abortController = null;
+
+    const updateButtonState = () => {
+        const q = (input.value || '').trim();
+        const tooShort = q.length < 2;
+        button.disabled = tooShort || inFlight;
+        if (hint) {
+            if (tooShort) {
+                hint.textContent = 'Type at least 2 characters';
+                hint.style.display = '';
+            } else {
+                hint.style.display = 'none';
+            }
+        }
+    };
+
+    const _renderTableShell = (query) => {
+        resultsContainer.innerHTML = `
+            <div class="candidates-manual-search-status" id="candidates-manual-search-status">Searching...</div>
+            <div class="candidates-table-wrapper" style="display: none;" id="candidates-manual-table-wrapper">
+                <table class="candidates-table">
+                    <thead><tr>
+                        <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
+                    </tr></thead>
+                    <tbody id="candidates-manual-tbody"></tbody>
+                </table>
+            </div>`;
+    };
+
+    const _appendRows = (newCandidates, query) => {
+        if (!newCandidates || newCandidates.length === 0) return;
+        const startIdx = currentResults.length;
+        currentResults = currentResults.concat(newCandidates);
+
+        const wrapper = resultsContainer.querySelector('#candidates-manual-table-wrapper');
+        const tbody = resultsContainer.querySelector('#candidates-manual-tbody');
+        const statusEl = resultsContainer.querySelector('#candidates-manual-search-status');
+        if (!tbody || !wrapper) return;
+
+        let rowsHtml = '';
+        newCandidates.forEach((c, i) => {
+            rowsHtml += _renderCandidateRow(c, startIdx + i, 'candidates-row-manual', isHybrid);
+        });
+        tbody.insertAdjacentHTML('beforeend', rowsHtml);
+        wrapper.style.display = '';
+        if (statusEl) {
+            statusEl.textContent = `${currentResults.length} result${currentResults.length !== 1 ? 's' : ''} so far...`;
+        }
+
+        // Wire newly-appended buttons
+        tbody.querySelectorAll('.candidates-download-btn').forEach(btn => {
+            if (btn._candidatesWired) return;
+            btn._candidatesWired = true;
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index);
+                const c = currentResults[idx];
+                if (c) downloadCandidate(taskId, c, trackName);
+            });
+        });
+    };
+
+    const _setStatus = (text) => {
+        const statusEl = resultsContainer.querySelector('#candidates-manual-search-status');
+        if (statusEl) statusEl.textContent = text;
+    };
+
+    const _setError = (msg) => {
+        resultsContainer.innerHTML = `<div class="candidates-manual-search-error">${escapeHtml(msg)}</div>`;
+    };
+
+    const runSearch = async () => {
+        const q = (input.value || '').trim();
+        if (q.length < 2 || inFlight) return;
+
+        if (abortController) {
+            try { abortController.abort(); } catch (_) { }
+        }
+        abortController = new AbortController();
+
+        const source = sourceSelect ? sourceSelect.value : 'all';
+        inFlight = true;
+        button.disabled = true;
+        const originalLabel = button.textContent;
+        button.textContent = 'Searching...';
+        currentResults = [];
+        _renderTableShell(q);
+
+        try {
+            const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/manual-search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: q, source: source }),
+                signal: abortController.signal,
+            });
+            if (!resp.ok) {
+                let errMsg = 'Search failed';
+                try {
+                    const payload = await resp.json();
+                    if (payload && payload.error) errMsg = payload.error;
+                } catch (_) { }
+                _setError(errMsg);
+                return;
+            }
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const errors = [];
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                let lineEnd;
+                while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                    const line = buffer.slice(0, lineEnd).trim();
+                    buffer = buffer.slice(lineEnd + 1);
+                    if (!line) continue;
+                    let msg;
+                    try { msg = JSON.parse(line); } catch (_) { continue; }
+
+                    if (msg.type === 'source_results') {
+                        _appendRows(msg.candidates || [], q);
+                    } else if (msg.type === 'source_error') {
+                        errors.push(`${msg.source}: ${msg.error}`);
+                    } else if (msg.type === 'done') {
+                        if (currentResults.length === 0) {
+                            const errorNote = errors.length
+                                ? `<div class="candidates-manual-search-empty-note">${errors.length} source${errors.length !== 1 ? 's' : ''} failed</div>`
+                                : '';
+                            resultsContainer.innerHTML = `
+                                <div class="candidates-manual-search-empty">No manual search results for "${escapeHtml(q)}"</div>
+                                ${errorNote}`;
+                        } else {
+                            _setStatus(`${currentResults.length} result${currentResults.length !== 1 ? 's' : ''}`);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.error('Manual search failed:', err);
+            _setError('Search request failed');
+        } finally {
+            inFlight = false;
+            button.textContent = originalLabel;
+            updateButtonState();
+        }
+    };
+
+    input.addEventListener('input', updateButtonState);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !button.disabled) {
+            e.preventDefault();
+            runSearch();
+        }
+    });
+    button.addEventListener('click', runSearch);
+
+    updateButtonState();
 }
 
 async function downloadCandidate(taskId, candidate, trackName) {
@@ -3160,8 +3399,11 @@ function processModalStatusUpdate(playlistId, data) {
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
                 }
-                // Make not_found and failed cells clickable to review search candidates
-                if ((task.status === 'not_found' || task.status === 'failed') && task.has_candidates) {
+                // Make not_found / failed / cancelled cells clickable to open
+                // the candidates modal. Always bind — even when no auto-search
+                // candidates were cached — because the modal carries the manual
+                // search bar, which is the user's recourse for empty results.
+                if (task.status === 'not_found' || task.status === 'failed' || task.status === 'cancelled') {
                     statusEl.classList.add('has-candidates');
                     statusEl.dataset.taskId = task.task_id;
                     _ensureCandidatesClickListener(statusEl);

@@ -293,8 +293,6 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
             apiEndpoint = '/api/discover/hidden-gems';
         } else if (virtualPlaylistId === 'discover_discovery_shuffle') {
             apiEndpoint = '/api/discover/discovery-shuffle';
-        } else if (virtualPlaylistId === 'discover_familiar_favorites') {
-            apiEndpoint = '/api/discover/familiar-favorites';
         } else if (virtualPlaylistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (virtualPlaylistId.startsWith('discover_lb_')) {

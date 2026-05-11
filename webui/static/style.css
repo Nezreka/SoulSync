@@ -40845,6 +40845,140 @@ div.artist-hero-badge {
     border-color: rgb(var(--accent-rgb));
 }
 
+/* Manual search section inside the candidates modal — sits above the
+   auto-candidates table; visually separated by a subtle border + spacing. */
+.candidates-manual-search {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+}
+.candidates-manual-search-header {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+}
+.candidates-manual-search-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.candidates-manual-search-input {
+    flex: 1;
+    min-width: 200px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+.candidates-manual-search-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+.candidates-manual-source {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+}
+.candidates-manual-source:focus {
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+.candidates-manual-source-label {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    padding: 0 8px;
+    white-space: nowrap;
+}
+.candidates-manual-search-btn {
+    background: rgba(var(--accent-rgb), 0.2);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-rgb));
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.candidates-manual-search-btn:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.35);
+    border-color: rgb(var(--accent-rgb));
+}
+.candidates-manual-search-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.candidates-manual-search-hint {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    margin-top: 6px;
+    font-style: italic;
+}
+.candidates-manual-search-results {
+    margin-top: 12px;
+}
+.candidates-manual-search-results:empty {
+    display: none;
+}
+.candidates-manual-search-loading,
+.candidates-manual-search-empty,
+.candidates-manual-search-error {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    padding: 14px;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+}
+.candidates-manual-search-error {
+    color: rgba(255, 100, 100, 0.85);
+}
+.candidates-manual-search-count {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+.candidates-manual-search-status {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    margin-bottom: 8px;
+    font-style: italic;
+}
+.candidates-manual-search-empty-note {
+    color: rgba(255, 180, 100, 0.7);
+    font-size: 11px;
+    margin-top: 6px;
+    text-align: center;
+    font-style: italic;
+}
+.candidates-source-badge {
+    display: inline-block;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.7);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
 /* =====================================
    HYDRABASE PAGE
    ===================================== */

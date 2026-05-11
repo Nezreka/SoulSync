@@ -87,13 +87,104 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, na, nb).ratio()
 
 
+def _alias_aware_artist_sim(
+    expected_artist: str,
+    actual_artist: str,
+    aliases: Optional[Any] = None,
+) -> float:
+    """Best artist-similarity across (expected, *aliases) vs actual.
+
+    Issue #442 — when expected and actual are in different scripts
+    (e.g. `Hiroyuki Sawano` vs `澤野弘之`), raw `_similarity` scores
+    near 0% even though MusicBrainz aliases bridge them. Routes
+    through the pure helper so the verifier inherits one shared
+    contract.
+
+    Returns the highest score across all candidates so existing
+    threshold checks (>= ARTIST_MATCH_THRESHOLD) keep their
+    semantics. When `aliases` is None or empty, behaves identically
+    to the prior raw `_similarity(expected, actual)` call.
+
+    `aliases` accepts two shapes:
+
+    - **Iterable** (list/tuple/set of strings): used directly. Used
+      by tests that already know the aliases.
+    - **Callable**: invoked LAZILY only when direct similarity
+      falls below the threshold. Lets the verifier pass a memoizing
+      thunk that resolves aliases (DB / cache / live MB) only when
+      needed. Verifications where the direct match already passes
+      never trigger the lookup chain — no wasted DB query for the
+      happy path.
+
+    Diagnostic logging: emits an INFO line whenever an alias rescues
+    a comparison that direct similarity would have failed. Lets
+    future bug reports trace which alias triggered which PASS
+    decision (e.g. "this file passed because alias `澤野弘之` matched
+    the file's artist tag").
+    """
+    from core.matching.artist_aliases import artist_names_match
+
+    direct = _similarity(expected_artist, actual_artist)
+    # Fast path — direct match already passes the threshold OR caller
+    # supplied no aliases handle. Avoids any lookup work.
+    if aliases is None:
+        return direct
+    if direct >= ARTIST_MATCH_THRESHOLD:
+        return direct
+
+    # Resolve the iterable. Callable provider invoked NOW (lazily —
+    # the caller can memoize the result across multiple invocations
+    # within one verify_audio_file call).
+    resolved = aliases() if callable(aliases) else aliases
+    if not resolved:
+        return direct
+
+    _matched, score = artist_names_match(
+        expected_artist,
+        actual_artist,
+        aliases=resolved,
+        threshold=ARTIST_MATCH_THRESHOLD,
+        similarity=_similarity,
+    )
+
+    # Diagnostic — alias rescued a comparison that direct would
+    # have failed. Worth logging at INFO since it's a user-visible
+    # decision (file PASS instead of FAIL). One line per rescue
+    # within a single verify call.
+    if score >= ARTIST_MATCH_THRESHOLD and direct < ARTIST_MATCH_THRESHOLD:
+        from core.matching.artist_aliases import best_alias_match
+        winner, _ = best_alias_match(
+            expected_artist, actual_artist, resolved, similarity=_similarity,
+        )
+        logger.info(
+            "Artist alias rescued comparison: expected=%r vs actual=%r "
+            "(direct sim=%.2f, alias %r → score=%.2f)",
+            expected_artist, actual_artist, direct, winner, score,
+        )
+
+    return score
+
+
 def _find_best_title_artist_match(
     recordings: List[Dict[str, Any]],
     expected_title: str,
     expected_artist: str,
+    expected_artist_aliases: Optional[Any] = None,
 ) -> Tuple[Optional[Dict], float, float]:
     """
     Find the AcoustID recording that best matches expected title/artist.
+
+    Issue #442 — `expected_artist_aliases` (when supplied) is the
+    list of alternate spellings for `expected_artist` (Japanese
+    kanji, Cyrillic, etc.). Accepts either:
+
+    - An iterable of alias strings (used eagerly), or
+    - A callable returning the list (resolved lazily — only fires
+      when at least one recording fails direct artist similarity).
+
+    Each recording's artist is scored against (expected, *aliases)
+    and the best score wins. When the list is empty/omitted/None,
+    behavior is identical to the prior raw similarity comparison.
 
     Returns:
         (best_recording, title_similarity, artist_similarity)
@@ -108,7 +199,9 @@ def _find_best_title_artist_match(
         artist = rec.get('artist') or ''
 
         title_sim = _similarity(expected_title, title)
-        artist_sim = _similarity(expected_artist, artist)
+        artist_sim = _alias_aware_artist_sim(
+            expected_artist, artist, expected_artist_aliases,
+        )
         # Weight title higher since that's the primary identifier
         combined = (title_sim * 0.6) + (artist_sim * 0.4)
 
@@ -125,6 +218,12 @@ def _find_best_title_artist_match(
 _mb_client = None
 _mb_client_lock = threading.Lock()
 
+# Shared MusicBrainzService for alias lookups (issue #442). Service
+# layer wraps the raw client + adds caching + DB access — all of which
+# the alias resolution chain (library DB → cache → live MB) needs.
+_mb_service = None
+_mb_service_lock = threading.Lock()
+
 MAX_MB_ENRICHMENT_LOOKUPS = 3
 
 
@@ -136,6 +235,42 @@ def _get_mb_client() -> MusicBrainzClient:
             if _mb_client is None:
                 _mb_client = MusicBrainzClient()
     return _mb_client
+
+
+def _get_mb_service():
+    """Get or create a shared MusicBrainzService instance.
+
+    Used by the alias-resolution chain in `verify_audio_file`. Lazy
+    init so importing this module doesn't trigger a DB connection on
+    paths that never run AcoustID verification (test runs, dry runs).
+    """
+    global _mb_service
+    if _mb_service is None:
+        with _mb_service_lock:
+            if _mb_service is None:
+                from core.musicbrainz_service import MusicBrainzService
+                from database.music_database import get_database
+                _mb_service = MusicBrainzService(get_database())
+    return _mb_service
+
+
+def _resolve_expected_artist_aliases(expected_artist_name: str) -> List[str]:
+    """Look up alternate-spelling aliases for the expected artist.
+
+    Issue #442 — bridges cross-script artist comparisons (Japanese
+    kanji ↔ romanized, Cyrillic ↔ Latin, etc.) without forcing the
+    verifier to know about the resolution chain. Best-effort: any
+    failure (no MB service, network down, no library DB) returns
+    empty list so verification falls back to the prior direct
+    similarity check.
+    """
+    if not expected_artist_name:
+        return []
+    try:
+        return _get_mb_service().lookup_artist_aliases(expected_artist_name)
+    except Exception as e:
+        logger.debug("alias lookup failed for %r: %s", expected_artist_name, e)
+        return []
 
 
 def _enrich_recordings_from_musicbrainz(
@@ -290,9 +425,33 @@ class AcoustIDVerification:
             # Enrich recordings that are missing title/artist via MusicBrainz lookup
             recordings = _enrich_recordings_from_musicbrainz(recordings)
 
+            # Issue #442 — alias resolution is LAZY. We pass a memoising
+            # thunk to the artist-comparison sites; it only fires the
+            # multi-tier lookup (library DB → cache → live MB) when
+            # direct artist similarity falls below threshold. Verifications
+            # where the direct match already passes (the common case for
+            # same-script artist names) never trigger any lookup work,
+            # so the fix doesn't add a per-verification DB query for the
+            # happy path. When the thunk DOES fire, the result is cached
+            # in the closure so the 3 comparison sites within one
+            # verification share a single resolution pass.
+            _alias_cache: Dict[str, Any] = {}
+
+            def _aliases_provider() -> List[str]:
+                if 'value' not in _alias_cache:
+                    resolved = _resolve_expected_artist_aliases(expected_artist_name)
+                    _alias_cache['value'] = resolved
+                    if resolved:
+                        logger.debug(
+                            "Resolved %d aliases for expected artist '%s'",
+                            len(resolved), expected_artist_name,
+                        )
+                return _alias_cache['value']
+
             # Step 4: Find best title/artist match among AcoustID results
             best_rec, title_sim, artist_sim = _find_best_title_artist_match(
-                recordings, expected_track_name, expected_artist_name
+                recordings, expected_track_name, expected_artist_name,
+                expected_artist_aliases=_aliases_provider,
             )
 
             if not best_rec:
@@ -352,7 +511,10 @@ class AcoustIDVerification:
                 # metadata for this fingerprint, it's likely the right track
                 # (AcoustID's "best" match just picked the wrong variant).
                 for rec in recordings:
-                    if _similarity(expected_artist_name, rec.get('artist', '')) >= ARTIST_MATCH_THRESHOLD:
+                    rec_artist = rec.get('artist', '')
+                    if _alias_aware_artist_sim(
+                        expected_artist_name, rec_artist, _aliases_provider,
+                    ) >= ARTIST_MATCH_THRESHOLD:
                         msg = (
                             f"Audio verified: found '{expected_track_name}' by '{expected_artist_name}' "
                             f"in AcoustID results"
@@ -400,7 +562,9 @@ class AcoustIDVerification:
                 if _detect_title_version(t) != expected_version:
                     continue
                 if (_similarity(expected_track_name, t) >= TITLE_MATCH_THRESHOLD and
-                        _similarity(expected_artist_name, a) >= ARTIST_MATCH_THRESHOLD):
+                        _alias_aware_artist_sim(
+                            expected_artist_name, a, _aliases_provider,
+                        ) >= ARTIST_MATCH_THRESHOLD):
                     msg = (
                         f"Audio verified: found '{t}' by '{a}' in AcoustID results "
                         f"matching expected '{expected_track_name}' by '{expected_artist_name}'"
