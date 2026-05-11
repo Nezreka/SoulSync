@@ -20130,6 +20130,81 @@ def get_discover_album(source, album_id):
                 'source': fallback_source,
             })
 
+        elif source == 'tidal':
+            # Tidal albums from Your Albums (sourced via the V2 user-
+            # collection endpoint). Two-call resolution: get_album for
+            # metadata, get_album_tracks for the cursor-paginated
+            # tracklist. `get_album_tracks` returns `Track` objects
+            # with `track_number` / `disc_number` annotated so the
+            # download modal renders in album order across multi-disc
+            # releases. Serialise to the same shape Spotify/Deezer
+            # return so the frontend track-mapping stays uniform.
+            if not tidal_client or not tidal_client.is_authenticated():
+                return jsonify({"error": "Tidal not authenticated"}), 401
+
+            album_meta = tidal_client.get_album(album_id)
+            tidal_tracks = tidal_client.get_album_tracks(album_id)
+
+            if not album_meta and not tidal_tracks:
+                return jsonify({"error": "Tidal album not found"}), 404
+
+            album_name = (album_meta or {}).get('title') or request.args.get('name', '')
+            release_date = (album_meta or {}).get('releaseDate', '')
+            total_tracks = (album_meta or {}).get('numberOfItems') or len(tidal_tracks)
+            album_artist_name = request.args.get('artist', '')
+
+            # Build cover image URL from the album metadata. Tidal
+            # exposes cover art via the `coverArt` relationship which
+            # `get_album` doesn't fetch (it's a one-shot attributes
+            # call). Best-effort: request it inline.
+            cover_url = ''
+            try:
+                cover_resp = tidal_client.session.get(
+                    f"{tidal_client.base_url}/albums/{album_id}",
+                    params={'countryCode': 'US', 'include': 'coverArt'},
+                    headers={'accept': 'application/vnd.api+json'},
+                    timeout=10,
+                )
+                if cover_resp.status_code == 200:
+                    payload = cover_resp.json()
+                    _, artworks = tidal_client._build_included_maps(payload.get('included', []))
+                    cover_rel = (payload.get('data') or {}).get('relationships', {}).get('coverArt', {})
+                    cover_url = tidal_client._first_artwork_url(cover_rel, artworks) or ''
+            except Exception as e:
+                logger.debug(f"Tidal cover-art resolve failed for album {album_id}: {e}")
+
+            tracks_out = []
+            for t in tidal_tracks:
+                tracks_out.append({
+                    'id': t.id,
+                    'name': t.name,
+                    'artists': [{'name': a} for a in (t.artists or [])],
+                    'duration_ms': t.duration_ms,
+                    'track_number': getattr(t, 'track_number', 0),
+                    'disc_number': getattr(t, 'disc_number', 1),
+                })
+
+            # Album-level artist name preference: explicit ?artist=
+            # query (passed by frontend with the saved-album row) wins
+            # over guessing from the first track. The saved-album row
+            # already resolved the canonical artist via the V2
+            # collection endpoint.
+            if not album_artist_name and tidal_tracks:
+                first_artists = tidal_tracks[0].artists or []
+                album_artist_name = first_artists[0] if first_artists else ''
+
+            return jsonify({
+                'id': album_id,
+                'name': album_name or 'Unknown Album',
+                'artists': [{'name': album_artist_name}] if album_artist_name else [],
+                'release_date': release_date,
+                'total_tracks': total_tracks,
+                'album_type': 'album',
+                'images': [{'url': cover_url}] if cover_url else [],
+                'tracks': tracks_out,
+                'source': 'tidal',
+            })
+
         elif source == 'discogs':
             # Discogs release detail. release_id comes from the Your
             # Albums Discogs source. Tracklist needs normalizing —
