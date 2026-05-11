@@ -290,3 +290,181 @@ class TestSettingsCombination:
         assert meta["artist"] == "A, B"
         assert meta["title"] == "Sample Track"
         assert meta["_artists_list"] == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Deezer-specific: upgrade single-artist search results via /track/<id>
+# ---------------------------------------------------------------------------
+#
+# Deezer's `/search` endpoint only returns the primary artist for each
+# track. The full contributors array (feat., remix collaborators,
+# producers credited as artists) lives on `/track/<id>`. Reporter said
+# their Retag flow worked because it called the per-track endpoint, but
+# the initial enrichment used search-result data and missed the
+# contributors. The fix: when source==deezer AND search returned only
+# one artist AND a track_id is available, fetch the full track details
+# and upgrade the artists list.
+
+
+class TestDeezerContributorsUpgrade:
+    def test_upgrades_when_deezer_search_returns_single_artist(self):
+        """Reporter's exact case: Deezer track with multiple
+        contributors, search returns just the primary, /track/<id>
+        returns all 3. Upgrade path fetches the full set."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "Collab Track",
+                "artists": [{"name": "Primary"}],  # Only one — search-response shape
+            },
+            "source": "deezer",
+        }
+        # track_id resolved via original_search_result.id by get_import_source_ids
+        context["original_search_result"]["id"] = "12345"
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock(return_value={
+            "id": "12345",
+            "name": "Collab Track",
+            "artists": ["Primary", "Featured1", "Featured2"],  # Full contributors
+        }))
+
+        cfg_overrides = {"metadata_enhancement.tags.artist_separator": "; "}
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg(cfg_overrides)), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "Primary"}, {})
+
+        # Upgraded list reaches the multi-value tag
+        assert meta["_artists_list"] == ["Primary", "Featured1", "Featured2"]
+        # And the joined ARTIST string respects the separator
+        assert meta["artist"] == "Primary; Featured1; Featured2"
+        fake_deezer.get_track_details.assert_called_once_with("12345")
+
+    def test_no_upgrade_when_search_already_returned_multiple(self):
+        """When search already has multiple artists, skip the upgrade —
+        no extra API call needed."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "T",
+                "artists": [{"name": "A"}, {"name": "B"}],  # Already multi
+            },
+            "source": "deezer",
+        }
+        # track_id resolved via original_search_result.id by get_import_source_ids
+        context["original_search_result"]["id"] = "12345"
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock())
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "A"}, {})
+
+        assert meta["_artists_list"] == ["A", "B"]
+        # No upgrade call — search already had what we needed
+        fake_deezer.get_track_details.assert_not_called()
+
+    def test_no_upgrade_for_non_deezer_sources(self):
+        """Spotify/iTunes/Tidal already return multi-artist in search,
+        so the Deezer-specific upgrade path must NOT fire for them.
+        Otherwise we'd be making redundant API calls."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "T",
+                "artists": [{"name": "A"}],
+            },
+            "source": "spotify",
+            "source_track_id": "12345",
+        }
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock())
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "A"}, {})
+
+        # Single artist preserved, no Deezer upgrade attempted
+        assert meta["_artists_list"] == ["A"]
+        fake_deezer.get_track_details.assert_not_called()
+
+    def test_upgrade_failure_falls_through_to_search_result(self):
+        """Defensive: if /track/<id> fails (network error, deezer
+        client unavailable), fall through to the search-result list.
+        Don't lose the single-artist data we already had."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "T",
+                "artists": [{"name": "Primary"}],
+            },
+            "source": "deezer",
+        }
+        # track_id resolved via original_search_result.id by get_import_source_ids
+        context["original_search_result"]["id"] = "12345"
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock(
+            side_effect=RuntimeError("network down"),
+        ))
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "Primary"}, {})
+
+        # Search-result list preserved
+        assert meta["_artists_list"] == ["Primary"]
+        assert meta["artist"] == "Primary"
+
+    def test_upgrade_returns_same_count_no_change(self):
+        """Edge: /track/<id> returns the same single artist (track
+        genuinely has one artist on Deezer too). Should preserve the
+        list without false-positive upgrade."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "T",
+                "artists": [{"name": "Solo"}],
+            },
+            "source": "deezer",
+        }
+        # track_id resolved via original_search_result.id by get_import_source_ids
+        context["original_search_result"]["id"] = "12345"
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock(return_value={
+            "id": "12345",
+            "artists": ["Solo"],  # Same single artist confirmed
+        }))
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "Solo"}, {})
+
+        assert meta["_artists_list"] == ["Solo"]
+
+    def test_no_upgrade_when_no_track_id(self):
+        """Edge: source==deezer but no track_id. Can't call
+        /track/<id> without an id. Don't attempt the upgrade."""
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "T",
+                "artists": [{"name": "Primary"}],
+            },
+            "source": "deezer",
+            "source_track_id": "",  # Missing
+        }
+
+        fake_deezer = SimpleNamespace(get_track_details=MagicMock())
+
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(context, {"name": "Primary"}, {})
+
+        assert meta["_artists_list"] == ["Primary"]
+        fake_deezer.get_track_details.assert_not_called()
