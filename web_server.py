@@ -9270,14 +9270,26 @@ def download_discography(artist_id):
 
         from database.music_database import MusicDatabase
         from core.metadata.album_tracks import get_artist_album_tracks
+        from core.metadata.discography_filters import (
+            content_type_skip_reason,
+            load_global_content_filter_settings,
+            track_artist_matches,
+        )
         db = MusicDatabase()
         profile_id = get_current_profile_id()
+        # Honor the same content-type filters the watchlist scanner uses
+        # (issue #559). One read at the top — settings don't change
+        # mid-stream and the four bool reads aren't worth re-running per
+        # track.
+        content_settings = load_global_content_filter_settings(config_manager)
 
         total_added = 0
         total_skipped = 0
+        total_skipped_artist = 0
+        total_skipped_filter = 0
 
         def generate_ndjson():
-            nonlocal total_added, total_skipped
+            nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter
 
             for entry in album_entries:
                 album_id = entry['id']
@@ -9325,6 +9337,8 @@ def download_discography(artist_id):
 
                     added = 0
                     skipped = 0
+                    skipped_artist = 0
+                    skipped_filter = 0
 
                     for track in tracks:
                         track_name = track.get('name', '')
@@ -9332,6 +9346,23 @@ def download_discography(artist_id):
                             continue
                         track_artists = track.get('artists', []) or album_artists
                         track_id = track.get('id', '')
+
+                        # Issue #559: drop tracks where the requested
+                        # artist isn't in the track's artists list
+                        # (cross-artist compilation / appears_on
+                        # contamination). Keeps features.
+                        if not track_artist_matches(track_artists, hint_artist):
+                            skipped_artist += 1
+                            continue
+
+                        # Issue #559: honor watchlist global content-type
+                        # filters (live / remix / acoustic / instrumental)
+                        # for one-off discography downloads too — same
+                        # contract as the discography backfill repair job.
+                        skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
+                        if skip_reason:
+                            skipped_filter += 1
+                            continue
 
                         spotify_track_data = {
                             'id': track_id,
@@ -9379,8 +9410,12 @@ def download_discography(artist_id):
 
                     total_added += added
                     total_skipped += skipped
+                    total_skipped_artist += skipped_artist
+                    total_skipped_filter += skipped_filter
                     logger.warning(
-                        f"[Discography] {album_name} ({resolved_source}): {added} added, {skipped} skipped"
+                        f"[Discography] {album_name} ({resolved_source}): {added} added, "
+                        f"{skipped} skipped (wishlist), {skipped_artist} skipped (artist mismatch), "
+                        f"{skipped_filter} skipped (content filter)"
                     )
                     yield json.dumps({
                         "album_id": album_id,
@@ -9388,6 +9423,8 @@ def download_discography(artist_id):
                         "status": "done",
                         "tracks_added": added,
                         "tracks_skipped": skipped,
+                        "tracks_skipped_artist": skipped_artist,
+                        "tracks_skipped_filter": skipped_filter,
                         "tracks_total": len(tracks),
                         "source": resolved_source,
                     }) + '\n'
@@ -9402,12 +9439,15 @@ def download_discography(artist_id):
 
             logger.warning(
                 f"[Discography] Complete for {artist_name}: {total_added} tracks added, "
-                f"{total_skipped} skipped across {len(album_entries)} albums"
+                f"{total_skipped} skipped (wishlist), {total_skipped_artist} skipped (artist mismatch), "
+                f"{total_skipped_filter} skipped (content filter) across {len(album_entries)} albums"
             )
             yield json.dumps({
                 "status": "complete",
                 "total_added": total_added,
                 "total_skipped": total_skipped,
+                "total_skipped_artist": total_skipped_artist,
+                "total_skipped_filter": total_skipped_filter,
                 "total_albums": len(album_entries),
             }) + '\n'
 
