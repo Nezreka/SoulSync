@@ -199,6 +199,53 @@ def _quality_rank(ext: str) -> int:
     return ranks.get(ext.lower(), 1)
 
 
+# Weight constants for `_score_album_search_result` — exposed at module
+# level so they're greppable + bumpable in one place. Pre-fix these were
+# magic numbers inline.
+_ALBUM_NAME_WEIGHT = 0.5    # title fuzzy similarity
+_ARTIST_NAME_WEIGHT = 0.2   # primary artist fuzzy similarity (skipped when target is empty)
+_TRACK_COUNT_WEIGHT = 0.3   # how close the source's track count is to the file count
+
+
+def _score_album_search_result(album_result, target_album: str,
+                               target_artist: Optional[str],
+                               file_count: int) -> float:
+    """Pure scoring helper for `_search_metadata_source`.
+
+    Weights how well an `album_result` from a metadata source's
+    `search_albums` matches the search inputs. Returns float in [0.0, 1.0].
+    Pre-extraction this lived inline in the loop body; lifting it out
+    lets the weight math be pinned independently of the orchestrator
+    (per-source iteration, exception containment, threshold check).
+
+    `album_result` is expected to expose:
+      - `.name` (str)
+      - `.artists` (list of dict-like with 'name', optional 'id') or list[str]
+      - `.total_tracks` (int, optional)
+    """
+    score = 0.0
+
+    # Album name similarity (default 50%)
+    name = getattr(album_result, 'name', '') or ''
+    score += _similarity(target_album, name) * _ALBUM_NAME_WEIGHT
+
+    # Artist similarity (default 20%) — only when target_artist provided
+    if target_artist:
+        artists = getattr(album_result, 'artists', None) or []
+        r_artist = artists[0] if artists else ''
+        if isinstance(r_artist, dict):
+            r_artist = r_artist.get('name', '')
+        score += _similarity(target_artist, str(r_artist)) * _ARTIST_NAME_WEIGHT
+
+    # Track count match (default 30%) — only when both sides have a count
+    r_tracks = getattr(album_result, 'total_tracks', 0) or 0
+    if r_tracks > 0 and file_count > 0:
+        count_ratio = 1.0 - abs(r_tracks - file_count) / max(r_tracks, file_count)
+        score += max(0.0, count_ratio) * _TRACK_COUNT_WEIGHT
+
+    return score
+
+
 class AutoImportWorker:
     """Background worker that watches the staging folder and auto-imports music.
 
@@ -1260,87 +1307,120 @@ class AutoImportWorker:
     def _search_metadata_source(self, artist: Optional[str], album: str,
                                  method: str, candidate: FolderCandidate,
                                  query: str = None) -> Optional[Dict]:
-        """Search the active metadata source for an album match."""
+        """Search configured metadata sources for an album match.
+
+        Iterates `get_source_priority(get_primary_source())` so primary
+        is tried first and the rest are tried as fallback. Returns the
+        FIRST source whose best result clears the 0.4 score threshold.
+
+        Pre-fix this only queried the primary, which meant indie/niche
+        albums missing from the user's primary (e.g. Bandcamp releases
+        not on Spotify) failed auto-import even when manual search
+        could find them on Tidal/Deezer. The manual search bar at the
+        bottom of the Import tab already iterates the full source
+        chain via `search_import_albums` — this aligns auto-import
+        with that behavior.
+        """
         try:
-            from core.metadata_service import get_primary_source, get_client_for_source
+            from core.metadata_service import (
+                get_primary_source,
+                get_source_priority,
+                get_client_for_source,
+            )
 
-            source = get_primary_source()
-            client = get_client_for_source(source)
-            if not client or not hasattr(client, 'search_albums'):
-                return None
-
+            primary_source = get_primary_source()
+            source_chain = get_source_priority(primary_source)
             search_query = query or (f"{artist} {album}" if artist else album)
-            results = client.search_albums(search_query, limit=5)
-            if not results:
-                return None
 
-            # Score each result
-            best_result = None
-            best_score = 0
+            for source in source_chain:
+                client = get_client_for_source(source)
+                if not client or not hasattr(client, 'search_albums'):
+                    continue
 
-            for r in results:
-                score = 0
-                # Album name similarity (50%)
-                score += _similarity(album, r.name) * 0.5
-                # Artist similarity (20%)
-                if artist:
-                    r_artist = r.artists[0] if hasattr(r, 'artists') and r.artists else ''
-                    if isinstance(r_artist, dict):
-                        r_artist = r_artist.get('name', '')
-                    score += _similarity(artist, str(r_artist)) * 0.2
-                # Track count match (30%)
-                r_tracks = getattr(r, 'total_tracks', 0) or 0
+                try:
+                    results = client.search_albums(search_query, limit=5)
+                except Exception as e:
+                    # Per-source failures (rate limit, auth, transient HTTP)
+                    # shouldn't abort the fallback chain. Log + continue.
+                    logger.debug(
+                        f"Auto-import: search_albums failed on {source}: {e}"
+                    )
+                    continue
+
+                if not results:
+                    continue
+
+                # Score each result via the pure helper. Helper is
+                # tested independently in
+                # `tests/imports/test_album_search_scoring.py` so the
+                # weight math is pinned at the function boundary, not
+                # through the orchestrator path.
                 file_count = len(candidate.audio_files)
-                if r_tracks > 0 and file_count > 0:
-                    count_ratio = 1.0 - abs(r_tracks - file_count) / max(r_tracks, file_count)
-                    score += max(0, count_ratio) * 0.3
+                best_result = None
+                best_score = 0.0
+                for r in results:
+                    score = _score_album_search_result(r, album, artist, file_count)
+                    if score > best_score:
+                        best_score = score
+                        best_result = r
 
-                if score > best_score:
-                    best_score = score
-                    best_result = r
+                if not best_result or best_score < 0.4:
+                    # Primary returned weak/no match — fall through to next source
+                    if source != primary_source:
+                        logger.debug(
+                            f"Auto-import: {source} best score {best_score:.2f} "
+                            f"below threshold for '{album}', trying next source"
+                        )
+                    continue
 
-            if not best_result or best_score < 0.4:
-                return None
+                # Get image
+                image_url = ''
+                if hasattr(best_result, 'image_url'):
+                    image_url = best_result.image_url or ''
+                elif hasattr(best_result, 'images') and best_result.images:
+                    img = best_result.images[0]
+                    image_url = img.get('url', '') if isinstance(img, dict) else str(img)
 
-            # Get image
-            image_url = ''
-            if hasattr(best_result, 'image_url'):
-                image_url = best_result.image_url or ''
-            elif hasattr(best_result, 'images') and best_result.images:
-                img = best_result.images[0]
-                image_url = img.get('url', '') if isinstance(img, dict) else str(img)
+                r_artist = ''
+                r_artist_id = ''
+                if hasattr(best_result, 'artists') and best_result.artists:
+                    a = best_result.artists[0]
+                    if isinstance(a, dict):
+                        r_artist = a.get('name', str(a))
+                        # Surface the metadata-source artist ID so the
+                        # standalone-library write can land it on the right
+                        # `<source>_artist_id` column. Without this the
+                        # artists row gets created but with NULL on the
+                        # source-id, and watchlist scans can't recognise
+                        # the artist as already in library by stable ID.
+                        r_artist_id = str(a.get('id', '') or '')
+                    else:
+                        r_artist = str(a)
 
-            r_artist = ''
-            r_artist_id = ''
-            if hasattr(best_result, 'artists') and best_result.artists:
-                a = best_result.artists[0]
-                if isinstance(a, dict):
-                    r_artist = a.get('name', str(a))
-                    # Surface the metadata-source artist ID so the
-                    # standalone-library write can land it on the right
-                    # `<source>_artist_id` column. Without this the
-                    # artists row gets created but with NULL on the
-                    # source-id, and watchlist scans can't recognise
-                    # the artist as already in library by stable ID.
-                    r_artist_id = str(a.get('id', '') or '')
-                else:
-                    r_artist = str(a)
+                # Get release date
+                release_date = getattr(best_result, 'release_date', '') or ''
 
-            # Get release date
-            release_date = getattr(best_result, 'release_date', '') or ''
+                if source != primary_source:
+                    logger.info(
+                        f"Auto-import: identified '{album}' via fallback "
+                        f"source {source!r} (score {best_score:.2f}, primary "
+                        f"{primary_source!r} returned nothing usable)"
+                    )
 
-            return {
-                'album_id': best_result.id,
-                'album_name': best_result.name,
-                'artist_name': r_artist or artist or '',
-                'artist_id': r_artist_id,
-                'image_url': image_url,
-                'release_date': release_date,
-                'total_tracks': getattr(best_result, 'total_tracks', 0),
-                'source': source,
-                'method': method,
-                'identification_confidence': best_score,
-            }
+                return {
+                    'album_id': best_result.id,
+                    'album_name': best_result.name,
+                    'artist_name': r_artist or artist or '',
+                    'artist_id': r_artist_id,
+                    'image_url': image_url,
+                    'release_date': release_date,
+                    'total_tracks': getattr(best_result, 'total_tracks', 0),
+                    'source': source,
+                    'method': method,
+                    'identification_confidence': best_score,
+                }
+
+            return None
 
         except Exception as e:
             logger.debug(f"Metadata search failed for '{album}': {e}")
