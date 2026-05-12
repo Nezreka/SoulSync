@@ -1922,6 +1922,54 @@ class RepairWorker:
         # Default
         return '{num:02d} - {title}'
 
+    def _build_unresolvable_album_folder_error(self, attempt, sample_db_path):
+        """Render a diagnostic error string for the Album Completeness
+        "couldn't find existing track on disk" failure mode.
+
+        Pre-fix this returned a flat
+            "Could not determine album folder from existing tracks"
+        which left users (especially Navidrome / Jellyfin Docker setups
+        where the resolver can't auto-discover library mounts) with no
+        way to know what to fix. The new message names the active media
+        server, shows one sample DB-recorded path, and lists the base
+        directories the resolver actually probed.
+
+        Args:
+            attempt: ``ResolveAttempt`` from the last resolver call.
+                May be ``None`` if no attempt was recorded (defensive).
+            sample_db_path: One example ``tracks.file_path`` value from
+                the album. Helps the user see what their media server is
+                reporting so they know what to mount / configure.
+        """
+        active_server = 'unknown'
+        if self._config_manager is not None:
+            try:
+                getter = getattr(self._config_manager, 'get_active_media_server', None)
+                if callable(getter):
+                    active_server = getter() or 'unknown'
+                else:
+                    active_server = self._config_manager.get('active_media_server', 'unknown') or 'unknown'
+            except Exception:
+                pass
+
+        lines = [
+            "Could not find any existing track from this album on disk.",
+            f"Active media server: {active_server}.",
+        ]
+        if sample_db_path:
+            lines.append(f"Example DB-recorded path: {sample_db_path}")
+        if attempt is not None:
+            if attempt.base_dirs_tried:
+                joined = ', '.join(attempt.base_dirs_tried)
+                lines.append(f"Probed base directories: {joined}")
+            else:
+                lines.append("No base directories were available to probe.")
+        lines.append(
+            "Fix: Settings → Library → Music Paths → add the path where "
+            "this container can read your library files."
+        )
+        return ' '.join(lines)
+
     def _fix_incomplete_album(self, entity_type, entity_id, file_path, details):
         """Auto-fill an incomplete album by finding missing tracks in the library.
 
@@ -1964,14 +2012,24 @@ class RepairWorker:
             download_folder = self._config_manager.get('soulseek.download_path', '')
 
         album_folder = None
+        last_attempt = None
+        sample_db_path = None
         for t in existing_tracks:
-            resolved = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
+            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+            resolved, attempt = resolve_library_file_path_with_diagnostic(
+                t.file_path, transfer_folder=self.transfer_folder,
+                download_folder=download_folder, config_manager=self._config_manager,
+            )
+            last_attempt = attempt
+            if sample_db_path is None and isinstance(t.file_path, str) and t.file_path:
+                sample_db_path = t.file_path
             if resolved and os.path.exists(resolved):
                 album_folder = os.path.dirname(resolved)
                 break
 
         if not album_folder:
-            return {'success': False, 'error': 'Could not determine album folder from existing tracks'}
+            return {'success': False,
+                    'error': self._build_unresolvable_album_folder_error(last_attempt, sample_db_path)}
 
         # Detect filename pattern
         resolved_paths = []
