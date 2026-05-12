@@ -34625,14 +34625,35 @@ def auto_import_approve_all():
 
 @app.route('/api/auto-import/clear-completed', methods=['POST'])
 def auto_import_clear_completed():
-    """Remove completed/imported items from history."""
+    """Remove completed/imported items from history.
+
+    `processing` rows are included so zombie entries (server restarted
+    mid-import → `_record_in_progress` row never got finalized) get
+    swept. Live in-flight imports are protected by intersecting against
+    `_snapshot_active()` — anything currently registered in the worker's
+    `_active_imports` map keeps its row. `pending_review` is left out so
+    user still has to approve/reject those explicitly.
+    """
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
     try:
+        active_hashes = {e['folder_hash'] for e in auto_import_worker._snapshot_active()}
         db = get_database()
         with db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM auto_import_history WHERE status IN ('completed', 'approved', 'failed', 'needs_identification', 'rejected')")
+            base_sql = (
+                "DELETE FROM auto_import_history "
+                "WHERE status IN ('completed', 'approved', 'failed', "
+                "'needs_identification', 'rejected', 'processing')"
+            )
+            if active_hashes:
+                placeholders = ','.join('?' * len(active_hashes))
+                cursor.execute(
+                    f"{base_sql} AND folder_hash NOT IN ({placeholders})",
+                    tuple(active_hashes),
+                )
+            else:
+                cursor.execute(base_sql)
             count = cursor.rowcount
             conn.commit()
         return jsonify({"success": True, "count": count})
