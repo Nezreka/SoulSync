@@ -1949,8 +1949,8 @@ class RepairWorker:
                     active_server = getter() or 'unknown'
                 else:
                     active_server = self._config_manager.get('active_media_server', 'unknown') or 'unknown'
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("active media server lookup failed: %s", e)
 
         lines = [
             "Could not find any existing track from this album on disk.",
