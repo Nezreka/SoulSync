@@ -403,3 +403,139 @@ def test_docker_resolve_path_pass_through_outside_docker(monkeypatch) -> None:
     monkeypatch.setattr(os.path, "exists",
                         lambda p: False if p == "/.dockerenv" else real_exists(p))
     assert path_resolver._docker_resolve_path("H:\\Music\\track.flac") == "H:\\Music\\track.flac"
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic helper — issue #558 (gabistek, Navidrome on Docker)
+# ---------------------------------------------------------------------------
+#
+# `resolve_library_file_path_with_diagnostic` returns
+# `(resolved, ResolveAttempt)` so callers can render a useful error
+# instead of a silent None. Pre-fix the Album Completeness "Auto-Fill"
+# button surfaced "Could not determine album folder from existing
+# tracks" with no diagnostic, leaving Navidrome users (whose Subsonic
+# API doesn't expose library paths the way Plex's does) with no signal
+# about what to configure.
+
+
+from core.library.path_resolver import (  # noqa: E402
+    ResolveAttempt,
+    resolve_library_file_path_with_diagnostic,
+)
+
+
+class TestResolveAttemptShape:
+    def test_returns_tuple_of_path_and_attempt(self, tmp_path: Path) -> None:
+        real = tmp_path / "track.flac"
+        real.write_bytes(b"a")
+        result = resolve_library_file_path_with_diagnostic(str(real))
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        path, attempt = result
+        assert path == str(real)
+        assert isinstance(attempt, ResolveAttempt)
+
+    def test_raw_path_existed_true_when_short_circuit(self, tmp_path: Path) -> None:
+        """Happy path → resolver short-circuits at the first
+        `os.path.exists` check; `base_dirs_tried` stays empty."""
+        real = tmp_path / "track.flac"
+        real.write_bytes(b"a")
+        _, attempt = resolve_library_file_path_with_diagnostic(str(real))
+        assert attempt.raw_path_existed is True
+        assert attempt.base_dirs_tried == []
+
+    def test_raw_path_existed_false_when_walking(self, tmp_path: Path) -> None:
+        """When the raw path doesn't exist but the suffix-walk finds it,
+        the attempt should report `raw_path_existed=False` and list the
+        base dir that succeeded among `base_dirs_tried`."""
+        # Create the file under a real base dir at a different parent
+        base = tmp_path / "library"
+        target = base / "Artist" / "Album" / "track.flac"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"a")
+
+        # DB stores it as if scanned at /music/Artist/Album/track.flac
+        db_path = "/music/Artist/Album/track.flac"
+        path, attempt = resolve_library_file_path_with_diagnostic(
+            db_path, transfer_folder=str(base),
+        )
+        assert path == str(target), f"suffix-walk should have found the file under {base}"
+        assert attempt.raw_path_existed is False
+        assert str(base) in attempt.base_dirs_tried
+
+
+class TestDiagnosticForFailedResolves:
+    def test_no_base_dirs_returns_none_with_empty_attempt(self) -> None:
+        """No transfer/download/config/plex → resolver can't probe.
+        Diagnostic must report empty `base_dirs_tried` so the caller can
+        render a "no probe sources configured" hint."""
+        path, attempt = resolve_library_file_path_with_diagnostic(
+            "/music/Artist/Album/track.flac",
+        )
+        assert path is None
+        assert attempt.raw_path_existed is False
+        assert attempt.base_dirs_tried == []
+        assert attempt.had_config_manager is False
+        assert attempt.had_plex_client is False
+
+    def test_base_dirs_listed_even_when_walk_fails(self, tmp_path: Path) -> None:
+        """When base dirs exist but the suffix-walk doesn't find the
+        file, `base_dirs_tried` must still report what was probed.
+        Lets the caller surface "we tried X, Y, Z" in the error."""
+        base = tmp_path / "transfer"
+        base.mkdir()
+        # Don't create the target file — the walk will fail
+        path, attempt = resolve_library_file_path_with_diagnostic(
+            "/music/Artist/Album/missing.flac",
+            transfer_folder=str(base),
+        )
+        assert path is None
+        assert str(base) in attempt.base_dirs_tried
+
+    def test_had_flags_track_caller_inputs(self, tmp_path: Path) -> None:
+        """`had_config_manager` / `had_plex_client` reflect what the
+        caller passed in — useful for distinguishing 'caller didn't
+        wire up the optional input' from 'optional input was wired up
+        but produced no usable base dirs'."""
+        config = MagicMock()
+        config.get.return_value = ""  # no config-driven paths
+        plex = SimpleNamespace(server=None, music_library=None)
+
+        path, attempt = resolve_library_file_path_with_diagnostic(
+            "/music/Artist/track.flac",
+            config_manager=config,
+            plex_client=plex,
+        )
+        assert path is None
+        assert attempt.had_config_manager is True
+        assert attempt.had_plex_client is True
+
+
+class TestBackwardsCompat:
+    def test_existing_resolve_function_delegates_to_diagnostic(self, tmp_path: Path) -> None:
+        """The non-diagnostic `resolve_library_file_path` is now a thin
+        wrapper that drops the attempt. Pin that the legacy signature
+        still returns the same path values across all the cases the
+        old function covered, so existing callers don't see drift."""
+        real = tmp_path / "track.flac"
+        real.write_bytes(b"a")
+
+        # Happy path
+        assert resolve_library_file_path(str(real)) == str(real)
+
+        # Suffix-walk path
+        base = tmp_path / "lib"
+        target = base / "Artist" / "Album" / "track.flac"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"a")
+        result = resolve_library_file_path(
+            "/music/Artist/Album/track.flac",
+            transfer_folder=str(base),
+        )
+        assert result == str(target)
+
+        # Failure path
+        assert resolve_library_file_path(
+            "/music/Artist/missing.flac",
+            transfer_folder=str(base),
+        ) is None
