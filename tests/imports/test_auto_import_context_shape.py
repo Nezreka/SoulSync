@@ -480,6 +480,7 @@ def test_search_metadata_source_extracts_artist_id_from_dict_artist():
 
     worker = AutoImportWorker(database=MagicMock(), process_callback=lambda *a, **k: None)
     with patch("core.metadata_service.get_primary_source", return_value="spotify"), \
+         patch("core.metadata_service.get_source_priority", return_value=["spotify"]), \
          patch("core.metadata_service.get_client_for_source", return_value=fake_client):
         result = worker._search_metadata_source(
             "Test Artist", "Test Album", "tags", candidate,
