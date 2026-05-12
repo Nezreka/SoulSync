@@ -130,8 +130,53 @@ def load_global_content_filter_settings(config_manager: Any) -> Dict[str, Any]:
         }
 
 
+def track_already_owned(
+    db: Any,
+    track_name: str,
+    requested_artist: str,
+    album_name: str,
+    server_source: Optional[str],
+    confidence_threshold: float = 0.7,
+) -> bool:
+    """Return True if the track is already in the user's library.
+
+    Discord report (Skowl): clicking "Download Discography" twice on
+    the same artist re-queued every track instead of skipping the
+    half already on disk. Trace: the endpoint added each track to the
+    wishlist via ``db.add_to_wishlist``, which only dedups against the
+    wishlist itself — once a wishlist track downloads it leaves the
+    wishlist, so the second discography click re-inserted everything.
+
+    The discography backfill repair job already runs the same check
+    via ``db.check_track_exists`` — this helper centralises the
+    contract so the user-facing endpoint matches that behavior.
+
+    `check_track_exists` is name+artist+album based, format-agnostic.
+    Skowl's "Blasphemy mode" library (FLAC converted to MP3 then
+    original deleted) matches just fine — track_name + artist + album
+    don't change with format.
+
+    Returns False on any exception so a transient DB hiccup doesn't
+    silently nuke a discography fetch — a redundant wishlist add is
+    much cheaper to recover from than a missed track.
+    """
+    if not requested_artist or not track_name:
+        return False
+    try:
+        match, confidence = db.check_track_exists(
+            track_name, requested_artist,
+            confidence_threshold=confidence_threshold,
+            server_source=server_source,
+            album=album_name or None,
+        )
+    except Exception:
+        return False
+    return bool(match) and confidence >= confidence_threshold
+
+
 __all__ = [
     'track_artist_matches',
     'content_type_skip_reason',
     'load_global_content_filter_settings',
+    'track_already_owned',
 ]

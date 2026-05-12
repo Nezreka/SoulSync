@@ -25,6 +25,7 @@ import pytest
 from core.metadata.discography_filters import (
     content_type_skip_reason,
     load_global_content_filter_settings,
+    track_already_owned,
     track_artist_matches,
 )
 
@@ -215,3 +216,107 @@ class TestLoadGlobalSettings:
         assert result['include_remixes'] is False
         assert result['include_acoustic'] is True
         assert result['include_instrumentals'] is False
+
+
+# ---------------------------------------------------------------------------
+# track_already_owned
+# ---------------------------------------------------------------------------
+
+
+class _FakeDB:
+    """Minimal stub for the parts of MusicDatabase the helper touches."""
+
+    def __init__(self, response):
+        self._response = response
+        self.calls = []
+
+    def check_track_exists(self, title, artist, **kwargs):
+        self.calls.append({'title': title, 'artist': artist, **kwargs})
+        if isinstance(self._response, Exception):
+            raise self._response
+        return self._response
+
+
+class TestTrackAlreadyOwned:
+    def test_returns_true_when_match_clears_threshold(self):
+        """Skowl's case: the second discography click finds the track
+        already in library at confidence ≥ 0.7 → skip."""
+        db = _FakeDB((object(), 0.85))
+        assert track_already_owned(
+            db, 'Hotline Bling', 'Drake', 'Views', 'plex',
+        ) is True
+
+    def test_returns_false_when_no_match(self):
+        """Library doesn't have it → return False so the caller queues
+        the track. (None track returned with confidence 0.0.)"""
+        db = _FakeDB((None, 0.0))
+        assert track_already_owned(
+            db, 'New Song', 'Drake', 'New Album', 'plex',
+        ) is False
+
+    def test_returns_false_when_match_below_threshold(self):
+        """A weak fuzzy match shouldn't count — better to over-queue
+        than to silently drop a real missing track. Mirrors the
+        backfill repair job's `if db_track and confidence >= 0.7` guard."""
+        db = _FakeDB((object(), 0.5))  # below default 0.7
+        assert track_already_owned(
+            db, 'Sort Of Like Hotline Bling', 'Drake', 'Views', 'plex',
+        ) is False
+
+    def test_passes_album_to_check(self):
+        """Album param is what enables album-aware matching for
+        multi-artist albums in `check_track_exists`. Pin it gets through."""
+        db = _FakeDB((object(), 0.9))
+        track_already_owned(db, 'Track', 'Artist', 'Album X', 'plex')
+        assert db.calls[0]['album'] == 'Album X'
+
+    def test_passes_server_source_to_check(self):
+        """Active media server scopes the lookup so the skip check
+        only fires on tracks the user can actually see in their
+        library through their currently-active server."""
+        db = _FakeDB((object(), 0.9))
+        track_already_owned(db, 'Track', 'Artist', 'Album', 'navidrome')
+        assert db.calls[0]['server_source'] == 'navidrome'
+
+    def test_empty_album_passed_as_none(self):
+        """Empty-string album becomes None so check_track_exists's
+        album-aware fallback doesn't try to match against ''."""
+        db = _FakeDB((None, 0.0))
+        track_already_owned(db, 'Track', 'Artist', '', 'plex')
+        assert db.calls[0]['album'] is None
+
+    def test_missing_track_or_artist_returns_false_without_calling_db(self):
+        """Don't fire a DB call when we have nothing to match against —
+        defensive AND avoids polluting query logs with empty lookups."""
+        db = _FakeDB((object(), 0.9))
+        assert track_already_owned(db, '', 'Artist', 'Album', 'plex') is False
+        assert track_already_owned(db, 'Track', '', 'Album', 'plex') is False
+        assert track_already_owned(db, '', '', 'Album', 'plex') is False
+        assert db.calls == [], "DB must not be called when track or artist is empty"
+
+    def test_db_exception_returns_false(self):
+        """If the DB call raises (lock contention, schema mismatch,
+        whatever), treat as 'not owned' and let the caller queue.
+        A redundant wishlist add is much cheaper to recover from
+        than a missed track."""
+        db = _FakeDB(RuntimeError('db locked'))
+        assert track_already_owned(db, 'Track', 'Artist', 'Album', 'plex') is False
+
+    def test_custom_confidence_threshold_honored(self):
+        """Caller can tighten or loosen the threshold. 0.95 means only
+        very-high-confidence matches count as owned."""
+        db = _FakeDB((object(), 0.8))
+        # Default threshold (0.7): match counts
+        assert track_already_owned(db, 'Track', 'Artist', 'Album', 'plex') is True
+        # Tighter threshold (0.95): same match doesn't count
+        assert track_already_owned(
+            db, 'Track', 'Artist', 'Album', 'plex',
+            confidence_threshold=0.95,
+        ) is False
+
+    def test_none_server_source_passes_through(self):
+        """When the caller can't determine the active server, pass
+        None — `check_track_exists` falls back to a cross-server search."""
+        db = _FakeDB((None, 0.0))
+        track_already_owned(db, 'Track', 'Artist', 'Album', None)
+        assert db.calls[0]['server_source'] is None

@@ -9273,6 +9273,7 @@ def download_discography(artist_id):
         from core.metadata.discography_filters import (
             content_type_skip_reason,
             load_global_content_filter_settings,
+            track_already_owned,
             track_artist_matches,
         )
         db = MusicDatabase()
@@ -9282,14 +9283,24 @@ def download_discography(artist_id):
         # mid-stream and the four bool reads aren't worth re-running per
         # track.
         content_settings = load_global_content_filter_settings(config_manager)
+        # Library-ownership check uses the active media server so the
+        # match is scoped to the same source whose tracks the user can
+        # actually see in their library. None falls through to a
+        # cross-server search inside check_track_exists.
+        active_server = None
+        try:
+            active_server = config_manager.get_active_media_server()
+        except Exception as e:
+            logger.debug("active media server lookup failed: %s", e)
 
         total_added = 0
         total_skipped = 0
         total_skipped_artist = 0
         total_skipped_filter = 0
+        total_skipped_owned = 0
 
         def generate_ndjson():
-            nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter
+            nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
 
             for entry in album_entries:
                 album_id = entry['id']
@@ -9339,6 +9350,7 @@ def download_discography(artist_id):
                     skipped = 0
                     skipped_artist = 0
                     skipped_filter = 0
+                    skipped_owned = 0
 
                     for track in tracks:
                         track_name = track.get('name', '')
@@ -9362,6 +9374,16 @@ def download_discography(artist_id):
                         skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
                         if skip_reason:
                             skipped_filter += 1
+                            continue
+
+                        # Skowl (Discord): clicking Download Discography
+                        # twice re-queued every track because add_to_wishlist
+                        # only dedups against the wishlist, not the library.
+                        # Same library-ownership check the discography
+                        # backfill repair job uses. Format-agnostic so
+                        # Blasphemy mode (FLAC→MP3) doesn't false-miss.
+                        if track_already_owned(db, track_name, hint_artist, album_name, active_server):
+                            skipped_owned += 1
                             continue
 
                         spotify_track_data = {
@@ -9412,10 +9434,12 @@ def download_discography(artist_id):
                     total_skipped += skipped
                     total_skipped_artist += skipped_artist
                     total_skipped_filter += skipped_filter
+                    total_skipped_owned += skipped_owned
                     logger.warning(
                         f"[Discography] {album_name} ({resolved_source}): {added} added, "
                         f"{skipped} skipped (wishlist), {skipped_artist} skipped (artist mismatch), "
-                        f"{skipped_filter} skipped (content filter)"
+                        f"{skipped_filter} skipped (content filter), "
+                        f"{skipped_owned} skipped (already in library)"
                     )
                     yield json.dumps({
                         "album_id": album_id,
@@ -9425,6 +9449,7 @@ def download_discography(artist_id):
                         "tracks_skipped": skipped,
                         "tracks_skipped_artist": skipped_artist,
                         "tracks_skipped_filter": skipped_filter,
+                        "tracks_skipped_owned": skipped_owned,
                         "tracks_total": len(tracks),
                         "source": resolved_source,
                     }) + '\n'
@@ -9440,7 +9465,8 @@ def download_discography(artist_id):
             logger.warning(
                 f"[Discography] Complete for {artist_name}: {total_added} tracks added, "
                 f"{total_skipped} skipped (wishlist), {total_skipped_artist} skipped (artist mismatch), "
-                f"{total_skipped_filter} skipped (content filter) across {len(album_entries)} albums"
+                f"{total_skipped_filter} skipped (content filter), "
+                f"{total_skipped_owned} skipped (already in library) across {len(album_entries)} albums"
             )
             yield json.dumps({
                 "status": "complete",
@@ -9448,6 +9474,7 @@ def download_discography(artist_id):
                 "total_skipped": total_skipped,
                 "total_skipped_artist": total_skipped_artist,
                 "total_skipped_filter": total_skipped_filter,
+                "total_skipped_owned": total_skipped_owned,
                 "total_albums": len(album_entries),
             }) + '\n'
 
