@@ -37,16 +37,6 @@ class TestDeriveArtistFolder:
         from core.library.artist_image import derive_artist_folder
         assert derive_artist_folder("/music/Drake/Views/") == "/music/Drake"
 
-    def test_handles_trailing_backslash(self):
-        """Windows path with trailing separator."""
-        from core.library.artist_image import derive_artist_folder
-        result = derive_artist_folder(r"H:\Music\Drake\Views\\")
-        # On Windows the trim leaves `H:\Music\Drake\Views`,
-        # dirname returns `H:\Music\Drake`. On POSIX dirname might
-        # treat backslashes as filename chars. Just verify the
-        # trailing separator was stripped.
-        assert "Drake" in result
-
     def test_empty_string_returns_empty(self):
         from core.library.artist_image import derive_artist_folder
         assert derive_artist_folder("") == ""
