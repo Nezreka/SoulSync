@@ -8870,6 +8870,143 @@ def get_similar_artists(artist_name):
             "error": str(e)
         }), 500
 
+@app.route('/api/artist/<artist_id>/write-image-to-disk', methods=['POST'])
+def write_artist_image_to_disk(artist_id):
+    """Write `artist.jpg` to the artist's folder on disk.
+
+    Issue #572 (rhwc): Navidrome has no API for setting an artist
+    image — it reads `artist.jpg` from the artist's folder during
+    library scans. SoulSync's `update_artist_poster` for Navidrome
+    is a NO-OP today. This endpoint closes the gap by:
+
+    1. Resolving the artist's folder on disk via any of their albums'
+       tracks (`_resolve_library_file_path` handles Docker mount
+       translation + the same library-path probes #558 settled on)
+    2. Fetching an artist photo URL from the configured metadata source
+       priority chain (Spotify → Deezer → ... already wired through
+       `core.metadata_service.get_artist_image_url`)
+    3. Downloading the image bytes and writing `<artist>/artist.jpg`
+       atomically via the pure helpers in `core/library/artist_image.py`
+    4. Triggering a Navidrome library scan so the file gets picked
+       up immediately
+
+    Request body (JSON, all optional):
+        - ``image_url`` — explicit URL to use, bypassing metadata
+          source resolution (useful for "use this exact photo" UX)
+        - ``overwrite`` — when True, replace existing `artist.jpg`
+          (default False respects user-supplied files)
+        - ``source_override`` — pin the metadata source for URL
+          resolution (e.g. ``"deezer"``)
+    """
+    try:
+        from core.library.artist_image import (
+            derive_artist_folder,
+            download_image_bytes,
+            write_artist_jpg,
+        )
+        from core.metadata_service import get_artist_image_url as _get_artist_image_url
+
+        data = request.get_json(silent=True) or {}
+        explicit_url = (data.get('image_url') or '').strip() or None
+        overwrite = bool(data.get('overwrite', False))
+        source_override = (data.get('source_override') or '').strip().lower() or None
+
+        db = get_database()
+        try:
+            artist_id_int = int(artist_id)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid artist id"}), 400
+
+        artist_row = db.get_artist(artist_id_int)
+        if artist_row is None:
+            return jsonify({"success": False, "error": "Artist not found"}), 404
+
+        # Find a track file on disk so we can derive the artist folder.
+        # Walk albums in DB order; first one with a resolvable track wins.
+        albums = db.get_albums_by_artist(artist_id_int)
+        if not albums:
+            return jsonify({"success": False,
+                            "error": "No albums for this artist; cannot derive folder."}), 400
+
+        resolved_track_path = None
+        for album in albums:
+            tracks = db.get_tracks_by_album(album.id)
+            for tr in tracks:
+                if not getattr(tr, 'file_path', None):
+                    continue
+                candidate = _resolve_library_file_path(tr.file_path) or tr.file_path
+                if candidate and os.path.exists(candidate):
+                    resolved_track_path = candidate
+                    break
+            if resolved_track_path:
+                break
+
+        if not resolved_track_path:
+            return jsonify({"success": False,
+                            "error": "Could not locate any track file on disk to derive the artist folder. "
+                                     "Configure Settings → Library → Music Paths to point at the library mount."}), 400
+
+        album_folder = os.path.dirname(resolved_track_path)
+        artist_folder = derive_artist_folder(album_folder)
+        if not artist_folder or not os.path.isdir(artist_folder):
+            return jsonify({"success": False,
+                            "error": f"Resolved artist folder is invalid: {artist_folder!r}"}), 400
+
+        # Pick the image URL. Explicit override (from request body)
+        # wins so users can paste a specific photo URL. Otherwise
+        # resolve from the active metadata source.
+        if explicit_url:
+            image_url = explicit_url
+        else:
+            try:
+                image_url = _get_artist_image_url(
+                    artist_id_int,
+                    source_override=source_override,
+                    artist_name=getattr(artist_row, 'name', None),
+                )
+            except Exception as exc:
+                logger.error(f"artist image lookup failed: {exc}")
+                image_url = None
+
+        if not image_url:
+            return jsonify({"success": False,
+                            "error": "No artist image URL found from metadata sources."}), 404
+
+        image_bytes = download_image_bytes(image_url)
+        if not image_bytes:
+            return jsonify({"success": False,
+                            "error": f"Failed to download image from {image_url}"}), 502
+
+        success, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=overwrite)
+        if not success:
+            return jsonify({"success": False, "error": detail}), 400
+
+        # If the active media server is Navidrome, trigger a scan so
+        # the new file gets indexed without waiting for the next
+        # automatic scan cycle.
+        scan_triggered = False
+        try:
+            active_server = config_manager.get_active_media_server()
+            if active_server == 'navidrome':
+                nav = media_server_engine.client('navidrome')
+                if nav is not None:
+                    nav.trigger_library_scan()
+                    scan_triggered = True
+        except Exception as exc:
+            logger.debug(f"Navidrome scan trigger after artist image write failed: {exc}")
+
+        return jsonify({
+            "success": True,
+            "written_to": detail,
+            "image_url": image_url,
+            "scan_triggered": scan_triggered,
+        })
+
+    except Exception as e:
+        logger.error(f"Error writing artist image to disk: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/artist/<artist_id>/image', methods=['GET'])
 def get_artist_image(artist_id):
     """Get an artist image URL using source-aware metadata resolution."""

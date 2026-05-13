@@ -21321,6 +21321,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: none;
 }
 
+/* ─── Write Artist Image Button (issue #572) ─── */
+.library-artist-write-image-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.78);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    backdrop-filter: blur(8px);
+}
+.library-artist-write-image-btn:hover:not(:disabled) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.22);
+    transform: translateY(-2px);
+}
+.library-artist-write-image-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+.library-artist-write-image-btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
+}
+
 /* ─── Artist Radio Button ─── */
 
 .library-artist-radio-btn {
