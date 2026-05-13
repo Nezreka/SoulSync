@@ -2176,9 +2176,12 @@
                     <div class="adl-batch-panel" id="adl-batch-panel">
                         <div class="adl-batch-panel-header">
                             <h3 class="adl-batch-panel-title">Batches</h3>
-                            <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                            </button>
+                            <div class="adl-batch-panel-header-actions">
+                                <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="adl-batch-active" id="adl-batch-active">
                             <!-- Active batch cards rendered by JS -->
@@ -2186,7 +2189,10 @@
                         <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
                             <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
                                 <span>Recent History</span>
-                                <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                <div class="adl-batch-history-header-actions">
+                                    <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                    <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                </div>
                             </div>
                             <div class="adl-batch-history-list" id="adl-batch-history-list">
                                 <!-- Completed batch history rendered by JS -->
@@ -7636,6 +7642,16 @@
             <div class="history-source-bar" id="history-source-bar" style="display:none"></div>
             <div class="library-history-list" id="library-history-list"></div>
             <div class="library-history-pagination" id="library-history-pagination"></div>
+        </div>
+    </div>
+
+    <!-- Download Audit Trail Modal -->
+    <div class="modal-overlay hidden" id="download-audit-overlay" onclick="if(event.target===this)closeDownloadAuditModal()">
+        <div class="download-audit-modal">
+            <button class="download-audit-close" onclick="closeDownloadAuditModal()" title="Close">&times;</button>
+            <div class="download-audit-hero" id="download-audit-hero"></div>
+            <div class="download-audit-tabs" id="download-audit-tabs"></div>
+            <div class="download-audit-body" id="download-audit-body"></div>
         </div>
     </div>
 
