@@ -130,3 +130,19 @@ class TestLegacyBuilderAlbumTypeAltKeys:
         a stray value from poisoning the path template."""
         info = self._build({'type': 'Mixtape'})
         assert info['album_type'] == 'album'
+
+    def test_type_track_collision_defaults_to_album(self):
+        """`type` is a generic key name — many dict shapes use it
+        for entity discrimination (Deezer track responses carry
+        `type='track'`, Spotify search results use it for
+        `artist`/`track`/`album`/etc). If a caller hands us a dict
+        that has `type='track'` (track data passed by mistake, or a
+        merged shape where `type` discriminates entity rather than
+        album category), the normalizer must treat it as unknown and
+        default to `album` — not silently classify the result as some
+        bogus 'track' folder."""
+        info = self._build({'type': 'track'})
+        assert info['album_type'] == 'album'
+
+        info = self._build({'type': 'artist'})
+        assert info['album_type'] == 'album'
