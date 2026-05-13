@@ -8416,6 +8416,41 @@ def get_library_history():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/library/history/<int:history_id>/file-tags')
+def get_library_history_file_tags(history_id: int):
+    """Read embedded tags from the actual audio file for one library
+    history row. Backs the Audit Trail modal's "Embedded Tags" section.
+
+    The file is the single source of truth — persisted snapshot
+    columns drift the moment a background worker writes more tags.
+    `read_embedded_tags` returns a uniform dict; we pass through.
+    """
+    try:
+        db = get_database()
+        entries, _total = db.get_library_history(event_type=None, page=1, limit=200)
+        entry = next((e for e in entries if e.get('id') == history_id), None)
+        if entry is None:
+            # Wider lookup — pagination above may not have caught older rows.
+            conn = db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM library_history WHERE id = ?", (history_id,))
+            row = cursor.fetchone()
+            entry = dict(row) if row else None
+        if entry is None:
+            return jsonify({'success': False, 'error': 'history row not found'}), 404
+
+        raw_path = entry.get('file_path') or ''
+        resolved = _resolve_library_file_path(raw_path) if raw_path else None
+        target_path = resolved or raw_path
+
+        from core.library.file_tags import read_embedded_tags
+        result = read_embedded_tags(target_path)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error(f"Error reading file tags for history {history_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/artists')
 def get_library_artists():
     """Get artists for the library page with search, filtering, and pagination"""
