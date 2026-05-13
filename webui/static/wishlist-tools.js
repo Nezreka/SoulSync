@@ -3080,6 +3080,10 @@ async function loadMetadataCacheStats() {
 
 // ── Library History Modal ────────────────────────────────────────────
 let _libraryHistoryState = { tab: 'download', page: 1, limit: 50 };
+// id → entry cache so the per-row audit button can look up the
+// full entry without round-tripping JSON through DOM data attrs
+// (escape headaches when titles / file paths contain quotes).
+const _libraryHistoryEntryCache = {};
 
 function openLibraryHistoryModal() {
     const overlay = document.getElementById('library-history-overlay');
@@ -3147,6 +3151,10 @@ async function loadLibraryHistory() {
             return;
         }
 
+        // Cache entries by id for the per-row audit button lookup.
+        data.entries.forEach(e => {
+            if (e && e.id != null) _libraryHistoryEntryCache[e.id] = e;
+        });
         list.innerHTML = data.entries.map(renderHistoryEntry).join('');
         renderHistoryPagination(data.total, page, limit);
     } catch (err) {
@@ -3217,6 +3225,16 @@ function renderHistoryEntry(entry) {
     const hasDetails = sourceDetail || acoustidBadge;
     const expandIndicator = hasDetails ? `<span class="lh-expand-btn">&#x25BE;</span>` : '';
 
+    // Audit button — only for download events (import rows have no
+    // source/match/verify decisions to trace). stopPropagation keeps
+    // the click from triggering the row-expand toggle. Inline onclick
+    // dispatches through `openDownloadAuditModalById` (a function so
+    // the script-split-integrity test sees it) rather than touching
+    // the cache directly.
+    const auditBtn = entry.event_type === 'download' && entry.id != null
+        ? `<button class="lh-audit-btn" title="View audit trail" onclick="event.stopPropagation();openDownloadAuditModalById(${entry.id})">Audit</button>`
+        : '';
+
     return `<div class="library-history-entry${hasDetails ? ' lh-expandable' : ''}" ${hasDetails ? 'onclick="this.classList.toggle(\'lh-expanded\')"' : ''}>
         ${thumb}
         <div class="library-history-entry-content">
@@ -3227,6 +3245,7 @@ function renderHistoryEntry(entry) {
                 </div>
                 <div class="library-history-entry-badges">${badge}</div>
                 <div class="library-history-entry-time">${formatHistoryTime(entry.created_at)}</div>
+                ${auditBtn}
                 ${expandIndicator}
             </div>
             ${hasDetails ? `<div class="library-history-entry-details">
@@ -3258,6 +3277,655 @@ function formatHistoryTime(isoStr) {
         return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     } catch { return ''; }
 }
+
+// ── Download Audit Trail Modal ──────────────────────────────────────
+//
+// First-pass implementation per spec: builds a "summary audit" from
+// fields already on the library_history row. Steps the backend doesn't
+// yet capture (per-source plan, per-candidate scoring, post-processing
+// substeps) render as 'Not captured yet' rather than fabricating
+// details — preserves trust until the backend event recorder lands.
+
+let _downloadAuditEntry = null;
+let _downloadAuditActiveTab = 'lifecycle';
+let _downloadAuditActiveStep = 'request';
+
+function openDownloadAuditModalById(historyId) {
+    const entry = _libraryHistoryEntryCache[historyId];
+    if (!entry) return;
+    openDownloadAuditModal(entry);
+}
+
+function openDownloadAuditModal(entry) {
+    if (!entry) return;
+    _downloadAuditEntry = entry;
+    _downloadAuditActiveTab = 'lifecycle';
+    _downloadAuditActiveStep = 'request';
+
+    const overlay = document.getElementById('download-audit-overlay');
+    const hero = document.getElementById('download-audit-hero');
+    const tabs = document.getElementById('download-audit-tabs');
+    const body = document.getElementById('download-audit-body');
+    if (!overlay || !hero || !tabs || !body) return;
+
+    hero.innerHTML = renderDownloadAuditHero(entry);
+    tabs.innerHTML = renderDownloadAuditTabs(_downloadAuditActiveTab);
+    body.innerHTML = renderDownloadAuditTabPanel(_downloadAuditActiveTab, entry);
+    overlay.classList.remove('hidden');
+
+    // Live tag read for the Tags tab. Fire-and-forget on open so the
+    // data is ready by the time the user switches to the Tags tab.
+    if (entry.id != null) {
+        fetchAndRenderEmbeddedTags(entry.id);
+    }
+}
+
+function switchAuditTab(tabName) {
+    if (!_downloadAuditEntry) return;
+    if (!['lifecycle', 'tags', 'lyrics'].includes(tabName)) return;
+    _downloadAuditActiveTab = tabName;
+    const tabs = document.getElementById('download-audit-tabs');
+    const body = document.getElementById('download-audit-body');
+    if (tabs) tabs.innerHTML = renderDownloadAuditTabs(tabName);
+    if (body) body.innerHTML = renderDownloadAuditTabPanel(tabName, _downloadAuditEntry);
+    // Re-fire the live fetch when switching to Tags (in case it
+    // raced past first mount before the user got there).
+    if (tabName === 'tags' && _downloadAuditEntry.id != null) {
+        fetchAndRenderEmbeddedTags(_downloadAuditEntry.id);
+    }
+    if (tabName === 'lyrics' && _downloadAuditEntry.id != null) {
+        fetchAndRenderEmbeddedTags(_downloadAuditEntry.id);
+    }
+}
+window.switchAuditTab = switchAuditTab;
+
+function selectAuditStep(stepKey) {
+    if (!_downloadAuditEntry) return;
+    _downloadAuditActiveStep = stepKey;
+    const body = document.getElementById('download-audit-body');
+    if (body) body.innerHTML = renderDownloadAuditTabPanel('lifecycle', _downloadAuditEntry);
+}
+window.selectAuditStep = selectAuditStep;
+
+function closeDownloadAuditModal() {
+    const overlay = document.getElementById('download-audit-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _downloadAuditEntry = null;
+}
+
+function renderDownloadAuditHero(entry) {
+    const title = entry.title || 'Unknown Track';
+    const artist = entry.artist_name || 'Unknown Artist';
+    const album = entry.album_name || '';
+    const year = (entry.created_at || '').slice(0, 4);  // fallback to history year
+    // Album-art thumb from row when present; placeholder otherwise.
+    const hasValidThumb = entry.thumb_url && (entry.thumb_url.startsWith('http://') || entry.thumb_url.startsWith('https://'));
+    const art = hasValidThumb
+        ? `<img src="${escapeHtml(entry.thumb_url)}" class="download-audit-hero-art" loading="lazy">`
+        : `<div class="download-audit-hero-art download-audit-hero-art-placeholder">♪</div>`;
+    const metaParts = [];
+    if (artist) metaParts.push(escapeHtml(artist));
+    if (album) metaParts.push(escapeHtml(album));
+    if (year && /^\d{4}$/.test(year)) metaParts.push(escapeHtml(year));
+    const meta = metaParts.join(' · ');
+
+    const pills = [];
+    if (entry.download_source) pills.push(_auditHeroPill('source', entry.download_source));
+    if (entry.quality) pills.push(_auditHeroPill('quality', entry.quality));
+    if (entry.acoustid_result) pills.push(_auditHeroPill('verify', formatAcoustidLabel(entry.acoustid_result), entry.acoustid_result));
+
+    return `
+        ${art}
+        <div class="download-audit-hero-text">
+            <div class="download-audit-hero-title">${escapeHtml(title)}</div>
+            <div class="download-audit-hero-meta">${meta}</div>
+            <div class="download-audit-hero-pills">${pills.join('')}</div>
+        </div>
+    `;
+}
+
+function _auditHeroPill(kind, label, statusHint) {
+    const cls = statusHint ? ` download-audit-hero-pill-${escapeHtml(statusHint)}` : '';
+    return `<span class="download-audit-hero-pill download-audit-hero-pill-${kind}${cls}">${escapeHtml(label)}</span>`;
+}
+
+function renderDownloadAuditTabs(active) {
+    const tabs = [
+        { key: 'lifecycle', label: 'Lifecycle' },
+        { key: 'tags',      label: 'Tags' },
+        { key: 'lyrics',    label: 'Lyrics' },
+    ];
+    return tabs.map(t =>
+        `<button class="download-audit-tab${t.key === active ? ' active' : ''}" onclick="switchAuditTab('${t.key}')">${t.label}</button>`
+    ).join('');
+}
+
+function renderDownloadAuditTabPanel(tabName, entry) {
+    if (tabName === 'tags') return renderDownloadAuditTagsTab(entry);
+    if (tabName === 'lyrics') return renderDownloadAuditLyricsTab(entry);
+    return renderDownloadAuditLifecycleTab(entry);
+}
+
+function renderDownloadAuditLifecycleTab(entry) {
+    const steps = buildDownloadAuditSteps(entry);
+    const activeStep = steps.find(s => s.key === _downloadAuditActiveStep) || steps[0];
+
+    // Horizontal stepper — compact nodes + short labels under each.
+    const stepperNodes = steps.map((step, i) => {
+        const isActive = step.key === activeStep.key;
+        const icon = _auditNodeIcon(step.status || 'unknown');
+        const connector = i < steps.length - 1 ? '<span class="download-audit-stepper-line"></span>' : '';
+        return `<button class="download-audit-stepper-node download-audit-stepper-${step.status || 'unknown'}${isActive ? ' active' : ''}" onclick="selectAuditStep('${step.key}')">
+            <span class="download-audit-stepper-circle">${icon}</span>
+            <span class="download-audit-stepper-label">${escapeHtml(_auditStepShortLabel(step.key))}</span>
+        </button>${connector}`;
+    }).join('');
+
+    // Detail card for the selected step.
+    const detail = activeStep.detail ? `<div class="download-audit-step-detail">${escapeHtml(activeStep.detail)}</div>` : '';
+    const meta = (activeStep.meta && activeStep.meta.length > 0)
+        ? `<div class="download-audit-step-meta">${activeStep.meta.map(m => `<div>${escapeHtml(String(m))}</div>`).join('')}</div>`
+        : '';
+
+    return `
+        <div class="download-audit-stepper">${stepperNodes}</div>
+        <div class="download-audit-step-card download-audit-step-card-${activeStep.status || 'unknown'}">
+            <div class="download-audit-step-card-title">${escapeHtml(activeStep.title || 'Step')}</div>
+            ${detail}
+            ${meta}
+        </div>
+        <div class="download-audit-final-path">
+            <span class="download-audit-final-path-label">Final path</span>
+            <code>${escapeHtml(entry.file_path || 'Not captured yet')}</code>
+        </div>
+    `;
+}
+
+function _auditStepShortLabel(key) {
+    return ({
+        request: 'Request',
+        source: 'Source',
+        match: 'Match',
+        verify: 'Verify',
+        process: 'Process',
+        transfer: 'Place',
+    })[key] || key;
+}
+
+function renderDownloadAuditTagsTab(entry) {
+    // Live tags get filled in by fetchAndRenderEmbeddedTags via the
+    // slot id below. Until the fetch resolves, show a loading state
+    // so the panel isn't blank.
+    return `<div class="download-audit-tags-body" id="download-audit-tags-body">
+        <div class="download-audit-tags-empty">Reading from file…</div>
+    </div>`;
+}
+
+function renderDownloadAuditLyricsTab(entry) {
+    return `<div class="download-audit-lyrics-body" id="download-audit-lyrics-body">
+        <div class="download-audit-tags-empty">Reading from file…</div>
+    </div>`;
+}
+
+function renderEmbeddedTagsSection(entry) {
+    // Legacy entry point retained for any other caller — now unused
+    // by the modal directly (Tags tab owns the live render).
+    return renderDownloadAuditTagsTab(entry);
+}
+
+async function fetchAndRenderEmbeddedTags(historyId) {
+    const tagsSlot = document.getElementById('download-audit-tags-body');
+    const lyricsSlot = document.getElementById('download-audit-lyrics-body');
+    if (!tagsSlot && !lyricsSlot) return;
+    const renderError = (msg) => {
+        const html = `<div class="download-audit-tags-empty">${escapeHtml(msg)}</div>`;
+        if (tagsSlot) tagsSlot.innerHTML = html;
+        if (lyricsSlot) lyricsSlot.innerHTML = html;
+    };
+    try {
+        const resp = await fetch(`/api/library/history/${historyId}/file-tags`);
+        if (!resp.ok) { renderError(`Could not read file tags (HTTP ${resp.status}).`); return; }
+        const data = await resp.json();
+        if (!data.success) { renderError(data.error || 'Could not read file tags.'); return; }
+        if (data.available === false) { renderError(data.reason || 'File tags not available.'); return; }
+        if (tagsSlot) tagsSlot.innerHTML = _renderEmbeddedTagsGrid(data);
+        if (lyricsSlot) lyricsSlot.innerHTML = _renderLyricsBody(data);
+    } catch (e) {
+        renderError(`Could not read file tags: ${String(e)}`);
+    }
+}
+
+function _renderLyricsBody(data) {
+    const tags = data.tags || {};
+    const text = (tags.lyrics || tags.unsyncedlyrics || '').toString();
+    if (!text.trim()) {
+        return `<div class="download-audit-tags-empty">No lyrics embedded in this file.</div>`;
+    }
+    // Highlight the timecodes at the start of each line in dim color
+    // so the body reads like a clean transcript. Pure CSS via a span
+    // wrapper around each match.
+    const html = escapeHtml(text)
+        .replace(/^(\[\d{1,2}:\d{2}(?:\.\d{1,3})?\])/gm, '<span class="download-audit-lyric-timecode">$1</span>')
+        .replace(/\n/g, '<br>');
+    return `<div class="download-audit-lyrics-text">${html}</div>`;
+}
+
+// Friendly labels for tag keys (lowercased canonical key →
+// human-readable). Keys not in the map render with title-case
+// fallback applied at render time.
+const _AUDIT_TAG_LABELS = {
+    title: 'Title',
+    artist: 'Artist',
+    artists: 'All Artists',
+    albumartist: 'Album Artist',
+    album_artist: 'Album Artist',
+    album: 'Album',
+    date: 'Date',
+    year: 'Year',
+    originaldate: 'Original Date',
+    genre: 'Genre',
+    mood: 'Mood',
+    style: 'Style',
+    tracknumber: 'Track #',
+    tracktotal: 'Total Tracks',
+    discnumber: 'Disc #',
+    totaldiscs: 'Total Discs',
+    bpm: 'BPM',
+    isrc: 'ISRC',
+    barcode: 'Barcode',
+    catalognumber: 'Catalog #',
+    asin: 'ASIN',
+    copyright: 'Copyright',
+    publisher: 'Publisher',
+    language: 'Language',
+    script: 'Script',
+    media: 'Media',
+    releasetype: 'Release Type',
+    releasestatus: 'Release Status',
+    releasecountry: 'Country',
+    composer: 'Composer',
+    performer: 'Performer',
+    quality: 'Quality',
+    replaygain_track_gain: 'Track Gain',
+    replaygain_track_peak: 'Track Peak',
+    replaygain_album_gain: 'Album Gain',
+    replaygain_album_peak: 'Album Peak',
+};
+
+// Source-ID services. Each service has a key-prefix matcher and a
+// per-key label map. Order matters for display (MusicBrainz first
+// since it's the canonical identity layer).
+const _AUDIT_SOURCE_SERVICES = [
+    {
+        name: 'MusicBrainz',
+        prefix: 'musicbrainz_',
+        labels: {
+            musicbrainz_trackid: 'Track',
+            musicbrainz_releasetrackid: 'Recording',
+            musicbrainz_albumid: 'Album',
+            musicbrainz_artistid: 'Artist',
+            musicbrainz_albumartistid: 'Album Artist',
+            musicbrainz_releasegroupid: 'Release Group',
+        },
+    },
+    { name: 'Spotify',  prefix: 'spotify_',  labels: { spotify_track_id: 'Track', spotify_artist_id: 'Artist', spotify_album_id: 'Album' } },
+    { name: 'Tidal',    prefix: 'tidal_',    labels: { tidal_track_id: 'Track', tidal_artist_id: 'Artist', tidal_album_id: 'Album' } },
+    { name: 'Deezer',   prefix: 'deezer_',   labels: { deezer_track_id: 'Track', deezer_artist_id: 'Artist', deezer_album_id: 'Album' } },
+    { name: 'AudioDB',  prefix: 'audiodb_',  labels: { audiodb_track_id: 'Track', audiodb_artist_id: 'Artist', audiodb_album_id: 'Album' } },
+    { name: 'iTunes',   prefix: 'itunes_',   labels: { itunes_track_id: 'Track', itunes_artist_id: 'Artist', itunes_album_id: 'Album' } },
+    { name: 'Genius',   prefix: 'genius_',   labels: { genius_track_id: 'Track', genius_url: 'URL' } },
+    { name: 'Last.fm',  prefix: 'lastfm_',   labels: { lastfm_url: 'URL' } },
+    { name: 'Beatport', prefix: 'beatport_', labels: { beatport_track_id: 'Track' } },
+];
+
+function _auditFriendlyLabel(key, fallbackToTitleCase = true) {
+    if (_AUDIT_TAG_LABELS[key]) return _AUDIT_TAG_LABELS[key];
+    if (!fallbackToTitleCase) return key;
+    // Snake-case → Title Case
+    return key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function _renderEmbeddedTagsGrid(data) {
+    const tags = data.tags || {};
+    const fmt = data.format || '';
+    const bitrate = data.bitrate || 0;
+    const duration = data.duration || 0;
+    const hasPicture = data.has_picture === true;
+
+    // Categorize keys. Anything not matched and not a Source ID
+    // falls under "Other" — but we drop "Other" entirely when its
+    // only contents are keys already shown elsewhere (like `quality`,
+    // which is already a chip on the modal status strip).
+    const TRACK_KEYS = ['title', 'artist', 'artists', 'tracknumber', 'tracktotal', 'discnumber', 'totaldiscs', 'bpm', 'isrc'];
+    const ALBUM_KEYS = ['album', 'album_artist', 'albumartist', 'date', 'year', 'originaldate', 'genre', 'mood', 'style', 'copyright', 'publisher', 'language', 'script', 'media', 'releasetype', 'releasestatus', 'releasecountry', 'barcode', 'catalognumber', 'asin'];
+    const REPLAYGAIN_KEYS = ['replaygain_track_gain', 'replaygain_track_peak', 'replaygain_album_gain', 'replaygain_album_peak'];
+    const LYRICS_KEYS = ['lyrics', 'unsyncedlyrics'];
+    // Duplicates of top-bar chips that should NOT appear in the
+    // "Other" bucket (already visible elsewhere in the modal).
+    const DUPLICATE_KEYS = new Set(['quality']);
+    const isSourceKey = (k) => /(_id|_url)$/.test(k) || k.startsWith('musicbrainz_');
+
+    const buckets = { track: [], album: [], source: {}, replaygain: [], lyrics: [], other: [] };
+    Object.keys(tags).sort().forEach(key => {
+        const val = tags[key];
+        if (!val) return;
+        if (DUPLICATE_KEYS.has(key)) return;
+        if (TRACK_KEYS.includes(key)) buckets.track.push([key, val]);
+        else if (ALBUM_KEYS.includes(key)) buckets.album.push([key, val]);
+        else if (REPLAYGAIN_KEYS.includes(key)) buckets.replaygain.push([key, val]);
+        else if (LYRICS_KEYS.includes(key)) buckets.lyrics.push([key, val]);
+        else if (isSourceKey(key)) {
+            // Slot into the matching service. Unmatched IDs land in
+            // an "Other Sources" bucket.
+            const svc = _AUDIT_SOURCE_SERVICES.find(s => key.startsWith(s.prefix));
+            const slot = svc ? svc.name : 'Other Sources';
+            if (!buckets.source[slot]) buckets.source[slot] = [];
+            buckets.source[slot].push([key, val, svc]);
+        } else {
+            buckets.other.push([key, val]);
+        }
+    });
+
+    // Horizontal file-info chip strip at the top.
+    const fileChips = [];
+    if (fmt) fileChips.push(`<span class="download-audit-chip">${escapeHtml(fmt)}</span>`);
+    if (bitrate) fileChips.push(`<span class="download-audit-chip">${Math.round(bitrate / 1000)} kbps</span>`);
+    if (duration > 0) fileChips.push(`<span class="download-audit-chip">${_formatDuration(duration)}</span>`);
+    fileChips.push(`<span class="download-audit-chip">Cover ${hasPicture ? '✓' : '—'}</span>`);
+    const fileStrip = `<div class="download-audit-tags-chips">${fileChips.join('')}</div>`;
+
+    // Pretty key-value rows using friendly labels.
+    const renderRow = ([key, val], labelOverride) => _auditTagRow(
+        labelOverride || _auditFriendlyLabel(key),
+        val,
+    );
+
+    const sections = [];
+    if (buckets.track.length > 0) {
+        sections.push(_renderTagGroup('Track', buckets.track.map(p => renderRow(p)).join('')));
+    }
+    if (buckets.album.length > 0) {
+        sections.push(_renderTagGroup('Album', buckets.album.map(p => renderRow(p)).join('')));
+    }
+    if (buckets.replaygain.length > 0) {
+        sections.push(_renderTagGroup('ReplayGain', buckets.replaygain.map(p => renderRow(p)).join('')));
+    }
+    if (buckets.other.length > 0) {
+        sections.push(_renderTagGroup('Other', buckets.other.map(p => renderRow(p)).join('')));
+    }
+
+    // Source IDs section — sub-card per service so the user can
+    // scan instead of reading a 14-row dump.
+    let sourcesBlock = '';
+    const sourceServiceNames = Object.keys(buckets.source);
+    if (sourceServiceNames.length > 0) {
+        const orderedNames = _AUDIT_SOURCE_SERVICES
+            .map(s => s.name)
+            .filter(n => buckets.source[n])
+            .concat(sourceServiceNames.filter(n => !_AUDIT_SOURCE_SERVICES.find(s => s.name === n)));
+        const subCards = orderedNames.map(name => {
+            const rows = buckets.source[name].map(([key, val, svc]) => {
+                const label = svc?.labels[key] || _auditFriendlyLabel(key.replace(/^[a-z]+_/, ''));
+                return _auditTagRow(label, val);
+            });
+            return `<div class="download-audit-source-card">
+                <div class="download-audit-source-card-title">${escapeHtml(name)}</div>
+                ${rows.join('')}
+            </div>`;
+        });
+        sourcesBlock = `<div class="download-audit-tag-group download-audit-sources">
+            <div class="download-audit-tag-group-title">Source IDs</div>
+            <div class="download-audit-source-grid">${subCards.join('')}</div>
+        </div>`;
+    }
+
+    // Lyrics live in their own tab now — don't render them inline.
+
+    if (sections.length === 0 && !sourcesBlock && fileChips.length === 0) {
+        return `<div class="download-audit-tags-empty">No tags were found on this file.</div>`;
+    }
+
+    return `${fileStrip}
+        <div class="download-audit-tags-grid">${sections.join('')}</div>
+        ${sourcesBlock}`;
+}
+
+function _renderTagGroup(title, rowsHtml) {
+    return `<div class="download-audit-tag-group">
+        <div class="download-audit-tag-group-title">${escapeHtml(title)}</div>
+        ${rowsHtml}
+    </div>`;
+}
+
+function _formatDuration(seconds) {
+    const s = Math.round(seconds || 0);
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${m}:${rem.toString().padStart(2, '0')}`;
+}
+
+function _auditTagRow(label, value) {
+    return `<div class="download-audit-tag-row">
+        <span class="download-audit-tag-key">${escapeHtml(label)}</span>
+        <span class="download-audit-tag-value">${escapeHtml(String(value))}</span>
+    </div>`;
+}
+
+function renderAuditChip(label) {
+    return `<span class="download-audit-chip">${escapeHtml(label)}</span>`;
+}
+
+function renderAuditStep(step, index, total) {
+    const status = step.status || 'unknown';
+    const detail = step.detail ? `<div class="download-audit-card-detail">${escapeHtml(step.detail)}</div>` : '';
+    const meta = (step.meta && step.meta.length > 0)
+        ? `<div class="download-audit-card-meta">${step.meta.map(m => `<div>${escapeHtml(String(m))}</div>`).join('')}</div>`
+        : '';
+    const nodeIcon = _auditNodeIcon(status);
+    return `
+        <div class="download-audit-step ${escapeHtml(status)}">
+            <div class="download-audit-node">${nodeIcon}</div>
+            <div class="download-audit-card">
+                <div class="download-audit-card-title">${escapeHtml(step.title || 'Step')}</div>
+                ${detail}
+                ${meta}
+            </div>
+        </div>
+    `;
+}
+
+function _auditNodeIcon(status) {
+    switch (status) {
+        case 'complete': return '&#x2713;';   // ✓
+        case 'partial':  return '&#x25CB;';   // ○ (open circle = partial signal)
+        case 'error':    return '&#x2715;';   // ✕
+        default:         return '&#x2014;';   // — (unknown / not captured)
+    }
+}
+
+function buildDownloadAuditExplanation(entry) {
+    const source = entry.download_source || 'an unknown source';
+    const quality = entry.quality ? ` at ${entry.quality}` : '';
+    const trackPart = entry.title ? `"${entry.title}"` : 'this track';
+    const artistPart = entry.artist_name ? ` by ${entry.artist_name}` : '';
+    return `SoulSync downloaded ${trackPart}${artistPart} from ${source}${quality}. Detailed source-by-source decisions, candidate scoring, and post-processing steps are not captured yet — older entries show a summary built from the recorded history fields.`;
+}
+
+function buildDownloadAuditSteps(entry) {
+    return [
+        {
+            key: 'request',
+            title: 'Request Created',
+            status: 'complete',
+            detail: `${entry.title || 'Unknown track'}${entry.artist_name ? ` by ${entry.artist_name}` : ''}`,
+            meta: entry.album_name ? [`Album: ${entry.album_name}`] : [],
+        },
+        {
+            key: 'source',
+            title: 'Source Selected',
+            status: entry.download_source ? 'complete' : 'unknown',
+            detail: entry.download_source
+                ? `Downloaded via ${entry.download_source}`
+                : 'Download source was not captured.',
+            meta: entry.quality ? [`Quality: ${entry.quality}`] : [],
+        },
+        {
+            key: 'match',
+            title: 'Source Match',
+            status: (entry.source_track_title || entry.source_filename) ? 'complete' : 'partial',
+            detail: buildSourceMatchDetail(entry),
+            meta: buildSourceMatchMeta(entry),
+        },
+        {
+            key: 'verify',
+            title: 'Verification',
+            status: auditStatusFromAcoustid(entry.acoustid_result),
+            detail: buildAcoustidDetail(entry.acoustid_result),
+            meta: [],
+        },
+        (() => {
+            const inferences = inferPostProcessingDetails(entry);
+            // Library_history rows are written AFTER post-processing
+            // finishes, so post-processing is provably DONE — the only
+            // question is which specific steps we can observe from
+            // before/after state. When any inference fires, status =
+            // complete and we list the observed changes. Otherwise
+            // partial — file landed (final placement complete) but
+            // source vs final state look identical, so we can't claim
+            // any specific step ran.
+            return {
+                key: 'process',
+                title: 'Post Processing',
+                status: inferences.length > 0 ? 'complete' : 'partial',
+                detail: inferences.length > 0
+                    ? 'Observed changes between source and final state:'
+                    : 'No observable changes between source and final state.',
+                meta: inferences,
+            };
+        })(),
+        {
+            key: 'transfer',
+            title: 'Final Placement',
+            status: entry.file_path ? 'complete' : 'unknown',
+            detail: entry.file_path
+                ? 'File was finalized and recorded in library history.'
+                : 'Final path not captured.',
+            meta: entry.file_path ? [entry.file_path] : [],
+        },
+    ];
+}
+
+function inferPostProcessingDetails(entry) {
+    // Diff observable fields on the history row to surface what post-
+    // processing demonstrably did. No fabrication — every bullet here
+    // is provable from the before/after state recorded on the row.
+    // ReplayGain / lyrics / per-field tag substitutions have no field
+    // we can observe, so they don't appear here at all.
+    const out = [];
+    const src = entry.source_filename || '';
+    const dst = entry.file_path || '';
+
+    const srcExt = _auditExtractExt(src);
+    const dstExt = _auditExtractExt(dst);
+    if (srcExt && dstExt && srcExt !== dstExt) {
+        out.push(`Format conversion: ${srcExt} → ${dstExt}`);
+    }
+
+    const srcBase = _auditBasename(src);
+    const dstBase = _auditBasename(dst);
+    if (srcBase && dstBase && srcBase !== dstBase) {
+        out.push(`File renamed via tag template: ${srcBase} → ${dstBase}`);
+    }
+
+    if (entry.source_track_title && entry.title
+        && entry.source_track_title.trim().toLowerCase() !== entry.title.trim().toLowerCase()) {
+        out.push(`Title rewritten from source tags: "${entry.source_track_title}" → "${entry.title}"`);
+    }
+
+    if (entry.source_artist && entry.artist_name
+        && entry.source_artist.trim().toLowerCase() !== entry.artist_name.trim().toLowerCase()) {
+        out.push(`Artist rewritten from source tags: "${entry.source_artist}" → "${entry.artist_name}"`);
+    }
+
+    // Folder template inference: counts non-empty path segments above
+    // the filename. A flat `/downloads/file.mp3` (1 dir segment) means
+    // no template ran; `/library/Artist/[Year] Album/01 - Title.mp3`
+    // (3+ segments) means a multi-level template was applied.
+    if (dst) {
+        const normalized = dst.replace(/\\/g, '/');
+        const segments = normalized.split('/').filter(s => s.length > 0);
+        // Last segment is the file; count directory segments above it.
+        if (segments.length >= 4) {
+            out.push('Folder template applied (multi-level path)');
+        }
+    }
+
+    return out;
+}
+
+function _auditExtractExt(path) {
+    if (!path) return '';
+    const lastDot = path.lastIndexOf('.');
+    const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    if (lastDot <= lastSlash || lastDot === -1) return '';
+    return path.substring(lastDot).toLowerCase();
+}
+
+function _auditBasename(path) {
+    if (!path) return '';
+    const normalized = path.replace(/\\/g, '/');
+    const slash = normalized.lastIndexOf('/');
+    return slash === -1 ? normalized : normalized.substring(slash + 1);
+}
+
+function buildSourceMatchDetail(entry) {
+    const srcTitle = entry.source_track_title || '';
+    const srcArtist = entry.source_artist || '';
+    if (srcTitle || srcArtist) {
+        return `Matched to ${srcTitle || '?'} by ${srcArtist || '?'}`;
+    }
+    if (entry.source_filename) {
+        return `Matched to ${entry.source_filename}`;
+    }
+    return 'Source-side match details were not captured.';
+}
+
+function buildSourceMatchMeta(entry) {
+    const out = [];
+    if (entry.source_filename) out.push(`File: ${entry.source_filename}`);
+    if (entry.source_track_id) out.push(`Source ID: ${entry.source_track_id}`);
+    return out;
+}
+
+function auditStatusFromAcoustid(result) {
+    if (!result) return 'unknown';
+    if (result === 'pass') return 'complete';
+    if (result === 'fail' || result === 'error') return 'error';
+    return 'partial';  // skip / disabled / anything else
+}
+
+function buildAcoustidDetail(result) {
+    if (!result) return 'AcoustID verification was not captured for this download.';
+    const labels = {
+        pass: 'AcoustID fingerprint matched the expected track.',
+        fail: 'AcoustID fingerprint did NOT match — track was flagged.',
+        skip: 'AcoustID verification was skipped for this download.',
+        disabled: 'AcoustID verification is disabled in settings.',
+        error: 'AcoustID verification errored out.',
+    };
+    return labels[result] || `AcoustID result: ${result}`;
+}
+
+function formatAcoustidLabel(result) {
+    const labels = { pass: 'AcoustID Verified', fail: 'AcoustID Failed', skip: 'AcoustID Skipped', disabled: 'AcoustID Off', error: 'AcoustID Error' };
+    return labels[result] || `AcoustID: ${result}`;
+}
+
+// Expose for onclick="" handlers wired in renderHistoryEntry.
+window.openDownloadAuditModalById = openDownloadAuditModalById;
+window.openDownloadAuditModal = openDownloadAuditModal;
+window.closeDownloadAuditModal = closeDownloadAuditModal;
+
 
 function renderHistoryPagination(total, page, limit) {
     const pagination = document.getElementById('library-history-pagination');
