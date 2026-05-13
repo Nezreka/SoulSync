@@ -10172,6 +10172,491 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 0 8px;
 }
 
+/* ── Download Audit Trail Modal ─────────────────────────── */
+.lh-audit-btn {
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-rgb));
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.lh-audit-btn:hover {
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.download-audit-modal {
+    width: 1040px;
+    max-width: 96vw;
+    max-height: 88vh;
+    background: linear-gradient(180deg, rgba(20, 20, 22, 0.98), rgba(12, 12, 14, 0.99));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 32px 96px rgba(0, 0, 0, 0.7);
+    position: relative;
+}
+.download-audit-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    z-index: 2;
+}
+.download-audit-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* Hero header — album art + title + meta + status pills */
+.download-audit-hero {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 18px;
+    align-items: center;
+    padding: 28px 32px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-hero-art {
+    width: 88px;
+    height: 88px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+.download-audit-hero-art-placeholder {
+    display: grid;
+    place-items: center;
+    font-size: 36px;
+    color: rgba(255, 255, 255, 0.25);
+}
+.download-audit-hero-text {
+    min-width: 0;
+}
+.download-audit-hero-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #fff;
+    line-height: 1.2;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.download-audit-hero-meta {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 13.5px;
+    margin-bottom: 12px;
+}
+.download-audit-hero-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.download-audit-hero-pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    line-height: 1.4;
+}
+.download-audit-hero-pill-source {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-rgb));
+}
+.download-audit-hero-pill-pass,
+.download-audit-hero-pill-verify.download-audit-hero-pill-pass {
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.3);
+    color: #4ade80;
+}
+.download-audit-hero-pill-fail,
+.download-audit-hero-pill-error {
+    background: rgba(239, 83, 80, 0.12);
+    border-color: rgba(239, 83, 80, 0.3);
+    color: #ef5350;
+}
+
+/* Tab bar */
+.download-audit-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-tab {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 12px 14px;
+    cursor: pointer;
+    position: relative;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s;
+}
+.download-audit-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+.download-audit-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb));
+}
+
+.download-audit-body {
+    overflow-y: auto;
+    padding: 24px 32px 28px;
+    flex: 1;
+}
+
+/* Horizontal stepper (Lifecycle tab) */
+.download-audit-stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+    margin-bottom: 22px;
+    padding: 0 8px;
+}
+.download-audit-stepper-node {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 0;
+    flex: 0 0 auto;
+    transition: color 0.15s;
+}
+.download-audit-stepper-node:hover { color: rgba(255, 255, 255, 0.85); }
+.download-audit-stepper-node.active { color: #fff; }
+.download-audit-stepper-line {
+    flex: 1 1 auto;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin-top: 14px;
+}
+.download-audit-stepper-circle {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1.5px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.6);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.download-audit-stepper-node.active .download-audit-stepper-circle {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
+}
+.download-audit-stepper-complete .download-audit-stepper-circle {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.45);
+    background: rgba(74, 222, 128, 0.12);
+}
+.download-audit-stepper-partial .download-audit-stepper-circle {
+    color: #facc15;
+    border-color: rgba(250, 204, 21, 0.45);
+    background: rgba(250, 204, 21, 0.12);
+}
+.download-audit-stepper-error .download-audit-stepper-circle {
+    color: #ef5350;
+    border-color: rgba(239, 83, 80, 0.45);
+    background: rgba(239, 83, 80, 0.12);
+}
+.download-audit-stepper-label {
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: inherit;
+}
+
+/* Detail card for the selected step */
+.download-audit-step-card {
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-step-card-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+.download-audit-step-detail {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    line-height: 1.55;
+}
+.download-audit-step-meta {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+.download-audit-step-card-complete { border-color: rgba(74, 222, 128, 0.18); }
+.download-audit-step-card-partial { border-color: rgba(250, 204, 21, 0.18); }
+.download-audit-step-card-error { border-color: rgba(239, 83, 80, 0.18); }
+
+/* Final path strip */
+.download-audit-final-path {
+    margin-top: 4px;
+    padding: 14px 16px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 10px;
+}
+.download-audit-final-path-label {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.4);
+    display: block;
+    margin-bottom: 6px;
+}
+.download-audit-final-path code {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    word-break: break-all;
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+
+/* Chips used in old layout — kept for the file-info strip in Tags */
+.download-audit-chip {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.75);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+}
+
+/* ── Mobile responsive ───────────────────────────────────── */
+@media (max-width: 760px) {
+    .download-audit-modal {
+        width: 100%;
+        max-width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+        border: none;
+    }
+    .download-audit-hero {
+        grid-template-columns: 64px 1fr;
+        gap: 14px;
+        padding: 20px 18px 16px;
+    }
+    .download-audit-hero-art {
+        width: 64px;
+        height: 64px;
+    }
+    .download-audit-hero-title {
+        font-size: 17px;
+        white-space: normal;  /* allow wrap on narrow screens */
+    }
+    .download-audit-hero-meta {
+        font-size: 12.5px;
+        margin-bottom: 8px;
+    }
+    .download-audit-tabs {
+        padding: 0 12px;
+        overflow-x: auto;
+        scrollbar-width: none;  /* hide on Firefox */
+    }
+    .download-audit-tabs::-webkit-scrollbar { display: none; }
+    .download-audit-tab {
+        padding: 10px 12px;
+        font-size: 12.5px;
+        flex-shrink: 0;
+    }
+    .download-audit-body {
+        padding: 16px 16px 24px;
+    }
+    /* Stepper: scroll horizontally instead of cramming all 6 nodes.
+       Connector lines look weird when scrolling so hide them. */
+    .download-audit-stepper {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: none;
+        gap: 18px;
+        padding: 0 4px 4px;
+    }
+    .download-audit-stepper::-webkit-scrollbar { display: none; }
+    .download-audit-stepper-line { display: none; }
+    .download-audit-stepper-node { min-width: 56px; }
+    .download-audit-step-card {
+        padding: 14px 16px;
+    }
+    .download-audit-step-card-title {
+        font-size: 14px;
+    }
+    .download-audit-close {
+        top: 10px;
+        right: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .download-audit-hero {
+        grid-template-columns: 1fr;  /* stack art above text */
+        text-align: left;
+        justify-items: start;
+    }
+    .download-audit-hero-art {
+        width: 72px;
+        height: 72px;
+    }
+}
+/* Tags tab — chips strip + 2-column metadata + source sub-cards */
+.download-audit-tags-empty {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.5;
+    padding: 8px 0;
+}
+.download-audit-tags-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 18px;
+}
+.download-audit-tags-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 18px;
+}
+@media (max-width: 800px) {
+    .download-audit-tags-grid { grid-template-columns: 1fr; gap: 16px; }
+}
+.download-audit-tag-group {
+    /* No box — just spacing + title */
+}
+.download-audit-tag-group-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+/* Stacked label-above-value pattern so long values (MBIDs, URLs,
+   joined genre lists) never get squeezed by a fixed key column. */
+.download-audit-tag-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.download-audit-tag-row:last-child { border-bottom: none; }
+.download-audit-tag-key {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+}
+.download-audit-tag-value {
+    color: rgba(255, 255, 255, 0.88);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.45;
+}
+.download-audit-tags-body {
+    min-height: 60px;
+}
+.download-audit-sources {
+    margin-top: 8px;
+}
+/* Cap at 2 cols max so long values (MBIDs ~36 chars) have room.
+   Drops to 1 col below tablet width. */
+.download-audit-source-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+}
+@media (max-width: 760px) {
+    .download-audit-source-grid { grid-template-columns: 1fr; }
+}
+.download-audit-source-card {
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.025);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-width: 0;  /* allow flex/grid children to shrink + wrap */
+}
+.download-audit-source-card-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--accent-rgb));
+    margin-bottom: 8px;
+}
+.download-audit-source-card .download-audit-tag-row {
+    padding: 5px 0;
+    border-bottom-color: rgba(255, 255, 255, 0.03);
+}
+.download-audit-source-card .download-audit-tag-value {
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+    font-size: 12px;
+}
+
+/* Lyrics tab — full-height transcript with dimmed timecodes */
+.download-audit-lyrics-body {
+    min-height: 60px;
+}
+.download-audit-lyrics-text {
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.82);
+    white-space: pre-wrap;
+}
+.download-audit-lyric-timecode {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
+    margin-right: 8px;
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+
 /* ── Sync History Modal ─────────────────────────────────── */
 .sync-history-modal {
     width: 750px;
@@ -57885,6 +58370,12 @@ body.reduce-effects *::after {
     margin: 0;
 }
 
+.adl-batch-panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 /* Collapse toggle */
 .adl-batch-panel-collapse {
     background: none;
@@ -58220,6 +58711,12 @@ body.reduce-effects *::after {
 
 .adl-batch-history-chevron {
     transition: transform 0.2s;
+}
+
+.adl-batch-history-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .adl-batch-history-section.expanded .adl-batch-history-chevron {
