@@ -3413,6 +3413,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.5.2': [
+        // --- post-release patch work on the 2.5.2 line — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.5.2 patch work' },
+        { title: '$albumtype Folder Template Now Splits EPs / Singles For Non-Spotify Sources', desc: 'discord report (cal): downloading an artist\'s discography with `$albumtype` in the path template put every release under `Album/` regardless of actual type — eps, singles, all dumped into the album folder. trace: the legacy duck-typed album-info builder at `core/metadata/album_tracks.py:_build_album_info_legacy` only checked the `album_type` key. spotify uses `album_type` (lowercase) so spotify discographies worked. but deezer\'s api uses `record_type`, tidal uses `type` (uppercase ALBUM/EP/SINGLE), and some flattened musicbrainz shapes use `primary-type` — none of those matched, all defaulted to `album`. fix: widen the legacy lookup to check `album_type` / `record_type` / `type` / `primary-type` and route the value through a new pure `_normalize_album_type` helper that lowercases + validates against the canonical token set (`album` / `single` / `ep` / `compilation`) and falls back to `album` for unknowns. typed-converter path for spotify / deezer / itunes / discogs / musicbrainz / hydrabase / qobuz unchanged — they were already correct. tidal users were the main offender (no typed converter for dict-shaped tidal data). 24 new tests pin: case-insensitive normalization for each canonical type, compilation preserved (spotify supports it), unknown values default to album, defensive against none / empty / non-string inputs, multi-key precedence (`album_type` wins over `record_type`), each known source shape produces correct token.', page: 'tools' },
+    ],
     '2.5.1': [
         // --- May 12, 2026 — 2.5.1 release ---
         { date: 'May 12, 2026 — 2.5.1 release' },
