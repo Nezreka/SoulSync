@@ -25,6 +25,13 @@ __pycache__/
 dist/
 build/
 
+# Frontend build artifacts and local dependency caches
+webui/.tanstack/
+webui/.vite/
+webui/node_modules/
+webui/test-results/
+webui/static/dist/
+
 # Virtual environments
 venv/
 env/

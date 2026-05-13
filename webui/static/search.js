@@ -1161,6 +1161,9 @@ async function startDownload(index) {
 
 async function loadInitialData() {
     try {
+        const initialPath = window.location.pathname;
+        const initialNavigationEpoch = navigationEpoch;
+
         // Load artist bubble state first
         await hydrateArtistBubblesFromSnapshot();
 
@@ -1177,14 +1180,24 @@ async function loadInitialData() {
             ? urlPage
             : homePage;
 
-        history.replaceState({ page: targetPage }, '', (targetPage === 'dashboard' ? '/' : '/' + targetPage) + window.location.search + window.location.hash);
-
-        if (targetPage !== 'dashboard') {
-            navigateToPage(targetPage, { skipPushState: true });
-        } else {
-            await loadDashboardData();
-            loadDashboardSyncHistory();
+        if (window.location.pathname !== initialPath || navigationEpoch !== initialNavigationEpoch) {
+            return;
         }
+
+        // Always apply the target page to the legacy shell chrome.
+        const router = getWebRouter();
+        const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+
+        if (route?.kind === 'react') {
+            showReactHost(targetPage);
+            setActivePageChrome(targetPage);
+            if (window.location.pathname !== route.path) {
+                history.replaceState({ page: targetPage }, '', route.path);
+            }
+            return;
+        }
+
+        navigateToPage(targetPage, { skipRouteChange: true, forceReload: true });
     } catch (error) {
         console.error('Error loading initial data:', error);
     }
@@ -1218,4 +1231,3 @@ async function loadDashboardData() {
 }
 
 // ===========================================
-
