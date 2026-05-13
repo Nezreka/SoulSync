@@ -1,0 +1,4 @@
+.vite
+node_modules
+static/dist
+test-results

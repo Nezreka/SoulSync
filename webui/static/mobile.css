@@ -3265,42 +3265,6 @@
 }
 
 /* ======================================
-   ISSUES PAGE — Mobile (supplement)
-   ====================================== */
-
-@media (max-width: 768px) {
-    .issues-header-right {
-        width: 100%;
-        flex-wrap: wrap;
-    }
-
-    .issues-filter-select {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .issues-stats {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-    }
-
-    .issues-stat-card {
-        min-width: 0;
-        padding: 10px;
-    }
-
-    .issues-stat-value {
-        font-size: 18px;
-    }
-
-    .issue-card-right {
-        flex-wrap: wrap;
-        gap: 6px;
-    }
-}
-
-/* ======================================
    HELP / DOCS PAGE — Mobile
    ====================================== */
 

@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "useDefineForClassFields": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "strict": true,
+    "jsx": "react-jsx",
+    "allowJs": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom", "react", "react-dom"]
+  },
+  "include": [
+    "./src",
+    "./tests",
+    "./vitest.setup.ts",
+    "./vite.config.ts",
+    "./vitest.config.ts",
+    "./playwright.config.ts"
+  ],
+  "references": []
+}
