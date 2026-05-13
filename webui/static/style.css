@@ -57129,12 +57129,6 @@ body.reduce-effects *::after {
     margin: 0;
 }
 
-.adl-batch-panel-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
 /* Collapse toggle */
 .adl-batch-panel-collapse {
     background: none;
