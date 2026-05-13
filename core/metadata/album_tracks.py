@@ -267,6 +267,33 @@ def _build_album_info_typed(album_data: Dict[str, Any], album_id: str,
     return ctx
 
 
+_ALBUM_TYPE_CANONICAL = {'album', 'single', 'ep', 'compilation'}
+
+
+def _normalize_album_type(value: Any, default: str = 'album') -> str:
+    """Map a raw album-type value from any source to the canonical
+    lowercase token the path templates use (``album`` / ``single`` /
+    ``ep`` / ``compilation``).
+
+    Different metadata sources expose the album type under different
+    keys AND with different casing — Tidal returns ``ALBUM``, MB
+    returns ``Album``, Deezer's ``record_type`` is already lowercase.
+    Without this normalization the legacy duck-typed builder accepted
+    only Spotify-shaped lowercase ``album_type``, so every other
+    source's discography ended up filed under ``Album/`` regardless
+    of actual type (Discord report, CAL, 2026-05-12).
+
+    Unknown values fall back to ``default`` rather than passing
+    through — keeps stray strings out of the path template.
+    """
+    if value is None:
+        return default
+    v = str(value).strip().lower()
+    if not v:
+        return default
+    return v if v in _ALBUM_TYPE_CANONICAL else default
+
+
 def _build_album_info_legacy(album_data: Any, album_id: str,
                              album_name: str, artist_name: str) -> Dict[str, Any]:
     """Original duck-typed extraction. Kept as the fallback when the
@@ -310,7 +337,12 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
         'image_url': image_url,
         'images': images,
         'release_date': _extract_lookup_value(album_data, 'release_date', default='') or '',
-        'album_type': _extract_lookup_value(album_data, 'album_type', default='album') or 'album',
+        'album_type': _normalize_album_type(
+            _extract_lookup_value(
+                album_data, 'album_type', 'record_type', 'type', 'primary-type',
+                default=None,
+            )
+        ),
         'total_tracks': _extract_lookup_value(album_data, 'total_tracks', 'track_count', default=0) or 0,
     }
 
