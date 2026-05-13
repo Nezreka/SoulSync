@@ -8697,7 +8697,13 @@ def get_artist_detail(artist_id):
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
-                    limit=50,
+                    # Match the Download Discography endpoint cap (200)
+                    # so the artist detail view sees the same release
+                    # set the modal lists. Spotify already paginates
+                    # all; Deezer/iTunes/Discogs/Hydrabase respect the
+                    # outer limit. 200 matches iTunes/Discogs internal
+                    # caps and covers prolific catalogues.
+                    limit=200,
                     artist_source_ids=artist_source_ids,
                 ),
             )
@@ -9218,7 +9224,17 @@ def get_artist_discography(artist_id):
                 allow_fallback=True,
                 skip_cache=False,
                 max_pages=0,
-                limit=50,
+                # Discord report: prolific artists (Bach, Beatles
+                # complete box, deep dance/electronic catalogues)
+                # showed only ~50 entries in the Download Discography
+                # modal. Spotify's `max_pages=0` already paginates
+                # through everything (per-page is clamped to 10
+                # internally), but Deezer / iTunes / Discogs /
+                # Hydrabase all honor the outer `limit` as a hard
+                # cap. 200 lines up with iTunes's and Discogs's own
+                # internal caps and covers near-everyone's full
+                # catalogue.
+                limit=200,
                 artist_source_ids=artist_source_ids or None,
             ),
         )
