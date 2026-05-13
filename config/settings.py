@@ -466,7 +466,14 @@ class ConfigManager:
                 "download_path": "./downloads",
                 "transfer_path": "./Transfer",
                 "max_peer_queue": 0,
-                "download_timeout": 600
+                "download_timeout": 600,
+                # Reddit report (YeloMelo95, Bell Canada): the existing
+                # 35-per-220s sliding-window cap allows all 35 searches in
+                # rapid succession before throttling — that burst trips ISP
+                # anti-abuse. This knob forces a min gap between consecutive
+                # searches even when the window cap isn't hit. 0 = disabled
+                # (preserves prior behavior).
+                "search_min_delay_seconds": 0,
             },
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid"
