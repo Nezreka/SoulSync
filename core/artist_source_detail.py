@@ -126,7 +126,11 @@ def build_source_only_artist_detail(
             allow_fallback=True,
             skip_cache=False,
             max_pages=0,
-            limit=50,
+            # Match the Download Discography endpoint cap (200).
+            # Spotify already paginates all; Deezer / iTunes / Discogs /
+            # Hydrabase clamp at the outer limit. 200 covers prolific
+            # catalogues without exceeding iTunes/Discogs internal caps.
+            limit=200,
             artist_source_ids={source: artist_id},
             dedup_variants=False,
         ),
