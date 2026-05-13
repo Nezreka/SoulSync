@@ -14,7 +14,12 @@ from pathlib import Path
 from flask import jsonify, request
 
 from config.settings import config_manager
-from core.metadata.registry import get_spotify_client
+from core.metadata.registry import (
+    get_spotify_client,
+    get_primary_source,
+    is_hydrabase_enabled,
+)
+from core.metadata.status import get_spotify_status
 
 logger = logging.getLogger(__name__)
 
@@ -183,21 +188,47 @@ def get_debug_info():
         info['paths']['music_videos_path'] = music_videos_path
         info['paths']['music_videos_path_exists'] = os.path.isdir(music_videos_path)
 
-    # Services from status cache
-    spotify_cache = _status_cache.get('spotify', {})
+    # Services. `_status_cache` only carries 'media_server' and 'soulseek'
+    # (no 'spotify' key) so anything we used to read from `spotify_cache`
+    # silently defaulted to the missing-value fallback — that's the
+    # "music_source: unknown" bug. Spotify status now comes from the
+    # canonical `get_spotify_status` accessor; primary metadata source
+    # comes from `get_primary_source` (which already accounts for the
+    # auth-fallback chain — Spotify drops back to Deezer when not
+    # authenticated).
     media_server_cache = _status_cache.get('media_server', {})
     soulseek_cache = _status_cache.get('soulseek', {})
+    spotify_status = _safe_check(lambda: get_spotify_status(spotify_client=spotify_client), default={})
+    if not isinstance(spotify_status, dict):
+        spotify_status = {}
     info['services'] = {
-        'music_source': spotify_cache.get('source', 'unknown'),
-        'spotify_connected': spotify_cache.get('connected', False),
-        'spotify_rate_limited': spotify_cache.get('rate_limited', False),
+        'music_source': _safe_check(get_primary_source, default='unknown') or 'unknown',
+        'spotify_connected': bool(spotify_status.get('connected', False)),
+        'spotify_rate_limited': bool(spotify_status.get('rate_limited', False)),
         'media_server_type': media_server_cache.get('type', 'none'),
         'media_server_connected': media_server_cache.get('connected', False),
         'soulseek_connected': soulseek_cache.get('connected', False),
         'download_source': config_manager.get('download_source.mode', 'hybrid'),
         'tidal_connected': _safe_check(lambda: bool(tidal_client and tidal_client.is_authenticated())),
         'qobuz_connected': _safe_check(lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.is_authenticated())),
+        'hydrabase_connected': _safe_check(is_hydrabase_enabled),
+        # YouTube is URL-based via yt-dlp — no auth, always reachable as
+        # long as the binary is installed. Surfaced so the debug dump
+        # documents that YouTube is one of the available download sources
+        # rather than implying it doesn't exist.
+        'youtube_available': True,
     }
+    # HiFi instance count — separate from connection status because each
+    # instance is its own independent endpoint with its own auth state.
+    info['services']['hifi_instance_count'] = _safe_check(
+        lambda: len(get_database().get_hifi_instances()), default=0
+    )
+    # Always-available public metadata sources (no auth, no per-user
+    # connection state). Listed so the debug dump reflects the full
+    # metadata surface SoulSync queries from, not just the auth-gated ones.
+    info['services']['always_available_metadata_sources'] = [
+        'deezer', 'itunes', 'musicbrainz',
+    ]
 
     # Enrichment workers
     workers = {}
@@ -300,7 +331,11 @@ def get_debug_info():
     # API rate monitor — current calls/min, 24h totals, peaks, rate limit events
     try:
         from core.api_call_tracker import api_call_tracker
-        from core.metadata.status import get_spotify_status
+        # `get_spotify_status` is already imported at module level. A
+        # local re-import here would make Python treat the name as a
+        # function-scoped local for the WHOLE body, breaking the lambda
+        # at the top of get_debug_info that closes over the module-level
+        # binding (Python 3.12 NameError on free variables).
         rates = api_call_tracker.get_all_rates()
         info['api_rates'] = rates
         # Rich 24h debug summary with peaks, totals, per-endpoint breakdown, events

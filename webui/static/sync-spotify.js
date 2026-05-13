@@ -1935,6 +1935,10 @@ function showPlaylistDetailsModal(playlist) {
             ? '📊 View Download Results'
             : '📥 Download Missing Tracks'}
                 </button>
+                <select id="sync-mode-${playlist.id}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)" ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>
+                    <option value="replace" selected>Replace</option>
+                    <option value="append">Append only</option>
+                </select>
                 <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''} ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
             </div>
         </div>

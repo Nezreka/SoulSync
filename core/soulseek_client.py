@@ -48,18 +48,87 @@ _SLSKD_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
 )
 
 
+# Search-rate-limit defaults. Pre-fix these were hardcoded magic numbers
+# inside `SoulseekClient.__init__`. Lifted to module level so they're
+# greppable + bumpable in one place, and so the reddit-reported case
+# (Bell Canada anti-abuse trips on slskd peer-connection bursts) can
+# tune them via `soulseek.search_*` config without touching code.
+_DEFAULT_MAX_PER_WINDOW = 35
+_DEFAULT_WINDOW_SECONDS = 220
+_DEFAULT_MIN_DELAY_SECONDS = 0  # 0 = disabled (preserves prior behavior)
+
+
+def compute_search_wait_seconds(
+    timestamps: List[float],
+    last_search_at: float,
+    now: float,
+    *,
+    max_per_window: int,
+    window_seconds: float,
+    min_delay_seconds: float,
+) -> float:
+    """Pure scheduler for the slskd search throttle.
+
+    Returns how many seconds the caller should sleep before issuing
+    the next search. ``timestamps`` is the list of recent search
+    timestamps already pruned to the current window (caller's job).
+    ``last_search_at`` is the timestamp of the most recent search
+    (0.0 if there hasn't been one). ``now`` is the current monotonic /
+    wall-clock time (caller chooses — pure function only does math).
+
+    Two independent gates, return the larger:
+
+    1. **Sliding-window cap** — when ``len(timestamps) >= max_per_window``,
+       sleep until the oldest timestamp ages out of the window. Same
+       semantics as the pre-fix hardcoded behavior.
+
+    2. **Min-delay between searches** — when ``min_delay_seconds > 0``,
+       sleep until at least that many seconds have passed since
+       ``last_search_at``. Smooths bursts even when the window isn't
+       full — this is the actual fix for the Reddit-reported case where
+       Bell Canada's anti-abuse trips on the rapid peer-connection
+       bursts that 35 back-to-back searches generate.
+
+    Returns 0.0 (no wait) when ``min_delay_seconds`` is 0 / negative
+    AND the window isn't full. Pure: no I/O, no side effects, no
+    mutation of the inputs.
+    """
+    window_wait = 0.0
+    if max_per_window > 0 and len(timestamps) >= max_per_window:
+        oldest = timestamps[0]
+        window_wait = max(0.0, oldest + window_seconds - now)
+
+    delay_wait = 0.0
+    if min_delay_seconds > 0 and last_search_at > 0:
+        elapsed = now - last_search_at
+        delay_wait = max(0.0, min_delay_seconds - elapsed)
+
+    return max(window_wait, delay_wait)
+
+
 class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
         self.download_path: Path = Path("./downloads")
         self.active_searches: Dict[str, bool] = {}  # search_id -> still_active
-        
-        # Rate limiting for searches
-        self.search_timestamps: List[float] = []  # Track search timestamps
-        self.max_searches_per_window = 35  # Conservative limit to prevent Soulseek bans
-        self.rate_limit_window = 220  # seconds (3 minutes 40 seconds)
-        
+
+        # Rate limiting for searches. Cap + window stay hardcoded —
+        # nobody has reported issues with the 35/220 defaults. The
+        # min-delay knob is the actual fix for the Reddit-reported
+        # case (Bell Canada anti-abuse cuts the WAN after rapid
+        # peer-connection bursts) — smooths bursts even when the
+        # sliding-window cap isn't hit. 0 = disabled (preserves prior
+        # behavior).
+        self.search_timestamps: List[float] = []
+        self._last_search_at: float = 0.0
+        self.max_searches_per_window = _DEFAULT_MAX_PER_WINDOW
+        self.rate_limit_window = _DEFAULT_WINDOW_SECONDS
+        self.search_min_delay_seconds = float(
+            config_manager.get('soulseek.search_min_delay_seconds', _DEFAULT_MIN_DELAY_SECONDS)
+            or _DEFAULT_MIN_DELAY_SECONDS
+        )
+
         self._setup_client()
     
     def _setup_client(self):
@@ -103,22 +172,36 @@ class SoulseekClient(DownloadSourcePlugin):
         self.search_timestamps = [ts for ts in self.search_timestamps if ts > cutoff_time]
     
     async def _wait_for_rate_limit(self):
-        """Wait if necessary to respect rate limiting"""
+        """Wait if necessary to respect search rate limits.
+
+        Delegates the wait math to ``compute_search_wait_seconds`` so
+        the throttle logic is testable independently of asyncio.sleep
+        and the singleton client. Two gates apply (max wins): sliding-
+        window cap on searches per N seconds, plus optional min-delay
+        between consecutive searches (the burst-smoother).
+        """
         self._clean_old_timestamps()
-        
-        if len(self.search_timestamps) >= self.max_searches_per_window:
-            # Calculate how long to wait
-            oldest_timestamp = self.search_timestamps[0]
-            wait_time = oldest_timestamp + self.rate_limit_window - time.time()
-            
-            if wait_time > 0:
-                logger.info(f"Rate limit reached ({len(self.search_timestamps)}/{self.max_searches_per_window} searches). Waiting {wait_time:.1f} seconds...")
-                await asyncio.sleep(wait_time)
-                # Clean up again after waiting
-                self._clean_old_timestamps()
-        
+        wait_time = compute_search_wait_seconds(
+            self.search_timestamps,
+            self._last_search_at,
+            time.time(),
+            max_per_window=self.max_searches_per_window,
+            window_seconds=self.rate_limit_window,
+            min_delay_seconds=self.search_min_delay_seconds,
+        )
+        if wait_time > 0:
+            logger.info(
+                f"Search rate limit: waiting {wait_time:.1f}s "
+                f"({len(self.search_timestamps)}/{self.max_searches_per_window} in window, "
+                f"min_delay={self.search_min_delay_seconds:.1f}s)"
+            )
+            await asyncio.sleep(wait_time)
+            self._clean_old_timestamps()
+
         # Record this search attempt
-        self.search_timestamps.append(time.time())
+        now = time.time()
+        self.search_timestamps.append(now)
+        self._last_search_at = now
     
     def get_rate_limit_status(self) -> Dict[str, Any]:
         """Get current rate limiting status"""

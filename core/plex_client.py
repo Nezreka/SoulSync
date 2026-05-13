@@ -620,6 +620,53 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error copying playlist '{source_name}' to '{target_name}': {e}")
             return False
 
+    def append_to_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
+        """Append tracks to an existing playlist (creates it if missing).
+
+        Differs from `update_playlist`: never deletes existing tracks,
+        never recreates the playlist, no backup. Used by sync mode
+        'append' so user-added tracks on the server playlist survive
+        re-syncing the source. Dedupe-by-ratingKey ensures we don't
+        re-add tracks the playlist already contains."""
+        if not self.ensure_connection():
+            return False
+
+        try:
+            try:
+                existing_playlist = self.server.playlist(playlist_name)
+            except NotFound:
+                logger.info(
+                    f"Plex append: playlist '{playlist_name}' doesn't exist yet — "
+                    f"creating with {len(tracks)} tracks"
+                )
+                return self.create_playlist(playlist_name, tracks)
+
+            existing_keys = {
+                str(t.ratingKey) for t in existing_playlist.items()
+                if hasattr(t, 'ratingKey')
+            }
+            new_tracks = [
+                t for t in tracks
+                if hasattr(t, 'ratingKey') and str(t.ratingKey) not in existing_keys
+            ]
+
+            if not new_tracks:
+                logger.info(
+                    f"Plex append: no new tracks to add to '{playlist_name}' "
+                    f"(all {len(tracks)} matched-tracks already present)"
+                )
+                return True
+
+            existing_playlist.addItems(new_tracks)
+            logger.info(
+                f"Plex append: added {len(new_tracks)} new tracks to '{playlist_name}' "
+                f"(skipped {len(tracks) - len(new_tracks)} already present)"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error appending to Plex playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
         if not self.ensure_connection():
             return False

@@ -4330,6 +4330,16 @@
                                             for late results (5-60 seconds)</small>
                                     </div>
                                     <div class="form-group">
+                                        <label>Minimum Delay Between Searches (seconds):</label>
+                                        <input type="number" id="soulseek-search-min-delay-seconds" placeholder="0"
+                                            min="0" max="60" value="0">
+                                        <small class="settings-hint">Forces a gap between
+                                            consecutive searches. Smooths burst patterns
+                                            that trip ISP anti-abuse (e.g. Bell Canada
+                                            cuts the WAN after rapid peer-connection
+                                            spikes). 0 disables.</small>
+                                    </div>
+                                    <div class="form-group">
                                         <label>Minimum Peer Upload Speed:</label>
                                         <select id="soulseek-min-peer-speed">
                                             <option value="0">Any speed</option>

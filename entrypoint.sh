@@ -72,8 +72,30 @@ chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 # Ensure all directories exist with correct ownership.
 # Only the directory nodes themselves need chown here — the recursive chown
 # above already ran if UIDs changed, so avoid walking the whole tree every start.
-mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
+# Both the mkdir and chown tolerate failure (`|| true`): the Dockerfile
+# pre-bakes every dir and bind-mounted volumes from the host already exist
+# at this point, so the only failure modes are:
+#  - rootless Docker/Podman where in-container root maps to a host UID
+#    that can't write to a bind-mounted path (mkdir EACCES)
+#  - read-only mounts or NFS with squashed root (chown EPERM)
+# Pre-mid-2026 the chown line had `|| true` but mkdir didn't — combined
+# with `set -e`, a permission-denied mkdir crashed the container into a
+# restart loop. Both lines are now best-effort.
+mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
 chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
+
+# Writability audit — surface a loud warning if any bind-mounted dir
+# isn't writable by the soulsync user. The restart-loop fix above makes
+# the container start regardless, but a non-writable Staging / downloads
+# / Transfer will fail silently inside the app (auto-import quarantine,
+# download writes). Better to log now than to debug missing files later.
+for dir in /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/MusicVideos /app/scripts; do
+    if [ -d "$dir" ] && ! gosu soulsync test -w "$dir" 2>/dev/null; then
+        echo "⚠️  WARNING: $dir is not writable by soulsync (uid $(id -u soulsync))."
+        echo "   Host bind-mount perms likely mismatch the PUID/PGID env vars."
+        echo "   Fix on host: chown -R $(id -u soulsync):$(id -g soulsync) $(echo $dir | sed 's|/app/|./|')"
+    fi
+done
 
 echo "✅ Configuration initialized successfully"
 

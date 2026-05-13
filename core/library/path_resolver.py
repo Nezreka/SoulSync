@@ -32,12 +32,40 @@ from any background worker.
 from __future__ import annotations
 
 import os
-from typing import Any, Iterable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Iterable, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
 
 logger = get_logger("library.path_resolver")
+
+
+@dataclass
+class ResolveAttempt:
+    """Diagnostic record for a single `resolve_library_file_path` call.
+
+    Returned by `resolve_library_file_path_with_diagnostic` so callers
+    that need to surface a useful error message (instead of just a
+    silent None) can describe what was tried. Pure data — no side
+    effects, no rendering opinions.
+
+    Fields:
+        raw_path_existed: True if `os.path.exists(file_path)` returned
+            True at the start of the resolver. When this is True the
+            resolver short-circuits and `base_dirs_tried` will be empty.
+        base_dirs_tried: The ordered list of base directories the
+            resolver suffix-walked against (already filtered by
+            `os.path.isdir`).
+        had_config_manager: Whether a config_manager was supplied. Useful
+            for distinguishing "no candidates discovered" from "couldn't
+            even read config to discover".
+        had_plex_client: Same, for the Plex API probe.
+    """
+    raw_path_existed: bool = False
+    base_dirs_tried: List[str] = field(default_factory=list)
+    had_config_manager: bool = False
+    had_plex_client: bool = False
 
 
 def _docker_resolve_path(path_str: Any) -> Optional[str]:
@@ -149,16 +177,52 @@ def resolve_library_file_path(
         The first existing path on disk, or None when no match is found.
         Never raises — failure is the None return.
     """
+    resolved, _ = resolve_library_file_path_with_diagnostic(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+        plex_client=plex_client,
+    )
+    return resolved
+
+
+def resolve_library_file_path_with_diagnostic(
+    file_path: Any,
+    *,
+    transfer_folder: Optional[str] = None,
+    download_folder: Optional[str] = None,
+    config_manager: Any = None,
+    plex_client: Any = None,
+) -> Tuple[Optional[str], ResolveAttempt]:
+    """Same as ``resolve_library_file_path`` but also returns a
+    ``ResolveAttempt`` describing what the resolver tried.
+
+    Use this when you need to surface a useful "we tried X, Y, Z" error
+    to the user instead of a silent None. Issue #558 (gabistek, Navidrome
+    on Docker): the resolver was returning None because Navidrome doesn't
+    expose library filesystem paths via API (unlike Plex), and the user
+    hadn't configured ``library.music_paths``. The Album Completeness
+    fix endpoint surfaced a generic "Could not determine album folder"
+    error with no diagnostic — user had no way to know what to configure.
+    """
+    attempt = ResolveAttempt(
+        had_config_manager=config_manager is not None,
+        had_plex_client=plex_client is not None,
+    )
+
     if not isinstance(file_path, str) or not file_path:
-        return None
+        return None, attempt
 
     if os.path.exists(file_path):
-        return file_path
+        attempt.raw_path_existed = True
+        return file_path, attempt
 
     path_parts = file_path.replace("\\", "/").split("/")
     base_dirs = _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client)
+    attempt.base_dirs_tried = list(base_dirs)
     if not base_dirs:
-        return None
+        return None, attempt
 
     # Skip index 0 to avoid drive-letter / leading-slash artifacts
     # (e.g. "E:" or "" from a leading "/").
@@ -166,8 +230,12 @@ def resolve_library_file_path(
         for i in range(1, len(path_parts)):
             candidate = os.path.join(base, *path_parts[i:])
             if os.path.exists(candidate):
-                return candidate
-    return None
+                return candidate, attempt
+    return None, attempt
 
 
-__all__ = ["resolve_library_file_path"]
+__all__ = [
+    "ResolveAttempt",
+    "resolve_library_file_path",
+    "resolve_library_file_path_with_diagnostic",
+]

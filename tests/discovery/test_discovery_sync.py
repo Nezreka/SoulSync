@@ -73,7 +73,7 @@ class _FakeSyncService:
     def clear_progress_callback(self, playlist_name):
         self.cleared_callbacks.append(playlist_name)
 
-    async def sync_playlist(self, playlist, download_missing=False, profile_id=1):
+    async def sync_playlist(self, playlist, download_missing=False, profile_id=1, sync_mode='replace'):
         if self._raise_on_sync:
             raise self._raise_on_sync
         return self._sync_result

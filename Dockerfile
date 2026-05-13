@@ -57,8 +57,13 @@ COPY --chown=soulsync:soulsync . .
 
 # Create runtime mount-point directories the app expects to exist.
 # NOTE: /app/data is for database FILES, /app/database is the Python package
-RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/MusicVideos /app/scripts && \
-    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/MusicVideos /app/scripts
+# NOTE: /app/Staging is required even though most users bind-mount it —
+# the entrypoint mkdir runs early and is gated by `set -e`, so a missing
+# pre-baked directory would crash the container into a restart loop on
+# rootless Docker/Podman where in-container "root" can't write to /app.
+# Pre-baking the dir here makes the entrypoint mkdir a guaranteed no-op.
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/MusicVideos /app/scripts && \
+    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/MusicVideos /app/scripts
 
 # Create defaults directory and copy template files
 # These will be used by entrypoint.sh to initialize empty volumes

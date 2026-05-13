@@ -49,7 +49,7 @@ class SyncDeps:
     sync_lock: Any  # threading.Lock
 
 
-def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', deps: SyncDeps = None):
+def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', deps: SyncDeps = None, sync_mode: str = 'replace'):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
     sync_lock = deps.sync_lock
@@ -359,7 +359,7 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
         sync_service._skip_wishlist = is_wing_it
 
         # Run the sync (this is a blocking call within this thread)
-        result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id))
+        result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode))
 
         # Clear progress callback immediately to prevent race condition where a
         # late-firing progress callback overwrites the "finished" state below

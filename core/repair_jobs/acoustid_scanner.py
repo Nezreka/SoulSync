@@ -192,10 +192,38 @@ class AcoustIDScannerJob(RepairJob):
         if not aid_title:
             return
 
+        # Resolve which artist value to compare against, in priority order:
+        #   1. DB `track_artist` (per-track, manually curated or scanner-
+        #      populated) — trust it when populated. Respects user edits
+        #      from the enhanced library view.
+        #   2. File's ARTIST tag — ground truth for what's on disk.
+        #      Catches legacy compilation tracks where `track_artist`
+        #      column is NULL because they were downloaded before that
+        #      column existed; the file itself has the correct per-
+        #      track artist (Tidal/Spotify/Deezer all write it).
+        #   3. Album artist — final fallback for files without proper
+        #      ARTIST tags AND no DB track_artist.
+        track_artist = (expected.get('track_artist') or '').strip()
+        if track_artist:
+            expected_artist = track_artist
+        else:
+            file_artist = None
+            try:
+                from core.tag_writer import read_file_tags
+                file_tags = read_file_tags(fpath)
+                file_artist = (file_tags.get('artist') or '').strip() or None
+            except Exception as e:
+                logger.debug("file-tag artist read failed for %s: %s", fname, e)
+            expected_artist = (
+                file_artist
+                or (expected.get('album_artist') or '').strip()
+                or expected['artist']
+            )
+
         # Normalize and compare
         norm_expected_title = _normalize(expected['title'])
         norm_aid_title = _normalize(aid_title)
-        norm_expected_artist = _normalize(expected['artist'])
+        norm_expected_artist = _normalize(expected_artist)
         norm_aid_artist = _normalize(aid_artist)
 
         title_sim = SequenceMatcher(None, norm_expected_title, norm_aid_title).ratio()
@@ -216,7 +244,7 @@ class AcoustIDScannerJob(RepairJob):
             from core.matching.artist_aliases import artist_names_match
 
             _, artist_sim = artist_names_match(
-                expected['artist'],
+                expected_artist,
                 aid_artist,
                 threshold=artist_threshold,
             )
@@ -243,14 +271,14 @@ class AcoustIDScannerJob(RepairJob):
                 file_path=fpath,
                 title=f'Wrong download: "{expected["title"]}" is actually "{aid_title}"',
                 description=(
-                    f'Expected "{expected["title"]}" by {expected["artist"]}, '
+                    f'Expected "{expected["title"]}" by {expected_artist}, '
                     f'but audio fingerprint matches "{aid_title}" by {aid_artist} '
                     f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
                     f'artist match: {artist_sim:.0%})'
                 ),
                 details={
                     'expected_title': expected['title'],
-                    'expected_artist': expected['artist'],
+                    'expected_artist': expected_artist,
                     'acoustid_title': aid_title,
                     'acoustid_artist': aid_artist,
                     'fingerprint_score': round(best_score, 3),
@@ -284,11 +312,21 @@ class AcoustIDScannerJob(RepairJob):
             # import path when different from album artist) and fall
             # back to the album artist only when the per-track column
             # is NULL or empty (legacy rows / single-artist albums).
+            # Load `track_artist` (raw, may be empty) AND `album_artist`
+            # separately so `_scan_file` can tell the difference between
+            # 'DB has a curated per-track value' and 'DB fell back to
+            # album artist'. The COALESCE'd `artist` field is kept as a
+            # convenience for the existing `expected['artist']` consumers
+            # that want a single resolved value, but the resolution
+            # priority that actually drives the comparison is reproduced
+            # in `_scan_file`: track_artist → file tag → album_artist.
             cursor.execute("""
                 SELECT t.id, t.title,
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
-                       al.title AS album_title, al.thumb_url, ar.thumb_url
+                       al.title AS album_title, al.thumb_url, ar.thumb_url,
+                       NULLIF(t.track_artist, '') AS track_artist,
+                       ar.name AS album_artist
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -312,6 +350,8 @@ class AcoustIDScannerJob(RepairJob):
                     'album_title': row[5] or '',
                     'album_thumb_url': row[6] or None,
                     'artist_thumb_url': row[7] or None,
+                    'track_artist': row[8] or '',  # raw (may be empty)
+                    'album_artist': row[9] or '',
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)

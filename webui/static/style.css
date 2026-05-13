@@ -15537,6 +15537,24 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
 }
 
+/* Sync mode picker — Replace vs Append, sits left of the Sync button.
+   Sized to match the modal-btn height so it doesn't break footer alignment. */
+.playlist-modal-sync-mode {
+    background: #2a2a2a;
+    color: #ffffff;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    margin-right: 4px;
+}
+
+.playlist-modal-sync-mode:hover {
+    border-color: #777777;
+    background: #333333;
+}
+
 .playlist-modal-btn-tertiary {
     background: #404040;
     color: #ffffff;

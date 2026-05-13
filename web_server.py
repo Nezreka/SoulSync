@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.0"
+_SOULSYNC_BASE_VERSION = "2.5.1"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -9270,14 +9270,37 @@ def download_discography(artist_id):
 
         from database.music_database import MusicDatabase
         from core.metadata.album_tracks import get_artist_album_tracks
+        from core.metadata.discography_filters import (
+            content_type_skip_reason,
+            load_global_content_filter_settings,
+            track_already_owned,
+            track_artist_matches,
+        )
         db = MusicDatabase()
         profile_id = get_current_profile_id()
+        # Honor the same content-type filters the watchlist scanner uses
+        # (issue #559). One read at the top — settings don't change
+        # mid-stream and the four bool reads aren't worth re-running per
+        # track.
+        content_settings = load_global_content_filter_settings(config_manager)
+        # Library-ownership check uses the active media server so the
+        # match is scoped to the same source whose tracks the user can
+        # actually see in their library. None falls through to a
+        # cross-server search inside check_track_exists.
+        active_server = None
+        try:
+            active_server = config_manager.get_active_media_server()
+        except Exception as e:
+            logger.debug("active media server lookup failed: %s", e)
 
         total_added = 0
         total_skipped = 0
+        total_skipped_artist = 0
+        total_skipped_filter = 0
+        total_skipped_owned = 0
 
         def generate_ndjson():
-            nonlocal total_added, total_skipped
+            nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
 
             for entry in album_entries:
                 album_id = entry['id']
@@ -9325,6 +9348,9 @@ def download_discography(artist_id):
 
                     added = 0
                     skipped = 0
+                    skipped_artist = 0
+                    skipped_filter = 0
+                    skipped_owned = 0
 
                     for track in tracks:
                         track_name = track.get('name', '')
@@ -9332,6 +9358,33 @@ def download_discography(artist_id):
                             continue
                         track_artists = track.get('artists', []) or album_artists
                         track_id = track.get('id', '')
+
+                        # Issue #559: drop tracks where the requested
+                        # artist isn't in the track's artists list
+                        # (cross-artist compilation / appears_on
+                        # contamination). Keeps features.
+                        if not track_artist_matches(track_artists, hint_artist):
+                            skipped_artist += 1
+                            continue
+
+                        # Issue #559: honor watchlist global content-type
+                        # filters (live / remix / acoustic / instrumental)
+                        # for one-off discography downloads too — same
+                        # contract as the discography backfill repair job.
+                        skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
+                        if skip_reason:
+                            skipped_filter += 1
+                            continue
+
+                        # Skowl (Discord): clicking Download Discography
+                        # twice re-queued every track because add_to_wishlist
+                        # only dedups against the wishlist, not the library.
+                        # Same library-ownership check the discography
+                        # backfill repair job uses. Format-agnostic so
+                        # Blasphemy mode (FLAC→MP3) doesn't false-miss.
+                        if track_already_owned(db, track_name, hint_artist, album_name, active_server):
+                            skipped_owned += 1
+                            continue
 
                         spotify_track_data = {
                             'id': track_id,
@@ -9379,8 +9432,14 @@ def download_discography(artist_id):
 
                     total_added += added
                     total_skipped += skipped
+                    total_skipped_artist += skipped_artist
+                    total_skipped_filter += skipped_filter
+                    total_skipped_owned += skipped_owned
                     logger.warning(
-                        f"[Discography] {album_name} ({resolved_source}): {added} added, {skipped} skipped"
+                        f"[Discography] {album_name} ({resolved_source}): {added} added, "
+                        f"{skipped} skipped (wishlist), {skipped_artist} skipped (artist mismatch), "
+                        f"{skipped_filter} skipped (content filter), "
+                        f"{skipped_owned} skipped (already in library)"
                     )
                     yield json.dumps({
                         "album_id": album_id,
@@ -9388,6 +9447,9 @@ def download_discography(artist_id):
                         "status": "done",
                         "tracks_added": added,
                         "tracks_skipped": skipped,
+                        "tracks_skipped_artist": skipped_artist,
+                        "tracks_skipped_filter": skipped_filter,
+                        "tracks_skipped_owned": skipped_owned,
                         "tracks_total": len(tracks),
                         "source": resolved_source,
                     }) + '\n'
@@ -9402,12 +9464,17 @@ def download_discography(artist_id):
 
             logger.warning(
                 f"[Discography] Complete for {artist_name}: {total_added} tracks added, "
-                f"{total_skipped} skipped across {len(album_entries)} albums"
+                f"{total_skipped} skipped (wishlist), {total_skipped_artist} skipped (artist mismatch), "
+                f"{total_skipped_filter} skipped (content filter), "
+                f"{total_skipped_owned} skipped (already in library) across {len(album_entries)} albums"
             )
             yield json.dumps({
                 "status": "complete",
                 "total_added": total_added,
                 "total_skipped": total_skipped,
+                "total_skipped_artist": total_skipped_artist,
+                "total_skipped_filter": total_skipped_filter,
+                "total_skipped_owned": total_skipped_owned,
                 "total_albums": len(album_entries),
             }) + '\n'
 
@@ -20130,6 +20197,81 @@ def get_discover_album(source, album_id):
                 'source': fallback_source,
             })
 
+        elif source == 'tidal':
+            # Tidal albums from Your Albums (sourced via the V2 user-
+            # collection endpoint). Two-call resolution: get_album for
+            # metadata, get_album_tracks for the cursor-paginated
+            # tracklist. `get_album_tracks` returns `Track` objects
+            # with `track_number` / `disc_number` annotated so the
+            # download modal renders in album order across multi-disc
+            # releases. Serialise to the same shape Spotify/Deezer
+            # return so the frontend track-mapping stays uniform.
+            if not tidal_client or not tidal_client.is_authenticated():
+                return jsonify({"error": "Tidal not authenticated"}), 401
+
+            album_meta = tidal_client.get_album(album_id)
+            tidal_tracks = tidal_client.get_album_tracks(album_id)
+
+            if not album_meta and not tidal_tracks:
+                return jsonify({"error": "Tidal album not found"}), 404
+
+            album_name = (album_meta or {}).get('title') or request.args.get('name', '')
+            release_date = (album_meta or {}).get('releaseDate', '')
+            total_tracks = (album_meta or {}).get('numberOfItems') or len(tidal_tracks)
+            album_artist_name = request.args.get('artist', '')
+
+            # Build cover image URL from the album metadata. Tidal
+            # exposes cover art via the `coverArt` relationship which
+            # `get_album` doesn't fetch (it's a one-shot attributes
+            # call). Best-effort: request it inline.
+            cover_url = ''
+            try:
+                cover_resp = tidal_client.session.get(
+                    f"{tidal_client.base_url}/albums/{album_id}",
+                    params={'countryCode': 'US', 'include': 'coverArt'},
+                    headers={'accept': 'application/vnd.api+json'},
+                    timeout=10,
+                )
+                if cover_resp.status_code == 200:
+                    payload = cover_resp.json()
+                    _, artworks = tidal_client._build_included_maps(payload.get('included', []))
+                    cover_rel = (payload.get('data') or {}).get('relationships', {}).get('coverArt', {})
+                    cover_url = tidal_client._first_artwork_url(cover_rel, artworks) or ''
+            except Exception as e:
+                logger.debug(f"Tidal cover-art resolve failed for album {album_id}: {e}")
+
+            tracks_out = []
+            for t in tidal_tracks:
+                tracks_out.append({
+                    'id': t.id,
+                    'name': t.name,
+                    'artists': [{'name': a} for a in (t.artists or [])],
+                    'duration_ms': t.duration_ms,
+                    'track_number': getattr(t, 'track_number', 0),
+                    'disc_number': getattr(t, 'disc_number', 1),
+                })
+
+            # Album-level artist name preference: explicit ?artist=
+            # query (passed by frontend with the saved-album row) wins
+            # over guessing from the first track. The saved-album row
+            # already resolved the canonical artist via the V2
+            # collection endpoint.
+            if not album_artist_name and tidal_tracks:
+                first_artists = tidal_tracks[0].artists or []
+                album_artist_name = first_artists[0] if first_artists else ''
+
+            return jsonify({
+                'id': album_id,
+                'name': album_name or 'Unknown Album',
+                'artists': [{'name': album_artist_name}] if album_artist_name else [],
+                'release_date': release_date,
+                'total_tracks': total_tracks,
+                'album_type': 'album',
+                'images': [{'url': cover_url}] if cover_url else [],
+                'tracks': tracks_out,
+                'source': 'tidal',
+            })
+
         elif source == 'discogs':
             # Discogs release detail. release_id comes from the Your
             # Albums Discogs source. Tracklist needs normalizing —
@@ -23836,10 +23978,11 @@ def _build_sync_deps():
     )
 
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url=''):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', sync_mode='replace'):
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
+        sync_mode=sync_mode,
     )
 
 
@@ -23855,14 +23998,22 @@ def start_playlist_sync():
     playlist_name = data.get('playlist_name')
     tracks_json = data.get('tracks') # Pass the full track list
     playlist_image_url = data.get('image_url', '')
+    # 'replace' (default) deletes the server playlist and recreates it from
+    # the source. 'append' preserves user-added tracks already on the server
+    # playlist — only adds tracks that aren't there yet. Per-server clients
+    # implement append via native add APIs (Plex addItems, Jellyfin POST
+    # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
+    sync_mode = data.get('sync_mode', 'replace')
+    if sync_mode not in ('replace', 'append'):
+        sync_mode = 'replace'
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
 
     # Add activity for sync start
-    add_activity_item("", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
+    add_activity_item("", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
-    logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks")
+    logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks (mode: {sync_mode})")
     logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
     with sync_lock:
@@ -23875,7 +24026,7 @@ def start_playlist_sync():
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url)
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url, sync_mode)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         logger.info(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
@@ -34541,14 +34692,35 @@ def auto_import_approve_all():
 
 @app.route('/api/auto-import/clear-completed', methods=['POST'])
 def auto_import_clear_completed():
-    """Remove completed/imported items from history."""
+    """Remove completed/imported items from history.
+
+    `processing` rows are included so zombie entries (server restarted
+    mid-import → `_record_in_progress` row never got finalized) get
+    swept. Live in-flight imports are protected by intersecting against
+    `_snapshot_active()` — anything currently registered in the worker's
+    `_active_imports` map keeps its row. `pending_review` is left out so
+    user still has to approve/reject those explicitly.
+    """
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
     try:
+        active_hashes = {e['folder_hash'] for e in auto_import_worker._snapshot_active()}
         db = get_database()
         with db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM auto_import_history WHERE status IN ('completed', 'approved', 'failed', 'needs_identification', 'rejected')")
+            base_sql = (
+                "DELETE FROM auto_import_history "
+                "WHERE status IN ('completed', 'approved', 'failed', "
+                "'needs_identification', 'rejected', 'processing')"
+            )
+            if active_hashes:
+                placeholders = ','.join('?' * len(active_hashes))
+                cursor.execute(
+                    f"{base_sql} AND folder_hash NOT IN ({placeholders})",
+                    tuple(active_hashes),
+                )
+            else:
+                cursor.execute(base_sql)
             count = cursor.rowcount
             conn.commit()
         return jsonify({"success": True, "count": count})
