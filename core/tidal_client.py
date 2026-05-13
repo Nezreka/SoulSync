@@ -1076,6 +1076,121 @@ class TidalClient:
             return None
 
     @rate_limited
+    def get_album_tracks(self, album_id: str, limit: Optional[int] = None) -> List[Track]:
+        """Fetch every track on an album with full artist + name + duration
+        metadata hydrated.
+
+        Two-phase: walk `/v2/albums/{id}/relationships/items?include=items`
+        cursor chain to enumerate track IDs (with their position metadata —
+        `meta.trackNumber` + `meta.volumeNumber` for multi-disc), then
+        feed the IDs through the existing `_get_tracks_batch` helper for
+        artist + album-name resolution.
+
+        Returns a list of `Track` dataclasses with `track_number` and
+        `disc_number` attached as ad-hoc attributes so callers that need
+        per-position info (download modal, virtual playlist build) can
+        read them. Backend `/api/discover/album/<source>/<album_id>`
+        serializes these to the same shape Spotify/Deezer return."""
+        if not self._ensure_valid_token():
+            return []
+
+        # Phase 1: enumerate track IDs + position metadata via cursor pagination.
+        # The relationship endpoint pages at 20 items by default. The `meta`
+        # dict on each ref carries `trackNumber` + `volumeNumber` (multi-disc).
+        track_meta_by_id: Dict[str, Dict[str, int]] = {}
+        track_ids: List[str] = []
+        next_path: Optional[str] = None
+
+        while True:
+            if next_path:
+                url = (next_path if next_path.startswith('http')
+                       else f"https://openapi.tidal.com/v2{next_path}")
+                params = None
+            else:
+                url = f"{self.base_url}/albums/{album_id}/relationships/items"
+                params = {'countryCode': 'US', 'include': 'items'}
+
+            try:
+                resp = self.session.get(
+                    url, params=params,
+                    headers={'accept': 'application/vnd.api+json'},
+                    timeout=15,
+                )
+            except Exception as e:
+                logger.debug(f"Tidal album-tracks page request failed: {e}")
+                break
+
+            if resp.status_code != 200:
+                if resp.status_code == 429:
+                    raise Exception("Rate limited (429) on get_album_tracks")
+                logger.debug(
+                    f"Tidal album-tracks page returned {resp.status_code}: {resp.text[:200]}"
+                )
+                break
+
+            try:
+                data = resp.json()
+            except ValueError:
+                break
+
+            for item in data.get('data', []):
+                if item.get('type') != 'tracks':
+                    continue
+                tid = item.get('id')
+                if not tid:
+                    continue
+                tid = str(tid)
+                meta = item.get('meta', {}) or {}
+                track_meta_by_id[tid] = {
+                    'track_number': int(meta.get('trackNumber') or 0),
+                    'disc_number': int(meta.get('volumeNumber') or 1),
+                }
+                track_ids.append(tid)
+                if limit is not None and len(track_ids) >= limit:
+                    break
+
+            if limit is not None and len(track_ids) >= limit:
+                break
+
+            next_path = data.get('links', {}).get('next')
+            if not next_path:
+                break
+
+            time.sleep(0.3)
+
+        if not track_ids:
+            return []
+
+        # Phase 2: batch hydrate via existing helper (artists + album names).
+        # Annotate each Track with position metadata so callers can build the
+        # per-track-number payload the download pipeline expects.
+        hydrated: List[Track] = []
+        for i in range(0, len(track_ids), self._COLLECTION_BATCH_SIZE):
+            batch_ids = track_ids[i:i + self._COLLECTION_BATCH_SIZE]
+            try:
+                batch_tracks = self._get_tracks_batch(batch_ids)
+            except Exception as e:
+                logger.debug(f"Tidal album-tracks batch hydration failed: {e}")
+                continue
+            for t in batch_tracks:
+                meta = track_meta_by_id.get(str(t.id), {})
+                t.track_number = meta.get('track_number', 0)
+                t.disc_number = meta.get('disc_number', 1)
+                hydrated.append(t)
+
+        # Tidal's relationship walk returns tracks in album order; the
+        # batch endpoint may not preserve order. Sort by (disc, track)
+        # so the modal renders the album top-down.
+        hydrated.sort(key=lambda t: (
+            getattr(t, 'disc_number', 1),
+            getattr(t, 'track_number', 0),
+        ))
+        logger.info(
+            f"Retrieved {len(hydrated)}/{len(track_ids)} tracks for Tidal album {album_id}"
+        )
+        return hydrated
+
+    @rate_limited
     def get_track(self, track_id: str) -> Optional[Dict]:
         """Get full track details by Tidal ID."""
         try:
@@ -1455,244 +1570,14 @@ class TidalClient:
             logger.error(f"Error getting Tidal user info: {e}")
             return None
 
-    def get_favorite_artists(self, limit: int = 200) -> list:
-        """Fetch user's favorite artists from Tidal.
-        Returns list of dicts with tidal_id, name, image_url."""
-        try:
-            if not self._ensure_valid_token():
-                logger.debug("Tidal not authenticated — cannot fetch favorites")
-                return []
-
-            user_id, api_version = self._get_user_id()
-            if not user_id:
-                logger.warning("Could not get Tidal user ID for favorites")
-                return []
-
-            artists = []
-
-            if api_version == 'v2':
-                # V2 API: /v2/favorites with filter
-                offset = 0
-                while len(artists) < limit:
-                    try:
-                        headers = self.session.headers.copy()
-                        headers['accept'] = 'application/vnd.api+json'
-                        resp = requests.get(
-                            f"{self.base_url}/favorites",
-                            params={
-                                'countryCode': 'US',
-                                'filter[user.id]': user_id,
-                                'filter[type]': 'ARTISTS',
-                                'include': 'artists',
-                                'page[limit]': min(50, limit - len(artists)),
-                                'page[offset]': offset
-                            },
-                            headers=headers, timeout=15
-                        )
-                        if resp.status_code != 200:
-                            logger.debug(f"Tidal V2 favorites returned {resp.status_code}, trying V1")
-                            break
-                        data = resp.json()
-                        # Parse included artists
-                        included = data.get('included', [])
-                        if not included:
-                            items = data.get('data', [])
-                            if not items:
-                                break
-                            # Try to extract from data items directly
-                            for item in items:
-                                attrs = item.get('attributes', {})
-                                name = attrs.get('name', '')
-                                if name:
-                                    img = None
-                                    img_data = item.get('relationships', {}).get('image', {}).get('data', {})
-                                    if isinstance(img_data, dict) and img_data.get('id'):
-                                        img = f"https://resources.tidal.com/images/{img_data['id'].replace('-', '/')}/750x750.jpg"
-                                    artists.append({'tidal_id': item.get('id', ''), 'name': name, 'image_url': img})
-                        else:
-                            for inc in included:
-                                if inc.get('type') == 'artists':
-                                    attrs = inc.get('attributes', {})
-                                    img = None
-                                    img_rel = inc.get('relationships', {}).get('image', {}).get('data', {})
-                                    if isinstance(img_rel, dict) and img_rel.get('id'):
-                                        img = f"https://resources.tidal.com/images/{img_rel['id'].replace('-', '/')}/750x750.jpg"
-                                    artists.append({
-                                        'tidal_id': str(inc.get('id', '')),
-                                        'name': attrs.get('name', ''),
-                                        'image_url': img,
-                                    })
-                        if not data.get('links', {}).get('next'):
-                            break
-                        offset += 50
-                        import time
-                        time.sleep(0.5)
-                    except Exception as e:
-                        logger.debug(f"Tidal V2 favorites error: {e}")
-                        break
-
-            # Fallback to V1 API if V2 returned nothing
-            if not artists:
-                try:
-                    offset = 0
-                    while len(artists) < limit:
-                        resp = self.session.get(
-                            f"{self.alt_base_url}/users/{user_id}/favorites/artists",
-                            params={'countryCode': 'US', 'limit': min(50, limit - len(artists)), 'offset': offset},
-                            timeout=15
-                        )
-                        if resp.status_code != 200:
-                            logger.debug(f"Tidal V1 favorites returned {resp.status_code}")
-                            break
-                        data = resp.json()
-                        items = data.get('items', [])
-                        if not items:
-                            break
-                        for item in items:
-                            a = item.get('item', item)
-                            img_id = (a.get('picture') or '').replace('-', '/')
-                            img = f"https://resources.tidal.com/images/{img_id}/750x750.jpg" if img_id else None
-                            artists.append({
-                                'tidal_id': str(a.get('id', '')),
-                                'name': a.get('name', ''),
-                                'image_url': img,
-                            })
-                        total = data.get('totalNumberOfItems', 0)
-                        offset += len(items)
-                        if offset >= total:
-                            break
-                        import time
-                        time.sleep(0.5)
-                except Exception as e:
-                    logger.debug(f"Tidal V1 favorites error: {e}")
-
-            logger.info(f"Retrieved {len(artists)} favorite artists from Tidal")
-            return artists
-        except Exception as e:
-            logger.error(f"Error fetching Tidal favorite artists: {e}")
-            return []
-
-    def get_favorite_albums(self, limit: int = 200) -> list:
-        """Fetch user's favorite albums from Tidal.
-        Returns list of dicts with tidal_id, album_name, artist_name, image_url, release_date, total_tracks."""
-        try:
-            if not self._ensure_valid_token():
-                logger.debug("Tidal not authenticated — cannot fetch favorite albums")
-                return []
-
-            user_id, api_version = self._get_user_id()
-            if not user_id:
-                logger.warning("Could not get Tidal user ID for favorite albums")
-                return []
-
-            albums = []
-
-            if api_version == 'v2':
-                offset = 0
-                while len(albums) < limit:
-                    try:
-                        headers = self.session.headers.copy()
-                        headers['accept'] = 'application/vnd.api+json'
-                        resp = requests.get(
-                            f"{self.base_url}/favorites",
-                            params={
-                                'countryCode': 'US',
-                                'filter[user.id]': user_id,
-                                'filter[type]': 'ALBUMS',
-                                'include': 'albums',
-                                'page[limit]': min(50, limit - len(albums)),
-                                'page[offset]': offset
-                            },
-                            headers=headers, timeout=15
-                        )
-                        if resp.status_code != 200:
-                            logger.debug(f"Tidal V2 favorite albums returned {resp.status_code}, trying V1")
-                            break
-                        data = resp.json()
-                        included = data.get('included', [])
-                        items = included if included else data.get('data', [])
-                        if not items:
-                            break
-                        for item in items:
-                            if included and item.get('type') not in ('albums', 'album'):
-                                continue
-                            attrs = item.get('attributes', {})
-                            title = attrs.get('title', '')
-                            if not title:
-                                continue
-                            img = None
-                            img_rel = item.get('relationships', {}).get('image', {}).get('data', {})
-                            if isinstance(img_rel, dict) and img_rel.get('id'):
-                                img = f"https://resources.tidal.com/images/{img_rel['id'].replace('-', '/')}/750x750.jpg"
-                            artist_name = ''
-                            artist_rel = attrs.get('artists', [{}])
-                            if artist_rel and isinstance(artist_rel, list):
-                                artist_name = artist_rel[0].get('name', '') if isinstance(artist_rel[0], dict) else ''
-                            albums.append({
-                                'tidal_id': str(item.get('id', '')),
-                                'album_name': title,
-                                'artist_name': artist_name,
-                                'image_url': img,
-                                'release_date': attrs.get('releaseDate', ''),
-                                'total_tracks': attrs.get('numberOfTracks', 0),
-                            })
-                        if not data.get('links', {}).get('next'):
-                            break
-                        offset += 50
-                        import time
-                        time.sleep(0.5)
-                    except Exception as e:
-                        logger.debug(f"Tidal V2 favorite albums error: {e}")
-                        break
-
-            # Fallback to V1 API
-            if not albums:
-                try:
-                    offset = 0
-                    while len(albums) < limit:
-                        resp = self.session.get(
-                            f"{self.alt_base_url}/users/{user_id}/favorites/albums",
-                            params={'countryCode': 'US', 'limit': min(50, limit - len(albums)), 'offset': offset},
-                            timeout=15
-                        )
-                        if resp.status_code != 200:
-                            logger.debug(f"Tidal V1 favorite albums returned {resp.status_code}")
-                            break
-                        data = resp.json()
-                        items = data.get('items', [])
-                        if not items:
-                            break
-                        for item in items:
-                            a = item.get('item', item)
-                            img_id = (a.get('cover') or '').replace('-', '/')
-                            img = f"https://resources.tidal.com/images/{img_id}/750x750.jpg" if img_id else None
-                            artist_name = ''
-                            if isinstance(a.get('artist'), dict):
-                                artist_name = a['artist'].get('name', '')
-                            elif isinstance(a.get('artists'), list) and a['artists']:
-                                artist_name = a['artists'][0].get('name', '')
-                            albums.append({
-                                'tidal_id': str(a.get('id', '')),
-                                'album_name': a.get('title', ''),
-                                'artist_name': artist_name,
-                                'image_url': img,
-                                'release_date': a.get('releaseDate', ''),
-                                'total_tracks': a.get('numberOfTracks', 0),
-                            })
-                        total = data.get('totalNumberOfItems', 0)
-                        offset += len(items)
-                        if offset >= total:
-                            break
-                        import time
-                        time.sleep(0.5)
-                except Exception as e:
-                    logger.debug(f"Tidal V1 favorite albums error: {e}")
-
-            logger.info(f"Retrieved {len(albums)} favorite albums from Tidal")
-            return albums
-        except Exception as e:
-            logger.error(f"Error fetching Tidal favorite albums: {e}")
-            return []
+    # `get_favorite_artists` and `get_favorite_albums` were defined here
+    # against the legacy `/v2/favorites?filter[type]=...` endpoint with a
+    # V1 fallback. Both paths are dead in 2026: V2 returns 404 for
+    # personal favorites (it's scoped to third-party-app-created
+    # collections only), and V1 returns 403 because modern OAuth tokens
+    # carry `collection.read` instead of the legacy `r_usr` scope V1
+    # demands. Replaced by the V2 user-collection endpoints below — see
+    # the "Favorited albums + artists" section near the end of this class.
 
     # ------------------------------------------------------------------
     # User Collection ("Favorite Tracks" — Tidal calls this "My Collection")
@@ -1732,15 +1617,23 @@ class TidalClient:
     # a user-actionable hint instead of silently hiding the row.
 
     _COLLECTION_TRACKS_PATH = "userCollectionTracks/me/relationships/items"
+    _COLLECTION_ALBUMS_PATH = "userCollectionAlbums/me/relationships/items"
+    _COLLECTION_ARTISTS_PATH = "userCollectionArtists/me/relationships/items"
     _COLLECTION_BATCH_SIZE = 20  # Tidal `filter[id]` page cap
 
     @rate_limited
-    def _iter_collection_track_ids(self, max_ids: Optional[int] = None) -> List[str]:
-        """Walk the cursor-paginated collection endpoint and return the
-        list of track IDs in the user's Favorite Tracks.
+    def _iter_collection_resource_ids(self, path: str, expected_type: str,
+                                      max_ids: Optional[int] = None) -> List[str]:
+        """Walk a cursor-paginated collection endpoint and return the
+        list of resource IDs (tracks / albums / artists).
 
-        ``max_ids`` caps the walk early — used by callers that only
-        need a count or a partial list. Returns ``[]`` when not
+        Generic across all three favorited-resource endpoints — the
+        only differences between them are the path segment and the
+        ``type`` field on each ``data[]`` entry. Pagination, auth,
+        scope-failure detection, and the diagnostic logging are
+        identical.
+
+        ``max_ids`` caps the walk early. Returns ``[]`` when not
         authenticated or when the endpoint refuses (e.g. token without
         ``collection.read`` scope). On 401/403 also flips
         ``self._collection_needs_reconnect = True`` so the caller can
@@ -1750,10 +1643,10 @@ class TidalClient:
         self._collection_needs_reconnect = False
 
         if not self._ensure_valid_token():
-            logger.debug("Tidal not authenticated — cannot fetch collection tracks")
+            logger.debug("Tidal not authenticated — cannot fetch collection %s", expected_type)
             return []
 
-        track_ids: List[str] = []
+        ids: List[str] = []
         next_path: Optional[str] = None
 
         while True:
@@ -1763,7 +1656,7 @@ class TidalClient:
                 url = next_path if next_path.startswith('http') else f"https://openapi.tidal.com/v2{next_path}"
                 params = None
             else:
-                url = f"{self.base_url}/{self._COLLECTION_TRACKS_PATH}"
+                url = f"{self.base_url}/{path}"
                 params = {
                     'countryCode': 'US',
                     'locale': 'en-US',
@@ -1811,13 +1704,13 @@ class TidalClient:
                 break
 
             for item in data.get('data', []):
-                if item.get('type') != 'tracks':
+                if item.get('type') != expected_type:
                     continue
-                tid = item.get('id')
-                if tid:
-                    track_ids.append(str(tid))
-                    if max_ids is not None and len(track_ids) >= max_ids:
-                        return track_ids
+                rid = item.get('id')
+                if rid:
+                    ids.append(str(rid))
+                    if max_ids is not None and len(ids) >= max_ids:
+                        return ids
 
             next_path = data.get('links', {}).get('next')
             if not next_path:
@@ -1825,7 +1718,25 @@ class TidalClient:
 
             time.sleep(0.3)  # Cursor pagination courtesy delay
 
-        return track_ids
+        return ids
+
+    def _iter_collection_track_ids(self, max_ids: Optional[int] = None) -> List[str]:
+        """Favorited tracks — thin wrapper over the generic walker."""
+        return self._iter_collection_resource_ids(
+            self._COLLECTION_TRACKS_PATH, 'tracks', max_ids,
+        )
+
+    def _iter_collection_album_ids(self, max_ids: Optional[int] = None) -> List[str]:
+        """Favorited albums — thin wrapper over the generic walker."""
+        return self._iter_collection_resource_ids(
+            self._COLLECTION_ALBUMS_PATH, 'albums', max_ids,
+        )
+
+    def _iter_collection_artist_ids(self, max_ids: Optional[int] = None) -> List[str]:
+        """Favorited artists — thin wrapper over the generic walker."""
+        return self._iter_collection_resource_ids(
+            self._COLLECTION_ARTISTS_PATH, 'artists', max_ids,
+        )
 
     def collection_needs_reconnect(self) -> bool:
         """True when the most recent collection fetch hit a 401/403 —
@@ -1877,6 +1788,224 @@ class TidalClient:
             return hydrated
         except Exception as e:
             logger.error(f"Error fetching Tidal collection tracks: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Favorited albums + artists — V2 collection endpoints
+    # ------------------------------------------------------------------
+    #
+    # Same problem the tracks side hit on issue #502: the prior
+    # `/v2/favorites?filter[type]=ALBUMS|ARTISTS` endpoints are
+    # deprecated (404) and the V1 fallback (`/v1/users/<id>/favorites/
+    # albums|artists`) returns 403 because modern OAuth tokens with
+    # `collection.read` scope don't have the legacy `r_usr` scope V1
+    # requires. Discord-reported symptom: Discover → Your Albums (and
+    # Your Artists) section shows nothing for Tidal users regardless
+    # of how many albums/artists they've favorited.
+    #
+    # Fix mirrors the tracks path:
+    #   1) Cursor-walk `/v2/userCollection{Albums|Artists}/me/relationships/items`
+    #      via `_iter_collection_album_ids` / `_iter_collection_artist_ids`
+    #      (lifted into the generic `_iter_collection_resource_ids` helper).
+    #   2) Batch-hydrate via `/v2/{albums|artists}?filter[id]=...&include=...`
+    #      with single-request fan-out (artists+coverArt for albums,
+    #      profileArt for artists). Parses JSON:API `included[]` for
+    #      artist names + image URLs.
+    #
+    # Public surface preserves the existing return shape — list of
+    # dicts matching what `database.upsert_liked_album` /
+    # `upsert_liked_artist` consume — so web_server.py callers
+    # (`/api/discover/your-albums-fetch` and equivalent) stay
+    # byte-identical.
+
+    @rate_limited
+    def _get_albums_batch(self, album_ids: List[str]) -> List[Dict[str, Any]]:
+        """Batch-fetch album metadata + cover art + artist names in
+        one request via JSON:API extended-include semantics. Returns
+        list of dicts matching `database.upsert_liked_album` kwargs."""
+        if not album_ids:
+            return []
+        try:
+            params = {
+                'countryCode': 'US',
+                'include': 'artists,coverArt',
+                'filter[id]': ','.join(album_ids),
+            }
+            headers = {'accept': 'application/vnd.api+json'}
+            resp = self.session.get(
+                f"{self.base_url}/albums",
+                params=params, headers=headers, timeout=15,
+            )
+            if resp.status_code != 200:
+                logger.debug(
+                    f"Tidal albums batch returned {resp.status_code}: {resp.text[:200]}"
+                )
+                return []
+
+            data = resp.json()
+            artists_by_id, artworks_by_id = self._build_included_maps(data.get('included', []))
+
+            results: List[Dict[str, Any]] = []
+            for item in data.get('data', []):
+                if item.get('type') != 'albums':
+                    continue
+                attrs = item.get('attributes', {})
+                rels = item.get('relationships', {})
+                results.append({
+                    'tidal_id': str(item.get('id', '')),
+                    'album_name': attrs.get('title', '') or '',
+                    'artist_name': self._first_artist_name(rels, artists_by_id),
+                    'image_url': self._first_artwork_url(rels.get('coverArt', {}), artworks_by_id),
+                    'release_date': attrs.get('releaseDate', '') or '',
+                    'total_tracks': int(attrs.get('numberOfItems') or 0),
+                })
+            return results
+        except Exception as e:
+            logger.debug(f"Tidal _get_albums_batch error: {e}")
+            return []
+
+    @rate_limited
+    def _get_artists_batch(self, artist_ids: List[str]) -> List[Dict[str, Any]]:
+        """Batch-fetch artist metadata + profile image. Returns list
+        of dicts matching the prior `get_favorite_artists` shape
+        (`tidal_id`, `name`, `image_url`)."""
+        if not artist_ids:
+            return []
+        try:
+            params = {
+                'countryCode': 'US',
+                'include': 'profileArt',
+                'filter[id]': ','.join(artist_ids),
+            }
+            headers = {'accept': 'application/vnd.api+json'}
+            resp = self.session.get(
+                f"{self.base_url}/artists",
+                params=params, headers=headers, timeout=15,
+            )
+            if resp.status_code != 200:
+                logger.debug(
+                    f"Tidal artists batch returned {resp.status_code}: {resp.text[:200]}"
+                )
+                return []
+
+            data = resp.json()
+            _, artworks_by_id = self._build_included_maps(data.get('included', []))
+
+            results: List[Dict[str, Any]] = []
+            for item in data.get('data', []):
+                if item.get('type') != 'artists':
+                    continue
+                attrs = item.get('attributes', {})
+                rels = item.get('relationships', {})
+                results.append({
+                    'tidal_id': str(item.get('id', '')),
+                    'name': attrs.get('name', '') or '',
+                    'image_url': self._first_artwork_url(rels.get('profileArt', {}), artworks_by_id),
+                })
+            return results
+        except Exception as e:
+            logger.debug(f"Tidal _get_artists_batch error: {e}")
+            return []
+
+    @staticmethod
+    def _build_included_maps(included: List[Dict[str, Any]]):
+        """Index a JSON:API `included[]` array by resource type so the
+        per-resource lookup in batch-hydrate is O(1) per relationship
+        ref rather than O(n)."""
+        artists_by_id: Dict[str, Dict[str, Any]] = {}
+        artworks_by_id: Dict[str, Dict[str, Any]] = {}
+        for inc in included:
+            inc_id = str(inc.get('id', ''))
+            if not inc_id:
+                continue
+            inc_type = inc.get('type')
+            if inc_type == 'artists':
+                artists_by_id[inc_id] = inc
+            elif inc_type == 'artworks':
+                artworks_by_id[inc_id] = inc
+        return artists_by_id, artworks_by_id
+
+    @staticmethod
+    def _first_artist_name(relationships: Dict[str, Any],
+                           artists_by_id: Dict[str, Dict[str, Any]]) -> str:
+        """Resolve the primary artist name from a relationships block
+        + included-artists map. Returns '' if not resolvable so the
+        upsert path doesn't trip on None."""
+        artist_refs = relationships.get('artists', {}).get('data', [])
+        if not artist_refs:
+            return ''
+        first_id = str(artist_refs[0].get('id', ''))
+        artist_obj = artists_by_id.get(first_id, {})
+        return artist_obj.get('attributes', {}).get('name', '') or ''
+
+    @staticmethod
+    def _first_artwork_url(artwork_relationship: Dict[str, Any],
+                           artworks_by_id: Dict[str, Dict[str, Any]]) -> Optional[str]:
+        """Resolve the largest cover/profile image URL from an artwork
+        relationship + included-artworks map. Tidal returns files
+        largest-first so picking files[0] gets the highest-resolution
+        variant (typically 1280×1280)."""
+        refs = artwork_relationship.get('data', [])
+        if not refs:
+            return None
+        first_id = str(refs[0].get('id', ''))
+        artwork = artworks_by_id.get(first_id, {})
+        files = artwork.get('attributes', {}).get('files', [])
+        if not files:
+            return None
+        return files[0].get('href')
+
+    def get_favorite_albums(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Fetch user's favorited albums via the V2 user-collection
+        endpoint. Replaces the prior `/v2/favorites` + V1-fallback
+        path which is now dead (V2 endpoint deprecated, V1 returns
+        403 for modern OAuth tokens lacking `r_usr` scope).
+
+        Returns list of dicts matching `database.upsert_liked_album`
+        kwargs — the discover.py 'Your Albums' aggregator iterates
+        these and writes them to the liked_albums table."""
+        try:
+            album_ids = self._iter_collection_album_ids(max_ids=limit)
+            if not album_ids:
+                return []
+
+            results: List[Dict[str, Any]] = []
+            for i in range(0, len(album_ids), self._COLLECTION_BATCH_SIZE):
+                batch = album_ids[i:i + self._COLLECTION_BATCH_SIZE]
+                results.extend(self._get_albums_batch(batch))
+
+            logger.info(
+                f"Retrieved {len(results)}/{len(album_ids)} favorite albums from Tidal"
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching Tidal favorite albums: {e}")
+            return []
+
+    def get_favorite_artists(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Fetch user's favorited artists via the V2 user-collection
+        endpoint. Replaces the prior `/v2/favorites` + V1-fallback
+        path (dead for the same reason as `get_favorite_albums`).
+
+        Returns list of dicts matching the prior shape (`tidal_id`,
+        `name`, `image_url`) so web_server.py's `/api/discover/
+        your-artists-fetch` aggregator path stays byte-identical."""
+        try:
+            artist_ids = self._iter_collection_artist_ids(max_ids=limit)
+            if not artist_ids:
+                return []
+
+            results: List[Dict[str, Any]] = []
+            for i in range(0, len(artist_ids), self._COLLECTION_BATCH_SIZE):
+                batch = artist_ids[i:i + self._COLLECTION_BATCH_SIZE]
+                results.extend(self._get_artists_batch(batch))
+
+            logger.info(
+                f"Retrieved {len(results)}/{len(artist_ids)} favorite artists from Tidal"
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching Tidal favorite artists: {e}")
             return []
 
 # Global instance

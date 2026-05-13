@@ -1085,6 +1085,7 @@ async function openYourAlbumDownload(index) {
         const trySources = [];
         if (album.spotify_album_id) trySources.push(['spotify', album.spotify_album_id]);
         if (album.deezer_album_id) trySources.push(['deezer', album.deezer_album_id]);
+        if (album.tidal_album_id) trySources.push(['tidal', album.tidal_album_id]);
         if (discogsId) trySources.push(['discogs', discogsId]);
 
         for (const [src, id] of trySources) {
@@ -1283,6 +1284,13 @@ async function _yaaSourcesSave() {
 }
 
 async function downloadMissingYourAlbums() {
+    // Opens the same selectable-grid modal pattern used by Download
+    // Discography on the library page. User picks which missing albums
+    // they want, clicks Add to Wishlist, each album's tracks get
+    // resolved + added to the wishlist for the existing auto-download
+    // processor to pick up. Replaces the prior per-album direct-download
+    // loop which was silently failing — actual downloads should go
+    // through the wishlist queue, not bypass it.
     try {
         const resp = await fetch('/api/discover/your-albums?page=1&per_page=1000&status=missing');
         const data = await resp.json();
@@ -1291,50 +1299,297 @@ async function downloadMissingYourAlbums() {
             return;
         }
         const missing = data.albums.filter(a => !a.in_library);
-        if (missing.length === 0) { showToast('All albums are already in your library!', 'success'); return; }
-        if (!confirm(`Download ${missing.length} missing album${missing.length > 1 ? 's' : ''} from your saved albums?`)) return;
-        showToast(`Starting download for ${missing.length} albums...`, 'info');
-        for (let i = 0; i < missing.length; i++) {
-            const album = missing[i];
-            try {
-                showToast(`Queuing ${i + 1}/${missing.length}: ${album.album_name}`, 'info');
-                const nameParams = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
-                let albumData = null;
-                if (album.spotify_album_id) {
-                    const r = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${nameParams}`);
-                    if (r.ok) albumData = await r.json();
-                }
-                if (!albumData && album.deezer_album_id) {
-                    const r = await fetch(`/api/discover/album/deezer/${album.deezer_album_id}?${nameParams}`);
-                    if (r.ok) albumData = await r.json();
-                }
-                if (!albumData || !albumData.tracks || albumData.tracks.length === 0) continue;
-                const tracks = albumData.tracks.map(track => {
-                    let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
-                    if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
-                    return {
-                        id: track.id, name: track.name, artists,
-                        album: {
-                            id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
-                            total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
-                            images: albumData.images || []
-                        },
-                        duration_ms: track.duration_ms || 0, track_number: track.track_number || 0
-                    };
-                });
-                const virtualId = `your_albums_${album.spotify_album_id || album.deezer_album_id || i}`;
-                await openDownloadMissingModalForYouTube(virtualId, albumData.name, tracks,
-                    { name: album.artist_name, source: albumData.source || 'spotify' },
-                    {
-                        id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
-                        total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
-                        images: albumData.images || []
-                    }
-                );
-            } catch (err) { console.error(`Error queuing ${album.album_name}:`, err); }
+        if (missing.length === 0) {
+            showToast('All albums are already in your library!', 'success');
+            return;
         }
+        _openYourAlbumsBatchModal(missing);
     } catch (e) {
-        console.error('Error downloading missing your albums:', e);
+        console.error('Error loading missing your albums:', e);
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+
+// Map a Your Albums row to the single best source-id the
+// /api/artist/<id>/download-discography endpoint can resolve. Each row
+// in the missing list typically only has one populated source-id (the
+// service it was saved on), so this is just a priority pick.
+function _yourAlbumsPickSource(album) {
+    if (album.spotify_album_id) return { id: String(album.spotify_album_id), source: 'spotify' };
+    if (album.deezer_album_id) return { id: String(album.deezer_album_id), source: 'deezer' };
+    if (album.tidal_album_id) return { id: String(album.tidal_album_id), source: 'tidal' };
+    const discogsId = album.discogs_release_id || album.discogs_id;
+    if (discogsId) return { id: String(discogsId), source: 'discogs' };
+    return null;
+}
+
+
+function _openYourAlbumsBatchModal(missingAlbums) {
+    // Reuses the .discog-modal styling from the library Download
+    // Discography flow — same checkboxes, same Select All / Deselect
+    // All semantics, same footer. Single difference: each card carries
+    // its own artist+source (multi-artist) instead of all being one
+    // artist's discography.
+    const existing = document.getElementById('your-albums-batch-modal-overlay');
+    if (existing) existing.remove();
+
+    // Stash the source-id picks on the cards so the submit handler
+    // can build the per-album payload without re-mapping the array.
+    const rows = missingAlbums
+        .map((a, i) => ({ ...a, _src: _yourAlbumsPickSource(a), _index: i }))
+        .filter(a => a._src);  // Skip albums with no usable source-id
+
+    if (rows.length === 0) {
+        showToast('No missing albums have a usable source ID to resolve', 'warning');
+        return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'discog-modal-overlay';
+    overlay.id = 'your-albums-batch-modal-overlay';
+    overlay.innerHTML = `
+        <div class="discog-modal">
+            <div class="discog-modal-hero">
+                <div class="discog-modal-hero-overlay"></div>
+                <div class="discog-modal-hero-content">
+                    <h2 class="discog-modal-title">Add Missing Albums to Wishlist</h2>
+                    <p class="discog-modal-artist">${rows.length} albums missing from your library</p>
+                </div>
+                <button class="discog-modal-close" onclick="_closeYourAlbumsBatchModal()">&times;</button>
+            </div>
+            <div class="discog-filter-bar">
+                <div class="discog-filters"></div>
+                <div class="discog-select-actions">
+                    <button class="discog-select-btn" onclick="_yourAlbumsBatchSelectAll(true)">Select All</button>
+                    <button class="discog-select-btn" onclick="_yourAlbumsBatchSelectAll(false)">Deselect All</button>
+                </div>
+            </div>
+            <div class="discog-grid" id="your-albums-batch-grid">
+                ${rows.map((r, i) => _renderYourAlbumsBatchCard(r, i)).join('')}
+            </div>
+            <div class="discog-progress" id="your-albums-batch-progress" style="display:none;"></div>
+            <div class="discog-footer" id="your-albums-batch-footer">
+                <div class="discog-footer-info" id="your-albums-batch-footer-info"></div>
+                <div class="discog-footer-actions">
+                    <button class="discog-cancel-btn" onclick="_closeYourAlbumsBatchModal()">Cancel</button>
+                    <button class="discog-submit-btn" id="your-albums-batch-submit-btn">
+                        <span class="discog-submit-icon">⬇</span>
+                        <span id="your-albums-batch-submit-text">Add to Wishlist</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    // Stash row data on the overlay for the submit handler — keeps the
+    // multi-artist source info available without re-fetching.
+    overlay._yourAlbumsRows = rows;
+
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    _updateYourAlbumsBatchFooterCount();
+
+    document.getElementById('your-albums-batch-submit-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _startYourAlbumsBatchAddToWishlist();
+    });
+}
+
+
+function _renderYourAlbumsBatchCard(row, index) {
+    const albumName = row.album_name || '';
+    const artistName = row.artist_name || '';
+    const year = row.release_date ? row.release_date.substring(0, 4) : '';
+    const tracks = row.total_tracks || 0;
+    const img = row.image_url || '';
+    const src = row._src?.source || '';
+    return `
+        <label class="discog-card" data-type="album" style="animation-delay:${index * 0.03}s">
+            <input type="checkbox" class="your-albums-batch-cb"
+                   data-row-index="${row._index}" data-tracks="${tracks}" checked
+                   onchange="_updateYourAlbumsBatchFooterCount()">
+            <div class="discog-card-art">
+                ${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
+            </div>
+            <div class="discog-card-info">
+                <div class="discog-card-title">${escapeHtml(albumName)}</div>
+                <div class="discog-card-meta">${escapeHtml(artistName)}${year ? ' · ' + year : ''}${tracks ? ' · ' + tracks + ' tracks' : ''}${src ? ' · ' + src : ''}</div>
+            </div>
+            <div class="discog-card-check"></div>
+        </label>
+    `;
+}
+
+
+function _yourAlbumsBatchSelectAll(select) {
+    document.querySelectorAll('.your-albums-batch-cb').forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') cb.checked = select;
+    });
+    _updateYourAlbumsBatchFooterCount();
+}
+
+
+function _updateYourAlbumsBatchFooterCount() {
+    const checked = document.querySelectorAll('.your-albums-batch-cb:checked');
+    let releases = 0, tracks = 0;
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            releases++;
+            tracks += parseInt(cb.dataset.tracks) || 0;
+        }
+    });
+    const info = document.getElementById('your-albums-batch-footer-info');
+    const btn = document.getElementById('your-albums-batch-submit-text');
+    if (info) info.textContent = `${releases} album${releases !== 1 ? 's' : ''}${tracks ? ' · ' + tracks + ' tracks' : ''}`;
+    if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select albums';
+    const submitBtn = document.getElementById('your-albums-batch-submit-btn');
+    if (submitBtn) submitBtn.disabled = releases === 0;
+}
+
+
+function _closeYourAlbumsBatchModal() {
+    const overlay = document.getElementById('your-albums-batch-modal-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 200);
+    }
+}
+
+
+async function _startYourAlbumsBatchAddToWishlist() {
+    const overlay = document.getElementById('your-albums-batch-modal-overlay');
+    if (!overlay) return;
+    const rows = overlay._yourAlbumsRows || [];
+
+    // Collect selected row indices from the checked checkboxes.
+    const selectedRowIndices = [];
+    document.querySelectorAll('.your-albums-batch-cb:checked').forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            selectedRowIndices.push(parseInt(cb.dataset.rowIndex));
+        }
+    });
+    const selected = rows.filter(r => selectedRowIndices.includes(r._index));
+    if (selected.length === 0) return;
+
+    // Switch to progress view.
+    const grid = document.getElementById('your-albums-batch-grid');
+    const progress = document.getElementById('your-albums-batch-progress');
+    const footer = document.getElementById('your-albums-batch-footer');
+    const filterBar = overlay.querySelector('.discog-filter-bar');
+
+    if (grid) grid.style.display = 'none';
+    if (filterBar) filterBar.style.display = 'none';
+    if (progress) {
+        progress.style.display = '';
+        progress.innerHTML = '';
+    }
+
+    selected.forEach(row => {
+        const item = document.createElement('div');
+        item.className = 'discog-progress-item active';
+        item.id = `your-albums-batch-prog-${row._src.source}-${row._src.id}`;
+        item.innerHTML = `
+            <div class="discog-prog-art">${row.image_url ? `<img src="${escapeHtml(row.image_url)}">` : '🎵'}</div>
+            <div class="discog-prog-info">
+                <div class="discog-prog-title">${escapeHtml(row.album_name || '')}</div>
+                <div class="discog-prog-status">Waiting...</div>
+            </div>
+            <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
+        `;
+        progress.appendChild(item);
+    });
+
+    const submitBtn = document.getElementById('your-albums-batch-submit-btn');
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (footer) {
+        const info = document.getElementById('your-albums-batch-footer-info');
+        if (info) info.textContent = 'Processing... this may take a moment';
+    }
+
+    // Build per-album payload matching the discography endpoint contract.
+    // URL artist_id is functionally unused by the endpoint when per-album
+    // metadata is supplied — backend resolves each album through its own
+    // `source` + `artist_name`. Placeholder 'your-albums' makes the route
+    // match without picking an arbitrary library artist.
+    const albumsPayload = selected.map(r => ({
+        id: r._src.id,
+        name: r.album_name || '',
+        artist_name: r.artist_name || '',
+        source: r._src.source,
+    }));
+
+    try {
+        const response = await fetch(`/api/artist/your-albums/download-discography`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                albums: albumsPayload,
+                artist_name: 'Your Albums',
+                source: null,
+            }),
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let totalAdded = 0, totalSkipped = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+                    if (data.status === 'complete') {
+                        totalAdded = data.total_added || 0;
+                        totalSkipped = data.total_skipped || 0;
+                    } else if (data.album_id) {
+                        // Find the matching progress card — match by composite source-id
+                        // pair since the same album_id could appear across sources.
+                        const matching = selected.find(s => s._src.id === String(data.album_id));
+                        if (matching) {
+                            const item = document.getElementById(`your-albums-batch-prog-${matching._src.source}-${matching._src.id}`);
+                            if (item) {
+                                const status = item.querySelector('.discog-prog-status');
+                                const icon = item.querySelector('.discog-prog-icon');
+                                if (data.status === 'done') {
+                                    if (status) status.textContent = `${data.tracks_added || 0} added · ${data.tracks_skipped || 0} skipped`;
+                                    if (icon) icon.innerHTML = '✓';
+                                    item.classList.add('done');
+                                    item.classList.remove('active');
+                                } else if (data.status === 'error') {
+                                    if (status) status.textContent = `Error: ${data.message || 'unknown'}`;
+                                    if (icon) icon.innerHTML = '✗';
+                                    item.classList.add('error');
+                                    item.classList.remove('active');
+                                }
+                            }
+                        }
+                    }
+                } catch (parseErr) {
+                    console.debug('your-albums batch ndjson parse:', parseErr);
+                }
+            }
+        }
+
+        if (footer) {
+            const info = document.getElementById('your-albums-batch-footer-info');
+            if (info) info.textContent = `${totalAdded} tracks added to wishlist · ${totalSkipped} skipped`;
+        }
+        if (submitBtn) {
+            submitBtn.style.display = '';
+            submitBtn.disabled = true;
+            const txt = document.getElementById('your-albums-batch-submit-text');
+            if (txt) txt.textContent = 'Done';
+        }
+        showToast(`${totalAdded} tracks added to wishlist`, totalAdded > 0 ? 'success' : 'info');
+    } catch (e) {
+        console.error('Error adding your albums to wishlist:', e);
         showToast(`Error: ${e.message}`, 'error');
     }
 }

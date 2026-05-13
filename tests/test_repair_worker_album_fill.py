@@ -62,6 +62,7 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
                 duration INTEGER,
                 file_path TEXT,
                 bitrate INTEGER,
+                server_source TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -69,10 +70,10 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
         )
         conn.execute(
             """
-            INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
-            ("target-track-1", "target-album", "target-artist", "Existing Track", 1, 180000, str(src_path), 320),
+            ("target-track-1", "target-album", "target-artist", "Existing Track", 1, 180000, str(src_path), 320, "navidrome"),
         )
         conn.commit()
 
@@ -89,6 +90,7 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
                     duration=180000,
                     file_path=str(src_path),
                     bitrate=320,
+                    server_source="soulsync",
                 ),
                 SimpleNamespace(
                     id="source-track-2",
@@ -97,6 +99,7 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
                     duration=181000,
                     file_path=str(src_path),
                     bitrate=320,
+                    server_source="soulsync",
                 ),
             ]
 
@@ -120,6 +123,7 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
             duration=180000,
             file_path=str(src_path),
             bitrate=320,
+            server_source="soulsync",
         ),
         album_id="target-album",
         album_title="Target Album",
@@ -137,7 +141,7 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
 
     with sqlite3.connect(db_path) as verify_conn:
         row = verify_conn.execute(
-            "SELECT id, title, file_path FROM tracks WHERE title = ?",
+            "SELECT id, title, file_path, server_source FROM tracks WHERE title = ?",
             ("New Track",),
         ).fetchone()
         assert row is not None
@@ -145,4 +149,5 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
         assert row[0].startswith("album_fill_source-track-1_deadbeef")
         assert row[1] == "New Track"
         assert Path(row[2]).exists()
+        assert row[3] == "navidrome"
         assert verify_conn.execute("SELECT COUNT(*) FROM tracks WHERE id IS NULL").fetchone()[0] == 0

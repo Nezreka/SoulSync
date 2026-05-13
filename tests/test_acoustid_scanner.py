@@ -54,8 +54,11 @@ def _make_context(rows):
 def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     job = AcoustIDScannerJob()
     context = _make_context([
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb"),
+        # 10 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
+        # album_artist.
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist"),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist"),
     ])
 
     tracks = job._load_db_tracks(context)
@@ -68,8 +71,11 @@ def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
 def test_scan_handles_mixed_track_id_types(monkeypatch):
     job = AcoustIDScannerJob()
     context = _make_context([
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb"),
+        # 10 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
+        # album_artist.
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist"),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist"),
     ])
 
     monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)
@@ -360,3 +366,257 @@ def test_load_db_tracks_falls_back_when_track_artist_empty_string():
     # Empty string in track_artist → NULLIF returns NULL → COALESCE
     # falls back to album artist
     assert tracks['t1']['artist'] == 'Album Artist'
+
+
+# ---------------------------------------------------------------------------
+# File-tag fallback for legacy compilation tracks — Skowl Discord follow-up
+# ---------------------------------------------------------------------------
+#
+# Skowl reported that the AcoustID Scanner was STILL flagging his
+# compilation tracks even after the COALESCE(track_artist, album_artist)
+# fix shipped. Cause: his tracks were downloaded BEFORE the
+# `tracks.track_artist` column existed, so for those rows
+# `track_artist IS NULL` and COALESCE falls back to the ALBUM artist
+# (the curator) — same wrong-comparison the prior fix was supposed to
+# eliminate.
+#
+# The audio file's ARTIST tag is ground truth for what's on disk:
+# Tidal/Spotify/Deezer all write the per-track artist into the file's
+# tag at download time, regardless of the SoulSync DB schema. Reading
+# it during the scan closes the gap without requiring a DB backfill
+# of the legacy rows. These tests pin:
+#   - File ARTIST tag trumps DB-resolved expected artist when present
+#     (Skowl's exact case: file says 'Eclypse', DB says 'Andromedik',
+#     AcoustID returns 'Eclypse' → no finding)
+#   - Missing file tag falls through to DB value (preserves
+#     pre-fix behavior for tracks without proper file tags)
+#   - mutagen failure is swallowed → falls through to DB
+#   - File tag matches DB → no behavioral change
+
+
+def test_scanner_uses_file_tag_artist_over_db_for_legacy_compilation(monkeypatch):
+    """Skowl's exact case verbatim:
+
+        DB row:        artist_id → 'Andromedik' (album artist), track_artist=NULL
+        File tag:      ARTIST='Eclypse' (Tidal-tagged correctly)
+        AcoustID:      artist='Eclypse'
+        Pre-fix:       expected='Andromedik' vs actual='Eclypse' → flag
+        Post-fix:      file tag trumps DB → expected='Eclypse' → no flag
+    """
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("city-lights", "City Lights", "Andromedik",
+                   "/music/eclypse-city-lights.opus", 1,
+                   "High Tea Music: Vol 1", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{
+                'title': 'City Lights',
+                'artist': 'Eclypse',
+            }],
+        },
+    )
+
+    # Patch read_file_tags to return Tidal's correct per-track artist.
+    # The scanner imports lazily inside _scan_file so we patch the
+    # source module's symbol.
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': 'Eclypse', 'title': 'City Lights'},
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/eclypse-city-lights.opus',
+        'city-lights',
+        {'title': 'City Lights', 'artist': 'Andromedik'},  # DB-resolved expected
+        fake_acoustid,
+        context,
+        result,
+        fp_threshold=0.85,
+        title_threshold=0.85,
+        artist_threshold=0.6,
+    )
+
+    assert captured_findings == [], (
+        f"Expected no finding (file tag matches AcoustID); got {captured_findings}"
+    )
+
+
+def test_scanner_falls_back_to_db_when_file_tag_missing(monkeypatch):
+    """Defensive: file has no ARTIST tag (rare but possible for
+    non-standard formats / damaged files). MUST fall back to DB
+    expected value. Otherwise the fix would BREAK the existing
+    'flag genuine mismatches' contract for files without tags."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Some Track", "Foreigner",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{
+                'title': 'Some Track',
+                'artist': 'Different Band',
+            }],
+        },
+    )
+
+    # File has no ARTIST tag (read_file_tags returns None for the field)
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': None},
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.flac',
+        '99',
+        {'title': 'Some Track', 'artist': 'Foreigner'},
+        fake_acoustid,
+        context,
+        result,
+        fp_threshold=0.85,
+        title_threshold=0.85,
+        artist_threshold=0.6,
+    )
+
+    # Should still flag — file tag was missing, fell back to DB
+    # ('Foreigner') vs AcoustID ('Different Band') mismatch
+    assert len(captured_findings) == 1, (
+        f"Expected finding (file tag missing → DB fallback → genuine mismatch); got {captured_findings}"
+    )
+
+
+def test_scanner_swallows_file_tag_read_exception(monkeypatch):
+    """Defensive: mutagen errors mid-read shouldn't crash the scan
+    — must log + fall back to DB value gracefully."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Track", "RealArtist",
+                   "/music/corrupted.mp3", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{'title': 'Track', 'artist': 'RealArtist'}],
+        },
+    )
+
+    def boom(fpath):
+        raise RuntimeError("mutagen exploded on corrupted file")
+
+    monkeypatch.setattr('core.tag_writer.read_file_tags', boom)
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/corrupted.mp3',
+        '99',
+        {'title': 'Track', 'artist': 'RealArtist'},
+        fake_acoustid,
+        context,
+        result,
+        fp_threshold=0.85,
+        title_threshold=0.85,
+        artist_threshold=0.6,
+    )
+
+    # No finding — DB matches AcoustID after the fallback
+    assert captured_findings == []
+
+
+def test_scanner_trusts_curated_db_track_artist_over_stale_file_tag(monkeypatch):
+    """The flip side of Skowl's case — user manually corrected
+    `track_artist` in the DB via the enhanced library view but
+    didn't re-tag the file. Pre-refactor 'file tag always wins'
+    would flag this as a false positive (file says wrong, DB says
+    right, AcoustID matches DB). Post-refactor: DB track_artist
+    is the curated source of truth when populated → file tag is
+    only consulted when DB is empty. No spurious flag.
+
+    This is why `_load_db_tracks` surfaces `track_artist` as a
+    separate field instead of just the COALESCE'd `artist`:
+    `_scan_file` needs to distinguish 'DB has a curated value'
+    from 'DB fell back to album artist'."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Track", "AlbumArtist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{'title': 'Track', 'artist': 'Eclypse'}],
+        },
+    )
+
+    # File has wrong tag (stale — user edited DB but didn't re-tag),
+    # DB has correct value, AcoustID matches DB.
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': 'WrongStaleTag'},
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.flac', '99',
+        # Simulates the post-refactor _load_db_tracks output:
+        # track_artist populated (curated) takes priority over file tag.
+        {'title': 'Track', 'artist': 'Eclypse',
+         'track_artist': 'Eclypse', 'album_artist': 'AlbumArtist'},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert captured_findings == [], (
+        f"DB curated value must trump stale file tag; got {captured_findings}"
+    )
+
+
+def test_scanner_file_tag_matches_db_no_behavioral_change(monkeypatch):
+    """Sanity: when file tag and DB agree, behavior is identical to
+    the pre-fix path. No double-counting, no spurious findings."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Track", "RealArtist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{'title': 'Track', 'artist': 'RealArtist'}],
+        },
+    )
+
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': 'RealArtist'},
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.flac', '99',
+        {'title': 'Track', 'artist': 'RealArtist'},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert captured_findings == []

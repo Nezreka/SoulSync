@@ -917,8 +917,84 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 all_artists.append(artist_item)
             else:
                 all_artists.append(str(artist_item))
-        metadata["artist"] = ", ".join(all_artists)
-        logger.info("Metadata: Using all artists: '%s'", metadata["artist"])
+
+        # Deezer upgrade path: Deezer's `/search` endpoint only returns
+        # the primary artist for each track. The full contributors
+        # array (feat., remix collaborators, producers credited as
+        # artists) lives on `/track/<id>` and gets parsed by
+        # `_build_enhanced_track`. Without this upgrade Deezer-sourced
+        # tracks never get multi-artist tags even with the right
+        # settings on. One extra API call per Deezer-sourced track,
+        # only when the search response had a single artist (so it's
+        # a no-op when search already returned multiple).
+        if (source == "deezer" and len(all_artists) == 1
+                and source_ids.get("track_id")):
+            try:
+                from core.metadata import get_deezer_client
+                deezer = get_deezer_client()
+                if deezer:
+                    full = deezer.get_track_details(str(source_ids["track_id"]))
+                    if full and isinstance(full.get("artists"), list) and len(full["artists"]) > 1:
+                        upgraded = [a for a in full["artists"] if a]
+                        if upgraded:
+                            logger.info(
+                                "Metadata: Deezer contributors upgrade — search returned "
+                                "%d artist, /track/<id> returned %d (%s)",
+                                len(all_artists), len(upgraded), upgraded,
+                            )
+                            all_artists = upgraded
+            except Exception as e:
+                logger.debug("Deezer contributors upgrade failed: %s", e)
+
+        # Store the multi-artist list so the enrichment writer can emit
+        # proper multi-value ARTIST tags (TPE1 multi-value for ID3,
+        # "artists" key for Vorbis) when `write_multi_artist` is on.
+        # Without this assignment the field was always empty and the
+        # multi-artist write path silently no-op'd.
+        metadata["_artists_list"] = list(all_artists)
+
+        # `feat_in_title` (when true): pull featured artists out of the
+        # ARTIST tag entirely and append "(feat. X, Y)" to the title.
+        # Matches Picard / Beets convention and lets media servers
+        # group by primary artist instead of treating "A, B & C" as a
+        # distinct artist string.
+        # `artist_separator`: when feat_in_title is off (or there's
+        # only one artist) and write_multi_artist is on, this is the
+        # delimiter used to join all artists into the single ARTIST
+        # string. Picard defaults to "; " — we default to ", " to
+        # preserve historical behavior for users who haven't touched
+        # the setting.
+        feat_in_title = cfg.get("metadata_enhancement.tags.feat_in_title", False)
+        artist_separator = cfg.get("metadata_enhancement.tags.artist_separator", ", ")
+
+        if feat_in_title and len(all_artists) > 1:
+            metadata["artist"] = all_artists[0]
+            featured = all_artists[1:]
+            existing_title = metadata.get("title", "") or ""
+            # Don't double-append if the title already carries the
+            # featured artists. Source titles vary: "(feat. X)",
+            # "(featuring X)", "(ft. X)", "ft. X" (no parens), "[feat X]"
+            # (no period, brackets), etc. Word-boundary regex catches
+            # `feat`, `feat.`, `featuring`, `ft`, `ft.` regardless of
+            # surrounding punctuation. Case-insensitive.
+            import re as _feat_re
+            already_has_feat = bool(_feat_re.search(
+                r'\b(?:feat|feat\.|featuring|ft|ft\.)\b',
+                existing_title,
+                _feat_re.IGNORECASE,
+            ))
+            if existing_title and not already_has_feat:
+                metadata["title"] = f"{existing_title} (feat. {', '.join(featured)})"
+            logger.info(
+                "Metadata: feat_in_title — primary='%s', featured=%s, title='%s'",
+                metadata["artist"], featured, metadata["title"],
+            )
+        else:
+            metadata["artist"] = artist_separator.join(all_artists)
+            logger.info(
+                "Metadata: Using all artists joined with %r: '%s'",
+                artist_separator, metadata["artist"],
+            )
     else:
         metadata["artist"] = artist_dict.get("name", "") or get_import_clean_artist(context)
         logger.info("Metadata: Using primary artist: '%s'", metadata["artist"])

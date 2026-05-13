@@ -856,6 +856,7 @@ async function loadSettingsData() {
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
         document.getElementById('soulseek-search-timeout').value = settings.soulseek?.search_timeout || 60;
         document.getElementById('soulseek-search-timeout-buffer').value = settings.soulseek?.search_timeout_buffer || 15;
+        document.getElementById('soulseek-search-min-delay-seconds').value = settings.soulseek?.search_min_delay_seconds ?? 0;
         document.getElementById('soulseek-min-peer-speed').value = settings.soulseek?.min_peer_upload_speed || 0;
         document.getElementById('soulseek-max-peer-queue').value = settings.soulseek?.max_peer_queue || 0;
         document.getElementById('soulseek-download-timeout').value = Math.round((settings.soulseek?.download_timeout || 600) / 60);
@@ -2605,6 +2606,7 @@ async function saveSettings(quiet = false) {
             transfer_path: document.getElementById('transfer-path').value,
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
+            search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
