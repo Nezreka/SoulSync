@@ -3382,7 +3382,18 @@ function processModalStatusUpdate(playlistId, data) {
                     case 'post_processing': statusText = '⌛ Processing...'; break;
                     case 'completed': statusText = '✅ Completed'; completedCount++; break;
                     case 'not_found': statusText = '🔇 Not Found'; notFoundCount++; break;
-                    case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                    case 'failed': {
+                        // Distinguish quarantine outcomes from generic
+                        // failures — the file is recoverable, not lost.
+                        const _em = (task.error_message || '').toLowerCase();
+                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quarantin')) {
+                            statusText = '🛡️ Quarantined';
+                        } else {
+                            statusText = '❌ Failed';
+                        }
+                        failedOrCancelledCount++;
+                        break;
+                    }
                     case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                     default: statusText = `⚪ ${task.status}`; break;
                 }
