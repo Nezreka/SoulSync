@@ -78,3 +78,8 @@ export function resolveLegacyShellPageFromPath(pathname: string): ShellPageId | 
   const route = getShellRouteByPath(pathname);
   return route?.kind === 'legacy' ? route.pageId : null;
 }
+
+export function resolveShellNavPage(pageId: ShellPageId): ShellPageId | '' {
+  if (pageId === 'artist-detail') return 'library';
+  return pageId;
+}
