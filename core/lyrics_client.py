@@ -52,9 +52,29 @@ class LyricsClient:
             lrc_path = os.path.splitext(audio_file_path)[0] + '.lrc'
             txt_path = os.path.splitext(audio_file_path)[0] + '.txt'
 
-            # Skip if lyrics file already exists (either .lrc or .txt)
+            # Sidecar already exists — skip the LRClib fetch but still
+            # re-embed the lyrics in the audio file's tag. The retag
+            # flow clears all tags including USLT and then runs this
+            # helper to restore them; without the embed step the
+            # LYRICS tag stays empty even though the .lrc is right
+            # there next to the file (Discord report — Netti93).
             if os.path.exists(lrc_path) or os.path.exists(txt_path):
-                logger.debug(f"Lyrics file already exists for: {os.path.basename(audio_file_path)}")
+                existing_path = lrc_path if os.path.exists(lrc_path) else txt_path
+                try:
+                    with open(existing_path, 'r', encoding='utf-8') as f:
+                        existing_lyrics = f.read().strip()
+                    if existing_lyrics:
+                        self._embed_lyrics(audio_file_path, existing_lyrics)
+                        logger.debug(
+                            "Re-embedded lyrics from existing %s for: %s",
+                            os.path.basename(existing_path),
+                            os.path.basename(audio_file_path),
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Could not re-embed lyrics from existing sidecar %s: %s",
+                        os.path.basename(existing_path), e,
+                    )
                 return True
 
             # Fetch lyrics from LRClib
