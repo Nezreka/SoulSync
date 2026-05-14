@@ -3095,146 +3095,147 @@ function openLibraryHistoryModal() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Quarantine management modal — list / delete / approve / recover
+// Quarantine tab — rendered inside the Library History modal as a third
+// tab next to Downloads + Server Imports. Reuses the existing list +
+// pagination chrome; provides per-row Approve / Recover / Delete actions.
 // ──────────────────────────────────────────────────────────────────────
 
-function openQuarantineModal() {
-    const modal = document.getElementById('quarantine-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-        loadQuarantineEntries();
-    }
-}
+async function loadQuarantineList() {
+    const list = document.getElementById('library-history-list');
+    const pagination = document.getElementById('library-history-pagination');
+    const sourceBar = document.getElementById('history-source-bar');
+    if (!list) return;
+    list.innerHTML = '<div class="library-history-loading">Loading...</div>';
+    if (pagination) pagination.innerHTML = '';
+    if (sourceBar) sourceBar.style.display = 'none';
 
-function closeQuarantineModal() {
-    const modal = document.getElementById('quarantine-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-function _quarantineFormatBytes(n) {
-    if (!n) return '0 B';
-    const u = ['B', 'KB', 'MB', 'GB'];
-    let i = 0;
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-    return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
-}
-
-function _quarantineFormatTime(iso) {
-    if (!iso) return '';
-    try { return new Date(iso).toLocaleString(); } catch { return iso; }
-}
-
-function _quarantineEsc(s) {
-    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-async function loadQuarantineEntries() {
-    const container = document.getElementById('quarantine-modal-content');
-    if (!container) return;
-    container.innerHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px">Loading…</p>';
     try {
-        const r = await fetch('/api/quarantine/list');
-        const data = await r.json();
-        if (!data.success) {
-            container.innerHTML = `<p style="color:#f87171;text-align:center;padding:40px">${_quarantineEsc(data.error || 'Failed to load')}</p>`;
-            return;
-        }
+        const resp = await fetch('/api/quarantine/list');
+        const data = await resp.json();
         const entries = data.entries || [];
-        if (entries.length === 0) {
-            container.innerHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px">No quarantined files. Nice and clean.</p>';
+        const countEl = document.getElementById('history-quarantine-count');
+        if (countEl) countEl.textContent = entries.length;
+
+        if (!data.success) {
+            list.innerHTML = `<div class="library-history-empty">Error: ${escapeHtml(data.error || 'Failed to load')}</div>`;
             return;
         }
-        const rows = entries.map(e => {
-            const approveBtn = e.has_full_context
-                ? `<button class="modal-btn-primary" style="font-size:11px;padding:5px 10px" onclick="approveQuarantineEntry('${_quarantineEsc(e.id)}')">Approve</button>`
-                : `<button class="modal-btn-secondary" style="font-size:11px;padding:5px 10px" onclick="recoverQuarantineEntry('${_quarantineEsc(e.id)}')" title="Move to Staging — finish via Import flow">Recover</button>`;
-            return `
-                <tr>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);font-weight:600;color:#fff">${_quarantineEsc(e.original_filename)}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.6);font-size:12px">${_quarantineEsc(e.expected_track || '—')}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.5);font-size:12px">${_quarantineEsc(e.expected_artist || '—')}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:#facc15;font-size:11.5px;max-width:260px">${_quarantineEsc(e.reason)}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.45);font-size:11px;font-family:monospace;white-space:nowrap">${_quarantineEsc(_quarantineFormatTime(e.timestamp))}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.4);font-size:11px;font-family:monospace">${_quarantineFormatBytes(e.size_bytes)}</td>
-                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);text-align:right;white-space:nowrap">
-                        ${approveBtn}
-                        <button class="modal-btn-secondary" style="font-size:11px;padding:5px 10px;background:rgba(248,113,113,0.15);border-color:rgba(248,113,113,0.4);color:#f87171" onclick="deleteQuarantineEntry('${_quarantineEsc(e.id)}')">Delete</button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-        container.innerHTML = `
-            <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:12px">
-                ${entries.length} quarantined file${entries.length !== 1 ? 's' : ''}.
-                <strong style="color:rgba(255,255,255,0.7)">Approve</strong> re-runs the post-process pipeline with the failing check skipped.
-                <strong style="color:rgba(255,255,255,0.7)">Recover</strong> (legacy entries only) drops the file into Staging for manual import.
-                <strong style="color:rgba(255,255,255,0.7)">Delete</strong> removes the file permanently.
-            </p>
-            <div style="overflow:auto;max-height:60vh">
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-                <thead>
-                    <tr style="text-align:left;color:rgba(255,255,255,0.45);font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em">
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">File</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Expected Track</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Expected Artist</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Reason</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">When</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Size</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1);text-align:right">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-            </div>
-        `;
+        if (entries.length === 0) {
+            list.innerHTML = '<div class="library-history-empty">🛡️<br><br>No quarantined files. Nice and clean.</div>';
+            return;
+        }
+        list.innerHTML = entries.map(renderQuarantineEntry).join('');
     } catch (err) {
-        container.innerHTML = `<p style="color:#f87171;text-align:center;padding:40px">${_quarantineEsc(err.message || 'Network error')}</p>`;
+        console.error('Error loading quarantine entries:', err);
+        list.innerHTML = '<div class="library-history-empty">Error loading quarantine</div>';
     }
+}
+
+function renderQuarantineEntry(entry) {
+    const triggerLabels = { integrity: 'Duration / Integrity', acoustid: 'AcoustID Mismatch', bit_depth: 'Bit Depth Filter', unknown: 'Unknown' };
+    const triggerColors = { integrity: '#facc15', acoustid: '#ef5350', bit_depth: '#fb923c', unknown: '#888' };
+    const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
+    const triggerColor = triggerColors[entry.trigger] || '#888';
+
+    const id = escapeHtml(entry.id);
+    const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
+    const approveTitle = entry.has_full_context
+        ? 'Re-run post-processing with only the failing check skipped'
+        : 'Legacy entry — move to Staging, finish via Import flow';
+    const approveCall = entry.has_full_context
+        ? `approveQuarantineEntry('${id}')`
+        : `recoverQuarantineEntry('${id}')`;
+
+    const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
+    const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
+    const reasonDetail = `<div class="library-history-entry-source"><span class="lh-prov-label">Reason:</span> ${escapeHtml(entry.reason || 'Unknown')}</div>`;
+
+    return `<div class="library-history-entry lh-expandable" onclick="this.classList.toggle('lh-expanded')">
+        <div class="library-history-thumb-placeholder">🛡️</div>
+        <div class="library-history-entry-content">
+            <div class="library-history-entry-row1">
+                <div class="library-history-entry-text">
+                    <div class="library-history-entry-title">${escapeHtml(entry.expected_track || entry.original_filename || 'Unknown')}</div>
+                    <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
+                </div>
+                <div class="library-history-entry-badges">${triggerBadge}</div>
+                <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
+                <button class="lh-audit-btn" title="${approveTitle}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
+                <button class="lh-audit-btn" title="Delete permanently" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntry('${id}')">Delete</button>
+                <span class="lh-expand-btn">&#x25BE;</span>
+            </div>
+            <div class="library-history-entry-details">
+                ${reasonDetail}
+            </div>
+        </div>
+    </div>`;
 }
 
 async function approveQuarantineEntry(entryId) {
-    if (!confirm('Approve this file? It will be re-processed with the failing check skipped, then moved into your library.')) return;
+    const ok = await showConfirmDialog({
+        title: 'Approve Quarantined File',
+        message: 'Re-run post-processing for this file with only the failing check skipped. The file will be tagged, lyrics generated, and moved into your library. Other quality gates (AcoustID + bit-depth) still run.',
+        confirmText: 'Approve & Import',
+        cancelText: 'Cancel',
+    });
+    if (!ok) return;
     try {
         const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
         const data = await r.json();
         if (!data.success) {
-            alert(`Approve failed: ${data.error}`);
-        } else if (typeof showToast === 'function') {
-            showToast(`Approved — bypassed ${data.trigger_bypassed} check. Re-running pipeline.`, 'success');
+            showToast(`Approve failed: ${data.error}`, 'error');
+        } else {
+            showToast(`Approved — skipped ${data.trigger_bypassed} check, re-running pipeline.`, 'success');
         }
     } catch (err) {
-        alert(`Approve failed: ${err.message}`);
+        showToast(`Approve failed: ${err.message}`, 'error');
     }
-    loadQuarantineEntries();
+    loadQuarantineList();
 }
 
 async function recoverQuarantineEntry(entryId) {
+    const ok = await showConfirmDialog({
+        title: 'Recover To Staging',
+        message: 'Legacy entry — no embedded context. The file will be moved to your Staging folder so you can finish via the Import page (manual match).',
+        confirmText: 'Move To Staging',
+        cancelText: 'Cancel',
+    });
+    if (!ok) return;
     try {
         const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
         const data = await r.json();
         if (!data.success) {
-            alert(`Recover failed: ${data.error}`);
-        } else if (typeof showToast === 'function') {
+            showToast(`Recover failed: ${data.error}`, 'error');
+        } else {
             showToast('Moved to Staging — finish via the Import page.', 'success');
         }
     } catch (err) {
-        alert(`Recover failed: ${err.message}`);
+        showToast(`Recover failed: ${err.message}`, 'error');
     }
-    loadQuarantineEntries();
+    loadQuarantineList();
 }
 
 async function deleteQuarantineEntry(entryId) {
-    if (!confirm('Delete this quarantined file permanently?')) return;
+    const ok = await showConfirmDialog({
+        title: 'Delete Quarantined File',
+        message: 'This permanently removes the file and its metadata sidecar. Cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        destructive: true,
+    });
+    if (!ok) return;
     try {
         const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}`, { method: 'DELETE' });
         const data = await r.json();
         if (!data.success) {
-            alert(`Delete failed: ${data.error}`);
+            showToast(`Delete failed: ${data.error}`, 'error');
+        } else {
+            showToast('Quarantined file deleted.', 'success');
         }
     } catch (err) {
-        alert(`Delete failed: ${err.message}`);
+        showToast(`Delete failed: ${err.message}`, 'error');
     }
-    loadQuarantineEntries();
+    loadQuarantineList();
 }
 
 function closeLibraryHistoryModal() {
@@ -3253,6 +3254,12 @@ function switchHistoryTab(tab) {
 
 async function loadLibraryHistory() {
     const { tab, page, limit } = _libraryHistoryState;
+    if (tab === 'quarantine') {
+        // Refresh the count for the other two tabs in the background so
+        // the badge stays accurate when the user switches over.
+        loadQuarantineList();
+        return;
+    }
     const list = document.getElementById('library-history-list');
     const pagination = document.getElementById('library-history-pagination');
     if (!list) return;
