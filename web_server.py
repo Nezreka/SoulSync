@@ -169,7 +169,6 @@ from core.imports.album import (
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
-    get_import_suggestions_cache,
     get_primary_source,
     get_staging_path,
     read_staging_file_metadata,
@@ -178,6 +177,11 @@ from core.imports.staging import (
     search_import_tracks,
     start_import_suggestions_cache,
 )
+from core.imports.routes import ImportRouteRuntime as _ImportRouteRuntime
+from core.imports.routes import staging_files as _import_staging_files
+from core.imports.routes import staging_groups as _import_staging_groups
+from core.imports.routes import staging_hints as _import_staging_hints
+from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
 from core.metadata.common import get_file_lock
@@ -34264,174 +34268,26 @@ def repair_job_progress():
 # IMPORT / STAGING SYSTEM
 # ================================================================================================
 
-AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
+def _build_import_route_runtime():
+    return _ImportRouteRuntime(logger=logger)
+
 
 @app.route('/api/import/staging/files', methods=['GET'])
 def import_staging_files():
-    """Scan the staging folder and return audio files with tag metadata."""
-    try:
-        staging_path = get_staging_path()
-        os.makedirs(staging_path, exist_ok=True)
-
-        files = []
-        for root, _dirs, filenames in os.walk(staging_path):
-            for fname in filenames:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in AUDIO_EXTENSIONS:
-                    continue
-                full_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(full_path, staging_path)
-
-                meta = read_staging_file_metadata(full_path, rel_path)
-
-                files.append({
-                    'filename': fname,
-                    'rel_path': rel_path,
-                    'full_path': full_path,
-                    'title': meta['title'],
-                    'artist': meta['albumartist'] or meta['artist'] or 'Unknown Artist',
-                    'album': meta['album'],
-                    'track_number': meta['track_number'],
-                    'disc_number': meta['disc_number'],
-                    'extension': ext
-                })
-
-        # Sort by filename
-        files.sort(key=lambda f: f['filename'].lower())
-        return jsonify({'success': True, 'files': files, 'staging_path': staging_path})
-    except Exception as e:
-        logger.error(f"Error scanning staging files: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_files(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/staging/groups', methods=['GET'])
 def import_staging_groups():
-    """Auto-detect album groups from staging files based on their tags.
-
-    Groups files by (album_tag, artist) where both are non-empty and at least 2 files share
-    the same album+artist combo. Returns groups sorted by file count descending.
-    """
-    try:
-        staging_path = get_staging_path()
-        if not os.path.isdir(staging_path):
-            return jsonify({'success': True, 'groups': []})
-
-        # Scan files and group by album+artist tags
-        album_groups = {}  # (album_lower, artist_lower) -> {album, artist, files: []}
-        for root, _dirs, filenames in os.walk(staging_path):
-            for fname in filenames:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in AUDIO_EXTENSIONS:
-                    continue
-                full_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(full_path, staging_path)
-
-                meta = read_staging_file_metadata(full_path, rel_path)
-                album = meta['album']
-                artist = meta['albumartist'] or meta['artist']
-                if not album or not artist:
-                    continue
-
-                key = (album.lower().strip(), artist.lower().strip())
-                if key not in album_groups:
-                    album_groups[key] = {
-                        'album': album.strip(),
-                        'artist': artist.strip(),
-                        'files': []
-                    }
-                album_groups[key]['files'].append({
-                    'filename': fname,
-                    'full_path': full_path,
-                    'title': meta['title'],
-                    'track_number': meta['track_number'],
-                })
-
-        # Only return groups with 2+ files
-        groups = []
-        for group in album_groups.values():
-            if len(group['files']) >= 2:
-                group['files'].sort(key=lambda f: f.get('track_number') or 999)
-                groups.append({
-                    'album': group['album'],
-                    'artist': group['artist'],
-                    'file_count': len(group['files']),
-                    'files': group['files'],
-                    'file_paths': [f['full_path'] for f in group['files']],
-                })
-
-        # Sort by file count descending
-        groups.sort(key=lambda g: g['file_count'], reverse=True)
-
-        return jsonify({'success': True, 'groups': groups})
-    except Exception as e:
-        logger.error(f"Error building staging groups: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_groups(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/staging/hints', methods=['GET'])
 def import_staging_hints():
-    """Extract album search hints from staging folder (tags + folder names). Fast — no Spotify calls."""
-    try:
-        staging_path = get_staging_path()
-        if not os.path.isdir(staging_path):
-            return jsonify({'success': True, 'hints': []})
-
-        # Collect hints from tags and folder structure
-        tag_albums = {}   # (album, artist) -> file count
-        folder_hints = {} # subfolder name -> file count
-
-        for root, _dirs, filenames in os.walk(staging_path):
-            audio_files = [f for f in filenames if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-            if not audio_files:
-                continue
-
-            # Folder-based hint: use immediate subfolder name relative to staging
-            rel_dir = os.path.relpath(root, staging_path)
-            if rel_dir != '.':
-                # Use the top-level subfolder as the hint
-                top_folder = rel_dir.split(os.sep)[0]
-                folder_hints[top_folder] = folder_hints.get(top_folder, 0) + len(audio_files)
-
-            # Tag-based hints
-            for fname in audio_files:
-                full_path = os.path.join(root, fname)
-                try:
-                    from mutagen import File as MutagenFile
-                    tags = MutagenFile(full_path, easy=True)
-                    if tags:
-                        album = (tags.get('album') or [None])[0]
-                        artist = (tags.get('artist') or (tags.get('albumartist') or [None]))[0]
-                        if album:
-                            key = (album.strip(), (artist or '').strip())
-                            tag_albums[key] = tag_albums.get(key, 0) + 1
-                except Exception as e:
-                    logger.debug("tag read failed: %s", e)
-
-        # Build search queries, prioritizing tag-based hints (more specific)
-        queries = []
-        seen_queries_lower = set()
-
-        # Tag-based: sort by file count descending
-        for (album, artist), _count in sorted(tag_albums.items(), key=lambda x: -x[1]):
-            q = f"{album} {artist}".strip() if artist else album
-            if q.lower() not in seen_queries_lower:
-                seen_queries_lower.add(q.lower())
-                queries.append(q)
-
-        # Folder-based: parse "Artist - Album" pattern or use as-is
-        for folder, _count in sorted(folder_hints.items(), key=lambda x: -x[1]):
-            q = folder.replace('_', ' ')
-            if q.lower() not in seen_queries_lower:
-                seen_queries_lower.add(q.lower())
-                queries.append(q)
-
-        # Cap at 5 queries to keep it fast
-        queries = queries[:5]
-
-        return jsonify({'success': True, 'hints': queries})
-    except Exception as e:
-        logger.error(f"Error getting staging hints: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_hints(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/search/albums', methods=['GET'])
@@ -34942,13 +34798,8 @@ def auto_import_clear_completed():
 
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
-    """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""
-    cache = get_import_suggestions_cache()
-    return jsonify({
-        'success': True,
-        'suggestions': cache['suggestions'],
-        'ready': cache['built'],
-    })
+    payload, status = _import_staging_suggestions()
+    return jsonify(payload), status
 
 
 # ================================================================================================
