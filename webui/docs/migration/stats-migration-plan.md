@@ -1,6 +1,15 @@
-# WebUI Stats React Migration Sketch
+# WebUI Stats Migration Plan
 
 Snapshot date: 2026-05-14
+
+## Status
+
+- Completed on 2026-05-14.
+- `stats` is now React-owned in the shell route manifest.
+- The legacy stats HTML, JS, and CSS path has been removed.
+- The global `Chart.js` import was removed and replaced with route-local `Recharts`.
+- Legacy playback and artist-detail handoffs now go through the explicit shell bridge.
+- A local seed script exists for realistic UI testing without production listening history: `tools/seed_stats_ui_scenarios.py`.
 
 ## Goal
 
@@ -15,6 +24,8 @@ Snapshot date: 2026-05-14
 - The page has real async data loading and interaction.
 - The page is complex enough to validate query conventions, search-param state, and route-local chart components.
 - The page does not currently drive broad shell-global workflows.
+
+This route has now validated those assumptions successfully.
 
 ## Current Legacy Shape
 
@@ -370,6 +381,7 @@ Playwright is optional for the first pass.
 - Extract shared chart colors into route-local constants or a small shared viz helper.
 - Consider a tiny `components/charts/` layer only after a second React page needs charts.
 - Revisit whether `stats/cached` should remain the primary page payload or whether the route should fan out to narrower endpoints later.
+- Keep watching for overlap between route-local controls and shared UI primitives. The stats range selector is a good example of a pattern that should stay local for now, but should be reconsidered if another migrated route needs the same segmented-control behavior.
 
 ## Recommendation
 
@@ -385,3 +397,12 @@ It should not optimize for:
 - visual redesign
 - a cross-app chart abstraction
 - backend reshaping
+
+## Outcome
+
+- The route now serves as the reference for data-heavy read-only React pages.
+- The migration proved out route-local charts, route-search state, explicit shell-bridge interop, and post-cutover legacy cleanup.
+- The work also reinforced a migration guideline for future routes:
+  - prefer local implementation on first use
+  - actively note overlap with shared primitives
+  - extract only once the second clear consumer appears
