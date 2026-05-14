@@ -5,7 +5,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -347,7 +346,10 @@ function StatsGenreChart({
 }: {
   genres: Array<{ genre: string; play_count: number; percentage: number }>;
 }) {
-  const topGenres = genres.slice(0, 10);
+  const topGenres = genres.slice(0, 10).map((genre, index) => ({
+    ...genre,
+    fill: STATS_GENRE_COLORS[index % STATS_GENRE_COLORS.length],
+  }));
   return (
     <ResponsiveContainer width={180} height={180}>
       <PieChart>
@@ -359,11 +361,7 @@ function StatsGenreChart({
           outerRadius={84}
           paddingAngle={2}
           stroke="transparent"
-        >
-          {topGenres.map((genre, index) => (
-            <Cell key={genre.genre} fill={STATS_GENRE_COLORS[index % STATS_GENRE_COLORS.length]} />
-          ))}
-        </Pie>
+        />
         <Tooltip contentStyle={STATS_TOOLTIP_STYLE} wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE} />
       </PieChart>
     </ResponsiveContainer>
@@ -782,7 +780,10 @@ function StatsDbStorage({
     return <SectionSubtleError message={getErrorMessage(error)} />;
   }
 
-  const tables = groupDbStorageTables(payload?.tables ?? []);
+  const tables = groupDbStorageTables(payload?.tables ?? []).map((table, index) => ({
+    ...table,
+    fill: STATS_DB_STORAGE_COLORS[index % STATS_DB_STORAGE_COLORS.length],
+  }));
   const method = payload?.method;
 
   return (
@@ -798,14 +799,7 @@ function StatsDbStorage({
               outerRadius={84}
               paddingAngle={2}
               stroke="transparent"
-            >
-              {tables.map((table, index) => (
-                <Cell
-                  key={table.name}
-                  fill={STATS_DB_STORAGE_COLORS[index % STATS_DB_STORAGE_COLORS.length]}
-                />
-              ))}
-            </Pie>
+            />
             <Tooltip
               contentStyle={STATS_TOOLTIP_STYLE}
               wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE}
