@@ -89,6 +89,33 @@ def _upgrade_deezer_cover_url(url: str, target_size: int = _DEEZER_MAX_COVER_SIZ
     return _DEEZER_CDN_SIZE_PATTERN.sub(f'/{target_size}x{target_size}-', url, count=1)
 
 
+def _is_full_track_payload(payload: Optional[Dict[str, Any]]) -> bool:
+    """Distinguish a full `/track/<id>` cache hit from partial album-tracks data.
+
+    Three Deezer endpoints feed the per-track cache:
+      - `/track/<id>` — full record, includes both `track_position` AND
+        `contributors` (the multi-artist list the contributors-upgrade
+        path reads).
+      - `/album/<id>/tracks` — partial; includes `track_position` but
+        omits `contributors`.
+      - `/search/track` — minimal; lacks `track_position`.
+
+    Pre-fix `get_track_details` only checked `track_position`, so
+    partial album-tracks payloads were treated as full hits and the
+    contributors-upgrade silently fell back to single-artist tagging
+    whenever an album had been fetched before its individual tracks
+    were post-processed (issue #588).
+
+    `contributors` key presence is the load-bearing distinction —
+    `[]` is a valid value for genuinely single-artist tracks fetched
+    via the per-track endpoint, so test for key membership not
+    truthiness.
+    """
+    if not isinstance(payload, dict):
+        return False
+    return 'track_position' in payload and 'contributors' in payload
+
+
 # ==================== Dataclasses (match iTunesClient / SpotifyClient format) ====================
 
 @dataclass
@@ -546,14 +573,9 @@ class DeezerClient:
         """Get detailed track info — returns Spotify-compatible dict (metadata source interface)"""
         cache = get_metadata_cache()
         cached = cache.get_entity('deezer', 'track', str(track_id))
-        if cached and cached.get('title'):
-            # Search results are cached with minimal data (no track_position).
-            # Only use cache if it has track_position — the key field from /track/{id}.
-            # Search results include 'isrc' and 'release_date' but NOT track_position,
-            # so those fields alone are not sufficient to distinguish full from partial data.
-            if 'track_position' in cached:
-                return self._build_enhanced_track(cached)
-            # Otherwise fall through to fetch full data from API
+        if cached and cached.get('title') and _is_full_track_payload(cached):
+            return self._build_enhanced_track(cached)
+        # Otherwise fall through to fetch full data from API
 
         data = self._api_get(f'track/{track_id}')
         if not data:
