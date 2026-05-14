@@ -135,6 +135,10 @@ export function StatsPage() {
     });
   };
 
+  const openArtistDetail = (artistId: string | number, artistName: string) => {
+    bridge.navigateToArtistDetail(artistId, artistName);
+  };
+
   return (
     <div id="stats-container" className={styles.statsContainer} data-testid="stats-page">
       <header className={styles.statsHeader}>
@@ -214,31 +218,23 @@ export function StatsPage() {
               <StatsSectionCard title="Top Artists">
                 <TopArtistsVisual
                   artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={(artistId, artistName) =>
-                    void openArtistDetail(bridge, artistId, artistName)
-                  }
+                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
                 />
                 <StatsRankedArtists
                   artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={(artistId, artistName) =>
-                    void openArtistDetail(bridge, artistId, artistName)
-                  }
+                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
                 />
               </StatsSectionCard>
               <StatsSectionCard title="Top Albums">
                 <StatsRankedAlbums
                   albums={cachedStats?.top_albums ?? []}
-                  onArtistSelect={(artistId, artistName) =>
-                    void openArtistDetail(bridge, artistId, artistName)
-                  }
+                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
                 />
               </StatsSectionCard>
               <StatsSectionCard title="Top Tracks">
                 <StatsRankedTracks
                   tracks={cachedStats?.top_tracks ?? []}
-                  onArtistSelect={(artistId, artistName) =>
-                    void openArtistDetail(bridge, artistId, artistName)
-                  }
+                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
                   onPlay={(track) => playStatsTrack(bridge, track)}
                 />
               </StatsSectionCard>
@@ -875,17 +871,6 @@ function SectionSubtleError({ message }: { message: string }) {
 
 function EmptyListState({ message }: { message: string }) {
   return <div className={styles.emptyListState}>{message}</div>;
-}
-
-async function openArtistDetail(
-  bridge: ShellBridge,
-  artistId: string | number,
-  artistName: string,
-) {
-  await window.SoulSyncWebRouter?.navigateToPage('library');
-  window.setTimeout(() => {
-    bridge.navigateToArtistDetail(artistId, artistName);
-  }, 300);
 }
 
 async function playStatsTrack(

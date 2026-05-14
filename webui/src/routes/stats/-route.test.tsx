@@ -114,6 +114,17 @@ describe('stats route', () => {
     await waitFor(() => expect(history.location.search).toContain('range=30d'));
   });
 
+  it('hands artist detail navigation directly to the shell bridge', async () => {
+    renderStatsRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Artist A' }));
+
+    expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+      7,
+      'Artist A',
+    );
+  });
+
   it('redirects back home when the page is not allowed', async () => {
     window.SoulSyncWebShellBridge = createShellBridge({
       isPageAllowed: vi.fn((pageId) => pageId !== 'stats'),
