@@ -8194,6 +8194,93 @@ def clear_quarantine():
         logger.error(f"[Quarantine] Error clearing quarantine: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+def _get_quarantine_dir():
+    return os.path.join(
+        docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
+        'ss_quarantine',
+    )
+
+
+@app.route('/api/quarantine/list', methods=['GET'])
+def list_quarantine():
+    """Return all quarantined files with sidecar metadata."""
+    try:
+        from core.imports.quarantine import list_quarantine_entries
+        entries = list_quarantine_entries(_get_quarantine_dir())
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error listing entries: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>', methods=['DELETE'])
+def delete_quarantine_item(entry_id):
+    """Delete a single quarantined file + sidecar."""
+    try:
+        from core.imports.quarantine import delete_quarantine_entry
+        ok = delete_quarantine_entry(_get_quarantine_dir(), entry_id)
+        if not ok:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error deleting {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
+def approve_quarantine_item(entry_id):
+    """One-click approve: restore the file and re-run post-process with the
+    matching per-check bypass flag set so the original quarantine trigger
+    is skipped. Other checks still run."""
+    try:
+        from core.imports.quarantine import approve_quarantine_entry
+        # Restore inside the soulseek download dir so existing path-resolution
+        # logic finds it. Unique subdir keeps it from re-mingling with active
+        # transfers.
+        restore_dir = os.path.join(
+            docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
+            'Transfer',
+        )
+        result = approve_quarantine_entry(_get_quarantine_dir(), entry_id, restore_dir)
+        if result is None:
+            return jsonify({
+                "success": False,
+                "error": "Cannot one-click approve — entry has thin sidecar (no embedded context). Use 'Recover to Staging' instead.",
+            }), 400
+        restored_path, context, trigger = result
+        # Mark the bypass so the pipeline skips the trigger that fired.
+        context['_skip_quarantine_check'] = trigger
+        # Re-dispatch through the same pipeline. Run async so the HTTP
+        # request returns quickly — UI polls /list to see the entry vanish.
+        context_key = f"approve_{entry_id}_{int(time.time())}"
+        threading.Thread(
+            target=lambda: _post_process_matched_download(context_key, context, restored_path),
+            daemon=True,
+        ).start()
+        logger.info(f"[Quarantine] Approved {entry_id} (bypass={trigger}) → re-running pipeline")
+        return jsonify({"success": True, "trigger_bypassed": trigger})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
+def recover_quarantine_item(entry_id):
+    """Fallback for legacy thin sidecars: move file into Staging so the user
+    can manually finish via the existing Import flow."""
+    try:
+        from core.imports.quarantine import recover_to_staging
+        from core.imports.staging import get_staging_path
+        target = recover_to_staging(_get_quarantine_dir(), get_staging_path(), entry_id)
+        if not target:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        return jsonify({"success": True, "staged_path": target})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error recovering {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/scan/request', methods=['POST'])
 def request_media_scan():
     """
