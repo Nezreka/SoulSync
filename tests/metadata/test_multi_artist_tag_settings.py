@@ -99,8 +99,10 @@ class TestArtistsListPopulated:
         assert meta.get("_artists_list") == ["Solo Artist"]
 
     def test_no_artists_falls_through(self):
-        """When search response has no artists list, falls through to
-        the single-artist branch — no `_artists_list` written."""
+        """When search response has no artists list, the artist-resolution
+        helper falls back to the artist_dict.name as a single-element list.
+        Multi-value tag write still no-ops because len([primary]) == 1.
+        """
         from core.metadata import source as src_module
 
         context = {
@@ -109,7 +111,31 @@ class TestArtistsListPopulated:
         }
         with patch.object(src_module, "get_config_manager", return_value=_make_cfg()):
             meta = src_module.extract_source_metadata(context, {"name": "X"}, {})
-        assert "_artists_list" not in meta or meta.get("_artists_list") in (None, [])
+        assert meta.get("_artists_list") == ["X"]
+
+    def test_soulseek_shape_falls_back_to_track_info_artists(self):
+        """Soulseek matched-download regression: original_search_result
+        carries 'artist' (singular string) but no 'artists' list, while
+        track_info (the matched Spotify track object) carries the full
+        multi-artist array. Helper should pull from track_info.
+        """
+        from core.metadata import source as src_module
+
+        context = {
+            "original_search_result": {
+                "title": "DNA.",
+                "artist": "Kendrick Lamar",
+            },
+            "track_info": {
+                "name": "DNA.",
+                "artists": [{"name": "Kendrick Lamar"}, {"name": "Rihanna"}],
+            },
+            "source": "spotify",
+        }
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()):
+            meta = src_module.extract_source_metadata(context, {"name": "Kendrick Lamar"}, {})
+        assert meta.get("_artists_list") == ["Kendrick Lamar", "Rihanna"]
+        assert meta.get("artist") == "Kendrick Lamar, Rihanna"
 
 
 # ---------------------------------------------------------------------------

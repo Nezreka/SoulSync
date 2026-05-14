@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.2"
+_SOULSYNC_BASE_VERSION = "2.5.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -115,10 +115,7 @@ from core.imports.context import (
     get_import_clean_album,
     get_import_clean_title,
     get_import_context_album,
-    get_import_context_artist,
     get_import_original_search,
-    get_import_track_info,
-    normalize_import_context,
 )
 from core.wishlist.payloads import (
     build_cancelled_task_wishlist_payload as _build_cancelled_task_wishlist_payload,
@@ -161,23 +158,25 @@ from core.wishlist.state import (
     is_wishlist_actually_processing as _is_wishlist_actually_processing,
     reset_flag_if_stuck as _reset_wishlist_flag_if_stuck,
 )
-from core.imports.album import (
-    build_album_import_context,
-    build_album_import_match_payload,
-    resolve_album_artist_context,
-)
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
+from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
-    get_import_suggestions_cache,
-    get_primary_source,
     get_staging_path,
     read_staging_file_metadata,
-    refresh_import_suggestions_cache,
-    search_import_albums,
-    search_import_tracks,
     start_import_suggestions_cache,
 )
+from core.imports.routes import ImportRouteRuntime as _ImportRouteRuntime
+from core.imports.routes import album_match as _import_album_match
+from core.imports.routes import album_process as _import_album_process
+from core.imports.routes import process_single_import_file as _import_process_single_import_file
+from core.imports.routes import search_albums as _import_search_albums
+from core.imports.routes import search_tracks as _import_search_tracks
+from core.imports.routes import singles_process as _import_singles_process
+from core.imports.routes import staging_files as _import_staging_files
+from core.imports.routes import staging_groups as _import_staging_groups
+from core.imports.routes import staging_hints as _import_staging_hints
+from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
 from core.metadata.common import get_file_lock
@@ -8195,6 +8194,93 @@ def clear_quarantine():
         logger.error(f"[Quarantine] Error clearing quarantine: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+def _get_quarantine_dir():
+    return os.path.join(
+        docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
+        'ss_quarantine',
+    )
+
+
+@app.route('/api/quarantine/list', methods=['GET'])
+def list_quarantine():
+    """Return all quarantined files with sidecar metadata."""
+    try:
+        from core.imports.quarantine import list_quarantine_entries
+        entries = list_quarantine_entries(_get_quarantine_dir())
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error listing entries: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>', methods=['DELETE'])
+def delete_quarantine_item(entry_id):
+    """Delete a single quarantined file + sidecar."""
+    try:
+        from core.imports.quarantine import delete_quarantine_entry
+        ok = delete_quarantine_entry(_get_quarantine_dir(), entry_id)
+        if not ok:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error deleting {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
+def approve_quarantine_item(entry_id):
+    """One-click approve: restore the file and re-run post-process with the
+    matching per-check bypass flag set so the original quarantine trigger
+    is skipped. Other checks still run."""
+    try:
+        from core.imports.quarantine import approve_quarantine_entry
+        # Restore inside the soulseek download dir so existing path-resolution
+        # logic finds it. Unique subdir keeps it from re-mingling with active
+        # transfers.
+        restore_dir = os.path.join(
+            docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
+            'Transfer',
+        )
+        result = approve_quarantine_entry(_get_quarantine_dir(), entry_id, restore_dir)
+        if result is None:
+            return jsonify({
+                "success": False,
+                "error": "Cannot one-click approve — entry has thin sidecar (no embedded context). Use 'Recover to Staging' instead.",
+            }), 400
+        restored_path, context, trigger = result
+        # Mark the bypass so the pipeline skips the trigger that fired.
+        context['_skip_quarantine_check'] = trigger
+        # Re-dispatch through the same pipeline. Run async so the HTTP
+        # request returns quickly — UI polls /list to see the entry vanish.
+        context_key = f"approve_{entry_id}_{int(time.time())}"
+        threading.Thread(
+            target=lambda: _post_process_matched_download(context_key, context, restored_path),
+            daemon=True,
+        ).start()
+        logger.info(f"[Quarantine] Approved {entry_id} (bypass={trigger}) → re-running pipeline")
+        return jsonify({"success": True, "trigger_bypassed": trigger})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
+def recover_quarantine_item(entry_id):
+    """Fallback for legacy thin sidecars: move file into Staging so the user
+    can manually finish via the existing Import flow."""
+    try:
+        from core.imports.quarantine import recover_to_staging
+        from core.imports.staging import get_staging_path
+        target = recover_to_staging(_get_quarantine_dir(), get_staging_path(), entry_id)
+        if not target:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        return jsonify({"success": True, "staged_path": target})
+    except Exception as e:
+        logger.error(f"[Quarantine] Error recovering {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/scan/request', methods=['POST'])
 def request_media_scan():
     """
@@ -15078,6 +15164,8 @@ def _build_retag_deps():
         global retag_state
         retag_state = value
 
+    from core.metadata.lyrics import generate_lrc_file as _generate_lrc_file
+
     return _library_retag.RetagDeps(
         config_manager=config_manager,
         retag_lock=retag_lock,
@@ -15092,6 +15180,7 @@ def _build_retag_deps():
         _get_retag_state=_get_state,
         _set_retag_state=_set_state,
         get_database=_get_db,
+        generate_lrc_file=_generate_lrc_file,
     )
 
 
@@ -18900,6 +18989,10 @@ def get_server_playlist_tracks(playlist_id):
                     'image_url': img,
                     'duration_ms': t.get('duration_ms', 0),
                     'position': t.get('position', 0),
+                    # Spotify track id — required for the user-confirmed
+                    # match override lookup (sync_match_cache). Null for
+                    # iTunes-only sources.
+                    'source_track_id': t.get('source_track_id') or '',
                 })
         elif playlist_name:
             # Legacy fallback: cross-reference with sync history
@@ -18939,6 +19032,21 @@ def get_server_playlist_tracks(playlist_id):
         used_server_indices = set()
         unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
 
+        # Pass 0: User-confirmed match overrides from sync_match_cache.
+        # When a user previously picked a local file via "Find & Add",
+        # the (source_track_id → server_track_id) mapping was persisted
+        # at confidence=1.0. Apply those FIRST so they bypass the
+        # exact/fuzzy passes entirely. Stale-cache safe — if the cached
+        # server track no longer exists, the override is silently
+        # skipped and normal matching runs.
+        from core.sync.match_overrides import resolve_match_overrides
+        _db_for_overrides = get_database()
+        _override_pairs = resolve_match_overrides(
+            source_tracks,
+            server_tracks,
+            lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
+        )
+
         # Pass 1: Exact title match (normalized — strips feat./ft. qualifiers)
         for i, src in enumerate(source_tracks):
             src_name = src.get('name', '')
@@ -18952,6 +19060,19 @@ def get_server_playlist_tracks(playlist_id):
                 'album': src.get('album', ''), 'image_url': src.get('image_url', ''),
                 'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
             }
+
+            # Override hit — paired by user, skip exact/fuzzy matching.
+            if i in _override_pairs:
+                j_override = _override_pairs[i]
+                used_server_indices.add(j_override)
+                combined.append({
+                    'source_track': src_entry,
+                    'server_track': server_tracks[j_override],
+                    'match_status': 'matched',
+                    'confidence': 1.0,
+                    'override': True,
+                })
+                continue
 
             src_norm = _norm_title(src_name)
             best_idx = -1
@@ -19125,14 +19246,48 @@ def server_playlist_replace_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist):
+    """Wrap match-override persistence with the active DB. No-op when
+    source_track_id is missing (e.g. add to a non-mirrored playlist)."""
+    if not source_track_id:
+        return
+    try:
+        from core.sync.match_overrides import record_manual_match
+        ok = record_manual_match(
+            get_database(),
+            source_track_id=source_track_id,
+            server_source=server_source,
+            server_track_id=server_track_id,
+            server_track_title=server_track_title,
+            source_title=source_title,
+            source_artist=source_artist,
+        )
+        if ok:
+            logger.info(f"[ServerPlaylist] Persisted Find & Add override: {source_track_id} → {server_track_id} ({server_source})")
+    except Exception as e:
+        logger.warning(f"[ServerPlaylist] Failed to persist Find & Add override: {e}")
+
+
 @app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
 def server_playlist_add_track(playlist_id):
-    """Add a track to a server playlist at a specific position."""
+    """Add a track to a server playlist at a specific position.
+
+    When the optional `source_track_id` is provided (the Spotify track id
+    from a mirrored playlist), the user's selection is also persisted to
+    sync_match_cache so future syncs auto-match this source→server pair
+    without requiring the user to re-trigger Find & Add.
+    """
     try:
         data = request.get_json()
         track_id = data.get('track_id')
         playlist_name = data.get('playlist_name', '')
         position = data.get('position')  # 0-based index; None = append
+        # Optional Spotify source track id — when present, the (source →
+        # server) mapping is persisted as a hard match override.
+        source_track_id = data.get('source_track_id') or ''
+        source_title = data.get('source_title') or ''
+        source_artist = data.get('source_artist') or ''
+        server_track_title = data.get('server_track_title') or ''
 
         if not track_id:
             return jsonify({"success": False, "error": "track_id required"}), 400
@@ -19185,6 +19340,7 @@ def server_playlist_add_track(playlist_id):
 
             new_id = str(raw_playlist.ratingKey)
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
@@ -19194,6 +19350,7 @@ def server_playlist_add_track(playlist_id):
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
             media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -19203,6 +19360,7 @@ def server_playlist_add_track(playlist_id):
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
             media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -34264,503 +34422,82 @@ def repair_job_progress():
 # IMPORT / STAGING SYSTEM
 # ================================================================================================
 
-AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
+def _build_import_route_runtime():
+    return _ImportRouteRuntime(
+        post_process_matched_download=_post_process_matched_download,
+        add_activity_item=add_activity_item,
+        automation_engine=automation_engine,
+        hydrabase_worker=hydrabase_worker,
+        dev_mode_enabled=dev_mode_enabled,
+        import_singles_executor=import_singles_executor,
+        build_album_import_match_payload=build_album_import_match_payload,
+        process_single_import_file=lambda runtime, file_info: _process_single_import_file(file_info),
+        logger=logger,
+    )
+
 
 @app.route('/api/import/staging/files', methods=['GET'])
 def import_staging_files():
-    """Scan the staging folder and return audio files with tag metadata."""
-    try:
-        staging_path = get_staging_path()
-        os.makedirs(staging_path, exist_ok=True)
-
-        files = []
-        for root, _dirs, filenames in os.walk(staging_path):
-            for fname in filenames:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in AUDIO_EXTENSIONS:
-                    continue
-                full_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(full_path, staging_path)
-
-                meta = read_staging_file_metadata(full_path, rel_path)
-
-                files.append({
-                    'filename': fname,
-                    'rel_path': rel_path,
-                    'full_path': full_path,
-                    'title': meta['title'],
-                    'artist': meta['albumartist'] or meta['artist'] or 'Unknown Artist',
-                    'album': meta['album'],
-                    'track_number': meta['track_number'],
-                    'disc_number': meta['disc_number'],
-                    'extension': ext
-                })
-
-        # Sort by filename
-        files.sort(key=lambda f: f['filename'].lower())
-        return jsonify({'success': True, 'files': files, 'staging_path': staging_path})
-    except Exception as e:
-        logger.error(f"Error scanning staging files: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_files(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/staging/groups', methods=['GET'])
 def import_staging_groups():
-    """Auto-detect album groups from staging files based on their tags.
-
-    Groups files by (album_tag, artist) where both are non-empty and at least 2 files share
-    the same album+artist combo. Returns groups sorted by file count descending.
-    """
-    try:
-        staging_path = get_staging_path()
-        if not os.path.isdir(staging_path):
-            return jsonify({'success': True, 'groups': []})
-
-        # Scan files and group by album+artist tags
-        album_groups = {}  # (album_lower, artist_lower) -> {album, artist, files: []}
-        for root, _dirs, filenames in os.walk(staging_path):
-            for fname in filenames:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in AUDIO_EXTENSIONS:
-                    continue
-                full_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(full_path, staging_path)
-
-                meta = read_staging_file_metadata(full_path, rel_path)
-                album = meta['album']
-                artist = meta['albumartist'] or meta['artist']
-                if not album or not artist:
-                    continue
-
-                key = (album.lower().strip(), artist.lower().strip())
-                if key not in album_groups:
-                    album_groups[key] = {
-                        'album': album.strip(),
-                        'artist': artist.strip(),
-                        'files': []
-                    }
-                album_groups[key]['files'].append({
-                    'filename': fname,
-                    'full_path': full_path,
-                    'title': meta['title'],
-                    'track_number': meta['track_number'],
-                })
-
-        # Only return groups with 2+ files
-        groups = []
-        for group in album_groups.values():
-            if len(group['files']) >= 2:
-                group['files'].sort(key=lambda f: f.get('track_number') or 999)
-                groups.append({
-                    'album': group['album'],
-                    'artist': group['artist'],
-                    'file_count': len(group['files']),
-                    'files': group['files'],
-                    'file_paths': [f['full_path'] for f in group['files']],
-                })
-
-        # Sort by file count descending
-        groups.sort(key=lambda g: g['file_count'], reverse=True)
-
-        return jsonify({'success': True, 'groups': groups})
-    except Exception as e:
-        logger.error(f"Error building staging groups: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_groups(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/staging/hints', methods=['GET'])
 def import_staging_hints():
-    """Extract album search hints from staging folder (tags + folder names). Fast — no Spotify calls."""
-    try:
-        staging_path = get_staging_path()
-        if not os.path.isdir(staging_path):
-            return jsonify({'success': True, 'hints': []})
-
-        # Collect hints from tags and folder structure
-        tag_albums = {}   # (album, artist) -> file count
-        folder_hints = {} # subfolder name -> file count
-
-        for root, _dirs, filenames in os.walk(staging_path):
-            audio_files = [f for f in filenames if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-            if not audio_files:
-                continue
-
-            # Folder-based hint: use immediate subfolder name relative to staging
-            rel_dir = os.path.relpath(root, staging_path)
-            if rel_dir != '.':
-                # Use the top-level subfolder as the hint
-                top_folder = rel_dir.split(os.sep)[0]
-                folder_hints[top_folder] = folder_hints.get(top_folder, 0) + len(audio_files)
-
-            # Tag-based hints
-            for fname in audio_files:
-                full_path = os.path.join(root, fname)
-                try:
-                    from mutagen import File as MutagenFile
-                    tags = MutagenFile(full_path, easy=True)
-                    if tags:
-                        album = (tags.get('album') or [None])[0]
-                        artist = (tags.get('artist') or (tags.get('albumartist') or [None]))[0]
-                        if album:
-                            key = (album.strip(), (artist or '').strip())
-                            tag_albums[key] = tag_albums.get(key, 0) + 1
-                except Exception as e:
-                    logger.debug("tag read failed: %s", e)
-
-        # Build search queries, prioritizing tag-based hints (more specific)
-        queries = []
-        seen_queries_lower = set()
-
-        # Tag-based: sort by file count descending
-        for (album, artist), _count in sorted(tag_albums.items(), key=lambda x: -x[1]):
-            q = f"{album} {artist}".strip() if artist else album
-            if q.lower() not in seen_queries_lower:
-                seen_queries_lower.add(q.lower())
-                queries.append(q)
-
-        # Folder-based: parse "Artist - Album" pattern or use as-is
-        for folder, _count in sorted(folder_hints.items(), key=lambda x: -x[1]):
-            q = folder.replace('_', ' ')
-            if q.lower() not in seen_queries_lower:
-                seen_queries_lower.add(q.lower())
-                queries.append(q)
-
-        # Cap at 5 queries to keep it fast
-        queries = queries[:5]
-
-        return jsonify({'success': True, 'hints': queries})
-    except Exception as e:
-        logger.error(f"Error getting staging hints: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_staging_hints(_build_import_route_runtime())
+    return jsonify(payload), status
 
 
 @app.route('/api/import/search/albums', methods=['GET'])
 def import_search_albums():
-    """Search for albums using the active metadata provider."""
-    try:
-        query = request.args.get('q', '').strip()
-        if not query:
-            return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
-
-        limit = min(int(request.args.get('limit', 12)), 50)
-        from core.metadata.registry import get_primary_source
-
-        if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'albums')
-
-        albums = search_import_albums(query, limit=limit)
-        return jsonify({'success': True, 'albums': albums})
-    except Exception as e:
-        logger.error(f"Error searching albums for import: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_search_albums(
+        _build_import_route_runtime(),
+        request.args.get('q', ''),
+        request.args.get('limit', 12),
+    )
+    return jsonify(payload), status
 
 
 @app.route('/api/import/album/match', methods=['POST'])
 def import_album_match():
-    """Match staging files to an album's tracklist."""
-    try:
-        data = request.get_json() or {}
-        album_id = data.get('album_id')
-        album_name = data.get('album_name', '')
-        album_artist = data.get('album_artist', '')
-        source = str(data.get('source') or '').strip().lower()
-        # Optional: only match specific files (from auto-group selection)
-        filter_file_paths = set(data.get('file_paths', []))
-        if not album_id:
-            return jsonify({'success': False, 'error': 'Missing album_id'}), 400
-
-        # Without `source`, the lookup chain has to guess which metadata
-        # source the album_id came from — and a Deezer numeric id will
-        # match nothing in Spotify/iTunes/Discogs/etc., resulting in the
-        # failure-fallback dict that github issue #524 surfaced as
-        # "Unknown Artist / album_id-as-title / 0 tracks / 1991". Frontend
-        # fix in the same PR populates source on every match POST; this
-        # log catches anything that still reaches us without it (curl,
-        # third-party, regression in another caller).
-        if not source:
-            logger.warning(
-                "[Import Match] Missing 'source' on album_id=%s — lookup will "
-                "guess via primary-source priority chain. If this fires "
-                "consistently, a frontend caller is dropping source from "
-                "the match POST body.",
-                album_id,
-            )
-
-        payload = build_album_import_match_payload(
-            album_id,
-            album_name=album_name,
-            album_artist=album_artist,
-            file_paths=filter_file_paths,
-            source=source or None,
-        )
-        return jsonify(payload)
-    except Exception as e:
-        logger.error(f"Error matching album for import: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_album_match(_build_import_route_runtime(), request.get_json() or {})
+    return jsonify(payload), status
 
 
 @app.route('/api/import/album/process', methods=['POST'])
 def import_album_process():
-    """Process matched album files through the post-processing pipeline."""
-    try:
-        data = request.get_json() or {}
-        album = data.get('album', {})
-        matches = data.get('matches', [])
-
-        if not album or not matches:
-            return jsonify({'success': False, 'error': 'Missing album or matches data'}), 400
-
-        processed = 0
-        errors = []
-        album_name = album.get('name', album.get('album_name', 'Unknown Album'))
-        artist_name = album.get('artist', album.get('artist_name', 'Unknown Artist'))
-        album_id = album.get('id', album.get('album_id', ''))
-        source = str(album.get('source') or data.get('source') or '').strip().lower()
-
-        total_discs = max(
-            (
-                match.get('track', {}).get('disc_number', 1)
-                for match in matches
-                if match.get('track')
-            ),
-            default=1,
-        )
-        artist_context = resolve_album_artist_context(album, source=source)
-
-        for match in matches:
-            staging_file = match.get('staging_file')
-            track = match.get('track') or {}
-            if not staging_file or not track:
-                continue
-
-            file_path = staging_file.get('full_path', '')
-            if not os.path.isfile(file_path):
-                errors.append(f"File not found: {staging_file.get('filename', '?')}")
-                continue
-
-            track_name = track.get('name', 'Unknown Track')
-            track_number = track.get('track_number', 1)
-            disc_number = track.get('disc_number', 1)
-
-            context_key = f"import_album_{album_id}_{track_number}_{uuid.uuid4().hex[:8]}"
-            context = build_album_import_context(
-                album,
-                track,
-                artist_context=artist_context,
-                total_discs=total_discs,
-                source=source,
-            )
-
-            try:
-                _post_process_matched_download(context_key, context, file_path)
-                processed += 1
-                logger.info(f"Import processed: {track_number}. {track_name} from {album_name}")
-            except Exception as proc_err:
-                err_msg = f"{track_name}: {str(proc_err)}"
-                errors.append(err_msg)
-                logger.error(f"Import processing error: {err_msg}")
-
-        add_activity_item("", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
-
-        # Emit events through automation engine — same chain as download batches
-        # batch_complete → auto-scan → library_scan_completed → auto-update DB
-        if processed > 0:
-            try:
-                if automation_engine:
-                    automation_engine.emit('import_completed', {
-                        'track_count': str(processed),
-                        'album_name': album_name or '',
-                        'artist': artist_name or '',
-                    })
-                    automation_engine.emit('batch_complete', {
-                        'playlist_name': f"Import: {album_name}" if album_name else 'Import',
-                        'total_tracks': str(len(matches)),
-                        'completed_tracks': str(processed),
-                        'failed_tracks': str(len(errors)),
-                    })
-            except Exception as e:
-                logger.debug("album import automation emit failed: %s", e)
-
-        # Rebuild suggestions cache since staging contents changed
-        if processed > 0:
-            refresh_import_suggestions_cache()
-
-        return jsonify({
-            'success': True,
-            'processed': processed,
-            'total': len(matches),
-            'errors': errors
-        })
-    except Exception as e:
-        logger.error(f"Error processing album import: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_album_process(_build_import_route_runtime(), request.get_json() or {})
+    return jsonify(payload), status
 
 
 @app.route('/api/import/search/tracks', methods=['GET'])
 def import_search_tracks():
-    """Search tracks using the configured metadata provider priority order."""
-    try:
-        query = request.args.get('q', '').strip()
-        if not query:
-            return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
-
-        limit = min(int(request.args.get('limit', 10)), 30)
-        if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'tracks')
-
-        tracks = search_import_tracks(query, limit=limit)
-        return jsonify({'success': True, 'tracks': tracks})
-    except Exception as e:
-        logger.error(f"Error searching tracks for import: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    payload, status = _import_search_tracks(
+        _build_import_route_runtime(),
+        request.args.get('q', ''),
+        request.args.get('limit', 10),
+    )
+    return jsonify(payload), status
 
 
 def _process_single_import_file(file_info):
-    """Worker function: validate, resolve metadata, post-process one file.
-
-    Returns ``("ok", title)`` on success, ``("error", message)`` on
-    failure, or ``("skip", reason)`` for files that need to be reported
-    but didn't actually run the pipeline. The caller aggregates these.
-    Designed to be safe to run concurrently from a ThreadPoolExecutor
-    — each file gets its own UUID context_key, downstream DB writes
-    serialize via SQLite's busy_timeout, and file-system ops touch
-    distinct destination paths.
-    """
-    file_path = file_info.get('full_path', '')
-    if not os.path.isfile(file_path):
-        return ("error", f"File not found: {file_info.get('filename', '?')}")
-
-    title = file_info.get('title', '')
-    artist = file_info.get('artist', '')
-    manual_match = file_info.get('manual_match')
-    if manual_match is not None and not isinstance(manual_match, dict):
-        manual_match = None
-
-    manual_match_source = ''
-    manual_match_id = None
-    if manual_match:
-        manual_match_source = str(manual_match.get('source') or '').strip().lower()
-        manual_match_id = str(manual_match.get('id') or '').strip()
-        if not manual_match_id or not manual_match_source:
-            return ("error", f"Malformed manual match for file: {file_info.get('filename', '?')}")
-
-    if not title and not manual_match:
-        parsed = parse_filename_metadata(file_info.get('filename', ''))
-        title = parsed.get('title') or os.path.splitext(file_info.get('filename', 'Unknown'))[0]
-        if not artist:
-            artist = parsed.get('artist', '')
-
-    from core.imports.resolution import get_single_track_import_context
-
-    try:
-        resolved = get_single_track_import_context(
-            title,
-            artist,
-            override_id=manual_match_id,
-            override_source=manual_match_source,
-        )
-        context = normalize_import_context(resolved['context'])
-        artist_data = get_import_context_artist(context)
-        track_data = get_import_track_info(context)
-        final_title = track_data.get('name', title)
-        final_artist = artist_data.get('name', artist)
-
-        context_key = f"import_single_{uuid.uuid4().hex[:8]}"
-        _post_process_matched_download(context_key, context, file_path)
-        logger.info(
-            "Import single processed: %s by %s (source=%s)",
-            final_title,
-            final_artist,
-            resolved.get('source') or 'local',
-        )
-        return ("ok", final_title)
-    except Exception as proc_err:
-        err_msg = f"{title}: {str(proc_err)}"
-        logger.error(f"Import single processing error: {err_msg}")
-        return ("error", err_msg)
+    return _import_process_single_import_file(_build_import_route_runtime(), file_info)
 
 
 @app.route('/api/import/singles/process', methods=['POST'])
 def import_singles_process():
-    """Process individual staging files as singles through the post-processing pipeline.
-
-    Files are processed in parallel through the
-    ``import_singles_executor`` (3 workers). Per-file work is dominated
-    by metadata search round-trips, so parallelizing gives a near-
-    linear speedup without saturating any one provider's rate limits.
-    """
-    try:
-        data = request.get_json()
-        files = data.get('files', [])
-
-        if not files:
-            return jsonify({'success': False, 'error': 'No files provided'}), 400
-
-        processed = 0
-        errors = []
-
-        # Submit all files at once so the executor pulls 3 at a time.
-        # as_completed yields in finish order; we don't need ordering
-        # because the caller just wants a count + error list.
-        future_to_filename = {
-            import_singles_executor.submit(_process_single_import_file, file_info):
-                file_info.get('filename', '?')
-            for file_info in files
-        }
-
-        for future in as_completed(future_to_filename):
-            try:
-                outcome, payload = future.result()
-            except Exception as worker_err:
-                # Catch-all for anything the worker itself didn't catch
-                # (shouldn't happen — _process_single_import_file wraps
-                # its own pipeline call — but defensive).
-                errors.append(
-                    f"{future_to_filename[future]}: worker crashed: {worker_err}"
-                )
-                continue
-            if outcome == "ok":
-                processed += 1
-            else:
-                errors.append(payload)
-
-        add_activity_item("", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
-
-        # Emit events through automation engine — same chain as download batches
-        # batch_complete → auto-scan → library_scan_completed → auto-update DB
-        if processed > 0:
-            try:
-                if automation_engine:
-                    automation_engine.emit('import_completed', {
-                        'track_count': str(processed),
-                        'album_name': '',
-                        'artist': 'Various',
-                    })
-                    automation_engine.emit('batch_complete', {
-                        'playlist_name': 'Import: Singles',
-                        'total_tracks': str(len(files)),
-                        'completed_tracks': str(processed),
-                        'failed_tracks': str(len(errors)),
-                    })
-            except Exception as e:
-                logger.debug("singles import automation emit failed: %s", e)
-
-        # Rebuild suggestions cache since staging contents changed
-        if processed > 0:
-            refresh_import_suggestions_cache()
-
-        return jsonify({
-            'success': True,
-            'processed': processed,
-            'total': len(files),
-            'errors': errors
-        })
-    except Exception as e:
-        logger.error(f"Error processing singles import: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    data = request.get_json() or {}
+    payload, status = _import_singles_process(_build_import_route_runtime(), data.get('files', []))
+    return jsonify(payload), status
 
 
-# ── Auto-Import Worker ──
+# Auto-Import Worker
 auto_import_worker = None
 try:
     from core.auto_import_worker import AutoImportWorker
@@ -34942,13 +34679,8 @@ def auto_import_clear_completed():
 
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
-    """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""
-    cache = get_import_suggestions_cache()
-    return jsonify({
-        'success': True,
-        'suggestions': cache['suggestions'],
-        'ready': cache['built'],
-    })
+    payload, status = _import_staging_suggestions()
+    return jsonify(payload), status
 
 
 # ================================================================================================

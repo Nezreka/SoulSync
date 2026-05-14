@@ -278,6 +278,27 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 return False
         return True
 
+    @classmethod
+    def _track_matches_qualifiers(cls, track, qualifiers: List[str]) -> bool:
+        """Issue #589 — qualifier check must inspect both track.name AND
+        track.album.name. For MTV Unplugged-style releases the live /
+        unplugged signal lives in the album title, not the track title.
+        A track passes if every required qualifier appears as a whole
+        word in either the track name OR its album name.
+        """
+        if not qualifiers:
+            return True
+        track_name = (getattr(track, 'name', '') or '').lower()
+        album = getattr(track, 'album', None)
+        album_name = (getattr(album, 'name', '') or '').lower() if album else ''
+        haystack = f"{track_name} {album_name}".strip()
+        if not haystack:
+            return False
+        for kw in qualifiers:
+            if not re.search(r'\b' + re.escape(kw) + r'\b', haystack):
+                return False
+        return True
+
     @staticmethod
     def _generate_shortened_queries(original: str) -> List[str]:
         variants: List[str] = []
@@ -342,25 +363,35 @@ class TidalDownloadClient(DownloadSourcePlugin):
                     found = await loop.run_in_executor(None, _search)
 
                     if found:
+                        # Issue #589 — qualifier filter applies to ALL
+                        # search attempts, not just fallbacks. If the
+                        # primary query carries "live" / "unplugged" /
+                        # etc, the studio cut should never be accepted
+                        # just because Tidal returned it first. The
+                        # filter inspects both track.name AND
+                        # track.album.name (the live signal often lives
+                        # in the album title for concert releases).
                         is_fallback = attempt_idx > 0
-                        if is_fallback and required_qualifiers:
+                        if required_qualifiers:
                             filtered = [
                                 t for t in found
-                                if self._track_name_contains_qualifiers(getattr(t, 'name', ''), required_qualifiers)
+                                if self._track_matches_qualifiers(t, required_qualifiers)
                             ]
                             if filtered:
                                 tidal_tracks = filtered
                                 successful_query = attempt_query
                                 logger.info(
-                                    f"Tidal fallback kept {len(filtered)}/{len(found)} tracks "
-                                    f"after qualifier filter {required_qualifiers} for '{attempt_query}'"
+                                    f"Tidal {'fallback' if is_fallback else 'primary'} kept "
+                                    f"{len(filtered)}/{len(found)} tracks after qualifier filter "
+                                    f"{required_qualifiers} for '{attempt_query}'"
                                 )
                                 break
                             else:
                                 any_fallback_filtered_out = True
                                 logger.debug(
-                                    f"Tidal fallback '{attempt_query}' returned {len(found)} tracks "
-                                    f"but none matched original qualifiers {required_qualifiers} — "
+                                    f"Tidal {'fallback' if is_fallback else 'primary'} "
+                                    f"'{attempt_query}' returned {len(found)} tracks but none "
+                                    f"matched required qualifiers {required_qualifiers} — "
                                     f"trying next variant"
                                 )
                                 if attempt_idx < len(queries_to_try) - 1:

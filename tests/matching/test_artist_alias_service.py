@@ -81,10 +81,13 @@ class TestFetchArtistAliases:
     def test_extracts_alias_names_from_mb_response(self, service):
         """Reporter's case 1 shape: MB returns aliases for Hiroyuki
         Sawano including the Japanese kanji form. Extract the `name`
-        from each alias entry."""
+        from each alias entry. Issue #586 — also include the canonical
+        ``name`` and ``sort-name`` from the artist record itself, plus
+        per-alias ``sort-name`` when present, for cross-script bridging."""
         service.mb_client.get_artist.return_value = {
             'id': '60d2ea34-1912-425f-bf9c-fc544e4448cd',
             'name': 'Hiroyuki Sawano',
+            'sort-name': 'Sawano, Hiroyuki',
             'aliases': [
                 {'name': '澤野弘之', 'sort-name': '澤野弘之', 'locale': 'ja', 'primary': True},
                 {'name': 'SawanoHiroyuki', 'sort-name': 'SawanoHiroyuki', 'locale': None},
@@ -94,10 +97,11 @@ class TestFetchArtistAliases:
 
         aliases = service.fetch_artist_aliases('60d2ea34-1912-425f-bf9c-fc544e4448cd')
 
+        assert 'Hiroyuki Sawano' in aliases  # canonical name
+        assert 'Sawano, Hiroyuki' in aliases  # canonical sort-name (also matches alias sort-name)
         assert '澤野弘之' in aliases
         assert 'SawanoHiroyuki' in aliases
         assert 'Sawano Hiroyuki' in aliases
-        assert len(aliases) == 3
 
     def test_dedup_case_insensitive(self, service):
         """Same name with different casing should collapse — MB
@@ -125,14 +129,15 @@ class TestFetchArtistAliases:
         aliases = service.fetch_artist_aliases('mbid-x')
         assert aliases == ['Real Name']
 
-    def test_missing_aliases_key_returns_empty(self, service):
-        """MB artist record might not have any aliases. Returns []
-        not raises."""
+    def test_missing_aliases_key_returns_canonical_name_only(self, service):
+        """MB artist record without an aliases array still returns the
+        canonical name (post-#586). Pre-fix this returned [] which
+        meant cross-script bridging was impossible."""
         service.mb_client.get_artist.return_value = {
             'id': 'mbid-x',
             'name': 'Some Artist',
         }
-        assert service.fetch_artist_aliases('mbid-x') == []
+        assert service.fetch_artist_aliases('mbid-x') == ['Some Artist']
 
     def test_aliases_null_returns_empty(self, service):
         """MB sometimes returns `aliases: null` instead of empty array."""
@@ -476,14 +481,19 @@ class TestLookupArtistAliasesMultiTier:
         assert aliases == []
 
     def test_no_search_results_returns_empty(self, service):
-        """Artist not found on MB — empty return, cached so we
-        don't re-search the same name forever."""
+        """Artist not found on MB under either strict or non-strict
+        search — empty return, cached so we don't re-search the same
+        name forever. Issue #586: strict-then-non-strict means TWO
+        search calls per uncached lookup; the empty cache prevents
+        further calls on the next invocation."""
         service.mb_client.search_artist.return_value = []
         aliases = service.lookup_artist_aliases('NeverHeardOf')
         assert aliases == []
-        # Second call should hit cache, not re-search
+        # First lookup: strict + non-strict fallback = 2 calls.
+        assert service.mb_client.search_artist.call_count == 2
+        # Second call should hit cache, not re-search at all.
         service.lookup_artist_aliases('NeverHeardOf')
-        assert service.mb_client.search_artist.call_count == 1
+        assert service.mb_client.search_artist.call_count == 2
 
     def test_low_confidence_match_skipped(self, service):
         """Search returned something but the name similarity is too

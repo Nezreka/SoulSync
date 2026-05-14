@@ -29,8 +29,22 @@ def _get_config_manager():
     return config_manager
 
 
-def move_to_quarantine(file_path: str, context: dict, reason: str, automation_engine=None) -> str:
-    """Move a file to the quarantine folder and write a metadata sidecar."""
+def move_to_quarantine(file_path: str, context: dict, reason: str, automation_engine=None, *, trigger: str = "unknown") -> str:
+    """Move a file to the quarantine folder and write a metadata sidecar.
+
+    `trigger` identifies which check fired (`integrity` / `acoustid` /
+    `bit_depth` / `unknown`) and is persisted in the sidecar so
+    one-click Approve can set the matching `_skip_quarantine_check`
+    bypass when re-running the pipeline.
+
+    Sidecar also persists a JSON-safe snapshot of the full `context`
+    dict via `serialize_quarantine_context`, enabling in-place approve
+    without losing the matched-track metadata. Legacy sidecars (written
+    before this expansion) lack the `context` field — Approve falls
+    back to `recover_to_staging` for those.
+    """
+    from core.imports.quarantine import serialize_quarantine_context
+
     download_dir = _get_config_manager().get("soulseek.download_path", "./downloads")
     quarantine_dir = Path(download_dir) / "ss_quarantine"
     quarantine_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +70,8 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
         "expected_track": get_import_clean_title(context, default=original_search.get("title", "Unknown")),
         "expected_artist": get_import_clean_artist(context, default=(artist_context.get("name", "") if isinstance(artist_context, dict) else "Unknown")),
         "context_key": context.get("context_key", "unknown"),
+        "trigger": trigger,
+        "context": serialize_quarantine_context(context),
     }
 
     try:
