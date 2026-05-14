@@ -254,6 +254,74 @@ class AcoustIDScannerJob(RepairJob):
         if title_sim >= title_threshold and artist_sim >= artist_threshold:
             return
 
+        # Issue #587 (Foxxify) — top recording's metadata mismatched, but
+        # AcoustID often returns multiple recordings per fingerprint
+        # (sample collisions, multi-MB-record cases). Check ALL of them
+        # before flagging — if any candidate's metadata matches expected
+        # title + artist, the file IS the right song and AcoustID's top
+        # match was just a wrong-credited recording.
+        from core.matching.acoustid_candidates import (
+            duration_mismatches_strongly,
+            find_matching_recording,
+        )
+        from core.matching.artist_aliases import artist_names_match
+
+        def _scanner_title_sim(a, b):
+            return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+
+        def _scanner_artist_sim(expected_a, actual_a):
+            _, score = artist_names_match(expected_a, actual_a, threshold=artist_threshold)
+            return score
+
+        candidate_match, _, _ = find_matching_recording(
+            fp_result.get('recordings') or [],
+            expected['title'],
+            expected_artist,
+            title_threshold=title_threshold,
+            artist_threshold=artist_threshold,
+            similarity=_scanner_title_sim,
+            artist_similarity=_scanner_artist_sim,
+        )
+        if candidate_match is not None:
+            # A lower-ranked candidate matched — file IS the right song.
+            # No finding.
+            if context.report_progress:
+                context.report_progress(
+                    log_line=(
+                        f'Resolved (lower-ranked candidate match): {fname} — '
+                        f'expected "{expected["title"]}" matched candidate '
+                        f'"{candidate_match.get("title")}" by '
+                        f'"{candidate_match.get("artist")}"'
+                    ),
+                    log_type='ok',
+                )
+            return
+
+        # Issue #587 (Foxxify "17min mashup → 5min track") — duration
+        # guard against fingerprint hash collisions. When the file's
+        # actual duration differs from AcoustID's matched recording by
+        # more than max(60s, 35%), the fingerprint is almost certainly
+        # a sample/intro collision, not a real recording match. Don't
+        # produce a confident "Wrong Song" finding.
+        try:
+            file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
+        except Exception:
+            file_duration_s = 0
+        candidate_duration_s = best_recording.get('duration')
+        if candidate_duration_s is None and best_recording.get('length'):
+            candidate_duration_s = best_recording.get('length')
+        if duration_mismatches_strongly(file_duration_s, candidate_duration_s):
+            if context.report_progress:
+                context.report_progress(
+                    log_line=(
+                        f'Skipped (duration mismatch suggests fingerprint collision): '
+                        f'{fname} — expected {file_duration_s:.0f}s, AcoustID '
+                        f'candidate {candidate_duration_s:.0f}s'
+                    ),
+                    log_type='skip',
+                )
+            return
+
         # Mismatch detected
         if context.report_progress:
             context.report_progress(
@@ -326,7 +394,8 @@ class AcoustIDScannerJob(RepairJob):
                        t.file_path, t.track_number,
                        al.title AS album_title, al.thumb_url, ar.thumb_url,
                        NULLIF(t.track_artist, '') AS track_artist,
-                       ar.name AS album_artist
+                       ar.name AS album_artist,
+                       t.duration
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -352,6 +421,11 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_thumb_url': row[7] or None,
                     'track_artist': row[8] or '',  # raw (may be empty)
                     'album_artist': row[9] or '',
+                    # Duration in MS (DB stores ms). Used by the
+                    # duration-mismatch guard to spot fingerprint
+                    # collisions where the matched recording is a
+                    # totally different length.
+                    'duration_ms': row[10] or 0,
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)
