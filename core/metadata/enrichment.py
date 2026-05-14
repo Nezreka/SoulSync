@@ -102,7 +102,19 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 save_audio_file(audio_file, symbols)
                 return True
 
-            track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
+            # Discord report (Netti93) — many album-dict construction
+            # sites pass `total_tracks: 0` when source data is incomplete
+            # (per types.py, 0 means "unknown"). Pre-fix this serialized
+            # to "6/0" tags. Helper drops the `/N` suffix when total is
+            # unknown so the tag reads "6" instead — matches retag's
+            # behavior at core/tag_writer.py and ID3 spec convention.
+            from core.metadata.track_number_format import (
+                format_track_number_tag,
+                format_track_number_tuple,
+            )
+            track_num_str = format_track_number_tag(
+                metadata.get('track_number'), metadata.get('total_tracks')
+            )
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             artists_list = metadata.get("_artists_list", [])
 
@@ -167,7 +179,9 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file["\xa9day"] = [metadata["date"]]
                 if metadata.get("genre"):
                     audio_file["\xa9gen"] = [metadata["genre"]]
-                audio_file["trkn"] = [(metadata.get("track_number", 1), metadata.get("total_tracks", 1))]
+                audio_file["trkn"] = [format_track_number_tuple(
+                    metadata.get("track_number"), metadata.get("total_tracks")
+                )]
                 if metadata.get("disc_number"):
                     audio_file["disk"] = [(metadata["disc_number"], 0)]
 
