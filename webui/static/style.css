@@ -20007,6 +20007,186 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: none;
 }
 
+/* =====================================================================
+   Download-Missing tracklist polish — pure visual tune-up.
+   Keeps column layout intact (no grid restructure, no cell reflow).
+   Refines: header chrome, row hairlines, hover states, typography
+   (mono numbers/duration, weight tightening), status pill polish,
+   pulse on checking/downloading, soft scrollbar.
+   All overrides scoped to `.download-missing-modal-content` so they
+   only affect this modal — never the standalone Albums page tables.
+   ===================================================================== */
+
+/* Header chrome — refined uppercase micro-caps for column labels */
+.download-missing-modal-content .download-tracks-table thead th {
+    background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: center;
+}
+
+/* Cell baseline — tighter padding, hairline divider */
+.download-missing-modal-content .download-tracks-table td {
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    transition: color 0.15s ease;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Row hover — subtle accent gradient + left-edge accent bar via box-shadow inset */
+.download-missing-modal-content .download-tracks-table tbody tr {
+    transition: background 0.18s ease, box-shadow 0.18s ease;
+    position: relative;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.07) 0%,
+        rgba(255, 255, 255, 0.03) 60%,
+        transparent 100%);
+    box-shadow: inset 3px 0 0 rgb(var(--accent-rgb));
+}
+
+/* Track number — mono, dim, tabular */
+.download-missing-modal-content .download-tracks-table .track-number {
+    color: rgba(255, 255, 255, 0.32);
+    font-weight: 500;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', Menlo, Consolas, ui-monospace, monospace;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover .track-number {
+    color: rgb(var(--accent-rgb));
+}
+
+/* Title — bold white, slight negative tracking */
+.download-missing-modal-content .download-tracks-table .track-name {
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.005em;
+}
+
+/* Artist — dim, centered */
+.download-missing-modal-content .download-tracks-table .track-artist {
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 400;
+    text-align: center;
+}
+
+/* Duration — mono dim tabular */
+.download-missing-modal-content .download-tracks-table .track-duration {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', Menlo, Consolas, ui-monospace, monospace;
+}
+
+/* Status cells — uppercase micro-caps with leading colored dot */
+.download-missing-modal-content .download-tracks-table .track-match-status,
+.download-missing-modal-content .download-tracks-table .track-download-status {
+    font-weight: 700;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+}
+
+/* Leading colored dot before status text — uses currentColor so it matches state */
+.download-missing-modal-content .download-tracks-table .match-found::before,
+.download-missing-modal-content .download-tracks-table .match-missing::before,
+.download-missing-modal-content .download-tracks-table .match-checking::before,
+.download-missing-modal-content .download-tracks-table .download-searching::before,
+.download-missing-modal-content .download-tracks-table .download-downloading::before,
+.download-missing-modal-content .download-tracks-table .download-complete::before,
+.download-missing-modal-content .download-tracks-table .download-failed::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    margin-right: 7px;
+    vertical-align: 1px;
+    box-shadow: 0 0 8px currentColor, 0 0 2px currentColor;
+}
+.download-missing-modal-content .download-tracks-table .match-found {
+    color: #4ade80;
+    text-shadow: 0 0 12px rgba(74, 222, 128, 0.35);
+}
+.download-missing-modal-content .download-tracks-table .match-missing {
+    color: #facc15;
+    text-shadow: 0 0 12px rgba(250, 204, 21, 0.35);
+}
+.download-missing-modal-content .download-tracks-table .match-checking {
+    color: #60a5fa;
+    text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
+    animation: dms-status-pulse 1.5s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-searching {
+    color: #60a5fa;
+    text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
+    animation: dms-status-pulse 1.5s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-downloading {
+    color: #fb923c;
+    text-shadow: 0 0 12px rgba(251, 146, 60, 0.4);
+    animation: dms-status-pulse 1s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-complete {
+    color: #4ade80;
+    text-shadow: 0 0 12px rgba(74, 222, 128, 0.4);
+}
+.download-missing-modal-content .download-tracks-table .download-failed {
+    color: #f87171;
+    text-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+}
+
+@keyframes dms-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* Checkbox column — accent + hover scale */
+.download-missing-modal-content .download-tracks-table .track-select-cb {
+    accent-color: rgb(var(--accent-rgb));
+    transition: transform 0.12s ease;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover .track-select-cb {
+    transform: scale(1.08);
+}
+
+/* Deselected — fade title/artist, keep status visible */
+.download-missing-modal-content .download-tracks-table .track-deselected .track-name,
+.download-missing-modal-content .download-tracks-table .track-deselected .track-artist {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.25);
+    text-decoration-thickness: 1px;
+}
+
+/* Soft scrollbar for the track scroll area */
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar {
+    width: 8px;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    transition: background 0.2s ease;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
 /* Force Download Toggle Styling */
 .force-download-toggle-container {
     display: flex;
