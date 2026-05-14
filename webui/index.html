@@ -2191,12 +2191,32 @@
                             <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
                                 <span>Recent History</span>
                                 <div class="adl-batch-history-header-actions">
+                                    <button class="library-history-btn" onclick="event.stopPropagation();openQuarantineModal()" title="Manage quarantined files">Quarantine</button>
                                     <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
                                     <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                                 </div>
                             </div>
                             <div class="adl-batch-history-list" id="adl-batch-history-list">
                                 <!-- Completed batch history rendered by JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quarantine Management Modal -->
+                    <div id="quarantine-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeQuarantineModal()">
+                        <div class="modal-content" style="max-width:1100px;width:95%">
+                            <div class="modal-header">
+                                <h2>Quarantined Files</h2>
+                                <button class="modal-close" onclick="closeQuarantineModal()">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="quarantine-modal-content">
+                                    <p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px">Loading…</p>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="modal-btn-secondary" onclick="loadQuarantineEntries()">Refresh</button>
+                                <button class="modal-btn-secondary" onclick="closeQuarantineModal()">Close</button>
                             </div>
                         </div>
                     </div>
