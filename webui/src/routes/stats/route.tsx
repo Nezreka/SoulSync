@@ -21,7 +21,12 @@ export const Route = createFileRoute('/stats')({
   loader: async ({ context, deps }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(statsCachedQueryOptions(deps.range)),
-      context.queryClient.ensureQueryData(listeningStatsStatusQueryOptions()),
+      context.queryClient
+        .fetchQuery({
+          ...listeningStatsStatusQueryOptions(),
+          retry: false,
+        })
+        .catch(() => undefined),
     ]);
   },
   component: StatsPage,

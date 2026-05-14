@@ -871,22 +871,26 @@ async function playStatsTrack(
   bridge: ShellBridge,
   track: { title: string; artist: string; album: string },
 ) {
-  const resolvedTrack = await resolveStatsTrack(track.title, track.artist);
-  if (resolvedTrack) {
-    await bridge.playLibraryTrack(
-      {
-        id: resolvedTrack.id,
-        title: resolvedTrack.title,
-        file_path: resolvedTrack.file_path,
-        bitrate: resolvedTrack.bitrate,
-        artist_id: resolvedTrack.artist_id,
-        album_id: resolvedTrack.album_id,
-        _stats_image: resolvedTrack.image_url || null,
-      },
-      resolvedTrack.album_title || track.album,
-      resolvedTrack.artist_name || track.artist,
-    );
-    return;
+  try {
+    const resolvedTrack = await resolveStatsTrack(track.title, track.artist);
+    if (resolvedTrack) {
+      await bridge.playLibraryTrack(
+        {
+          id: resolvedTrack.id,
+          title: resolvedTrack.title,
+          file_path: resolvedTrack.file_path,
+          bitrate: resolvedTrack.bitrate,
+          artist_id: resolvedTrack.artist_id,
+          album_id: resolvedTrack.album_id,
+          _stats_image: resolvedTrack.image_url || null,
+        },
+        resolvedTrack.album_title || track.album,
+        resolvedTrack.artist_name || track.artist,
+      );
+      return;
+    }
+  } catch {
+    // Library resolve is best-effort; fall through to stream lookup on failure.
   }
 
   bridge.showLoadingOverlay(`Searching for ${track.title}...`);
