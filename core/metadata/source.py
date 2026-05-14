@@ -23,6 +23,7 @@ from core.imports.context import (
     get_source_tag_names,
     normalize_import_context,
 )
+from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
 from core.metadata.common import (
@@ -907,17 +908,13 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     else:
         logger.warning("Metadata: Using original title as fallback: '%s'", metadata["title"])
 
-    artists = original_search.get("artists")
-    if isinstance(artists, list) and artists:
-        all_artists = []
-        for artist_item in artists:
-            if isinstance(artist_item, dict) and artist_item.get("name"):
-                all_artists.append(artist_item["name"])
-            elif isinstance(artist_item, str):
-                all_artists.append(artist_item)
-            else:
-                all_artists.append(str(artist_item))
-
+    # Resolve canonical artists list. Soulseek matched-download contexts
+    # only carry `original_search.artist` (singular string) — the full
+    # contributors list lives on `track_info` (the matched Spotify/etc
+    # track object). Deezer-direct contexts populate `original_search.artists`
+    # directly. Pure helper handles all three shapes.
+    all_artists = resolve_track_artists(original_search, track_info, artist_dict)
+    if all_artists:
         # Deezer upgrade path: Deezer's `/search` endpoint only returns
         # the primary artist for each track. The full contributors
         # array (feat., remix collaborators, producers credited as
