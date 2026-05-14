@@ -42,7 +42,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'library', path: '/library', kind: 'legacy' },
   { pageId: 'tools', path: '/tools', kind: 'legacy' },
   { pageId: 'artist-detail', path: '/artist-detail', kind: 'legacy' },
-  { pageId: 'stats', path: '/stats', kind: 'legacy' },
+  { pageId: 'stats', path: '/stats', kind: 'react' },
   { pageId: 'settings', path: '/settings', kind: 'legacy' },
   { pageId: 'issues', path: '/issues', kind: 'react' },
   { pageId: 'help', path: '/help', kind: 'legacy' },
