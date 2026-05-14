@@ -38,6 +38,46 @@ describe('stats api', () => {
     });
   });
 
+  it('returns an empty payload when cached stats are not available yet', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({ success: false, error: 'Listening stats not synced yet' }),
+      ),
+    );
+
+    await expect(fetchStatsCached('7d')).resolves.toMatchObject({
+      success: true,
+      overview: { total_plays: 0 },
+      top_artists: [],
+      top_albums: [],
+      top_tracks: [],
+      timeline: [],
+      genres: [],
+      recent: [],
+      health: {},
+    });
+  });
+
+  it('returns an empty payload when the server reports a cache miss as an HTTP error', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({ error: 'No cached stats available yet' }, { status: 500 }),
+      ),
+    );
+
+    await expect(fetchStatsCached('7d')).resolves.toMatchObject({
+      success: true,
+      overview: { total_plays: 0 },
+      top_artists: [],
+      top_albums: [],
+      top_tracks: [],
+      timeline: [],
+      genres: [],
+      recent: [],
+      health: {},
+    });
+  });
+
   it('surfaces db storage and disk usage errors', async () => {
     server.use(
       http.get('/api/stats/db-storage', () =>

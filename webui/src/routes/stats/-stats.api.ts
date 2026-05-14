@@ -1,4 +1,5 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import { HTTPError } from 'ky';
 
 import { apiClient, readJson } from '@/app/api-client';
 
@@ -12,18 +13,50 @@ import type {
   StatsStreamTrackPayload,
 } from './-stats.types';
 
+import { EMPTY_STATS_PAYLOAD } from './-stats.helpers';
+
 export const STATS_QUERY_KEY = ['stats'] as const;
 
+const NO_STATS_YET_PATTERNS = [
+  /not synced/i,
+  /no listening stats/i,
+  /no cached stats/i,
+  /cache miss/i,
+  /stats cache.*(missing|empty|not found)/i,
+] as const;
+
+function isNoStatsYetMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  return NO_STATS_YET_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function getEmptyStatsPayload(): StatsCachedPayload {
+  return {
+    success: true,
+    ...EMPTY_STATS_PAYLOAD,
+  };
+}
+
 export async function fetchStatsCached(range: StatsRange): Promise<StatsCachedPayload> {
-  const payload = await readJson<StatsCachedPayload>(
-    apiClient.get('stats/cached', {
-      searchParams: { range },
-    }),
-  );
-  if (!payload.success) {
-    throw new Error(payload.error || 'Failed to load listening stats');
+  try {
+    const payload = await readJson<StatsCachedPayload>(
+      apiClient.get('stats/cached', {
+        searchParams: { range },
+      }),
+    );
+    if (!payload.success) {
+      if (isNoStatsYetMessage(payload.error)) {
+        return getEmptyStatsPayload();
+      }
+      throw new Error(payload.error || 'Failed to load listening stats');
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof HTTPError && isNoStatsYetMessage(error.message)) {
+      return getEmptyStatsPayload();
+    }
+    throw error;
   }
-  return payload;
 }
 
 export async function fetchListeningStatsStatus(): Promise<ListeningStatsStatus> {
