@@ -15164,6 +15164,8 @@ def _build_retag_deps():
         global retag_state
         retag_state = value
 
+    from core.metadata.lyrics import generate_lrc_file as _generate_lrc_file
+
     return _library_retag.RetagDeps(
         config_manager=config_manager,
         retag_lock=retag_lock,
@@ -15178,6 +15180,7 @@ def _build_retag_deps():
         _get_retag_state=_get_state,
         _set_retag_state=_set_state,
         get_database=_get_db,
+        generate_lrc_file=_generate_lrc_file,
     )
 
 
