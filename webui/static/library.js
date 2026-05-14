@@ -1475,6 +1475,70 @@ const _TOP_TRACKS_SOURCE_LABELS = {
     lastfm: 'Popular on Last.fm',
 };
 
+async function playTrackByMetadata(title, artist, album = '') {
+    // 1. Try the library first — fastest and best quality if owned.
+    try {
+        const resp = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist }),
+        });
+        const data = await resp.json();
+        if (data.success && data.track) {
+            const track = data.track;
+            playLibraryTrack(
+                {
+                    id: track.id,
+                    title: track.title,
+                    file_path: track.file_path,
+                    bitrate: track.bitrate,
+                    artist_id: track.artist_id,
+                    album_id: track.album_id,
+                    _stats_image: track.image_url || null,
+                },
+                track.album_title || album || '',
+                track.artist_name || artist || '',
+            );
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed, will try streaming fallback:', e);
+    }
+
+    // 2. Library miss — fall back to streaming via the enhanced-search streamer.
+    if (typeof showLoadingOverlay === 'function') {
+        showLoadingOverlay(`Searching for ${title}...`);
+    }
+    try {
+        const streamResp = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album,
+                duration_ms: 0,
+            }),
+        });
+        const streamData = await streamResp.json();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+
+        if (streamData.success && streamData.result) {
+            if (typeof startStream === 'function') {
+                await startStream(streamData.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(streamData.error || 'Track not found in library or any source', 'error');
+        }
+    } catch (e) {
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        showToast('Failed to play track', 'error');
+        console.error('Stream fallback failed:', e);
+    }
+}
+
 async function _loadArtistTopTracks(artistName) {
     const sidebar = document.getElementById('artist-hero-sidebar');
     const container = document.getElementById('hero-top-tracks');
@@ -1539,7 +1603,7 @@ async function _loadArtistTopTracks(artistName) {
                         const playBtn = e.target.closest('.hero-top-track-play');
                         if (playBtn) {
                             e.stopPropagation();
-                            playStatsTrack(playBtn.dataset.track, playBtn.dataset.artist, '');
+                            playTrackByMetadata(playBtn.dataset.track, playBtn.dataset.artist, '');
                             return;
                         }
                         const dlBtn = e.target.closest('.hero-top-track-download');
@@ -1595,7 +1659,7 @@ async function _loadArtistTopTracks(artistName) {
             const btn = e.target.closest('.hero-top-track-play');
             if (btn) {
                 e.stopPropagation();
-                playStatsTrack(btn.dataset.track, btn.dataset.artist, '');
+                playTrackByMetadata(btn.dataset.track, btn.dataset.artist, '');
             }
         };
         sidebar.style.display = '';

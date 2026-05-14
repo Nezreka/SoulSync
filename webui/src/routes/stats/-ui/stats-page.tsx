@@ -134,14 +134,19 @@ export function StatsPage() {
   };
 
   return (
-    <div className={styles.statsContainer} data-testid="stats-page">
+    <div id="stats-container" className={styles.statsContainer} data-testid="stats-page">
       <header className={styles.statsHeader}>
         <div className={styles.statsHeaderTitle}>
           <img src="/static/trans2.png" alt="Stats" className={styles.headerIcon} />
           <h1 className={styles.headerTitle}>Listening Stats</h1>
         </div>
         <div className={styles.statsHeaderControls}>
-          <div className={styles.statsTimeRange} role="tablist" aria-label="Listening stats range">
+          <div
+            id="stats-time-range"
+            className={styles.statsTimeRange}
+            role="tablist"
+            aria-label="Listening stats range"
+          >
             {(['7d', '30d', '12m', 'all'] as const).map((option) => (
               <button
                 key={option}
@@ -160,6 +165,7 @@ export function StatsPage() {
               {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
             </span>
             <button
+              id="stats-sync-btn"
               type="button"
               className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
               onClick={() => syncMutation.mutate()}
@@ -183,13 +189,13 @@ export function StatsPage() {
           <div className={styles.statsMainGrid}>
             <div className={styles.statsLeftCol}>
               <StatsSectionCard title="Listening Activity">
-                <div className={styles.chartContainer}>
+                <div id="stats-timeline-chart" className={styles.chartContainer}>
                   <StatsActivityChart timeline={cachedStats?.timeline ?? []} />
                 </div>
               </StatsSectionCard>
               <StatsSectionCard title="Genre Breakdown">
                 <div className={styles.statsGenreChartContainer}>
-                  <div className={styles.statsGenreChartWrap}>
+                  <div id="stats-genre-chart" className={styles.statsGenreChartWrap}>
                     <StatsGenreChart genres={cachedStats?.genres ?? []} />
                   </div>
                   <StatsGenreLegend genres={cachedStats?.genres ?? []} />
@@ -265,7 +271,7 @@ function OverviewCards({
   ];
 
   return (
-    <div className={styles.statsOverview}>
+    <div id="stats-overview" className={styles.statsOverview}>
       {cards.map((card) => (
         <div key={card.label} className={styles.statsCard}>
           <div className={styles.statsCardValue}>{card.value}</div>
@@ -440,7 +446,7 @@ function StatsRankedArtists({
   onArtistSelect: (artistId: string | number, artistName: string) => void;
 }) {
   return (
-    <div className={styles.statsRankedList}>
+    <div id="stats-top-artists" className={styles.statsRankedList}>
       {artists.length === 0 ? <EmptyListState message="No data yet" /> : null}
       {artists.map((artist, index) => (
         <div key={`${artist.name}-${artist.id ?? index}`} className={styles.statsRankedItem}>
@@ -490,7 +496,7 @@ function StatsRankedAlbums({
   onArtistSelect: (artistId: string | number, artistName: string) => void;
 }) {
   return (
-    <div className={styles.statsRankedList}>
+    <div id="stats-top-albums" className={styles.statsRankedList}>
       {albums.length === 0 ? <EmptyListState message="No data yet" /> : null}
       {albums.map((album, index) => (
         <div key={`${album.name}-${index}`} className={styles.statsRankedItem}>
@@ -537,7 +543,7 @@ function StatsRankedTracks({
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
 }) {
   return (
-    <div className={styles.statsRankedList}>
+    <div id="stats-top-tracks" className={styles.statsRankedList}>
       {tracks.length === 0 ? <EmptyListState message="No data yet" /> : null}
       {tracks.map((track, index) => (
         <div key={`${track.name}-${index}`} className={styles.statsRankedItem}>
@@ -597,7 +603,7 @@ function StatsRecentPlays({
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
 }) {
   return (
-    <div className={styles.statsRecentList}>
+    <div id="stats-recent-plays" className={styles.statsRecentList}>
       {tracks.length === 0 ? <EmptyListState message="No recent plays" /> : null}
       {tracks.map((track, index) => (
         <div key={`${track.title}-${track.played_at ?? index}`} className={styles.statsRecentItem}>
@@ -639,7 +645,7 @@ function StatsLibraryHealth({ health }: { health: StatsHealth }) {
   };
 
   return (
-    <>
+    <div id="stats-library-health">
       <div className={styles.statsHealthGrid}>
         <div className={`${styles.statsHealthItem} ${styles.statsHealthItemWide}`}>
           <div className={styles.statsHealthLabel}>Format Breakdown</div>
@@ -679,7 +685,7 @@ function StatsLibraryHealth({ health }: { health: StatsHealth }) {
           <div className={styles.statsHealthLabel}>Total Tracks</div>
         </div>
       </div>
-      <div className={styles.statsEnrichment}>
+      <div id="stats-enrichment-coverage" className={styles.statsEnrichment}>
         {STATS_ENRICHMENT_SERVICES.map((service) => {
           const percent = health.enrichment_coverage?.[service.key] || 0;
           return (
@@ -696,7 +702,7 @@ function StatsLibraryHealth({ health }: { health: StatsHealth }) {
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -769,7 +775,7 @@ function StatsDbStorage({
 
   return (
     <div className={styles.statsDbStorageWrap}>
-      <div className={styles.statsDbChartContainer}>
+      <div id="stats-db-storage-chart" className={styles.statsDbChartContainer}>
         <ResponsiveContainer width={180} height={180}>
           <PieChart>
             <Pie
