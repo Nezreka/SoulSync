@@ -3094,6 +3094,149 @@ function openLibraryHistoryModal() {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Quarantine management modal — list / delete / approve / recover
+// ──────────────────────────────────────────────────────────────────────
+
+function openQuarantineModal() {
+    const modal = document.getElementById('quarantine-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        loadQuarantineEntries();
+    }
+}
+
+function closeQuarantineModal() {
+    const modal = document.getElementById('quarantine-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function _quarantineFormatBytes(n) {
+    if (!n) return '0 B';
+    const u = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+
+function _quarantineFormatTime(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function _quarantineEsc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadQuarantineEntries() {
+    const container = document.getElementById('quarantine-modal-content');
+    if (!container) return;
+    container.innerHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px">Loading…</p>';
+    try {
+        const r = await fetch('/api/quarantine/list');
+        const data = await r.json();
+        if (!data.success) {
+            container.innerHTML = `<p style="color:#f87171;text-align:center;padding:40px">${_quarantineEsc(data.error || 'Failed to load')}</p>`;
+            return;
+        }
+        const entries = data.entries || [];
+        if (entries.length === 0) {
+            container.innerHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px">No quarantined files. Nice and clean.</p>';
+            return;
+        }
+        const rows = entries.map(e => {
+            const approveBtn = e.has_full_context
+                ? `<button class="modal-btn-primary" style="font-size:11px;padding:5px 10px" onclick="approveQuarantineEntry('${_quarantineEsc(e.id)}')">Approve</button>`
+                : `<button class="modal-btn-secondary" style="font-size:11px;padding:5px 10px" onclick="recoverQuarantineEntry('${_quarantineEsc(e.id)}')" title="Move to Staging — finish via Import flow">Recover</button>`;
+            return `
+                <tr>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);font-weight:600;color:#fff">${_quarantineEsc(e.original_filename)}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.6);font-size:12px">${_quarantineEsc(e.expected_track || '—')}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.5);font-size:12px">${_quarantineEsc(e.expected_artist || '—')}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:#facc15;font-size:11.5px;max-width:260px">${_quarantineEsc(e.reason)}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.45);font-size:11px;font-family:monospace;white-space:nowrap">${_quarantineEsc(_quarantineFormatTime(e.timestamp))}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(255,255,255,0.4);font-size:11px;font-family:monospace">${_quarantineFormatBytes(e.size_bytes)}</td>
+                    <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,0.05);text-align:right;white-space:nowrap">
+                        ${approveBtn}
+                        <button class="modal-btn-secondary" style="font-size:11px;padding:5px 10px;background:rgba(248,113,113,0.15);border-color:rgba(248,113,113,0.4);color:#f87171" onclick="deleteQuarantineEntry('${_quarantineEsc(e.id)}')">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        container.innerHTML = `
+            <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:12px">
+                ${entries.length} quarantined file${entries.length !== 1 ? 's' : ''}.
+                <strong style="color:rgba(255,255,255,0.7)">Approve</strong> re-runs the post-process pipeline with the failing check skipped.
+                <strong style="color:rgba(255,255,255,0.7)">Recover</strong> (legacy entries only) drops the file into Staging for manual import.
+                <strong style="color:rgba(255,255,255,0.7)">Delete</strong> removes the file permanently.
+            </p>
+            <div style="overflow:auto;max-height:60vh">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                    <tr style="text-align:left;color:rgba(255,255,255,0.45);font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em">
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">File</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Expected Track</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Expected Artist</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Reason</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">When</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1)">Size</th>
+                        <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.1);text-align:right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+            </div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<p style="color:#f87171;text-align:center;padding:40px">${_quarantineEsc(err.message || 'Network error')}</p>`;
+    }
+}
+
+async function approveQuarantineEntry(entryId) {
+    if (!confirm('Approve this file? It will be re-processed with the failing check skipped, then moved into your library.')) return;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const data = await r.json();
+        if (!data.success) {
+            alert(`Approve failed: ${data.error}`);
+        } else if (typeof showToast === 'function') {
+            showToast(`Approved — bypassed ${data.trigger_bypassed} check. Re-running pipeline.`, 'success');
+        }
+    } catch (err) {
+        alert(`Approve failed: ${err.message}`);
+    }
+    loadQuarantineEntries();
+}
+
+async function recoverQuarantineEntry(entryId) {
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
+        const data = await r.json();
+        if (!data.success) {
+            alert(`Recover failed: ${data.error}`);
+        } else if (typeof showToast === 'function') {
+            showToast('Moved to Staging — finish via the Import page.', 'success');
+        }
+    } catch (err) {
+        alert(`Recover failed: ${err.message}`);
+    }
+    loadQuarantineEntries();
+}
+
+async function deleteQuarantineEntry(entryId) {
+    if (!confirm('Delete this quarantined file permanently?')) return;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!data.success) {
+            alert(`Delete failed: ${data.error}`);
+        }
+    } catch (err) {
+        alert(`Delete failed: ${err.message}`);
+    }
+    loadQuarantineEntries();
+}
+
 function closeLibraryHistoryModal() {
     const overlay = document.getElementById('library-history-overlay');
     if (overlay) overlay.classList.add('hidden');
