@@ -2521,7 +2521,7 @@ function _renderDiscogCard(release, index, completionData) {
             data-year="${year || '0'}" data-name="${albumName.toLowerCase().replace(/"/g, '&quot;')}"
             data-variants="${_detectReleaseVariants(albumName).join(' ')}" data-initially-checked="${!isOwned}"
             style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_onDiscogCardChange(this)">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
@@ -2712,7 +2712,7 @@ function _applyAllFilters() {
         } else if (!shouldFilter && card.dataset.filterOff === 'true') {
             card.dataset.filterOff = '';
             card.classList.remove('discog-card--filtered');
-            if (cb) cb.checked = card.dataset.initiallyChecked === 'true';
+            if (cb) cb.checked = 'userChecked' in card.dataset ? card.dataset.userChecked === 'true' : card.dataset.initiallyChecked === 'true';
         }
     });
     _resortGrid();
@@ -2735,6 +2735,8 @@ function _resortGrid() {
     if (deselectedSection) deselectedSection.style.display = count > 0 ? '' : 'none';
     const countEl = document.getElementById('discog-deselected-count');
     if (countEl) countEl.textContent = count;
+    const sortVal = document.querySelector('.discog-sort-select')?.value;
+    if (sortVal) sortDiscogGrid(sortVal);
 }
 
 function toggleDeselectedSection() {
@@ -2778,6 +2780,12 @@ function _updateSelectToggleBtn() {
     const cbs = Array.from(selectedGrid.querySelectorAll('.discog-card-cb'));
     const allChecked = cbs.length > 0 && cbs.every(cb => cb.checked);
     btn.textContent = allChecked ? 'Deselect All' : 'Select All';
+}
+
+function _onDiscogCardChange(cb) {
+    const card = cb.closest('.discog-card');
+    if (card) card.dataset.userChecked = cb.checked;
+    _updateDiscogFooterCount();
 }
 
 function _updateDiscogFooterCount() {
