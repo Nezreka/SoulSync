@@ -1821,6 +1821,11 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
             for (let k = 0; k < trackIndex; k++) {
                 if (_serverEditorState.tracks[k]?.server_track) serverPos++;
             }
+            // source_track carries source_track_id (Spotify ID) when this
+            // came from a mirrored playlist — the backend uses it to
+            // persist the Find & Add selection as a permanent match
+            // override so future syncs auto-pair without user action.
+            const srcTrack = track.source_track || {};
             response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/add-track`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1828,6 +1833,9 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
                     track_id: newTrackId,
                     playlist_name: _serverEditorState.playlistName,
                     position: serverPos,
+                    source_track_id: srcTrack.source_track_id || '',
+                    source_title: srcTrack.name || '',
+                    source_artist: srcTrack.artist || '',
                 })
             });
         }
