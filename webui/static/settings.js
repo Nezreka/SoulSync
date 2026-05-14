@@ -970,6 +970,7 @@ async function loadSettingsData() {
         document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
+        document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -2747,6 +2748,7 @@ async function saveSettings(quiet = false) {
         },
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
+            duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
         },
         library: {
             music_paths: collectMusicPaths(),

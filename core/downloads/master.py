@@ -174,14 +174,33 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             elif album_tracks_map:
                 # Album-scoped matching: check against known album tracks first
                 track_name_lower = track_name.lower().strip()
-                # Direct title match
+                # Issue #589 — strip suffixes that just repeat the album
+                # context (e.g. "Shy Away (MTV Unplugged Live)" on a
+                # "MTV Unplugged" album → "Shy Away") so album-owned
+                # tracks don't false-miss when the local DB stored the
+                # base title. Only fires inside the album-confirmed
+                # scope; global matching elsewhere is unchanged.
+                from core.matching.album_context_title import strip_redundant_album_suffix
+                _album_name_for_strip = (batch_album_context or {}).get('name', '')
+                _normalized_source_title = strip_redundant_album_suffix(
+                    track_name, _album_name_for_strip
+                ).lower().strip()
+                # Direct title match (try both raw and normalized)
                 if track_name_lower in album_tracks_map:
                     found, confidence = True, 1.0
+                elif _normalized_source_title and _normalized_source_title in album_tracks_map:
+                    found, confidence = True, 1.0
                 else:
-                    # Fuzzy match against album tracks using string similarity
+                    # Fuzzy match against album tracks using string similarity.
+                    # Compare BOTH the raw and normalized source titles —
+                    # whichever scores higher wins. Preserves strict
+                    # matching when the album doesn't imply version
+                    # context (helper returns the input unchanged).
                     best_sim = 0.0
                     for db_title_lower, _db_track in album_tracks_map.items():
-                        sim = db._string_similarity(track_name_lower, db_title_lower)
+                        sim_raw = db._string_similarity(track_name_lower, db_title_lower)
+                        sim_norm = db._string_similarity(_normalized_source_title, db_title_lower) if _normalized_source_title else 0.0
+                        sim = max(sim_raw, sim_norm)
                         if sim > best_sim:
                             best_sim = sim
                     if best_sim >= 0.7:
