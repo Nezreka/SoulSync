@@ -25,6 +25,11 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     navigateToArtistDetail: vi.fn(),
     cancelSimilarArtistsLoad: vi.fn(),
     showReactHost: vi.fn(),
+    navigateToArtistDetail: vi.fn(),
+    playLibraryTrack: vi.fn(),
+    startStream: vi.fn(),
+    showLoadingOverlay: vi.fn(),
+    hideLoadingOverlay: vi.fn(),
     ...overrides,
   };
 }
