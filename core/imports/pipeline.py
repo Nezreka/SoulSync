@@ -32,7 +32,7 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.imports.file_integrity import check_audio_integrity
+from core.imports.file_integrity import check_audio_integrity, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
 from core.imports.side_effects import (
@@ -155,8 +155,20 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         except Exception:
             _expected_duration_ms = None
 
+        # User-configurable tolerance override. None = use built-in
+        # auto-scaled defaults (3s normal / 5s for tracks >10min). Set
+        # higher (e.g. 10) when matched files routinely drift from the
+        # source's reported duration (live recordings, alternate
+        # masterings, etc).
+        _duration_tolerance_override = resolve_duration_tolerance(
+            config_manager.get('post_processing.duration_tolerance_seconds', 0)
+        )
         try:
-            integrity = check_audio_integrity(file_path, _expected_duration_ms)
+            integrity = check_audio_integrity(
+                file_path,
+                _expected_duration_ms,
+                length_tolerance_s=_duration_tolerance_override,
+            )
         except Exception as integrity_error:
             logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")
             integrity = None
