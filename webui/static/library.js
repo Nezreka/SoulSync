@@ -700,6 +700,27 @@ let artistDetailPageState = {
     enhancedTrackSort: {}
 };
 
+function clearArtistDetailPageState() {
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+        artistDetailPageState.completionController = null;
+    }
+
+    artistDetailPageState.currentArtistId = null;
+    artistDetailPageState.currentArtistName = null;
+    artistDetailPageState.currentArtistSource = null;
+    artistDetailPageState.originStack = [];
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener(PAGE_WILL_CHANGE_EVENT, (event) => {
+        const detail = event.detail || {};
+        if (detail.fromPageId === 'artist-detail' && detail.toPageId !== 'artist-detail') {
+            clearArtistDetailPageState();
+        }
+    });
+}
+
 // Discography filter state
 let discographyFilterState = {
     categories: { albums: true, eps: true, singles: true },
@@ -1838,7 +1859,7 @@ function createReleaseCard(release) {
     content.className = "album-card-content";
     const _esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     content.innerHTML = `
-        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}</div>
+        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}${release.explicit === true ? ' <span class="explicit-badge">E</span>' : ''}</div>
         ${yearText ? `<div class="album-card-year">${_esc(yearText)}</div>` : ''}
     `;
     card.appendChild(content);
@@ -2486,7 +2507,7 @@ function _renderDiscogCard(release, index, completionData) {
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
             </div>
             <div class="discog-card-info">
-                <div class="discog-card-title">${_esc(albumName)}</div>
+                <div class="discog-card-title">${_esc(albumName)}${release.explicit === true ? ' <span class="explicit-badge">E</span>' : ''}</div>
                 <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
             </div>
             <div class="discog-card-check"></div>

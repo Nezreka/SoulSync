@@ -8368,9 +8368,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 20px 22px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -10170,6 +10168,491 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.35);
     padding: 0 8px;
+}
+
+/* ── Download Audit Trail Modal ─────────────────────────── */
+.lh-audit-btn {
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-rgb));
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.lh-audit-btn:hover {
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.download-audit-modal {
+    width: 1040px;
+    max-width: 96vw;
+    max-height: 88vh;
+    background: linear-gradient(180deg, rgba(20, 20, 22, 0.98), rgba(12, 12, 14, 0.99));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 32px 96px rgba(0, 0, 0, 0.7);
+    position: relative;
+}
+.download-audit-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    z-index: 2;
+}
+.download-audit-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* Hero header — album art + title + meta + status pills */
+.download-audit-hero {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 18px;
+    align-items: center;
+    padding: 28px 32px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-hero-art {
+    width: 88px;
+    height: 88px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+.download-audit-hero-art-placeholder {
+    display: grid;
+    place-items: center;
+    font-size: 36px;
+    color: rgba(255, 255, 255, 0.25);
+}
+.download-audit-hero-text {
+    min-width: 0;
+}
+.download-audit-hero-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #fff;
+    line-height: 1.2;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.download-audit-hero-meta {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 13.5px;
+    margin-bottom: 12px;
+}
+.download-audit-hero-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.download-audit-hero-pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    line-height: 1.4;
+}
+.download-audit-hero-pill-source {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-rgb));
+}
+.download-audit-hero-pill-pass,
+.download-audit-hero-pill-verify.download-audit-hero-pill-pass {
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.3);
+    color: #4ade80;
+}
+.download-audit-hero-pill-fail,
+.download-audit-hero-pill-error {
+    background: rgba(239, 83, 80, 0.12);
+    border-color: rgba(239, 83, 80, 0.3);
+    color: #ef5350;
+}
+
+/* Tab bar */
+.download-audit-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-tab {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 12px 14px;
+    cursor: pointer;
+    position: relative;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s;
+}
+.download-audit-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+.download-audit-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--accent-rgb));
+}
+
+.download-audit-body {
+    overflow-y: auto;
+    padding: 24px 32px 28px;
+    flex: 1;
+}
+
+/* Horizontal stepper (Lifecycle tab) */
+.download-audit-stepper {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+    margin-bottom: 22px;
+    padding: 0 8px;
+}
+.download-audit-stepper-node {
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 0;
+    flex: 0 0 auto;
+    transition: color 0.15s;
+}
+.download-audit-stepper-node:hover { color: rgba(255, 255, 255, 0.85); }
+.download-audit-stepper-node.active { color: #fff; }
+.download-audit-stepper-line {
+    flex: 1 1 auto;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin-top: 14px;
+}
+.download-audit-stepper-circle {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1.5px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.6);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.download-audit-stepper-node.active .download-audit-stepper-circle {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
+}
+.download-audit-stepper-complete .download-audit-stepper-circle {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.45);
+    background: rgba(74, 222, 128, 0.12);
+}
+.download-audit-stepper-partial .download-audit-stepper-circle {
+    color: #facc15;
+    border-color: rgba(250, 204, 21, 0.45);
+    background: rgba(250, 204, 21, 0.12);
+}
+.download-audit-stepper-error .download-audit-stepper-circle {
+    color: #ef5350;
+    border-color: rgba(239, 83, 80, 0.45);
+    background: rgba(239, 83, 80, 0.12);
+}
+.download-audit-stepper-label {
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: inherit;
+}
+
+/* Detail card for the selected step */
+.download-audit-step-card {
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.download-audit-step-card-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 15px;
+    margin-bottom: 8px;
+}
+.download-audit-step-detail {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    line-height: 1.55;
+}
+.download-audit-step-meta {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+.download-audit-step-card-complete { border-color: rgba(74, 222, 128, 0.18); }
+.download-audit-step-card-partial { border-color: rgba(250, 204, 21, 0.18); }
+.download-audit-step-card-error { border-color: rgba(239, 83, 80, 0.18); }
+
+/* Final path strip */
+.download-audit-final-path {
+    margin-top: 4px;
+    padding: 14px 16px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 10px;
+}
+.download-audit-final-path-label {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.4);
+    display: block;
+    margin-bottom: 6px;
+}
+.download-audit-final-path code {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    word-break: break-all;
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+
+/* Chips used in old layout — kept for the file-info strip in Tags */
+.download-audit-chip {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.75);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+}
+
+/* ── Mobile responsive ───────────────────────────────────── */
+@media (max-width: 760px) {
+    .download-audit-modal {
+        width: 100%;
+        max-width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+        border: none;
+    }
+    .download-audit-hero {
+        grid-template-columns: 64px 1fr;
+        gap: 14px;
+        padding: 20px 18px 16px;
+    }
+    .download-audit-hero-art {
+        width: 64px;
+        height: 64px;
+    }
+    .download-audit-hero-title {
+        font-size: 17px;
+        white-space: normal;  /* allow wrap on narrow screens */
+    }
+    .download-audit-hero-meta {
+        font-size: 12.5px;
+        margin-bottom: 8px;
+    }
+    .download-audit-tabs {
+        padding: 0 12px;
+        overflow-x: auto;
+        scrollbar-width: none;  /* hide on Firefox */
+    }
+    .download-audit-tabs::-webkit-scrollbar { display: none; }
+    .download-audit-tab {
+        padding: 10px 12px;
+        font-size: 12.5px;
+        flex-shrink: 0;
+    }
+    .download-audit-body {
+        padding: 16px 16px 24px;
+    }
+    /* Stepper: scroll horizontally instead of cramming all 6 nodes.
+       Connector lines look weird when scrolling so hide them. */
+    .download-audit-stepper {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: none;
+        gap: 18px;
+        padding: 0 4px 4px;
+    }
+    .download-audit-stepper::-webkit-scrollbar { display: none; }
+    .download-audit-stepper-line { display: none; }
+    .download-audit-stepper-node { min-width: 56px; }
+    .download-audit-step-card {
+        padding: 14px 16px;
+    }
+    .download-audit-step-card-title {
+        font-size: 14px;
+    }
+    .download-audit-close {
+        top: 10px;
+        right: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .download-audit-hero {
+        grid-template-columns: 1fr;  /* stack art above text */
+        text-align: left;
+        justify-items: start;
+    }
+    .download-audit-hero-art {
+        width: 72px;
+        height: 72px;
+    }
+}
+/* Tags tab — chips strip + 2-column metadata + source sub-cards */
+.download-audit-tags-empty {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.5;
+    padding: 8px 0;
+}
+.download-audit-tags-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 18px;
+}
+.download-audit-tags-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 18px;
+}
+@media (max-width: 800px) {
+    .download-audit-tags-grid { grid-template-columns: 1fr; gap: 16px; }
+}
+.download-audit-tag-group {
+    /* No box — just spacing + title */
+}
+.download-audit-tag-group-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+/* Stacked label-above-value pattern so long values (MBIDs, URLs,
+   joined genre lists) never get squeezed by a fixed key column. */
+.download-audit-tag-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.download-audit-tag-row:last-child { border-bottom: none; }
+.download-audit-tag-key {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+}
+.download-audit-tag-value {
+    color: rgba(255, 255, 255, 0.88);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.45;
+}
+.download-audit-tags-body {
+    min-height: 60px;
+}
+.download-audit-sources {
+    margin-top: 8px;
+}
+/* Cap at 2 cols max so long values (MBIDs ~36 chars) have room.
+   Drops to 1 col below tablet width. */
+.download-audit-source-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+}
+@media (max-width: 760px) {
+    .download-audit-source-grid { grid-template-columns: 1fr; }
+}
+.download-audit-source-card {
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.025);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-width: 0;  /* allow flex/grid children to shrink + wrap */
+}
+.download-audit-source-card-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--accent-rgb));
+    margin-bottom: 8px;
+}
+.download-audit-source-card .download-audit-tag-row {
+    padding: 5px 0;
+    border-bottom-color: rgba(255, 255, 255, 0.03);
+}
+.download-audit-source-card .download-audit-tag-value {
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+    font-size: 12px;
+}
+
+/* Lyrics tab — full-height transcript with dimmed timecodes */
+.download-audit-lyrics-body {
+    min-height: 60px;
+}
+.download-audit-lyrics-text {
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.82);
+    white-space: pre-wrap;
+}
+.download-audit-lyric-timecode {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
+    margin-right: 8px;
+    font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
 }
 
 /* ── Sync History Modal ─────────────────────────────────── */
@@ -19524,6 +20007,186 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: none;
 }
 
+/* =====================================================================
+   Download-Missing tracklist polish — pure visual tune-up.
+   Keeps column layout intact (no grid restructure, no cell reflow).
+   Refines: header chrome, row hairlines, hover states, typography
+   (mono numbers/duration, weight tightening), status pill polish,
+   pulse on checking/downloading, soft scrollbar.
+   All overrides scoped to `.download-missing-modal-content` so they
+   only affect this modal — never the standalone Albums page tables.
+   ===================================================================== */
+
+/* Header chrome — refined uppercase micro-caps for column labels */
+.download-missing-modal-content .download-tracks-table thead th {
+    background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: center;
+}
+
+/* Cell baseline — tighter padding, hairline divider */
+.download-missing-modal-content .download-tracks-table td {
+    padding: 11px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    transition: color 0.15s ease;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Row hover — subtle accent gradient + left-edge accent bar via box-shadow inset */
+.download-missing-modal-content .download-tracks-table tbody tr {
+    transition: background 0.18s ease, box-shadow 0.18s ease;
+    position: relative;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.07) 0%,
+        rgba(255, 255, 255, 0.03) 60%,
+        transparent 100%);
+    box-shadow: inset 3px 0 0 rgb(var(--accent-rgb));
+}
+
+/* Track number — mono, dim, tabular */
+.download-missing-modal-content .download-tracks-table .track-number {
+    color: rgba(255, 255, 255, 0.32);
+    font-weight: 500;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', Menlo, Consolas, ui-monospace, monospace;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover .track-number {
+    color: rgb(var(--accent-rgb));
+}
+
+/* Title — bold white, slight negative tracking */
+.download-missing-modal-content .download-tracks-table .track-name {
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.005em;
+}
+
+/* Artist — dim, centered */
+.download-missing-modal-content .download-tracks-table .track-artist {
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 400;
+    text-align: center;
+}
+
+/* Duration — mono dim tabular */
+.download-missing-modal-content .download-tracks-table .track-duration {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', Menlo, Consolas, ui-monospace, monospace;
+}
+
+/* Status cells — uppercase micro-caps with leading colored dot */
+.download-missing-modal-content .download-tracks-table .track-match-status,
+.download-missing-modal-content .download-tracks-table .track-download-status {
+    font-weight: 700;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+}
+
+/* Leading colored dot before status text — uses currentColor so it matches state */
+.download-missing-modal-content .download-tracks-table .match-found::before,
+.download-missing-modal-content .download-tracks-table .match-missing::before,
+.download-missing-modal-content .download-tracks-table .match-checking::before,
+.download-missing-modal-content .download-tracks-table .download-searching::before,
+.download-missing-modal-content .download-tracks-table .download-downloading::before,
+.download-missing-modal-content .download-tracks-table .download-complete::before,
+.download-missing-modal-content .download-tracks-table .download-failed::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    margin-right: 7px;
+    vertical-align: 1px;
+    box-shadow: 0 0 8px currentColor, 0 0 2px currentColor;
+}
+.download-missing-modal-content .download-tracks-table .match-found {
+    color: #4ade80;
+    text-shadow: 0 0 12px rgba(74, 222, 128, 0.35);
+}
+.download-missing-modal-content .download-tracks-table .match-missing {
+    color: #facc15;
+    text-shadow: 0 0 12px rgba(250, 204, 21, 0.35);
+}
+.download-missing-modal-content .download-tracks-table .match-checking {
+    color: #60a5fa;
+    text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
+    animation: dms-status-pulse 1.5s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-searching {
+    color: #60a5fa;
+    text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
+    animation: dms-status-pulse 1.5s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-downloading {
+    color: #fb923c;
+    text-shadow: 0 0 12px rgba(251, 146, 60, 0.4);
+    animation: dms-status-pulse 1s ease-in-out infinite;
+}
+.download-missing-modal-content .download-tracks-table .download-complete {
+    color: #4ade80;
+    text-shadow: 0 0 12px rgba(74, 222, 128, 0.4);
+}
+.download-missing-modal-content .download-tracks-table .download-failed {
+    color: #f87171;
+    text-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+}
+
+@keyframes dms-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* Checkbox column — accent + hover scale */
+.download-missing-modal-content .download-tracks-table .track-select-cb {
+    accent-color: rgb(var(--accent-rgb));
+    transition: transform 0.12s ease;
+}
+.download-missing-modal-content .download-tracks-table tbody tr:hover .track-select-cb {
+    transform: scale(1.08);
+}
+
+/* Deselected — fade title/artist, keep status visible */
+.download-missing-modal-content .download-tracks-table .track-deselected .track-name,
+.download-missing-modal-content .download-tracks-table .track-deselected .track-artist {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.25);
+    text-decoration-thickness: 1px;
+}
+
+/* Soft scrollbar for the track scroll area */
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar {
+    width: 8px;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    transition: background 0.2s ease;
+}
+.download-missing-modal-content .download-tracks-table-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
 /* Force Download Toggle Styling */
 .force-download-toggle-container {
     display: flex;
@@ -20834,6 +21497,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .library-artist-enhance-btn.hidden {
     display: none;
+}
+
+/* ─── Write Artist Image Button (issue #572) ─── */
+.library-artist-write-image-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.78);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    backdrop-filter: blur(8px);
+}
+.library-artist-write-image-btn:hover:not(:disabled) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.22);
+    transform: translateY(-2px);
+}
+.library-artist-write-image-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+.library-artist-write-image-btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
 }
 
 /* ─── Artist Radio Button ─── */
@@ -45427,7 +46123,7 @@ textarea.enhanced-meta-field-input {
 }
 
 .discog-card {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: flex-start; gap: 10px;
     padding: 8px 10px; border-radius: 10px;
     background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
     cursor: pointer; transition: all 0.15s ease;
@@ -45464,15 +46160,31 @@ textarea.enhanced-meta-field-input {
 
 .discog-card-title {
     font-size: 13px; font-weight: 600; color: #fff;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: normal; word-break: break-word;
 }
 
 .discog-card-meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+
+.explicit-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 5px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.15); line-height: 1.4; flex-shrink: 0;
+    font-family: inherit;
+}
+.album-card-explicit {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 4px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.2); line-height: 1.4;
+    font-family: inherit; text-shadow: none;
+}
 
 .discog-card-check {
     width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;
     border: 2px solid rgba(255,255,255,0.15); transition: all 0.15s ease;
     display: flex; align-items: center; justify-content: center;
+    margin-top: 2px;
 }
 
 .discog-card-cb:checked ~ .discog-card-check {
@@ -48607,379 +49319,6 @@ tr.tag-diff-same {
     color: #ffa500;
 }
 
-/* ===== Issues Page ===== */
-
-.issues-container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 24px 20px;
-}
-
-.issues-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-    gap: 16px;
-}
-
-.issues-header-left {
-    flex: 1;
-    min-width: 200px;
-}
-
-.issues-title {
-    font-size: 24px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0 0 4px 0;
-}
-
-.issues-subtitle {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
-    margin: 0;
-}
-
-.issues-header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.issues-filters {
-    display: flex;
-    gap: 8px;
-}
-
-.issues-filter-select {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
-    padding: 7px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    cursor: pointer;
-    outline: none;
-    transition: border-color 0.2s;
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%23888'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 28px;
-    min-width: 130px;
-}
-
-.issues-filter-select:focus {
-    border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.issues-filter-select option {
-    background: #1a1a2e;
-    color: #fff;
-}
-
-/* Issues Stats */
-
-.issues-stats {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-
-.issues-stat-card {
-    flex: 1;
-    min-width: 100px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    padding: 14px 16px;
-    text-align: center;
-    transition: border-color 0.2s;
-}
-
-.issues-stat-number {
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1.2;
-}
-
-.issues-stat-label {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.45);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
-}
-
-.issues-stat-open { border-left: 3px solid #ffa500; }
-.issues-stat-progress { border-left: 3px solid #4da6ff; }
-.issues-stat-resolved { border-left: 3px solid #4ade80; }
-.issues-stat-dismissed { border-left: 3px solid #888; }
-.issues-stat-total { border-left: 3px solid rgba(var(--accent-light-rgb), 0.6); }
-
-/* Issues List */
-
-.issues-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.issues-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 40px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 14px;
-}
-
-.issues-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-top-color: rgba(var(--accent-light-rgb), 0.7);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-.issues-empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: rgba(255, 255, 255, 0.4);
-}
-
-.issues-empty-icon {
-    font-size: 40px;
-    margin-bottom: 12px;
-    opacity: 0.5;
-}
-
-.issues-empty-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.6);
-    margin-bottom: 6px;
-}
-
-.issues-empty-text {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.35);
-}
-
-/* Issue Card */
-
-.issue-card {
-    display: flex;
-    align-items: stretch;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
-    padding: 14px 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    gap: 14px;
-}
-
-.issue-card:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.12);
-    transform: translateY(-1px);
-}
-
-.issue-card-left {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-}
-
-.issue-card-thumb {
-    width: 52px;
-    height: 52px;
-    border-radius: 8px;
-    object-fit: cover;
-}
-
-.issue-card-thumb-placeholder {
-    width: 52px;
-    height: 52px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-}
-
-.issue-card-center {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-}
-
-.issue-card-title-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.issue-card-category-icon {
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-.issue-card-title {
-    font-size: 14px;
-    font-weight: 500;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.issue-card-responded {
-    font-size: 13px;
-    flex-shrink: 0;
-    opacity: 0.7;
-}
-
-.issue-card-entity {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.issue-card-entity-type {
-    background: rgba(255, 255, 255, 0.08);
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
-
-.issue-card-entity-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.issue-card-meta-line {
-    color: rgba(255, 255, 255, 0.35);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.issue-card-description {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 500px;
-}
-
-.issue-card-footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.3);
-}
-
-.issue-card-profile {
-    background: rgba(255, 255, 255, 0.06);
-    padding: 1px 6px;
-    border-radius: 4px;
-}
-
-.issue-card-date {
-    opacity: 0.8;
-}
-
-.issue-card-right {
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 8px;
-}
-
-/* Status Badges */
-
-.issue-status-badge {
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-}
-
-.issue-status-open {
-    background: rgba(255, 165, 0, 0.15);
-    color: #ffa500;
-    border: 1px solid rgba(255, 165, 0, 0.25);
-}
-
-.issue-status-progress {
-    background: rgba(77, 166, 255, 0.15);
-    color: #4da6ff;
-    border: 1px solid rgba(77, 166, 255, 0.25);
-}
-
-.issue-status-resolved {
-    background: rgba(74, 222, 128, 0.15);
-    color: #4ade80;
-    border: 1px solid rgba(74, 222, 128, 0.25);
-}
-
-.issue-status-dismissed {
-    background: rgba(136, 136, 136, 0.15);
-    color: #888;
-    border: 1px solid rgba(136, 136, 136, 0.25);
-}
-
-/* Priority Dots */
-
-.issue-priority-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-}
-
-.issue-priority-low, .issue-priority-dot.issue-priority-low {
-    background: #666;
-}
-
-.issue-priority-normal, .issue-priority-dot.issue-priority-normal {
-    background: #4da6ff;
-}
-
-.issue-priority-high, .issue-priority-dot.issue-priority-high {
-    background: #ff4d4d;
-    box-shadow: 0 0 6px rgba(255, 77, 77, 0.4);
-}
-
 /* Nav Badge */
 
 .issues-nav-badge {
@@ -48996,921 +49335,6 @@ tr.tag-diff-same {
     text-align: center;
     border-radius: 8px;
     padding: 0 4px;
-}
-
-/* ===== Report Issue Modal ===== */
-
-.report-issue-modal {
-    max-width: 580px;
-    width: 95vw;
-}
-
-.report-issue-entity-info {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 18px;
-}
-
-.report-issue-entity-name {
-    font-size: 15px;
-    font-weight: 500;
-    color: #fff;
-}
-
-.report-issue-entity-artist {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    margin-top: 3px;
-}
-
-.report-issue-section {
-    margin-bottom: 16px;
-}
-
-.report-issue-label {
-    display: block;
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.6);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 10px;
-}
-
-.report-issue-optional {
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-    color: rgba(255, 255, 255, 0.3);
-}
-
-.report-issue-category-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 8px;
-}
-
-.report-issue-category-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 12px 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    text-align: center;
-}
-
-.report-issue-category-card:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
-}
-
-.report-issue-category-card.selected {
-    background: rgba(var(--accent-light-rgb), 0.1);
-    border-color: rgba(var(--accent-light-rgb), 0.4);
-}
-
-.report-issue-category-icon {
-    font-size: 22px;
-    margin-bottom: 6px;
-}
-
-.report-issue-category-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: #fff;
-    margin-bottom: 3px;
-}
-
-.report-issue-category-desc {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.35);
-    line-height: 1.4;
-}
-
-.report-issue-input {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-}
-
-.report-issue-input:focus {
-    border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.report-issue-textarea {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    outline: none;
-    resize: vertical;
-    min-height: 80px;
-    font-family: inherit;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-}
-
-.report-issue-textarea:focus {
-    border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.report-issue-priority-row {
-    display: flex;
-    gap: 8px;
-}
-
-.report-issue-priority-btn {
-    flex: 1;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
-    transition: all 0.2s ease;
-}
-
-.report-issue-priority-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.report-issue-priority-btn.selected {
-    background: rgba(var(--accent-light-rgb), 0.12);
-    border-color: rgba(var(--accent-light-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
-}
-
-/* ===== Issue Detail Modal ===== */
-
-.issue-detail-modal {
-    max-width: 750px;
-    width: 95vw;
-    max-height: 85vh;
-}
-
-.issue-detail-modal .enhanced-bulk-modal-body {
-    overflow-y: auto;
-    max-height: calc(85vh - 120px);
-}
-
-/* Issue Detail — Hero Section (Enhanced Library Style) */
-
-.issue-hero {
-    display: flex;
-    gap: 16px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    margin-bottom: 14px;
-}
-
-.issue-hero-art-group {
-    position: relative;
-    flex-shrink: 0;
-}
-
-.issue-hero-artist-thumb {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    object-fit: cover;
-    position: absolute;
-    top: -6px;
-    left: -10px;
-    border: 2px solid rgba(30, 30, 30, 0.9);
-    z-index: 1;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-
-.issue-hero-album-art {
-    width: 140px;
-    height: 140px;
-    border-radius: 10px;
-    object-fit: cover;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-}
-
-.issue-hero-album-placeholder {
-    width: 140px;
-    height: 140px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 40px;
-    color: rgba(255, 255, 255, 0.15);
-}
-
-.issue-hero-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-}
-
-.issue-hero-artist {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-weight: 500;
-}
-
-.issue-hero-album {
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1.2;
-}
-
-.issue-hero-track-name {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.7);
-    font-weight: 500;
-    margin-top: 2px;
-}
-
-.issue-hero-meta {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-top: 2px;
-}
-
-.issue-hero-genres {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
-}
-
-.issue-hero-genre-tag {
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* Issue Detail — Info Bar */
-
-.issue-detail-info-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    margin-bottom: 14px;
-}
-
-.issue-detail-info-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.issue-detail-info-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 12px;
-}
-
-/* Issue Detail — Action Buttons */
-
-.issue-action-buttons {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
-}
-
-.issue-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.2s ease;
-    font-family: inherit;
-}
-
-.issue-action-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.issue-action-download {
-    background: rgba(var(--accent-light-rgb), 0.12);
-    color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-light-rgb), 0.25);
-}
-
-.issue-action-download:hover:not(:disabled) {
-    background: rgba(var(--accent-light-rgb), 0.22);
-    border-color: rgba(var(--accent-light-rgb), 0.4);
-}
-
-.issue-action-wishlist {
-    background: rgba(255, 165, 0, 0.1);
-    color: #ffa500;
-    border-color: rgba(255, 165, 0, 0.2);
-}
-
-.issue-action-wishlist:hover:not(:disabled) {
-    background: rgba(255, 165, 0, 0.2);
-    border-color: rgba(255, 165, 0, 0.35);
-}
-
-/* Issue Detail — Track Duration */
-
-.issue-detail-tracklist-dur {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.3);
-    flex-shrink: 0;
-    min-width: 36px;
-    text-align: right;
-}
-
-
-.issue-detail-section {
-    margin-bottom: 16px;
-}
-
-.issue-detail-section-title {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-bottom: 8px;
-    font-weight: 500;
-}
-
-.issue-detail-meta-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.issue-detail-category {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.issue-detail-date {
-    color: rgba(255, 255, 255, 0.35);
-}
-
-.issue-detail-profile {
-    background: rgba(255, 255, 255, 0.06);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-}
-
-.issue-detail-title-text {
-    font-size: 15px;
-    font-weight: 500;
-    color: #fff;
-    margin-bottom: 8px;
-}
-
-.issue-detail-description {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.65);
-    line-height: 1.6;
-    white-space: pre-wrap;
-}
-
-.issue-detail-no-desc {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.25);
-    font-style: italic;
-}
-
-/* Issue Detail — Snapshot */
-
-.issue-detail-snapshot {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    padding: 12px 14px;
-}
-
-.issue-detail-snapshot-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-}
-
-.issue-detail-snapshot-row:last-child {
-    border-bottom: none;
-}
-
-.issue-detail-snapshot-label {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    flex-shrink: 0;
-    min-width: 70px;
-}
-
-.issue-detail-snapshot-value {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.75);
-    text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 350px;
-}
-
-.issue-detail-snapshot-tracklist-header {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: rgba(255, 255, 255, 0.35);
-    margin-top: 10px;
-    margin-bottom: 6px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.issue-detail-snapshot-track {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.6);
-    padding: 2px 0;
-}
-
-.issue-detail-snapshot-track-meta {
-    color: rgba(255, 255, 255, 0.3);
-    font-size: 11px;
-    margin-left: 6px;
-}
-
-
-/* Issue Detail — Metadata Grid */
-
-.issue-detail-meta-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 8px;
-}
-
-.issue-meta-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-}
-
-.issue-meta-icon {
-    font-size: 14px;
-    opacity: 0.5;
-    flex-shrink: 0;
-    width: 18px;
-    text-align: center;
-}
-
-.issue-meta-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: rgba(255, 255, 255, 0.35);
-    flex-shrink: 0;
-}
-
-.issue-meta-value {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.85);
-    margin-left: auto;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
-}
-
-/* Issue Detail — Album Context (for track issues) */
-
-.issue-detail-album-context {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-}
-
-.issue-detail-album-context-thumb {
-    width: 44px;
-    height: 44px;
-    border-radius: 6px;
-    object-fit: cover;
-    flex-shrink: 0;
-}
-
-.issue-detail-album-context-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.issue-detail-album-context-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.issue-detail-album-context-meta {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-top: 2px;
-}
-
-/* Issue Detail — File Path */
-
-.issue-detail-filepath {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(0, 0, 0, 0.2);
-    padding: 8px 10px;
-    border-radius: 6px;
-    font-family: monospace;
-    word-break: break-all;
-    border: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-/* Issue Detail — Track Listing (redesigned) */
-
-.issue-detail-tracklist {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    padding: 6px 0;
-    max-height: 240px;
-    overflow-y: auto;
-}
-
-.issue-detail-tracklist-disc {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: rgba(255, 255, 255, 0.35);
-    padding: 8px 14px 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.issue-detail-tracklist-disc:first-child {
-    border-top: none;
-    padding-top: 4px;
-}
-
-.issue-detail-tracklist-row {
-    display: flex;
-    align-items: center;
-    padding: 4px 14px;
-    gap: 10px;
-    transition: background 0.15s;
-}
-
-.issue-detail-tracklist-row:hover {
-    background: rgba(255, 255, 255, 0.03);
-}
-
-.issue-detail-tracklist-num {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.3);
-    min-width: 22px;
-    text-align: right;
-    flex-shrink: 0;
-}
-
-.issue-detail-tracklist-title {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.75);
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.issue-detail-tracklist-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-}
-
-
-.issue-detail-section-count {
-    font-weight: 400;
-    color: rgba(255, 255, 255, 0.3);
-    font-size: 10px;
-    text-transform: none;
-    letter-spacing: 0;
-    margin-left: 6px;
-}
-
-/* Issue Detail — External Links */
-
-.issue-ext-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.issue-ext-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid transparent;
-}
-
-.issue-ext-chip-type {
-    font-weight: 400;
-    font-size: 10px;
-    opacity: 0.7;
-}
-
-.issue-ext-chip.ext-spotify {
-    background: rgba(30, 215, 96, 0.1);
-    color: #1ed760;
-    border-color: rgba(30, 215, 96, 0.2);
-}
-
-.issue-ext-chip.ext-spotify:hover {
-    background: rgba(30, 215, 96, 0.2);
-}
-
-.issue-ext-chip.ext-mb {
-    background: rgba(186, 81, 163, 0.1);
-    color: #d4a0cb;
-    border-color: rgba(186, 81, 163, 0.2);
-}
-
-.issue-ext-chip.ext-mb:hover {
-    background: rgba(186, 81, 163, 0.2);
-}
-
-.issue-ext-chip.ext-deezer {
-    background: rgba(160, 54, 255, 0.1);
-    color: #c88eff;
-    border-color: rgba(160, 54, 255, 0.2);
-}
-
-.issue-ext-chip.ext-deezer:hover {
-    background: rgba(160, 54, 255, 0.2);
-}
-
-.issue-ext-chip.ext-tidal {
-    background: rgba(0, 255, 255, 0.08);
-    color: #66ffff;
-    border-color: rgba(0, 255, 255, 0.15);
-}
-
-.issue-ext-chip.ext-tidal:hover {
-    background: rgba(0, 255, 255, 0.15);
-}
-
-.issue-ext-chip.ext-qobuz {
-    background: rgba(0, 130, 200, 0.1);
-    color: #5bb8e8;
-    border-color: rgba(0, 130, 200, 0.2);
-}
-
-.issue-ext-chip.ext-qobuz:hover {
-    background: rgba(0, 130, 200, 0.2);
-}
-
-/* Issue Detail — Responsive */
-
-@media (max-width: 768px) {
-    .issue-hero {
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-    }
-
-    .issue-hero-album-art,
-    .issue-hero-album-placeholder {
-        width: 120px;
-        height: 120px;
-    }
-
-    .issue-hero-artist-thumb {
-        width: 40px;
-        height: 40px;
-    }
-
-    .issue-hero-info {
-        align-items: center;
-    }
-
-    .issue-hero-genres {
-        justify-content: center;
-    }
-
-    .issue-hero-album {
-        font-size: 17px;
-    }
-
-    .issue-detail-info-bar {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .issue-action-buttons {
-        flex-direction: column;
-    }
-
-    .issue-action-btn {
-        justify-content: center;
-    }
-
-    .issue-detail-meta-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .issue-meta-value {
-        max-width: 80px;
-    }
-
-    .issue-ext-chips {
-        gap: 4px;
-        justify-content: center;
-    }
-
-    .issue-ext-chip {
-        font-size: 11px;
-        padding: 3px 8px;
-    }
-}
-
-/* Issue Detail — Admin Response */
-
-.issue-detail-response-textarea {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    outline: none;
-    resize: vertical;
-    min-height: 70px;
-    font-family: inherit;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-}
-
-.issue-detail-response-textarea:focus {
-    border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.issue-detail-admin-response {
-    background: rgba(74, 222, 128, 0.06);
-    border: 1px solid rgba(74, 222, 128, 0.15);
-    border-radius: 10px;
-    padding: 12px 14px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.75);
-    line-height: 1.6;
-    white-space: pre-wrap;
-}
-
-/* Issue Detail — Footer Action Buttons */
-
-.issue-btn-progress {
-    background: rgba(77, 166, 255, 0.15) !important;
-    border-color: rgba(77, 166, 255, 0.3) !important;
-    color: #4da6ff !important;
-}
-
-.issue-btn-progress:hover {
-    background: rgba(77, 166, 255, 0.25) !important;
-}
-
-.issue-btn-resolve {
-    background: rgba(74, 222, 128, 0.15) !important;
-    border-color: rgba(74, 222, 128, 0.3) !important;
-    color: #4ade80 !important;
-}
-
-.issue-btn-resolve:hover {
-    background: rgba(74, 222, 128, 0.25) !important;
-}
-
-.issue-btn-dismiss {
-    background: rgba(136, 136, 136, 0.15) !important;
-    border-color: rgba(136, 136, 136, 0.3) !important;
-    color: #aaa !important;
-}
-
-.issue-btn-dismiss:hover {
-    background: rgba(136, 136, 136, 0.25) !important;
-}
-
-.issue-btn-reopen {
-    background: rgba(255, 165, 0, 0.15) !important;
-    border-color: rgba(255, 165, 0, 0.3) !important;
-    color: #ffa500 !important;
-}
-
-.issue-btn-reopen:hover {
-    background: rgba(255, 165, 0, 0.25) !important;
-}
-
-.issue-btn-delete {
-    background: rgba(255, 77, 77, 0.1) !important;
-    border-color: rgba(255, 77, 77, 0.2) !important;
-    color: #ff6b6b !important;
-}
-
-.issue-btn-delete:hover {
-    background: rgba(255, 77, 77, 0.2) !important;
-}
-
-/* ===== Issues Page — Responsive ===== */
-
-@media (max-width: 768px) {
-    .issues-header {
-        flex-direction: column;
-    }
-
-    .issues-stats {
-        flex-wrap: wrap;
-    }
-
-    .issues-stat-card {
-        min-width: 80px;
-    }
-
-    .issue-card {
-        flex-wrap: wrap;
-        padding: 12px;
-    }
-
-    .issue-card-left {
-        display: none;
-    }
-
-    .issue-card-description {
-        max-width: 100%;
-    }
-
-    .report-issue-category-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    }
-
-    .issue-detail-header-info {
-        flex-direction: column;
-    }
-
-    .issue-detail-snapshot-value {
-        max-width: 200px;
-    }
 }
 
 /* ============================================ */
@@ -54825,7 +54249,7 @@ tr.tag-diff-same {
     .explorer-node-artist { width: 56px; height: 56px; }
     .explorer-node-album { width: 60px; height: 60px; }
 }
-    display: flex;
+    /* display: flex;
     align-items: center;
     gap: 20px;
     padding: 24px 32px;
@@ -54837,7 +54261,7 @@ tr.tag-diff-same {
     backdrop-filter: blur(16px);
     animation: explorer-node-enter 0.6s ease both;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
+} */
 
 .explorer-root-glow {
     position: absolute;
@@ -58220,6 +57644,12 @@ body.reduce-effects *::after {
 
 .adl-batch-history-chevron {
     transition: transform 0.2s;
+}
+
+.adl-batch-history-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .adl-batch-history-section.expanded .adl-batch-history-chevron {

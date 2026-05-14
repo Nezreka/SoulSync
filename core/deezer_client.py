@@ -212,6 +212,7 @@ class Album:
     album_type: str
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_deezer_album(cls, album_data: Dict[str, Any]) -> 'Album':
@@ -243,7 +244,8 @@ class Album:
             total_tracks=album_data.get('nb_tracks', 0),
             album_type=album_type,
             image_url=image_url,
-            external_urls=external_urls if external_urls else None
+            external_urls=external_urls if external_urls else None,
+            explicit=bool(album_data.get('explicit_lyrics', False)),
         )
 
 
