@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
+    {{ vite_assets('head')|safe }}
 </head>
 
 <body>
@@ -103,6 +104,8 @@
                             <option value="sync">Sync</option>
                             <option value="search">Search</option>
                             <option value="discover">Discover</option>
+                            <option value="watchlist">Watchlist</option>
+                            <option value="wishlist">Wishlist</option>
                             <option value="automations">Automations</option>
                             <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
@@ -117,6 +120,8 @@
                             <label><input type="checkbox" value="sync" checked> Sync</label>
                             <label><input type="checkbox" value="search" checked> Search</label>
                             <label><input type="checkbox" value="discover" checked> Discover</label>
+                            <label><input type="checkbox" value="watchlist" checked> Watchlist</label>
+                            <label><input type="checkbox" value="wishlist" checked> Wishlist</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
                             <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
@@ -189,7 +194,7 @@
 
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
-                <button class="nav-button active" data-page="dashboard">
+                <button class="nav-button" data-page="dashboard">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="7" rx="1"/><line x1="5" y1="20" x2="5" y2="22"/><line x1="8" y1="19" x2="8" y2="22"/></svg></span>
                     <span class="nav-text">Dashboard</span>
                 </button>
@@ -301,9 +306,10 @@
         <div class="main-content">
             <!-- Global particle canvas for page background animations -->
             <canvas id="page-particles-canvas"></canvas>
+            <div id="webui-react-root" class="page" data-react-app="router"></div>
 
             <!-- Dashboard Page -->
-            <div class="page active" id="dashboard-page">
+            <div class="page" id="dashboard-page">
                 <div class="dashboard-container">
                     <div class="dashboard-header">
                         <div class="header-text">
@@ -1844,7 +1850,7 @@
                 </div>
             </div>
 
-            <!-- Downloads Page -->
+            <!-- Search Page -->
             <div class="page" id="search-page">
                 <!-- 
                 This top-level container replicates the QSplitter from downloads.py,
@@ -2091,8 +2097,6 @@
 
                 </div>
             </div>
-
-
             <!-- Automations Page -->
             <div class="page" id="automations-page">
                 <!-- List View -->
@@ -2168,7 +2172,7 @@
                                 </div>
                             </div>
                             <div class="adl-list" id="adl-list">
-                                <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Artists.</div>
+                                <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Library.</div>
                             </div>
                         </div>
                     </div>
@@ -2186,7 +2190,10 @@
                         <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
                             <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
                                 <span>Recent History</span>
-                                <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                <div class="adl-batch-history-header-actions">
+                                    <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                    <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                </div>
                             </div>
                             <div class="adl-batch-history-list" id="adl-batch-history-list">
                                 <!-- Completed batch history rendered by JS -->
@@ -2385,6 +2392,12 @@
                                     <span class="enhance-icon">⚡</span>
                                     <span class="enhance-text">Enhance Quality</span>
                                 </button>
+                                <button class="library-artist-write-image-btn" id="library-artist-write-image-btn"
+                                    onclick="writeArtistImageToDisk()"
+                                    title="Write artist.jpg to the artist folder on disk (Navidrome reads this)">
+                                    <span class="write-image-icon">🖼️</span>
+                                    <span class="write-image-text">Write Artist Image</span>
+                                </button>
                             </div>
                             <div class="artist-genres-container" id="artist-genres"></div>
                             <div class="artist-hero-bio" id="artist-hero-bio" style="display:none;"></div>
@@ -2533,7 +2546,7 @@
                         </div>
 
                         <!-- Similar Artists Section (works for both library and source artists).
-                             Uses its own scoped IDs because the inline Artists page has a section
+                             Uses its own scoped IDs because the artist detail view has a section
                              with the same base IDs and both elements live in the DOM at once. -->
                         <div class="similar-artists-section" id="ad-similar-artists-section">
                             <div class="similar-artists-header">
@@ -6133,85 +6146,6 @@
 
             </div>
         </div>
-    </div>
-
-            <!-- Issues Page -->
-            <div class="page" id="issues-page">
-                <div class="issues-container">
-                    <div class="issues-header">
-                        <div class="issues-header-left">
-                            <h2 class="issues-title">Issues</h2>
-                            <p class="issues-subtitle" id="issues-subtitle">Track and resolve library problems</p>
-                        </div>
-                        <div class="issues-header-right">
-                            <div class="issues-filters" id="issues-filters">
-                                <select id="issues-filter-status" class="issues-filter-select" onchange="loadIssuesPage()">
-                                    <option value="">All Status</option>
-                                    <option value="open" selected>Open</option>
-                                    <option value="in_progress">In Progress</option>
-                                    <option value="resolved">Resolved</option>
-                                    <option value="dismissed">Dismissed</option>
-                                </select>
-                                <select id="issues-filter-category" class="issues-filter-select" onchange="loadIssuesPage()">
-                                    <option value="">All Categories</option>
-                                    <optgroup label="Track Issues">
-                                        <option value="wrong_track">Wrong Track</option>
-                                        <option value="wrong_artist">Wrong Artist</option>
-                                        <option value="wrong_album">Wrong Album</option>
-                                        <option value="audio_quality">Audio Quality</option>
-                                    </optgroup>
-                                    <optgroup label="Album Issues">
-                                        <option value="wrong_cover">Wrong Cover Art</option>
-                                        <option value="duplicate_tracks">Duplicate Tracks</option>
-                                        <option value="missing_tracks">Missing Tracks</option>
-                                        <option value="incomplete_album">Incomplete Album</option>
-                                    </optgroup>
-                                    <optgroup label="Both">
-                                        <option value="wrong_metadata">Wrong Metadata</option>
-                                        <option value="other">Other</option>
-                                    </optgroup>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="issues-stats" id="issues-stats"></div>
-                    <div class="issues-list" id="issues-list">
-                        <div class="issues-empty">Loading issues...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Report Issue Modal -->
-            <div class="modal-overlay hidden" id="report-issue-overlay">
-                <div class="enhanced-bulk-modal report-issue-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="report-issue-title">Report an Issue</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeReportIssueModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="report-issue-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeReportIssueModal()">Cancel</button>
-                        <button class="enhanced-bulk-btn primary" id="report-issue-submit-btn" onclick="submitIssue()">Submit Issue</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Issue Detail Modal (Admin) -->
-            <div class="modal-overlay hidden" id="issue-detail-overlay">
-                <div class="enhanced-bulk-modal issue-detail-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="issue-detail-title">Issue Details</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeIssueDetailModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="issue-detail-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer" id="issue-detail-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeIssueDetailModal()">Close</button>
-                    </div>
-                </div>
             </div>
 
             <!-- Help & Docs Page -->
@@ -7639,6 +7573,16 @@
         </div>
     </div>
 
+    <!-- Download Audit Trail Modal -->
+    <div class="modal-overlay hidden" id="download-audit-overlay" onclick="if(event.target===this)closeDownloadAuditModal()">
+        <div class="download-audit-modal">
+            <button class="download-audit-close" onclick="closeDownloadAuditModal()" title="Close">&times;</button>
+            <div class="download-audit-hero" id="download-audit-hero"></div>
+            <div class="download-audit-tabs" id="download-audit-tabs"></div>
+            <div class="download-audit-body" id="download-audit-body"></div>
+        </div>
+    </div>
+
     <!-- Sync History Modal -->
     <div class="modal-overlay hidden" id="sync-history-overlay" onclick="if(event.target===this)closeSyncHistoryModal()">
         <div class="sync-history-modal">
@@ -7829,8 +7773,9 @@
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    {{ vite_assets('body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
-    <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
+    <!-- Split modules (was: script.js) — core.js must load first, init.js before shell-bridge.js -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
@@ -7849,6 +7794,7 @@
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
     <!-- Ambient glow under the global search bar. Radial gradient, brightest
          directly under the bar, tapering out toward the window corners.

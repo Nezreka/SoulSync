@@ -150,6 +150,7 @@ def _build_discography_release_dict(release: Any, artist_id: str,
             'image_url': typed_album.image_url,
             'total_tracks': typed_album.total_tracks or 0,
             'external_urls': typed_album.external_urls or {},
+            'explicit': typed_album.explicit,
         }
 
     release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
@@ -168,6 +169,7 @@ def _build_discography_release_dict(release: Any, artist_id: str,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'total_tracks': _extract_lookup_value(release, 'total_tracks', default=0) or 0,
         'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
+        'explicit': _extract_lookup_value(release, 'explicit'),
     }
 
 
@@ -436,6 +438,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
             'track_count': typed_album.total_tracks or 0,
             'owned': None,
             'track_completion': 'checking',
+            'explicit': typed_album.explicit,
         }
         if typed_album.release_date:
             card['release_date'] = typed_album.release_date
@@ -470,6 +473,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any],
         'track_count': _extract_lookup_value(release, 'track_count', 'total_tracks', default=0) or 0,
         'owned': None,
         'track_completion': 'checking',
+        'explicit': _extract_lookup_value(release, 'explicit'),
     }
 
     if release_date:

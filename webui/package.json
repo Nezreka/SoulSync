@@ -1,0 +1,44 @@
+{
+  "name": "soulsync-webui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "oxfmt --check src && oxlint --type-check src",
+    "dev": "vite",
+    "fix": "oxfmt src && oxlint --type-check src --fix",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.4.1",
+    "@tanstack/react-form": "^1.29.1",
+    "@tanstack/react-query": "^5.100.5",
+    "@tanstack/react-router": "^1.168.24",
+    "clsx": "^2.1.1",
+    "ky": "^2.0.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "zod": "^4.4.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@tanstack/router-plugin": "^1.167.27",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^29.0.2",
+    "msw": "^2.14.2",
+    "oxfmt": "^0.47.0",
+    "oxlint": "^1.62.0",
+    "oxlint-tsgolint": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
+  },
+  "packageManager": "npm@11.13.0"
+}

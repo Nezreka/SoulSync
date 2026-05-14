@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
+from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.1"
+_SOULSYNC_BASE_VERSION = "2.5.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -97,6 +97,7 @@ from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
 from core.metadata import is_internal_image_host
 from core.metadata import normalize_image_url as fix_artist_image_url
+from core.webui import build_webui_vite_assets, should_serve_webui_spa
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
@@ -292,13 +293,12 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 
-# Cache-bust query string for static assets — appended to every
-# url_for('static', ...) URL via the context processor below. Computed
-# once per process start so each server restart invalidates the
-# browser's cached copy of every JS/CSS file. This is the surefire
-# fix for "user has stale JS even after Ctrl+Shift+R" — the URL
-# itself changes, so the browser cannot reuse a previously-cached
-# response no matter what its Cache-Control header said.
+# Cache-bust query string for static assets. Computed once per process
+# start so each server restart invalidates the browser's cached copy of
+# every JS/CSS file. This is the surefire fix for "user has stale JS
+# even after Ctrl+Shift+R" — the URL itself changes, so the browser
+# cannot reuse a previously-cached response no matter what its
+# Cache-Control header said.
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
@@ -371,6 +371,11 @@ def _log_rejected_socketio_origin():
         request.headers.get('X-Forwarded-Proto', ''),
     )
 
+@app.context_processor
+def inject_webui_assets():
+    return {
+        'vite_assets': build_webui_vite_assets,
+    }
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -514,7 +519,26 @@ def get_spotify_client_for_profile(profile_id=None):
     return metadata_registry.get_spotify_client_for_profile(profile_id)
 
 # Valid page IDs for profile permission validation
-VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+VALID_PAGE_IDS = {
+    'dashboard',
+    'sync',
+    'search',
+    'discover',
+    'playlist-explorer',
+    'watchlist',
+    'wishlist',
+    'automations',
+    'active-downloads',
+    'library',
+    'tools',
+    'artist-detail',
+    'stats',
+    'import',
+    'settings',
+    'help',
+    'hydrabase',
+    'issues',
+}
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
@@ -3325,9 +3349,9 @@ def service_worker():
 @app.route('/<path:page>')
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
-    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'deezer/', 'tidal/', 'status')):
+    if not should_serve_webui_spa(f'/{page}'):
         abort(404)
-    return render_template('index.html')
+    return index()
 
 # --- API Endpoints ---
 
@@ -8416,6 +8440,41 @@ def get_library_history():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/library/history/<int:history_id>/file-tags')
+def get_library_history_file_tags(history_id: int):
+    """Read embedded tags from the actual audio file for one library
+    history row. Backs the Audit Trail modal's "Embedded Tags" section.
+
+    The file is the single source of truth — persisted snapshot
+    columns drift the moment a background worker writes more tags.
+    `read_embedded_tags` returns a uniform dict; we pass through.
+    """
+    try:
+        db = get_database()
+        entries, _total = db.get_library_history(event_type=None, page=1, limit=200)
+        entry = next((e for e in entries if e.get('id') == history_id), None)
+        if entry is None:
+            # Wider lookup — pagination above may not have caught older rows.
+            conn = db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM library_history WHERE id = ?", (history_id,))
+            row = cursor.fetchone()
+            entry = dict(row) if row else None
+        if entry is None:
+            return jsonify({'success': False, 'error': 'history row not found'}), 404
+
+        raw_path = entry.get('file_path') or ''
+        resolved = _resolve_library_file_path(raw_path) if raw_path else None
+        target_path = resolved or raw_path
+
+        from core.library.file_tags import read_embedded_tags
+        result = read_embedded_tags(target_path)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error(f"Error reading file tags for history {history_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/artists')
 def get_library_artists():
     """Get artists for the library page with search, filtering, and pagination"""
@@ -8662,7 +8721,13 @@ def get_artist_detail(artist_id):
                     allow_fallback=True,
                     skip_cache=False,
                     max_pages=0,
-                    limit=50,
+                    # Match the Download Discography endpoint cap (200)
+                    # so the artist detail view sees the same release
+                    # set the modal lists. Spotify already paginates
+                    # all; Deezer/iTunes/Discogs/Hydrabase respect the
+                    # outer limit. 200 matches iTunes/Discogs internal
+                    # caps and covers prolific catalogues.
+                    limit=200,
                     artist_source_ids=artist_source_ids,
                 ),
             )
@@ -8834,6 +8899,143 @@ def get_similar_artists(artist_name):
             "success": False,
             "error": str(e)
         }), 500
+
+@app.route('/api/artist/<artist_id>/write-image-to-disk', methods=['POST'])
+def write_artist_image_to_disk(artist_id):
+    """Write `artist.jpg` to the artist's folder on disk.
+
+    Issue #572 (rhwc): Navidrome has no API for setting an artist
+    image — it reads `artist.jpg` from the artist's folder during
+    library scans. SoulSync's `update_artist_poster` for Navidrome
+    is a NO-OP today. This endpoint closes the gap by:
+
+    1. Resolving the artist's folder on disk via any of their albums'
+       tracks (`_resolve_library_file_path` handles Docker mount
+       translation + the same library-path probes #558 settled on)
+    2. Fetching an artist photo URL from the configured metadata source
+       priority chain (Spotify → Deezer → ... already wired through
+       `core.metadata_service.get_artist_image_url`)
+    3. Downloading the image bytes and writing `<artist>/artist.jpg`
+       atomically via the pure helpers in `core/library/artist_image.py`
+    4. Triggering a Navidrome library scan so the file gets picked
+       up immediately
+
+    Request body (JSON, all optional):
+        - ``image_url`` — explicit URL to use, bypassing metadata
+          source resolution (useful for "use this exact photo" UX)
+        - ``overwrite`` — when True, replace existing `artist.jpg`
+          (default False respects user-supplied files)
+        - ``source_override`` — pin the metadata source for URL
+          resolution (e.g. ``"deezer"``)
+    """
+    try:
+        from core.library.artist_image import (
+            derive_artist_folder,
+            download_image_bytes,
+            write_artist_jpg,
+        )
+        from core.metadata_service import get_artist_image_url as _get_artist_image_url
+
+        data = request.get_json(silent=True) or {}
+        explicit_url = (data.get('image_url') or '').strip() or None
+        overwrite = bool(data.get('overwrite', False))
+        source_override = (data.get('source_override') or '').strip().lower() or None
+
+        db = get_database()
+        try:
+            artist_id_int = int(artist_id)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid artist id"}), 400
+
+        artist_row = db.get_artist(artist_id_int)
+        if artist_row is None:
+            return jsonify({"success": False, "error": "Artist not found"}), 404
+
+        # Find a track file on disk so we can derive the artist folder.
+        # Walk albums in DB order; first one with a resolvable track wins.
+        albums = db.get_albums_by_artist(artist_id_int)
+        if not albums:
+            return jsonify({"success": False,
+                            "error": "No albums for this artist; cannot derive folder."}), 400
+
+        resolved_track_path = None
+        for album in albums:
+            tracks = db.get_tracks_by_album(album.id)
+            for tr in tracks:
+                if not getattr(tr, 'file_path', None):
+                    continue
+                candidate = _resolve_library_file_path(tr.file_path) or tr.file_path
+                if candidate and os.path.exists(candidate):
+                    resolved_track_path = candidate
+                    break
+            if resolved_track_path:
+                break
+
+        if not resolved_track_path:
+            return jsonify({"success": False,
+                            "error": "Could not locate any track file on disk to derive the artist folder. "
+                                     "Configure Settings → Library → Music Paths to point at the library mount."}), 400
+
+        album_folder = os.path.dirname(resolved_track_path)
+        artist_folder = derive_artist_folder(album_folder)
+        if not artist_folder or not os.path.isdir(artist_folder):
+            return jsonify({"success": False,
+                            "error": f"Resolved artist folder is invalid: {artist_folder!r}"}), 400
+
+        # Pick the image URL. Explicit override (from request body)
+        # wins so users can paste a specific photo URL. Otherwise
+        # resolve from the active metadata source.
+        if explicit_url:
+            image_url = explicit_url
+        else:
+            try:
+                image_url = _get_artist_image_url(
+                    artist_id_int,
+                    source_override=source_override,
+                    artist_name=getattr(artist_row, 'name', None),
+                )
+            except Exception as exc:
+                logger.error(f"artist image lookup failed: {exc}")
+                image_url = None
+
+        if not image_url:
+            return jsonify({"success": False,
+                            "error": "No artist image URL found from metadata sources."}), 404
+
+        image_bytes = download_image_bytes(image_url)
+        if not image_bytes:
+            return jsonify({"success": False,
+                            "error": f"Failed to download image from {image_url}"}), 502
+
+        success, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=overwrite)
+        if not success:
+            return jsonify({"success": False, "error": detail}), 400
+
+        # If the active media server is Navidrome, trigger a scan so
+        # the new file gets indexed without waiting for the next
+        # automatic scan cycle.
+        scan_triggered = False
+        try:
+            active_server = config_manager.get_active_media_server()
+            if active_server == 'navidrome':
+                nav = media_server_engine.client('navidrome')
+                if nav is not None:
+                    nav.trigger_library_scan()
+                    scan_triggered = True
+        except Exception as exc:
+            logger.debug(f"Navidrome scan trigger after artist image write failed: {exc}")
+
+        return jsonify({
+            "success": True,
+            "written_to": detail,
+            "image_url": image_url,
+            "scan_triggered": scan_triggered,
+        })
+
+    except Exception as e:
+        logger.error(f"Error writing artist image to disk: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/artist/<artist_id>/image', methods=['GET'])
 def get_artist_image(artist_id):
@@ -9046,7 +9248,17 @@ def get_artist_discography(artist_id):
                 allow_fallback=True,
                 skip_cache=False,
                 max_pages=0,
-                limit=50,
+                # Discord report: prolific artists (Bach, Beatles
+                # complete box, deep dance/electronic catalogues)
+                # showed only ~50 entries in the Download Discography
+                # modal. Spotify's `max_pages=0` already paginates
+                # through everything (per-page is clamped to 10
+                # internally), but Deezer / iTunes / Discogs /
+                # Hydrabase all honor the outer `limit` as a hard
+                # cap. 200 lines up with iTunes's and Discogs's own
+                # internal caps and covers near-everyone's full
+                # catalogue.
+                limit=200,
                 artist_source_ids=artist_source_ids or None,
             ),
         )
@@ -35610,8 +35822,11 @@ def start_runtime_services():
 # Direct execution: python web_server.py (dev/Windows fallback)
 # Production should use: gunicorn -c gunicorn.conf.py wsgi:application
 if _DIRECT_RUN:
+    web_run_host = os.environ.get('SOULSYNC_WEB_BIND_HOST', '0.0.0.0')
+    web_run_port = int(os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008'))
+    display_host = '127.0.0.1' if web_run_host in {'0.0.0.0', '::'} else web_run_host
     logger.info("Starting SoulSync Web UI Server...")
-    logger.info("Open your browser and navigate to http://127.0.0.1:8008")
+    logger.info(f"Open your browser and navigate to http://{display_host}:{web_run_port}")
     logger.info("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
     start_runtime_services()
-    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host=web_run_host, port=web_run_port, debug=False, allow_unsafe_werkzeug=True)

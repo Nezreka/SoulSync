@@ -1,0 +1,1032 @@
+.issuesContainer {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  color: #fff;
+}
+
+.issuesHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.issuesHeaderLeft {
+  flex: 1;
+  min-width: 200px;
+}
+
+.issuesTitle {
+  font-size: 24px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 4px;
+}
+
+.issuesSubtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0;
+}
+
+.issuesHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.issuesFilters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issuesStats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.issuesStatCard {
+  flex: 1;
+  min-width: 100px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.issuesStatNumber {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.issuesStatLabel {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+
+.issuesStatOpen {
+  border-left: 3px solid #ffa500;
+}
+
+.issuesStatProgress {
+  border-left: 3px solid #4da6ff;
+}
+
+.issuesStatResolved {
+  border-left: 3px solid #4ade80;
+}
+
+.issuesStatDismissed {
+  border-left: 3px solid #888;
+}
+
+.issuesStatTotal {
+  border-left: 3px solid rgba(var(--accent-light-rgb), 0.6);
+}
+
+.issuesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issuesLoading,
+.issuesEmpty {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.issuesLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  font-size: 14px;
+}
+
+.issuesSpinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(var(--accent-light-rgb), 0.7);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.issuesEmptyIcon {
+  font-size: 40px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.issuesEmptyTitle {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6px;
+}
+
+.issuesEmptyText {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.issueCard {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.issueCard:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.issueCardLeft {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.issueCardThumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.issueCardThumbPlaceholder {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+.issueCardCenter {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.issueCardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.issueCardCategoryIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.issueCardTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issueCardResponded {
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.issueCardEntity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  flex-wrap: wrap;
+}
+
+.issueCardEntityType {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.issueCardEntityName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issueCardMetaLine {
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issueCardDescription {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 500px;
+}
+
+.issueCardFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.issueCardProfile {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.issueCardDate {
+  opacity: 0.8;
+}
+
+.issueCardRight {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+}
+
+.issueStatusBadge {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.issueStatusOpen {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+  border: 1px solid rgba(255, 165, 0, 0.25);
+}
+
+.issueStatusProgress {
+  background: rgba(77, 166, 255, 0.15);
+  color: #4da6ff;
+  border: 1px solid rgba(77, 166, 255, 0.25);
+}
+
+.issueStatusResolved {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.issueStatusDismissed {
+  background: rgba(136, 136, 136, 0.15);
+  color: #888;
+  border: 1px solid rgba(136, 136, 136, 0.25);
+}
+
+.issuePriorityDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.issuePriorityLow {
+  background: #666;
+}
+
+.issuePriorityNormal {
+  background: #4da6ff;
+}
+
+.issuePriorityHigh {
+  background: #ff4d4d;
+  box-shadow: 0 0 6px rgba(255, 77, 77, 0.4);
+}
+
+.issueDetailDialog {
+  max-width: 750px;
+  width: 95vw;
+  max-height: 85vh;
+}
+
+.reportIssueDialog {
+  max-width: 680px;
+  width: 95vw;
+}
+
+.reportIssueForm {
+  display: grid;
+  gap: 18px;
+}
+
+.issueHero {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 14px;
+}
+
+.issueHeroArtGroup {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.issueHeroArtistThumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  position: absolute;
+  top: -6px;
+  left: -10px;
+  border: 2px solid rgba(30, 30, 30, 0.9);
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.issueHeroAlbumArt {
+  width: 140px;
+  height: 140px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.issueHeroAlbumPlaceholder {
+  width: 140px;
+  height: 140px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  color: rgba(255, 255, 255, 0.15);
+}
+
+.issueHeroInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.issueHeroArtist {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.issueHeroAlbum {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.issueHeroTrackName {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.issueHeroMeta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 2px;
+}
+
+.issueHeroGenres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.issueHeroGenreTag {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.issueDetailInfoBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 14px;
+}
+
+.issueDetailInfoLeft,
+.issueDetailInfoRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.issueDetailInfoRight {
+  font-size: 12px;
+}
+
+.issueDetailCategory {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.issueDetailDate {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+}
+
+.issueDetailProfile {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.issueDetailSection {
+  margin-bottom: 16px;
+}
+
+.issueDetailSectionTitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.issueDetailSectionCount {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  text-transform: none;
+  margin-left: 4px;
+}
+
+.issueDetailTitleText {
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.issueDetailDescription {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.issueDetailFilepath {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.issueDetailNoDesc {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.25);
+  font-style: italic;
+}
+
+.issueDetailMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.issueMetaItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.issueMetaIcon {
+  font-size: 14px;
+  opacity: 0.5;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.issueMetaLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
+.issueMetaValue {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-left: auto;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.issueActionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.issueActionDownload {
+  background: rgba(var(--accent-light-rgb), 0.12);
+  color: rgb(var(--accent-light-rgb));
+}
+
+.issueActionDownload:hover:not(:disabled) {
+  background: rgba(var(--accent-light-rgb), 0.22);
+}
+
+.issueActionWishlist {
+  background: rgba(255, 165, 0, 0.1);
+  color: #ffa500;
+}
+
+.issueActionWishlist:hover:not(:disabled) {
+  background: rgba(255, 165, 0, 0.2);
+}
+
+.issueDetailResponseTextarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  min-height: 70px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.issueDetailResponseTextarea:focus {
+  border-color: rgba(var(--accent-light-rgb), 0.5);
+}
+
+.issueDetailAdminResponse {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(var(--accent-light-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-light-rgb), 0.18);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.issueExternalLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.issueExternalLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.issueExternalLink:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.issueExternalLinkService {
+  font-weight: 600;
+}
+
+.issueExternalLinkType {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.issueExternalLinkSpotify {
+  background: rgba(30, 215, 96, 0.1);
+  color: #1ed760;
+}
+
+.issueExternalLinkSpotify:hover {
+  background: rgba(30, 215, 96, 0.2);
+}
+
+.issueExternalLinkMusicBrainz {
+  background: rgba(186, 81, 163, 0.1);
+  color: #d4a0cb;
+}
+
+.issueExternalLinkMusicBrainz:hover {
+  background: rgba(186, 81, 163, 0.2);
+}
+
+.issueExternalLinkDeezer {
+  background: rgba(160, 54, 255, 0.1);
+  color: #c88eff;
+}
+
+.issueExternalLinkDeezer:hover {
+  background: rgba(160, 54, 255, 0.2);
+}
+
+.issueExternalLinkTidal {
+  background: rgba(0, 255, 255, 0.08);
+  color: #66ffff;
+}
+
+.issueExternalLinkTidal:hover {
+  background: rgba(0, 255, 255, 0.15);
+}
+
+.issueExternalLinkQobuz {
+  background: rgba(0, 130, 200, 0.1);
+  color: #5bb8e8;
+}
+
+.issueExternalLinkQobuz:hover {
+  background: rgba(0, 130, 200, 0.2);
+}
+
+.issueDetailTracklist {
+  display: grid;
+  gap: 0;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 6px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.issueDetailTracklistDisc {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 8px 14px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.issueDetailTracklistDisc:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.issueDetailTracklistRow {
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  gap: 10px;
+  transition: background 0.15s;
+}
+
+.issueDetailTracklistRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.issueDetailTracklistNum,
+.issueDetailTracklistDur,
+.issueDetailTracklistMeta {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.issueDetailTracklistNum {
+  font-size: 12px;
+  min-width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.issueDetailTracklistTitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issueDetailTracklistDur {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: right;
+}
+
+.issueDetailTracklistMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.issueTrackBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 10px;
+  margin-left: 0;
+}
+
+.issueTrackBadgeFlac {
+  background: rgba(255, 184, 77, 0.15);
+  color: #ffb84d;
+}
+
+.issueTrackBadgeMp3 {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: rgb(var(--accent-light-rgb));
+}
+
+.issueTrackBadgeOther {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.issueTrackBadgeHigh {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.issueTrackBadgeMedium {
+  color: #ffb84d;
+}
+
+.issueTrackBadgeLow {
+  color: #ff6b6b;
+}
+
+.reportIssueEntityInfo {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reportIssueEntityName {
+  color: #fff;
+  font-weight: 600;
+}
+
+.reportIssueEntityArtist {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 13px;
+}
+
+.modalButtonSecondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.modalButtonSecondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.modalButtonPrimary {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.95),
+    rgba(var(--accent-light-rgb), 0.85)
+  );
+  color: #08110b;
+  border-color: transparent;
+}
+
+.modalButtonProgress {
+  background: rgba(77, 166, 255, 0.15);
+  color: #4da6ff;
+}
+
+.modalButtonResolve {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.modalButtonDismiss {
+  background: rgba(136, 136, 136, 0.15);
+  color: #888;
+  border-color: rgba(136, 136, 136, 0.3);
+}
+
+.modalButtonDismiss:hover:not(:disabled) {
+  background: rgba(136, 136, 136, 0.25);
+}
+
+.modalButtonReopen {
+  background: rgba(var(--accent-light-rgb), 0.15);
+  color: #fff;
+}
+
+.modalButtonDelete {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ffd0d0;
+}
+
+.modalButtonDelete:hover:not(:disabled),
+.modalButtonProgress:hover:not(:disabled),
+.modalButtonResolve:hover:not(:disabled),
+.modalButtonDismiss:hover:not(:disabled),
+.modalButtonReopen:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+@media (max-width: 900px) {
+  .issuesStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .issueHero {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .issueHeroInfo {
+    align-items: center;
+  }
+
+  .issueDetailInfoBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .issuesContainer {
+    padding: 18px;
+  }
+
+  .issuesStats {
+    display: grid;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .issuesList {
+    gap: 10px;
+  }
+
+  .issueCard {
+    flex-direction: column;
+  }
+
+  .issueCardLeft {
+    width: 100%;
+  }
+
+  .issueCardThumb,
+  .issueCardThumbPlaceholder {
+    width: 100%;
+    height: 180px;
+  }
+
+  .issueCardRight {
+    align-items: flex-start;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .issueDetailInfoLeft,
+  .issueDetailInfoRight {
+    width: 100%;
+  }
+
+  .issueDetailDialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .issueDetailMetaGrid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .issueMetaValue {
+    max-width: none;
+  }
+
+  .issueActionButtons {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .issueActionButtons > button {
+    width: 100%;
+  }
+
+  .issueActionButtons > button {
+    justify-content: center;
+  }
+
+  .issueExternalLinks {
+    justify-content: center;
+  }
+
+  .issueExternalLink {
+    width: 100%;
+    justify-content: center;
+  }
+}
