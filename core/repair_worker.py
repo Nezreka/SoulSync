@@ -35,6 +35,23 @@ logger = get_logger("repair_worker")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def _split_acoustid_credit(credit: str) -> List[str]:
+    """Split an AcoustID artist credit into individual contributor names.
+
+    Reuses the matching layer's credit splitter so the AcoustID retag
+    path tags multi-artist tracks the same way the post-download
+    enrichment pipeline does (comma / ampersand / feat. / etc).
+    Returns ``[credit]`` for single-artist credits — the writer's
+    ``len > 1`` check is what gates whether the multi-value tag gets
+    written.
+    """
+    try:
+        from core.matching.artist_aliases import split_artist_credit
+        return split_artist_credit(credit)
+    except Exception:
+        return [credit] if credit else []
+
+
 def _resolve_file_path(file_path, transfer_folder, download_folder=None,
                        config_manager=None, plex_client=None):
     """Resolve a stored DB path to an actual file on disk.
@@ -1715,6 +1732,17 @@ class RepairWorker:
                     tag_updates = {'title': aid_title}
                     if aid_artist:
                         tag_updates['artist_name'] = aid_artist
+                        # Issue #587 — derive a per-artist list from
+                        # AcoustID's credit string when it carries
+                        # multiple contributors. The post-download
+                        # enrichment pipeline preserves multi-value
+                        # ARTISTS tags via the user's
+                        # `write_multi_artist` setting; the repair
+                        # path was bypassing that and writing a
+                        # single-string TPE1 only. Now respects the
+                        # same setting via the writer's new
+                        # `artists_list` derivation.
+                        tag_updates['artists_list'] = _split_acoustid_credit(aid_artist)
                     write_tags_to_file(resolved, tag_updates)
                     logger.info("Wrote corrected tags to file: %s", resolved)
                 except Exception as tag_err:
