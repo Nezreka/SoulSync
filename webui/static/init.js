@@ -2420,9 +2420,6 @@ async function loadPageData(pageId) {
                 loadApiKeys();
                 loadBlacklistCount();
                 break;
-            case 'stats':
-                initializeStatsPage();
-                break;
             case 'import':
                 initializeImportPage();
                 break;
