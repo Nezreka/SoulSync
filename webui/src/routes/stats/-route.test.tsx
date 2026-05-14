@@ -23,6 +23,11 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     setActivePageChrome: vi.fn(),
     activateLegacyPath: vi.fn(),
     showReactHost: vi.fn(),
+    navigateToArtistDetail: vi.fn(),
+    playLibraryTrack: vi.fn(),
+    startStream: vi.fn(),
+    showLoadingOverlay: vi.fn(),
+    hideLoadingOverlay: vi.fn(),
     ...overrides,
   };
 }
@@ -41,11 +46,6 @@ function renderStatsRoute(initialEntries = ['/stats']) {
 describe('stats route', () => {
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
-    window.navigateToArtistDetail = vi.fn();
-    window.playLibraryTrack = vi.fn();
-    window.startStream = vi.fn();
-    window.showLoadingOverlay = vi.fn();
-    window.hideLoadingOverlay = vi.fn();
     window.showToast = vi.fn();
     vi.stubGlobal(
       'fetch',

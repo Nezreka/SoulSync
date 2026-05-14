@@ -14,6 +14,8 @@ import {
   YAxis,
 } from 'recharts';
 
+import type { ShellBridge } from '@/platform/shell/bridge';
+
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
@@ -72,7 +74,7 @@ const STATS_CHART_CURSOR = {
 } as const;
 
 export function StatsPage() {
-  useReactPageShell('stats');
+  const bridge = useReactPageShell('stats');
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
@@ -202,31 +204,42 @@ export function StatsPage() {
                 </div>
               </StatsSectionCard>
               <StatsSectionCard title="Recently Played">
-                <StatsRecentPlays tracks={cachedStats?.recent ?? []} onPlay={playStatsTrack} />
+                <StatsRecentPlays
+                  tracks={cachedStats?.recent ?? []}
+                  onPlay={(track) => playStatsTrack(bridge, track)}
+                />
               </StatsSectionCard>
             </div>
             <div className={styles.statsRightCol}>
               <StatsSectionCard title="Top Artists">
                 <TopArtistsVisual
                   artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={openArtistDetail}
+                  onArtistSelect={(artistId, artistName) =>
+                    void openArtistDetail(bridge, artistId, artistName)
+                  }
                 />
                 <StatsRankedArtists
                   artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={openArtistDetail}
+                  onArtistSelect={(artistId, artistName) =>
+                    void openArtistDetail(bridge, artistId, artistName)
+                  }
                 />
               </StatsSectionCard>
               <StatsSectionCard title="Top Albums">
                 <StatsRankedAlbums
                   albums={cachedStats?.top_albums ?? []}
-                  onArtistSelect={openArtistDetail}
+                  onArtistSelect={(artistId, artistName) =>
+                    void openArtistDetail(bridge, artistId, artistName)
+                  }
                 />
               </StatsSectionCard>
               <StatsSectionCard title="Top Tracks">
                 <StatsRankedTracks
                   tracks={cachedStats?.top_tracks ?? []}
-                  onArtistSelect={openArtistDetail}
-                  onPlay={playStatsTrack}
+                  onArtistSelect={(artistId, artistName) =>
+                    void openArtistDetail(bridge, artistId, artistName)
+                  }
+                  onPlay={(track) => playStatsTrack(bridge, track)}
                 />
               </StatsSectionCard>
             </div>
@@ -606,7 +619,10 @@ function StatsRecentPlays({
     <div id="stats-recent-plays" className={styles.statsRecentList}>
       {tracks.length === 0 ? <EmptyListState message="No recent plays" /> : null}
       {tracks.map((track, index) => (
-        <div key={`${track.title}-${track.played_at ?? index}`} className={styles.statsRecentItem}>
+        <div
+          key={`${track.title}-${track.artist ?? ''}-${track.album ?? ''}-${track.played_at ?? ''}-${index}`}
+          className={styles.statsRecentItem}
+        >
           <button
             type="button"
             className={`${styles.statsPlayButton} ${styles.statsPlayButtonSmall}`}
@@ -861,17 +877,24 @@ function EmptyListState({ message }: { message: string }) {
   return <div className={styles.emptyListState}>{message}</div>;
 }
 
-async function openArtistDetail(artistId: string | number, artistName: string) {
+async function openArtistDetail(
+  bridge: ShellBridge,
+  artistId: string | number,
+  artistName: string,
+) {
   await window.SoulSyncWebRouter?.navigateToPage('library');
   window.setTimeout(() => {
-    window.navigateToArtistDetail?.(artistId, artistName);
+    bridge.navigateToArtistDetail(artistId, artistName);
   }, 300);
 }
 
-async function playStatsTrack(track: { title: string; artist: string; album: string }) {
+async function playStatsTrack(
+  bridge: ShellBridge,
+  track: { title: string; artist: string; album: string },
+) {
   const resolvedTrack = await resolveStatsTrack(track.title, track.artist);
   if (resolvedTrack) {
-    void window.playLibraryTrack?.(
+    await bridge.playLibraryTrack(
       {
         id: resolvedTrack.id,
         title: resolvedTrack.title,
@@ -887,23 +910,19 @@ async function playStatsTrack(track: { title: string; artist: string; album: str
     return;
   }
 
-  window.showLoadingOverlay?.(`Searching for ${track.title}...`);
+  bridge.showLoadingOverlay(`Searching for ${track.title}...`);
   try {
     const streamResult = await streamStatsTrack(track.title, track.artist, track.album);
-    window.hideLoadingOverlay?.();
+    bridge.hideLoadingOverlay();
 
     if (streamResult) {
-      if (typeof window.startStream === 'function') {
-        await window.startStream(streamResult);
-      } else {
-        window.showToast?.('Streaming not available', 'error');
-      }
+      await bridge.startStream(streamResult);
       return;
     }
 
     window.showToast?.('Track not found in library or any source', 'error');
   } catch (error) {
-    window.hideLoadingOverlay?.();
+    bridge.hideLoadingOverlay();
     window.showToast?.(getErrorMessage(error), 'error');
   }
 }
