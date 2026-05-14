@@ -4349,7 +4349,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.2';
+    return versions[0] || '2.5.3';
 }
 
 function openWhatsNew() {
