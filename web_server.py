@@ -18986,6 +18986,10 @@ def get_server_playlist_tracks(playlist_id):
                     'image_url': img,
                     'duration_ms': t.get('duration_ms', 0),
                     'position': t.get('position', 0),
+                    # Spotify track id — required for the user-confirmed
+                    # match override lookup (sync_match_cache). Null for
+                    # iTunes-only sources.
+                    'source_track_id': t.get('source_track_id') or '',
                 })
         elif playlist_name:
             # Legacy fallback: cross-reference with sync history
@@ -19025,6 +19029,21 @@ def get_server_playlist_tracks(playlist_id):
         used_server_indices = set()
         unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
 
+        # Pass 0: User-confirmed match overrides from sync_match_cache.
+        # When a user previously picked a local file via "Find & Add",
+        # the (source_track_id → server_track_id) mapping was persisted
+        # at confidence=1.0. Apply those FIRST so they bypass the
+        # exact/fuzzy passes entirely. Stale-cache safe — if the cached
+        # server track no longer exists, the override is silently
+        # skipped and normal matching runs.
+        from core.sync.match_overrides import resolve_match_overrides
+        _db_for_overrides = get_database()
+        _override_pairs = resolve_match_overrides(
+            source_tracks,
+            server_tracks,
+            lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
+        )
+
         # Pass 1: Exact title match (normalized — strips feat./ft. qualifiers)
         for i, src in enumerate(source_tracks):
             src_name = src.get('name', '')
@@ -19038,6 +19057,19 @@ def get_server_playlist_tracks(playlist_id):
                 'album': src.get('album', ''), 'image_url': src.get('image_url', ''),
                 'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
             }
+
+            # Override hit — paired by user, skip exact/fuzzy matching.
+            if i in _override_pairs:
+                j_override = _override_pairs[i]
+                used_server_indices.add(j_override)
+                combined.append({
+                    'source_track': src_entry,
+                    'server_track': server_tracks[j_override],
+                    'match_status': 'matched',
+                    'confidence': 1.0,
+                    'override': True,
+                })
+                continue
 
             src_norm = _norm_title(src_name)
             best_idx = -1
@@ -19211,14 +19243,48 @@ def server_playlist_replace_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist):
+    """Wrap match-override persistence with the active DB. No-op when
+    source_track_id is missing (e.g. add to a non-mirrored playlist)."""
+    if not source_track_id:
+        return
+    try:
+        from core.sync.match_overrides import record_manual_match
+        ok = record_manual_match(
+            get_database(),
+            source_track_id=source_track_id,
+            server_source=server_source,
+            server_track_id=server_track_id,
+            server_track_title=server_track_title,
+            source_title=source_title,
+            source_artist=source_artist,
+        )
+        if ok:
+            logger.info(f"[ServerPlaylist] Persisted Find & Add override: {source_track_id} → {server_track_id} ({server_source})")
+    except Exception as e:
+        logger.warning(f"[ServerPlaylist] Failed to persist Find & Add override: {e}")
+
+
 @app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
 def server_playlist_add_track(playlist_id):
-    """Add a track to a server playlist at a specific position."""
+    """Add a track to a server playlist at a specific position.
+
+    When the optional `source_track_id` is provided (the Spotify track id
+    from a mirrored playlist), the user's selection is also persisted to
+    sync_match_cache so future syncs auto-match this source→server pair
+    without requiring the user to re-trigger Find & Add.
+    """
     try:
         data = request.get_json()
         track_id = data.get('track_id')
         playlist_name = data.get('playlist_name', '')
         position = data.get('position')  # 0-based index; None = append
+        # Optional Spotify source track id — when present, the (source →
+        # server) mapping is persisted as a hard match override.
+        source_track_id = data.get('source_track_id') or ''
+        source_title = data.get('source_title') or ''
+        source_artist = data.get('source_artist') or ''
+        server_track_title = data.get('server_track_title') or ''
 
         if not track_id:
             return jsonify({"success": False, "error": "track_id required"}), 400
@@ -19271,6 +19337,7 @@ def server_playlist_add_track(playlist_id):
 
             new_id = str(raw_playlist.ratingKey)
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
@@ -19280,6 +19347,7 @@ def server_playlist_add_track(playlist_id):
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
             media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -19289,6 +19357,7 @@ def server_playlist_add_track(playlist_id):
             track_ids.insert(pos, track_id)
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
             media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
             return jsonify({"success": True, "message": "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
