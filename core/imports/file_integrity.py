@@ -52,6 +52,37 @@ _DEFAULT_LENGTH_TOLERANCE_S = 3.0
 _LENGTH_TOLERANCE_LONG_TRACK_S = 5.0
 _LONG_TRACK_THRESHOLD_S = 600.0  # 10 minutes
 
+# Upper bound for the user-configurable override. Anything past 60s
+# means the check is effectively off — cap defends against accidental
+# nonsense like 9999 making logs misleading. Users who genuinely want
+# to disable the check can set 60.
+_MAX_USER_TOLERANCE_S = 60.0
+
+
+def resolve_duration_tolerance(value: Any) -> Optional[float]:
+    """Coerce a user-configured tolerance value to a float override.
+
+    Returns:
+        - None when value is missing / 0 / negative / unparseable, so
+          callers fall back to the auto-scaled defaults (3s/5s).
+        - float in (0, _MAX_USER_TOLERANCE_S] when value is a positive
+          numeric string or float — clamped to the upper bound.
+
+    Pure helper. No I/O. Drives the `length_tolerance_s` override on
+    `check_audio_integrity`.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    if parsed > _MAX_USER_TOLERANCE_S:
+        return _MAX_USER_TOLERANCE_S
+    return parsed
+
 
 @dataclass
 class IntegrityResult:
