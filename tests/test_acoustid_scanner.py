@@ -54,11 +54,11 @@ def _make_context(rows):
 def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     job = AcoustIDScannerJob()
     context = _make_context([
-        # 10 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # 11 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
-        # album_artist.
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist"),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist"),
+        # album_artist, duration_ms (issue #587 — duration guard).
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000),
     ])
 
     tracks = job._load_db_tracks(context)
@@ -66,16 +66,17 @@ def test_load_db_tracks_skips_null_ids_and_normalizes_track_ids():
     assert list(tracks.keys()) == ["42"]
     assert tracks["42"]["title"] == "Good Track"
     assert tracks["42"]["artist"] == "Artist"
+    assert tracks["42"]["duration_ms"] == 240000
 
 
 def test_scan_handles_mixed_track_id_types(monkeypatch):
     job = AcoustIDScannerJob()
     context = _make_context([
-        # 10 columns: id, title, artist (COALESCE'd), file_path, track_number,
+        # 11 columns: id, title, artist (COALESCE'd), file_path, track_number,
         # album_title, album_thumb, artist_thumb, track_artist (raw, may be ''),
-        # album_artist.
-        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist"),
-        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist"),
+        # album_artist, duration_ms.
+        (None, "Broken Track", "Artist", "/music/broken.flac", 1, "Album", None, None, "", "Artist", 180000),
+        (42, "Good Track", "Artist", "/music/good.flac", 2, "Album", "album-thumb", "artist-thumb", "", "Artist", 240000),
     ])
 
     monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)
@@ -275,7 +276,8 @@ def _make_real_db_context(tmp_path):
             album_id TEXT,
             file_path TEXT,
             track_number INTEGER,
-            track_artist TEXT
+            track_artist TEXT,
+            duration INTEGER
         );
     """)
     conn.commit()
@@ -620,3 +622,160 @@ def test_scanner_file_tag_matches_db_no_behavioral_change(monkeypatch):
     )
 
     assert captured_findings == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #587 — multi-candidate scan + duration guard (Foxxify report)
+# ---------------------------------------------------------------------------
+
+
+def test_scanner_no_finding_when_lower_ranked_candidate_matches():
+    """Foxxify case 2 — AcoustID returns multiple recordings per
+    fingerprint; the top match is the wrong-credited recording but a
+    lower-ranked candidate matches expected metadata exactly. Scanner
+    should iterate ALL candidates and suppress the finding.
+
+    Repro: file is "Nana" by Geoxor, AcoustID top match is "Nana" by
+    Edward Vesala Trio (different recording sharing similar
+    fingerprint), AcoustID's second candidate is the actual Geoxor
+    track. Pre-fix scanner only saw [0] → flagged. Post-fix sees [1]
+    → no flag."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("nana", "Nana", "Geoxor",
+                   "/music/nana.opus", 6, "Stardust", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.97,
+            'recordings': [
+                # AcoustID's top match — wrong artist for our file
+                {'title': 'Nana', 'artist': 'Edward Vesala Trio'},
+                # Lower-ranked candidate — actually matches our expected
+                {'title': 'Nana', 'artist': 'Geoxor'},
+            ],
+        },
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/nana.opus', 'nana',
+        {'title': 'Nana', 'artist': 'Geoxor'},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert captured_findings == [], (
+        f"Expected no finding (lower-ranked candidate matches); got {captured_findings}"
+    )
+
+
+def test_scanner_still_flags_when_no_candidate_matches():
+    """Confirm the multi-candidate check doesn't accidentally suppress
+    legitimate mismatches — if NO candidate matches expected metadata,
+    the finding still fires."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Expected Title", "Expected Artist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [
+                {'title': 'Wrong Track', 'artist': 'Wrong Artist A'},
+                {'title': 'Different Wrong', 'artist': 'Wrong Artist B'},
+            ],
+        },
+    )
+
+    result = JobResultStub()
+    job._scan_file(
+        '/music/track.flac', '99',
+        {'title': 'Expected Title', 'artist': 'Expected Artist'},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert len(captured_findings) == 1
+
+
+def test_scanner_skips_finding_on_strong_duration_mismatch():
+    """Foxxify case 3 — 17-minute mashup edit fingerprints to a 5-minute
+    late-70s Japanese hiphop track. Fingerprint matched a sample/intro
+    section but the recordings are clearly different (drastic length
+    difference). Scanner should skip the finding rather than recommend
+    retag of a totally different track length."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("mashup", "Some Mashup Edit", "Mashup Artist",
+                   "/music/mashup.opus", 1, "Mashups", None, None),
+        captured=captured_findings,
+    )
+
+    # AcoustID matched a 5-minute Japanese hiphop track via fingerprint
+    # hash collision. Expected file is 17 minutes — duration guard
+    # should kick in.
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.98,
+            'recordings': [
+                {'title': 'Different Song', 'artist': 'Different Artist',
+                 'duration': 300},  # 5 min — way off from our 17 min file
+            ],
+        },
+    )
+
+    result = JobResultStub()
+    # 17 minutes = 1020 sec = 1020000 ms
+    job._scan_file(
+        '/music/mashup.opus', 'mashup',
+        {'title': 'Some Mashup Edit', 'artist': 'Mashup Artist', 'duration_ms': 1020000},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert captured_findings == [], (
+        f"Expected no finding (duration mismatch suggests collision); got {captured_findings}"
+    )
+
+
+def test_scanner_still_flags_when_duration_matches():
+    """Confirm the duration guard only kicks in for STRONG mismatches —
+    similar-length wrong song still gets flagged."""
+    job = AcoustIDScannerJob()
+    captured_findings = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Expected", "Artist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured_findings,
+    )
+
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [
+                {'title': 'Wrong Song', 'artist': 'Wrong Artist',
+                 'duration': 180},  # 3 min, matches expected
+            ],
+        },
+    )
+
+    result = JobResultStub()
+    # 3-minute file with 3-minute candidate — same length, but title +
+    # artist clearly mismatch → finding should still fire
+    job._scan_file(
+        '/music/track.flac', '99',
+        {'title': 'Expected', 'artist': 'Artist', 'duration_ms': 180000},
+        fake_acoustid, context, result,
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert len(captured_findings) == 1
