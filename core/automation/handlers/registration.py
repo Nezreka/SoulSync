@@ -34,6 +34,12 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.progress_callbacks import (
+    progress_init,
+    progress_finish,
+    record_history,
+    register_library_scan_completed_emitter,
+)
 
 
 def register_all(deps: AutomationDeps) -> None:
@@ -151,3 +157,19 @@ def register_all(deps: AutomationDeps) -> None:
         'search_and_download',
         lambda config: auto_search_and_download(config, deps),
     )
+
+    # Progress + history callbacks: the engine invokes these around
+    # each handler run. Lift the closures from
+    # `web_server._register_automation_handlers` into thin lambdas
+    # that delegate into the extracted top-level functions.
+    engine.register_progress_callbacks(
+        lambda aid, name, action_type: progress_init(aid, name, action_type, deps),
+        lambda aid, result: progress_finish(aid, result, deps),
+        deps.update_progress,
+        lambda aid, result: record_history(aid, result, deps),
+    )
+
+    # `library_scan_completed` event: when the media-server scan
+    # manager finishes a scan, emit the event so any automation can
+    # trigger off it. No-op when no scan manager is configured.
+    register_library_scan_completed_emitter(deps)

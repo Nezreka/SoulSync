@@ -133,3 +133,8 @@ class AutomationDeps:
     get_watchlist_scanner: Callable[[Any], Any]
     get_app: Callable[[], Any]                           # Flask app for test_client (beatport refresh)
     get_beatport_data_cache: Callable[[], dict]
+
+    # --- Progress + history callbacks (used by register_all to wire
+    # the engine's progress callback hooks). ---
+    init_automation_progress: Callable[..., Any]
+    record_progress_history: Callable[..., Any]
