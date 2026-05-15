@@ -130,6 +130,16 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
         except OSError:
             size_bytes = 0
 
+        # Issue #608 follow-up (AfonsoG6): surface the source username
+        # + filename that was originally downloaded, so the user can see
+        # at a glance which uploader the bad file came from. Lives
+        # under `context.original_search_result` when full context is
+        # persisted; absent on legacy thin sidecars.
+        ctx = sidecar.get("context") if isinstance(sidecar.get("context"), dict) else {}
+        osr = ctx.get("original_search_result") if isinstance(ctx.get("original_search_result"), dict) else {}
+        source_username = osr.get("username", "") if isinstance(osr, dict) else ""
+        source_filename = osr.get("filename", "") if isinstance(osr, dict) else ""
+
         entries.append(
             {
                 "id": entry_id,
@@ -142,6 +152,8 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "size_bytes": size_bytes,
                 "has_full_context": isinstance(sidecar.get("context"), dict),
                 "trigger": sidecar.get("trigger", "unknown"),
+                "source_username": source_username,
+                "source_filename": source_filename,
             }
         )
 

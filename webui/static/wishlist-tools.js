@@ -3137,18 +3137,37 @@ function renderQuarantineEntry(entry) {
     const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
     const triggerColor = triggerColors[entry.trigger] || '#888';
 
-    const id = escapeHtml(entry.id);
+    // Issue #608 (AfonsoG6): the prior code injected `entry.id` raw
+    // into single-quoted JS string literals inside HTML onclick
+    // attributes. Filenames containing an apostrophe broke JS
+    // parsing — Approve and Delete buttons silently no-op'd.
+    // JSON.stringify wraps the value in valid JS literal syntax
+    // (handles ', \, " and unicode); escapeHtml then guards the HTML
+    // attribute boundary so the JS string round-trips intact.
+    const idJs = escapeHtml(JSON.stringify(entry.id));
     const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
     const approveTitle = entry.has_full_context
         ? 'Re-run post-processing with only the failing check skipped'
         : 'Legacy entry — move to Staging, finish via Import flow';
     const approveCall = entry.has_full_context
-        ? `approveQuarantineEntry('${id}')`
-        : `recoverQuarantineEntry('${id}')`;
+        ? `approveQuarantineEntry(${idJs})`
+        : `recoverQuarantineEntry(${idJs})`;
 
     const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
     const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
     const reasonDetail = `<div class="library-history-entry-source"><span class="lh-prov-label">Reason:</span> ${escapeHtml(entry.reason || 'Unknown')}</div>`;
+
+    // Issue #608 follow-up: show source uploader + original soulseek
+    // filename when the sidecar carried that context. Helps the user
+    // understand which uploader the bad file came from at a glance.
+    const sourceParts = [];
+    if (entry.source_username) {
+        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Source:</span> ${escapeHtml(entry.source_username)}</div>`);
+    }
+    if (entry.source_filename) {
+        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Original filename:</span> ${escapeHtml(entry.source_filename)}</div>`);
+    }
+    const sourceDetail = sourceParts.join('');
 
     return `<div class="library-history-entry lh-expandable" onclick="this.classList.toggle('lh-expanded')">
         <div class="library-history-thumb-placeholder">🛡️</div>
@@ -3161,11 +3180,12 @@ function renderQuarantineEntry(entry) {
                 <div class="library-history-entry-badges">${triggerBadge}</div>
                 <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
                 <button class="lh-audit-btn" title="${approveTitle}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
-                <button class="lh-audit-btn" title="Delete permanently" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntry('${id}')">Delete</button>
+                <button class="lh-audit-btn" title="Delete permanently" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntry(${idJs})">Delete</button>
                 <span class="lh-expand-btn">&#x25BE;</span>
             </div>
             <div class="library-history-entry-details">
                 ${reasonDetail}
+                ${sourceDetail}
             </div>
         </div>
     </div>`;
