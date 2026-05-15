@@ -2426,3 +2426,164 @@ async function loadPageData(pageId) {
         showToast(`Failed to load ${pageId} data`, 'error');
     }
 }
+
+// ---- Dashboard cursor-following accent blob (two-layer liquid) ----
+// Both layers lerp toward a target point: the cursor when it's hovering
+// any .dash-card, otherwise the grid center (idle resting position).
+// Core layer (--blob-x/y) follows faster, halo (--blob-x-soft/y-soft)
+// trails. Each card renders both layers and clips them to its own bounds
+// via overflow:hidden, so the blob spans the bento while gaps stay dark.
+// Disabled entirely when body.reduce-effects is set.
+(function initDashboardCursorBlob() {
+    let grid = null;
+    let cards = [];
+    let cardRects = [];               // cached rects, refreshed each frame
+    let targetX = 0, targetY = 0;
+    let coreX = 0, coreY = 0;
+    let softX = 0, softY = 0;
+    let rafId = 0;
+    let attached = false;
+    let centeredOnce = false;
+
+    const RECENTER_DELAY_MS = 1500;
+    let recenterTimer = 0;
+
+    const isReduced = () => document.body.classList.contains('reduce-effects');
+
+    const gridCenter = () => {
+        const r = grid.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    };
+
+    // Two-pass per frame: read all rects first (one layout flush), then
+    // write all CSS vars (no further reads). Avoids per-card layout thrash.
+    const tick = () => {
+        if (isReduced()) { rafId = 0; return; }
+
+        coreX += (targetX - coreX) * 0.040;
+        coreY += (targetY - coreY) * 0.040;
+        softX += (targetX - softX) * 0.022;
+        softY += (targetY - softY) * 0.022;
+
+        const n = cards.length;
+        if (cardRects.length !== n) cardRects.length = n;
+        for (let i = 0; i < n; i++) cardRects[i] = cards[i].getBoundingClientRect();
+        for (let i = 0; i < n; i++) {
+            const r = cardRects[i];
+            const s = cards[i].style;
+            s.setProperty('--blob-x',      (coreX - r.left) + 'px');
+            s.setProperty('--blob-y',      (coreY - r.top)  + 'px');
+            s.setProperty('--blob-x-soft', (softX - r.left) + 'px');
+            s.setProperty('--blob-y-soft', (softY - r.top)  + 'px');
+        }
+
+        const dx = Math.abs(targetX - softX) + Math.abs(targetX - coreX);
+        const dy = Math.abs(targetY - softY) + Math.abs(targetY - coreY);
+        if (dx + dy > 0.4) rafId = requestAnimationFrame(tick);
+        else rafId = 0;
+    };
+
+    const ensureLoop = () => {
+        if (!rafId && !isReduced()) rafId = requestAnimationFrame(tick);
+    };
+
+    const cancelRecenter = () => {
+        if (recenterTimer) { clearTimeout(recenterTimer); recenterTimer = 0; }
+    };
+    const recenterNow = () => {
+        recenterTimer = 0;
+        if (!grid) return;
+        const c = gridCenter();
+        targetX = c.x; targetY = c.y;
+        ensureLoop();
+    };
+    const scheduleRecenter = () => {
+        if (recenterTimer) return;
+        recenterTimer = setTimeout(recenterNow, RECENTER_DELAY_MS);
+    };
+
+    // Snap the blob to grid center the first time the grid becomes
+    // measurable (page may not be visible at DOMContentLoaded).
+    const snapToCenterIfReady = () => {
+        if (!grid || centeredOnce) return;
+        const r = grid.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;  // not visible yet
+        const c = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        targetX = coreX = softX = c.x;
+        targetY = coreY = softY = c.y;
+        centeredOnce = true;
+        ensureLoop();
+    };
+
+    function attach() {
+        if (attached) return;
+        grid = document.querySelector('.dash-grid');
+        if (!grid) return;
+        attached = true;
+        cards = Array.from(grid.querySelectorAll('.dash-card'));
+
+        snapToCenterIfReady();
+
+        grid.addEventListener('pointermove', (e) => {
+            if (isReduced()) return;
+            const onCard = e.target && e.target.closest && e.target.closest('.dash-card');
+            if (onCard) {
+                cancelRecenter();
+                targetX = e.clientX;
+                targetY = e.clientY;
+                ensureLoop();
+            } else {
+                scheduleRecenter();
+            }
+        });
+        grid.addEventListener('pointerleave', () => {
+            if (!isReduced()) scheduleRecenter();
+        });
+        window.addEventListener('resize', () => {
+            if (isReduced()) return;
+            // Idle: snap immediately. Active: respect the existing delay.
+            if (!recenterTimer) recenterNow();
+        });
+
+        // Re-resolve cards when active-downloads card toggles visibility.
+        const cardObserver = new MutationObserver(() => {
+            cards = Array.from(grid.querySelectorAll('.dash-card'));
+            ensureLoop();
+        });
+        cardObserver.observe(grid, { childList: true, subtree: false, attributes: true, attributeFilter: ['style', 'class'] });
+
+        // If the grid was hidden at attach time, snap once it becomes
+        // measurable (page navigation, tab switch).
+        if (!centeredOnce && 'IntersectionObserver' in window) {
+            const visObserver = new IntersectionObserver((entries) => {
+                for (const ent of entries) {
+                    if (ent.isIntersecting) { snapToCenterIfReady(); break; }
+                }
+            });
+            visObserver.observe(grid);
+        }
+
+        // React to reduce-effects toggle on body class.
+        const bodyObserver = new MutationObserver(() => {
+            if (isReduced()) {
+                cancelRecenter();
+                if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+            } else {
+                centeredOnce = false;
+                snapToCenterIfReady();
+            }
+        });
+        bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attach);
+    } else {
+        attach();
+    }
+    // Also retry on full load — covers late-mounted markup.
+    window.addEventListener('load', () => {
+        attach();
+        snapToCenterIfReady();
+    });
+})();
