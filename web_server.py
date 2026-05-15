@@ -990,44 +990,11 @@ def _register_automation_handlers():
         get_watchlist_scanner=_get_watchlist_scanner_fn,
         get_app=lambda: app,
         get_beatport_data_cache=lambda: beatport_data_cache,
+        init_automation_progress=_init_automation_progress,
+        record_progress_history=_auto_progress.record_history,
     )
     _register_extracted_handlers(_automation_deps)
 
-
-    # --- Phase 3 action handlers ---
-
-    # Register progress tracking callbacks
-    def _progress_init(aid, name, action_type):
-        _init_automation_progress(aid, name, action_type)
-
-    def _progress_finish(aid, result):
-        result_status = result.get('status', '')
-        # Skip for handlers that manage their own progress lifecycle
-        # (they call _update_automation_progress(status='finished') themselves)
-        if result.get('_manages_own_progress'):
-            return
-        status = 'error' if result_status == 'error' else 'finished'
-        msg = result.get('error', result.get('reason', result_status or 'done'))
-        _update_automation_progress(aid, status=status, progress=100,
-                                     phase='Error' if status == 'error' else 'Complete',
-                                     log_line=msg, log_type='error' if status == 'error' else 'success')
-
-    def _record_automation_history(aid, result):
-        """Capture progress state into run history before cleanup clears it."""
-        _auto_progress.record_history(aid, result, get_database())
-
-    automation_engine.register_progress_callbacks(_progress_init, _progress_finish, _update_automation_progress, _record_automation_history)
-
-    # Register permanent callback: when any scan completes, emit library_scan_completed event
-    # This replaces the hardcoded scan_completion_callback → trigger_automatic_database_update chain
-    if web_scan_manager:
-        def _on_library_scan_completed():
-            if automation_engine:
-                server_type = getattr(web_scan_manager, '_current_server_type', None) or 'unknown'
-                automation_engine.emit('library_scan_completed', {
-                    'server_type': server_type,
-                })
-        web_scan_manager.add_scan_completion_callback(_on_library_scan_completed)
 
     logger.info("Automation action handlers registered")
 

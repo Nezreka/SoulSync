@@ -120,6 +120,8 @@ def _build_deps(**overrides) -> AutomationDeps:
         get_watchlist_scanner=lambda spc: None,
         get_app=lambda: None,
         get_beatport_data_cache=lambda: {'cache_lock': threading.Lock(), 'homepage': {}},
+        init_automation_progress=lambda *a, **k: None,
+        record_progress_history=lambda *a, **k: None,
     )
     defaults.update(overrides)
     return AutomationDeps(**defaults)  # type: ignore[arg-type]
