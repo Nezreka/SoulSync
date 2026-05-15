@@ -93,3 +93,11 @@ class AutomationDeps:
     is_wishlist_actually_processing: Callable[[], bool]
     is_watchlist_actually_scanning: Callable[[], bool]
     get_watchlist_scan_state: Callable[[], dict]         # accessor returns the live mutable dict
+
+    # --- Playlist pipeline entry points ---
+    run_playlist_discovery_worker: Callable[..., Any]
+    run_sync_task: Callable[..., Any]
+    load_sync_status_file: Callable[[], dict]
+    get_deezer_client: Callable[[], Any]
+    parse_youtube_playlist: Callable[[str], Any]
+    get_sync_states: Callable[[], dict]                  # accessor returns the live dict shared with the sync UI
