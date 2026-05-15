@@ -60109,3 +60109,709 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 .hifi-instance-remove:hover {
     color: #ef5350;
 }
+
+/* ==========================================================================
+   BENTO DASHBOARD — polished mixed-size card grid for the dashboard page.
+
+   Each card has bold title + dim subtitle + hero body region + optional
+   actions. Cards span 1, 2, or 3 of the 3 grid columns to create
+   visual hierarchy. Preserves every JS-relied class hook + ID by
+   wrapping existing markup rather than replacing it.
+
+   Inspired by the anthropic.com "Do more with Claude" tile layout —
+   subtle border, soft shadow, hover lift, generous breathing room,
+   per-card accent hue tints.
+   ========================================================================== */
+
+.dash-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    align-items: stretch;
+}
+
+.dash-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 24px;
+    background: linear-gradient(165deg,
+        rgba(16, 16, 20, 0.94) 0%,
+        rgba(8, 8, 12, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 18px;
+    box-shadow:
+        0 6px 24px rgba(0, 0, 0, 0.42),
+        0 2px 8px rgba(0, 0, 0, 0.26),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition:
+        border-color 0.24s ease,
+        transform 0.18s ease,
+        box-shadow 0.24s ease;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+/* Cursor-following accent blob — two-layer "liquid" effect that spans
+   the bento. ::before is a huge soft halo with lag (lerped position via
+   --blob-x-soft / --blob-y-soft), ::after is a smaller sharp core that
+   tracks the cursor instantly (--blob-x / --blob-y). Each card renders
+   its own copy of both layers; overflow:hidden on the card clips them
+   to its bounds, so the blob looks continuous across cards but never
+   bleeds into the gaps between them. */
+.dash-card::before {
+    content: '';
+    position: absolute;
+    left: var(--blob-x-soft, -9999px);
+    top: var(--blob-y-soft, -9999px);
+    width: 1280px;
+    height: 1280px;
+    transform: translate(-50%, -50%) scale(1);
+    background: radial-gradient(
+        circle,
+        rgba(var(--accent-rgb), 0.13) 0%,
+        rgba(var(--accent-rgb), 0.06) 25%,
+        rgba(var(--accent-rgb), 0.025) 50%,
+        transparent 72%);
+    filter: blur(48px);
+    opacity: 1;
+    pointer-events: none;
+    z-index: 0;
+    will-change: left, top, transform, opacity;
+    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+}
+.dash-card::after {
+    content: '';
+    position: absolute;
+    left: var(--blob-x, -9999px);
+    top: var(--blob-y, -9999px);
+    width: 540px;
+    height: 540px;
+    transform: translate(-50%, -50%) scale(1);
+    background: radial-gradient(
+        circle,
+        rgba(var(--accent-rgb), 0.16) 0%,
+        rgba(var(--accent-rgb), 0.07) 30%,
+        rgba(var(--accent-rgb), 0.03) 55%,
+        transparent 72%);
+    filter: blur(18px);
+    opacity: 1;
+    pointer-events: none;
+    z-index: 0;
+    will-change: left, top, transform, opacity;
+    mix-blend-mode: screen;
+    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+}
+
+@keyframes dashBlobHaloPulse {
+    0%, 100% { opacity: 0.7;  transform: translate(-50%, -50%) scale(0.96); }
+    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@keyframes dashBlobCorePulse {
+    0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.92); }
+    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.10); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dash-card::before,
+    .dash-card::after { animation: none; }
+}
+
+body.reduce-effects .dash-card::before,
+body.reduce-effects .dash-card::after {
+    display: none;
+}
+.dash-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    transform: translateY(-3px);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.40),
+        0 4px 14px rgba(0, 0, 0, 0.22),
+        0 0 28px rgba(var(--accent-rgb), 0.10),
+        inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* Mount stagger — cards fade up on first paint (and on page revisit) */
+@keyframes dashCardMount {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.dash-card {
+    animation: dashCardMount 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.dash-card[data-card="services"]        { animation-delay: 0.00s; }
+.dash-card[data-card="stats"]           { animation-delay: 0.06s; }
+.dash-card[data-card="library"]         { animation-delay: 0.12s; }
+.dash-card[data-card="syncs"]           { animation-delay: 0.18s; }
+.dash-card[data-card="tools"]           { animation-delay: 0.24s; }
+.dash-card[data-card="activity"]        { animation-delay: 0.30s; }
+.dash-card[data-card="enrichment"]      { animation-delay: 0.36s; }
+.dash-card[data-card="active-downloads"] { animation-delay: 0.20s; }
+
+/* Honor reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+    .dash-card { animation: none; }
+    .dash-card::before { animation: none; }
+}
+
+/* Span modifiers */
+.dash-card--wide { grid-column: span 2; }
+.dash-card--full { grid-column: 1 / -1; }
+
+/* Card head */
+.dash-card__head {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 16px;
+}
+.dash-card__head--withaction {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.dash-card__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+}
+.dash-card__sub {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 4px 0 0;
+    line-height: 1.4;
+}
+.dash-card__head-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.dash-card__head-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #fff;
+}
+
+/* Card body */
+.dash-card__body {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-width: 0;
+}
+
+/* CTA card variant (Tools) — entire card is clickable */
+.dash-card--cta {
+    cursor: pointer;
+}
+.dash-card--cta:hover .dash-card__cta-arrow {
+    transform: translateX(4px);
+    color: rgb(var(--accent-rgb));
+}
+.dash-card--cta:hover .dash-card__cta-icon {
+    background: rgba(var(--accent-rgb), 0.22);
+    transform: scale(1.06) rotate(-2deg);
+    box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.35);
+}
+.dash-card__body--cta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-top: 4px;
+}
+.dash-card__cta-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(var(--accent-rgb), 0.14);
+    border: 1px solid rgba(var(--accent-rgb), 0.26);
+    color: rgb(var(--accent-rgb));
+    transition: background 0.24s ease, transform 0.24s ease, box-shadow 0.24s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.dash-card__cta-label {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+}
+.dash-card__cta-arrow {
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease, color 0.2s ease;
+    flex-shrink: 0;
+}
+
+/* Body overrides for embedded sub-grids — make them compact for bento */
+
+/* Service status: 3 service cards side-by-side in a tighter grid */
+.dash-card[data-card="services"] .service-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.dash-card[data-card="services"] .service-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 14px 14px;
+    min-height: 0;
+    box-shadow: none;
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+.dash-card[data-card="services"] .service-card:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+.dash-card[data-card="services"] .service-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.dash-card[data-card="services"] .service-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+.dash-card[data-card="services"] .service-card-indicator {
+    font-size: 11px;
+}
+.dash-card[data-card="services"] .service-card-status-text,
+.dash-card[data-card="services"] .service-card-response-time {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 2px 0;
+}
+.dash-card[data-card="services"] .service-card-footer {
+    margin-top: 10px;
+}
+.dash-card[data-card="services"] .service-card-button {
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 11.5px;
+    border-radius: 6px;
+}
+
+/* Library card — trim the inner library-status-card chrome since the
+   bento card already provides the framing. */
+.dash-card[data-card="library"] .library-status-card {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 10px 0 0;
+    border-radius: 0;
+}
+.dash-card[data-card="library"] .library-status-glow {
+    display: none;
+}
+.dash-card[data-card="library"] .library-status-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.dash-card[data-card="library"] .library-status-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(168, 85, 247, 0.12);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    color: rgba(168, 85, 247, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.dash-card[data-card="library"] .library-status-info {
+    flex: 1;
+    min-width: 0;
+}
+.dash-card[data-card="library"] .library-status-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+}
+.dash-card[data-card="library"] .library-status-subtitle {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 2px 0 0;
+}
+.dash-card[data-card="library"] .library-status-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.dash-card[data-card="library"] .library-status-btn {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    border-radius: 7px;
+    white-space: nowrap;
+}
+.dash-card[data-card="library"] .library-status-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding: 0;
+}
+.dash-card[data-card="library"] .library-status-stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+}
+.dash-card[data-card="library"] .library-status-stat-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: rgba(168, 85, 247, 0.10);
+    color: rgba(168, 85, 247, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.dash-card[data-card="library"] .library-status-stat-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.dash-card[data-card="library"] .library-status-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+.dash-card[data-card="library"] .library-status-stat-label {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+/* Stats card — 2x3 grid of compact metric chips. Override the default
+   stats-grid-dashboard which uses wider, taller cards. */
+.dash-card[data-card="stats"] .stats-grid-dashboard {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+.dash-card[data-card="stats"] .stat-card-dashboard {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: none;
+    min-height: 0;
+}
+.dash-card[data-card="stats"] .stat-card-dashboard:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+.dash-card[data-card="stats"] .stat-card-title {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0;
+}
+.dash-card[data-card="stats"] .stat-card-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    margin: 4px 0 0;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+.dash-card[data-card="stats"] .stat-card-subtitle {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 4px 0 0;
+}
+
+/* Activity feed — trim outer chrome */
+.dash-card[data-card="activity"] .activity-feed-container {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    border-radius: 0;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+/* Sync history strip — horizontal scroller */
+.dash-card[data-card="syncs"] .sync-history-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 2px;
+    max-height: 260px;
+}
+
+.dash-card[data-card="syncs"] .sync-history-card {
+    min-width: 0;
+    width: 100%;
+    padding: 10px 12px;
+}
+
+/* Enrichment / rate monitor — single row of compact tiles */
+.dash-card[data-card="enrichment"] .rate-monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 8px;
+    padding: 4px 0 0;
+}
+
+.dash-card[data-card="enrichment"] .rate-gauge-card {
+    padding: 10px 8px 8px;
+    gap: 4px;
+    min-height: 0;
+}
+
+.dash-card[data-card="enrichment"] .rate-gauge-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.dash-card[data-card="enrichment"] .gauge-card-header {
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    text-align: center;
+}
+
+.dash-card[data-card="enrichment"] .gauge-card-name {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    font-weight: 600;
+}
+
+.dash-card[data-card="enrichment"] .gauge-card-status {
+    font-size: 8px;
+    padding: 1px 5px;
+    line-height: 1.3;
+}
+
+.dash-card[data-card="enrichment"] .gauge-card-stats {
+    display: none;
+}
+
+.dash-card[data-card="enrichment"] .gauge-budget-bar {
+    display: none;
+}
+
+/* Active downloads container */
+.dash-card[data-card="active-downloads"] #dashboard-downloads-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Soft scrollbar inside cards */
+.dash-card *::-webkit-scrollbar { width: 7px; height: 7px; }
+.dash-card *::-webkit-scrollbar-track { background: transparent; }
+.dash-card *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 99px; }
+.dash-card *::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* Responsive breakpoints:
+   - >=1500px (large desktop):    3-col bento grid (default)
+   - 1100-1499px (laptop):        2-col bento; full cards span both
+   - 700-1099px (tablet):         2-col bento; tighter sub-grids
+   - <700px (mobile):             1-col stack
+   - <480px (small mobile):       tightest padding/typography
+*/
+
+/* Laptop — 2-col bento */
+@media (max-width: 1499px) {
+    .dash-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+    }
+    .dash-card--wide {
+        grid-column: span 2;
+    }
+    .dash-card--full {
+        grid-column: 1 / -1;
+    }
+    .dash-card {
+        padding: 20px 22px;
+    }
+    /* Services sub-grid: 2-up — each service tile keeps room for title + status + button */
+    .dash-card[data-card="services"] .service-status-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .dash-card[data-card="services"] .service-card {
+        padding: 12px 12px;
+    }
+    .dash-card[data-card="services"] .service-card-title {
+        font-size: 12.5px;
+    }
+    .dash-card[data-card="services"] .service-card-status-text,
+    .dash-card[data-card="services"] .service-card-response-time {
+        font-size: 11px;
+    }
+    /* Stats: 3-col stays, value font shrinks slightly */
+    .dash-card[data-card="stats"] .stats-grid-dashboard {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+    }
+    .dash-card[data-card="stats"] .stat-card-dashboard {
+        padding: 10px 12px;
+    }
+    .dash-card[data-card="stats"] .stat-card-value {
+        font-size: 19px;
+    }
+    .dash-card[data-card="stats"] .stat-card-title,
+    .dash-card[data-card="stats"] .stat-card-subtitle {
+        font-size: 10px;
+    }
+    /* Library stats: 4 across stays in wider 2-col cell */
+    .dash-card[data-card="library"] .library-status-stats {
+        grid-template-columns: repeat(4, 1fr);
+    }
+    /* Enrichment full spans both cols — 10 tiles single row still fits */
+    .dash-card[data-card="enrichment"] .rate-monitor-grid {
+        grid-template-columns: repeat(10, minmax(0, 1fr));
+    }
+}
+
+/* Tablet — 2-col bento, tighter */
+@media (max-width: 1099px) {
+    .dash-grid {
+        gap: 14px;
+    }
+    .dash-card {
+        padding: 18px 18px;
+    }
+    .dash-card__title {
+        font-size: 16px;
+    }
+    .dash-card[data-card="services"] .service-status-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .dash-card[data-card="services"] .service-card {
+        padding: 10px 10px;
+    }
+    .dash-card[data-card="services"] .service-card-button {
+        font-size: 11px;
+        padding: 5px 8px;
+    }
+    .dash-card[data-card="stats"] .stats-grid-dashboard {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .dash-card[data-card="stats"] .stat-card-value {
+        font-size: 18px;
+    }
+    .dash-card[data-card="library"] .library-status-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dash-card[data-card="enrichment"] .rate-monitor-grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+/* Mobile — 1-col stack */
+@media (max-width: 699px) {
+    .dash-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .dash-card--wide,
+    .dash-card--full {
+        grid-column: auto;
+    }
+    .dash-card {
+        padding: 16px 16px;
+        border-radius: 14px;
+    }
+    .dash-card__title {
+        font-size: 15px;
+    }
+    .dash-card__sub {
+        font-size: 12px;
+    }
+    .dash-card[data-card="services"] .service-status-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    .dash-card[data-card="stats"] .stats-grid-dashboard {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .dash-card[data-card="library"] .library-status-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dash-card[data-card="library"] .library-status-header {
+        flex-wrap: wrap;
+    }
+    .dash-card[data-card="library"] .library-status-actions {
+        flex-direction: row;
+        width: 100%;
+    }
+    .dash-card[data-card="enrichment"] .rate-monitor-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+    }
+    .dash-card[data-card="enrichment"] .rate-gauge-card {
+        padding: 8px 6px 6px;
+    }
+    .dash-card[data-card="syncs"] .sync-history-cards {
+        max-height: 220px;
+    }
+}
+
+/* Small mobile — tightest */
+@media (max-width: 480px) {
+    .dash-grid {
+        gap: 10px;
+    }
+    .dash-card {
+        padding: 14px 12px;
+    }
+    .dash-card__head {
+        margin-bottom: 12px;
+    }
+    .dash-card[data-card="stats"] .stats-grid-dashboard {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dash-card[data-card="stats"] .stat-card-value {
+        font-size: 20px;
+    }
+    .dash-card[data-card="enrichment"] .rate-monitor-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .dash-card[data-card="enrichment"] .gauge-card-name {
+        font-size: 10px;
+    }
+}
