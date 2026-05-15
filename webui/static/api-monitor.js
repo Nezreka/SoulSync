@@ -614,6 +614,26 @@ async function fetchAndUpdateActivityFeed() {
 // Cache last feed signature to avoid unnecessary DOM rebuilds (prevents blink)
 let _lastActivityFeedSig = '';
 
+// Activity items carry `timestamp` (Unix epoch seconds) — `activity.time`
+// is a human label like "Now" that doesn't parse as a date. Use the
+// epoch for relative-time formatting; fall back to the label only
+// when no timestamp is present (legacy items, future shapes).
+function _activityTimeAgo(activity) {
+    const ts = activity && activity.timestamp;
+    if (typeof ts !== 'number' || !isFinite(ts)) {
+        return (activity && activity.time) || '';
+    }
+    const diffMs = Date.now() - ts * 1000;
+    if (diffMs < 60000) return 'Just now';
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+}
+
 function updateActivityFeed(activities) {
     const feedContainer = document.getElementById('dashboard-activity-feed');
     if (!feedContainer) return;
@@ -644,7 +664,7 @@ function updateActivityFeed(activities) {
         // Just update timestamps without rebuilding DOM
         const timeEls = feedContainer.querySelectorAll('.activity-time');
         items.forEach((activity, i) => {
-            if (timeEls[i]) timeEls[i].textContent = timeAgo(activity.time);
+            if (timeEls[i]) timeEls[i].textContent = _activityTimeAgo(activity);
         });
         return;
     }
@@ -660,7 +680,7 @@ function updateActivityFeed(activities) {
                 <p class="activity-title">${escapeHtml(activity.title)}</p>
                 <p class="activity-subtitle">${escapeHtml(activity.subtitle)}</p>
             </div>
-            <p class="activity-time">${timeAgo(activity.time)}</p>
+            <p class="activity-time">${_activityTimeAgo(activity)}</p>
         `;
         feedContainer.appendChild(activityElement);
 
