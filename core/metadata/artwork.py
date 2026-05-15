@@ -37,22 +37,43 @@ _REDACT_QUERY_KEYS = (
     'x-plex-token', 'x-emby-token', 'api_key', 'apikey',
     't', 's', 'p', 'token', 'password',
 )
-# Anchor on `?` / `&` (or string start) so short keys like `t` only
-# match at parameter boundaries — not as a substring of `format=Jpg`.
+_REDACT_KEYS_ALT = '|'.join(re.escape(k) for k in _REDACT_QUERY_KEYS)
+# Plain form: `?key=value` or `&key=value`. Anchored on `?` / `&` (or
+# string start) so short keys like `t` only match at parameter
+# boundaries — not as a substring of `format=Jpg`.
 _REDACT_QUERY_RE = re.compile(
-    r'(?i)(?P<lead>^|[?&])(?P<key>' + '|'.join(re.escape(k) for k in _REDACT_QUERY_KEYS) + r')=([^&\s]+)'
+    r'(?i)(?P<lead>^|[?&])(?P<key>' + _REDACT_KEYS_ALT + r')=(?P<val>[^&\s]+)'
+)
+# URL-encoded form: `%3Fkey%3Dvalue` or `%26key%3Dvalue`. The image
+# proxy wraps the original URL via `?url=<encoded>`, so the auth
+# params end up encoded inside another URL. Without this second pass
+# the encoded form survives plain redaction and ships to logs intact.
+_REDACT_QUERY_RE_ENCODED = re.compile(
+    r'(?i)(?P<lead>%3F|%26)(?P<key>' + _REDACT_KEYS_ALT + r')%3D(?P<val>[^%&\s]+?)(?=%26|&|\s|$)'
 )
 
 
 def _redact_url_secrets(url: str | None) -> str:
     """Mask sensitive query parameters in a URL so the result is safe
-    to log. Returns ``''`` for None/empty input. Idempotent."""
+    to log. Handles both the plain form (``?token=abc``) and the URL-
+    encoded form (``%3Ftoken%3Dabc``) — the latter shows up when an
+    auth-bearing URL is wrapped inside another URL's query string
+    (e.g. our `/api/image-proxy?url=<encoded-plex-url>` flow).
+
+    Returns ``''`` for None/empty input. Idempotent (safe to call on
+    already-redacted strings)."""
     if not url:
         return ''
-    return _REDACT_QUERY_RE.sub(
+    out = str(url)
+    out = _REDACT_QUERY_RE.sub(
         lambda m: f"{m.group('lead')}{m.group('key')}=***REDACTED***",
-        str(url),
+        out,
     )
+    out = _REDACT_QUERY_RE_ENCODED.sub(
+        lambda m: f"{m.group('lead')}{m.group('key')}%3D***REDACTED***",
+        out,
+    )
+    return out
 
 
 def normalize_image_url(thumb_url: str | None) -> str | None:
