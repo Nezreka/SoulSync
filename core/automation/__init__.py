@@ -1,7 +1,11 @@
-"""Automation API + progress tracking helpers package.
+"""Automation API + progress + handlers package.
 
-Lifted from web_server.py /api/automations/* routes and progress
-emitters. The action handler registration (`_register_automation_handlers`)
-stays in web_server.py because each handler closure is tightly coupled
-to other application features.
+Lifted from web_server.py:
+  - `/api/automations/*` route helpers → `api.py`
+  - block library used by the trigger/action UI → `blocks.py`
+  - progress tracker (init / update / finish) → `progress.py`
+  - cross-handler signal bus → `signals.py`
+  - per-action handler functions → `handlers/` subpackage (with
+    `deps.py` defining the dependency-injection surface so handlers
+    stay testable in isolation)
 """

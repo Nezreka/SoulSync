@@ -906,129 +906,49 @@ _scan_library_automation_id = None
 
 
 def _register_automation_handlers():
-    """Register real SoulSync action handlers with the automation engine."""
+    """Register real SoulSync action handlers with the automation engine.
+
+    Per-handler bodies live in ``core.automation.handlers``. This
+    function wires the dependency-injection surface (clients,
+    callables, mutable state) into a single ``AutomationDeps`` object
+    and hands it to ``register_all``.
+
+    NOTE: extraction is in progress. The first batch of handlers
+    (``process_wishlist`` / ``scan_watchlist`` / ``scan_library``)
+    has been moved to ``core/automation/handlers/``; the remaining
+    closures still live below until subsequent commits in the same
+    branch finish the lift.
+    """
     if not automation_engine:
         return
 
-    def _auto_process_wishlist(config):
-        try:
-            _process_wishlist_automatically(automation_id=config.get('_automation_id'))
-            return {'status': 'completed'}
-        except Exception as e:
-            return {'status': 'error', 'error': str(e)}
-    # Note: wishlist processing is async (batch submitted to executor), stats come via batch completion
+    from core.automation.deps import AutomationDeps, AutomationState
+    from core.automation.handlers import register_all as _register_extracted_handlers
 
-    def _auto_scan_watchlist(config):
-        try:
-            pre_state_id = id(watchlist_scan_state)
-            _process_watchlist_scan_automatically(
-                automation_id=config.get('_automation_id'),
-                profile_id=config.get('_profile_id')
-            )
-            # Only report stats if a fresh scan actually ran (state dict was reassigned)
-            if id(watchlist_scan_state) != pre_state_id:
-                summary = watchlist_scan_state.get('summary', {})
-                return {
-                    'status': 'completed',
-                    'artists_scanned': summary.get('total_artists', 0),
-                    'successful_scans': summary.get('successful_scans', 0),
-                    'new_tracks_found': summary.get('new_tracks_found', 0),
-                    'tracks_added_to_wishlist': summary.get('tracks_added_to_wishlist', 0),
-                }
-            return {'status': 'completed'}
-        except Exception as e:
-            return {'status': 'error', 'error': str(e)}
+    # Mutable shared state previously lived as module-level globals
+    # (`_scan_library_automation_id`, `_pipeline_running`, etc).
+    # Keeping the legacy globals AS WELL as the new state object during
+    # the transitional period so the not-yet-extracted closures still
+    # work; they'll be removed once the rest of the lift is done.
+    _automation_state = AutomationState()
 
-    def _auto_scan_library(config):
-        global _scan_library_automation_id
-        automation_id = config.get('_automation_id')
-
-        if not web_scan_manager:
-            return {'status': 'error', 'reason': 'Scan manager not available'}
-
-        # If another automation is already tracking the scan, just forward the request
-        if _scan_library_automation_id is not None:
-            web_scan_manager.request_scan('Automation trigger (additional batch)')
-            return {'status': 'skipped', 'reason': 'Scan already being tracked'}
-
-        _scan_library_automation_id = automation_id
-
-        try:
-            result = web_scan_manager.request_scan('Automation trigger')
-            scan_status_val = result.get('status', 'unknown')
-
-            if scan_status_val == 'queued':
-                _update_automation_progress(automation_id,
-                    log_line='Scan already in progress — waiting for completion', log_type='info')
-            else:
-                delay = result.get('delay_seconds', 60)
-                _update_automation_progress(automation_id,
-                    log_line=f'Scan scheduled (debounce: {delay}s)', log_type='info')
-
-            # Unified polling loop — handles debounce → scanning → idle transitions
-            poll_start = time.time()
-            scan_started = (scan_status_val == 'queued')  # Already scanning if queued
-            while time.time() - poll_start < 1800:  # Max 30 min overall
-                status = web_scan_manager.get_scan_status()
-                st = status.get('status')
-
-                if st == 'idle':
-                    break  # Scan completed (or finished before we started polling)
-
-                elif st == 'scheduled':
-                    elapsed = int(time.time() - poll_start)
-                    _update_automation_progress(automation_id,
-                        phase=f'Waiting for scan to start... ({elapsed}s)',
-                        progress=min(int(elapsed / 60 * 10), 14))
-                    time.sleep(2)
-
-                elif st == 'scanning':
-                    if not scan_started:
-                        scan_started = True
-                        _update_automation_progress(automation_id, progress=15,
-                            log_line='Scan triggered on media server', log_type='success')
-                    elapsed = status.get('elapsed_seconds', 0)
-                    max_time = status.get('max_time_seconds', 300)
-                    pct = min(15 + int(elapsed / max_time * 80), 95)
-                    mins, secs = divmod(elapsed, 60)
-                    _update_automation_progress(automation_id,
-                        phase=f'Library scan in progress... ({mins}m {secs}s)',
-                        progress=pct)
-                    time.sleep(5)
-
-                else:
-                    time.sleep(2)  # Unknown status, avoid tight loop
-            else:
-                # 30-min timeout reached
-                _update_automation_progress(automation_id, status='error',
-                    phase='Timed out', log_line='Library scan timed out after 30 minutes', log_type='error')
-                return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
-
-            elapsed = round(time.time() - poll_start, 1)
-            _update_automation_progress(automation_id, status='finished', progress=100,
-                phase='Complete',
-                log_line='Library scan completed', log_type='success')
-
-            return {'status': 'completed', '_manages_own_progress': True, 'scan_duration_seconds': elapsed}
-
-        except Exception as e:
-            _update_automation_progress(automation_id, status='error',
-                phase='Error', log_line=str(e), log_type='error')
-            return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
-
-        finally:
-            _scan_library_automation_id = None
-
-    # Self-guards only — prevent duplicate runs of the same operation,
-    # but allow wishlist processing and watchlist scanning to run concurrently.
-    # Downloads use bandwidth (Soulseek/Tidal/etc), scans use API calls — different resources.
-    # The per-call rate limiter handles any API contention during post-processing.
-    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist,
-        guard_fn=lambda: is_wishlist_actually_processing())
-    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist,
-        guard_fn=lambda: is_watchlist_actually_scanning())
-    automation_engine.register_action_handler('scan_library', _auto_scan_library,
-        lambda: _scan_library_automation_id is not None)
+    _automation_deps = AutomationDeps(
+        engine=automation_engine,
+        state=_automation_state,
+        config_manager=config_manager,
+        update_progress=_update_automation_progress,
+        logger=logger,
+        get_database=get_database,
+        spotify_client=spotify_client,
+        tidal_client=tidal_client,
+        web_scan_manager=web_scan_manager,
+        process_wishlist_automatically=_process_wishlist_automatically,
+        process_watchlist_scan_automatically=_process_watchlist_scan_automatically,
+        is_wishlist_actually_processing=is_wishlist_actually_processing,
+        is_watchlist_actually_scanning=is_watchlist_actually_scanning,
+        get_watchlist_scan_state=lambda: watchlist_scan_state,
+    )
+    _register_extracted_handlers(_automation_deps)
 
     def _auto_refresh_mirrored(config):
         """Refresh mirrored playlist(s) from source."""
