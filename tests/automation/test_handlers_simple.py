@@ -36,12 +36,19 @@ def _build_deps(**overrides: Any) -> AutomationDeps:
     """Return a default `AutomationDeps` with no-op callables. Tests
     pass ``overrides`` to install behaviour on the specific deps they
     care about."""
+
+    class _StubLogger:
+        def debug(self, *_a, **_k): pass
+        def info(self, *_a, **_k): pass
+        def warning(self, *_a, **_k): pass
+        def error(self, *_a, **_k): pass
+
     defaults = dict(
         engine=object(),
         state=AutomationState(),
         config_manager=object(),
         update_progress=lambda *a, **k: None,
-        logger=object(),
+        logger=_StubLogger(),
         get_database=lambda: object(),
         spotify_client=None,
         tidal_client=None,
@@ -51,6 +58,12 @@ def _build_deps(**overrides: Any) -> AutomationDeps:
         is_wishlist_actually_processing=lambda: False,
         is_watchlist_actually_scanning=lambda: False,
         get_watchlist_scan_state=lambda: {},
+        run_playlist_discovery_worker=lambda *a, **k: None,
+        run_sync_task=lambda *a, **k: None,
+        load_sync_status_file=lambda: {},
+        get_deezer_client=lambda: None,
+        parse_youtube_playlist=lambda url: None,
+        get_sync_states=lambda: {},
     )
     defaults.update(overrides)
     return AutomationDeps(**defaults)  # type: ignore[arg-type]
