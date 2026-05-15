@@ -60136,14 +60136,14 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     flex-direction: column;
     padding: 22px 24px;
     background: linear-gradient(165deg,
-        rgba(34, 34, 38, 0.62) 0%,
-        rgba(22, 22, 26, 0.74) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.13);
+        rgba(16, 16, 20, 0.94) 0%,
+        rgba(8, 8, 12, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 18px;
     box-shadow:
-        0 6px 24px rgba(0, 0, 0, 0.28),
-        0 2px 8px rgba(0, 0, 0, 0.18),
+        0 6px 24px rgba(0, 0, 0, 0.42),
+        0 2px 8px rgba(0, 0, 0, 0.26),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
     transition:
         border-color 0.24s ease,
@@ -60153,20 +60153,75 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     isolation: isolate;
 }
 
-/* Subtle accent bloom in the top-left corner — adds depth without
-   competing with content. Per-card hue via the data-card selector
-   below. */
+/* Cursor-following accent blob — two-layer "liquid" effect that spans
+   the bento. ::before is a huge soft halo with lag (lerped position via
+   --blob-x-soft / --blob-y-soft), ::after is a smaller sharp core that
+   tracks the cursor instantly (--blob-x / --blob-y). Each card renders
+   its own copy of both layers; overflow:hidden on the card clips them
+   to its bounds, so the blob looks continuous across cards but never
+   bleeds into the gaps between them. */
 .dash-card::before {
     content: '';
     position: absolute;
-    inset: 0;
+    left: var(--blob-x-soft, -9999px);
+    top: var(--blob-y-soft, -9999px);
+    width: 1280px;
+    height: 1280px;
+    transform: translate(-50%, -50%) scale(1);
     background: radial-gradient(
-        ellipse at center,
-        rgba(var(--accent-rgb), 0.08) 0%,
-        transparent 60%);
+        circle,
+        rgba(var(--accent-rgb), 0.13) 0%,
+        rgba(var(--accent-rgb), 0.06) 25%,
+        rgba(var(--accent-rgb), 0.025) 50%,
+        transparent 72%);
+    filter: blur(48px);
+    opacity: 1;
     pointer-events: none;
     z-index: 0;
-    transition: opacity 0.3s ease;
+    will-change: left, top, transform, opacity;
+    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+}
+.dash-card::after {
+    content: '';
+    position: absolute;
+    left: var(--blob-x, -9999px);
+    top: var(--blob-y, -9999px);
+    width: 540px;
+    height: 540px;
+    transform: translate(-50%, -50%) scale(1);
+    background: radial-gradient(
+        circle,
+        rgba(var(--accent-rgb), 0.16) 0%,
+        rgba(var(--accent-rgb), 0.07) 30%,
+        rgba(var(--accent-rgb), 0.03) 55%,
+        transparent 72%);
+    filter: blur(18px);
+    opacity: 1;
+    pointer-events: none;
+    z-index: 0;
+    will-change: left, top, transform, opacity;
+    mix-blend-mode: screen;
+    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+}
+
+@keyframes dashBlobHaloPulse {
+    0%, 100% { opacity: 0.7;  transform: translate(-50%, -50%) scale(0.96); }
+    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@keyframes dashBlobCorePulse {
+    0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.92); }
+    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.10); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dash-card::before,
+    .dash-card::after { animation: none; }
+}
+
+body.reduce-effects .dash-card::before,
+body.reduce-effects .dash-card::after {
+    display: none;
 }
 .dash-card:hover {
     border-color: rgba(var(--accent-rgb), 0.35);
@@ -60176,32 +60231,6 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
         0 4px 14px rgba(0, 0, 0, 0.22),
         0 0 28px rgba(var(--accent-rgb), 0.10),
         inset 0 1px 0 rgba(255, 255, 255, 0.10);
-}
-
-.dash-card:hover::before {
-    opacity: 1.6;
-    filter: blur(2px) saturate(1.2);
-}
-
-/* Per-card accent bloom — all driven by user accent, only the position
-   and intensity vary so each card still feels distinct. */
-.dash-card::before {
-    transition: opacity 0.4s ease, filter 0.4s ease;
-    animation: dashBloomDrift 12s ease-in-out infinite;
-}
-.dash-card[data-card="services"]::before        { background: radial-gradient(ellipse at 20% 0%,  rgba(var(--accent-rgb), 0.16) 0%, transparent 60%); }
-.dash-card[data-card="library"]::before         { background: radial-gradient(ellipse at 70% 10%, rgba(var(--accent-rgb), 0.14) 0%, transparent 60%); animation-delay: -2s; }
-.dash-card[data-card="stats"]::before           { background: radial-gradient(ellipse at 50% 0%,  rgba(var(--accent-rgb), 0.13) 0%, transparent 60%); animation-delay: -4s; }
-.dash-card[data-card="activity"]::before        { background: radial-gradient(ellipse at 30% 20%, rgba(var(--accent-rgb), 0.14) 0%, transparent 60%); animation-delay: -6s; }
-.dash-card[data-card="syncs"]::before           { background: radial-gradient(ellipse at 80% 0%,  rgba(var(--accent-rgb), 0.13) 0%, transparent 60%); animation-delay: -8s; }
-.dash-card[data-card="enrichment"]::before      { background: radial-gradient(ellipse at 50% 0%,  rgba(var(--accent-rgb), 0.12) 0%, transparent 70%); animation-delay: -3s; }
-.dash-card[data-card="tools"]::before           { background: radial-gradient(ellipse at 30% 10%, rgba(var(--accent-rgb), 0.18) 0%, transparent 60%); animation-delay: -5s; }
-.dash-card[data-card="active-downloads"]::before { background: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-rgb), 0.16) 0%, transparent 60%); animation-delay: -7s; }
-
-/* Subtle bloom drift — keeps cards alive without being noisy */
-@keyframes dashBloomDrift {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 1; }
-    50%      { transform: translate(6%, 4%) scale(1.08); opacity: 1.25; }
 }
 
 /* Mount stagger — cards fade up on first paint (and on page revisit) */
