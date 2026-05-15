@@ -101,3 +101,35 @@ class AutomationDeps:
     get_deezer_client: Callable[[], Any]
     parse_youtube_playlist: Callable[[str], Any]
     get_sync_states: Callable[[], dict]                  # accessor returns the live dict shared with the sync UI
+
+    # --- Database update + quality scanner (shared state + executors) ---
+    set_db_update_automation_id: Callable[[Optional[str]], None]  # syncs the legacy `_db_update_automation_id` global so the live DB-update progress callbacks (which still read the global directly) keep firing for the active automation
+    get_db_update_state: Callable[[], dict]
+    db_update_lock: Any                                  # threading.Lock
+    db_update_executor: Any                              # ThreadPoolExecutor
+    run_db_update_task: Callable[..., Any]
+    run_deep_scan_task: Callable[..., Any]
+    get_duplicate_cleaner_state: Callable[[], dict]
+    duplicate_cleaner_lock: Any
+    duplicate_cleaner_executor: Any
+    run_duplicate_cleaner: Callable[..., Any]
+    get_quality_scanner_state: Callable[[], dict]
+    quality_scanner_lock: Any
+    quality_scanner_executor: Any
+    run_quality_scanner: Callable[..., Any]
+
+    # --- Download orchestrator + queue accessors ---
+    download_orchestrator: Any
+    run_async: Callable[..., Any]
+    tasks_lock: Any
+    get_download_batches: Callable[[], dict]
+    get_download_tasks: Callable[[], dict]
+    sweep_empty_download_directories: Callable[[], int]
+    get_staging_path: Callable[[], str]
+
+    # --- Maintenance helpers ---
+    docker_resolve_path: Callable[[str], str]
+    get_current_profile_id: Callable[[], int]
+    get_watchlist_scanner: Callable[[Any], Any]
+    get_app: Callable[[], Any]                           # Flask app for test_client (beatport refresh)
+    get_beatport_data_cache: Callable[[], dict]
