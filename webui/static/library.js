@@ -6418,10 +6418,24 @@ async function showReorganizeModal(albumId) {
 
     let html = '<div class="reorganize-content">';
 
+    // Metadata MODE picker — API call (default) vs read embedded tags.
+    // Tag-mode (#592) trusts the user's enriched library and issues
+    // zero API calls.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
     // Metadata source picker — populated from /reorganize/sources.
     // Empty value = use configured primary (with fallback chain).
     // Specific source = strict mode, that source only.
-    html += '<div class="reorganize-source-section">';
+    // Hidden when mode = 'tags' since the source picker is irrelevant
+    // (tags are read straight off the file).
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read the album\'s tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6445,6 +6459,21 @@ async function showReorganizeModal(albumId) {
 
     // Populate source picker after the modal mounts
     setTimeout(() => _populateReorganizeSources(_reorganizeAlbumId), 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
+}
+
+function _onReorganizeModeChange() {
+    const mode = document.getElementById('reorganize-mode-select')?.value || 'api';
+    const srcSection = document.getElementById('reorganize-source-section');
+    if (srcSection) srcSection.style.display = (mode === 'tags') ? 'none' : '';
+    try { localStorage.setItem('soulsync-reorganize-mode', mode); } catch (e) {}
 }
 
 async function _populateReorganizeSources(albumId) {
@@ -6496,10 +6525,11 @@ async function loadReorganizePreview() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) {
@@ -6596,10 +6626,11 @@ async function executeReorganize() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
@@ -6690,10 +6721,21 @@ async function _showReorganizeAllModal() {
 
     let html = '<div class="reorganize-content">';
 
-    // Source picker — applies to ALL albums in this run. Albums without
-    // an ID for the chosen source will be skipped at the backend with
-    // a clear status. Auto = use configured primary with fallback chain.
+    // Mode picker — applies to ALL albums.
     html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Source picker — applies to ALL albums in this run. Hidden when
+    // mode = 'tags'. Albums without an ID for the chosen source will
+    // be skipped at the backend with a clear status. Auto = use
+    // configured primary with fallback chain.
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source (applies to all albums)</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6743,6 +6785,14 @@ async function _showReorganizeAllModal() {
             console.error('Failed to load reorganize sources:', err);
         }
     }, 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
 }
 
 async function _executeReorganizeAll() {
@@ -6766,14 +6816,15 @@ async function _executeReorganizeAll() {
     const overlay = document.getElementById('reorganize-overlay');
     if (overlay) overlay.classList.add('hidden');
 
-    // One source pick applies to every album in the batch.
+    // One source + mode pick applies to every album in the batch.
     const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+    const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
 
     try {
         const resp = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource }),
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode }),
         });
         const result = await resp.json();
         if (!result.success) throw new Error(result.error || 'Queue request failed');

@@ -11095,12 +11095,20 @@ def reorganize_album_preview(album_id):
     the apply endpoint, so the preview is guaranteed to match what
     apply would actually produce.
 
-    Optional body param ``source``: when provided, only that metadata
-    source is queried (no fallback chain)."""
+    Optional body params:
+        source: when provided, only that metadata source is queried
+            (no fallback chain).
+        mode: 'api' (default — query metadata source) or 'tags' (read
+            embedded file tags as the source of truth, issue #592)."""
     try:
         from core.library_reorganize import preview_album_reorganize
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
+        metadata_source = data.get('mode') or config_manager.get(
+            'library.reorganize_metadata_source', 'api'
+        ) or 'api'
+        if metadata_source not in ('api', 'tags'):
+            metadata_source = 'api'
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         result = preview_album_reorganize(
             album_id=album_id,
@@ -11110,6 +11118,7 @@ def reorganize_album_preview(album_id):
             build_final_path_fn=_build_final_path_for_track,
             primary_source=chosen_source,
             strict_source=bool(chosen_source),
+            metadata_source=metadata_source,
         )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404
@@ -11132,11 +11141,21 @@ def reorganize_album_files(album_id):
         source (optional): per-album source pick (Spotify / iTunes /
             Deezer / Discogs / Hydrabase). When omitted, the
             orchestrator uses the configured primary with fallback.
+        mode (optional): 'api' (default — query metadata source) or
+            'tags' (read embedded file tags as the source of truth,
+            issue #592). When omitted, falls back to the
+            ``library.reorganize_metadata_source`` config setting,
+            then to 'api'.
     """
     try:
         from core.reorganize_queue import get_queue
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
+        metadata_source = data.get('mode') or config_manager.get(
+            'library.reorganize_metadata_source', 'api'
+        ) or 'api'
+        if metadata_source not in ('api', 'tags'):
+            metadata_source = 'api'
 
         # Capture display fields at enqueue time so the status panel
         # can render them without a DB lookup later.
@@ -11150,6 +11169,7 @@ def reorganize_album_files(album_id):
             artist_id=meta['artist_id'],
             artist_name=meta['artist_name'],
             source=chosen_source,
+            metadata_source=metadata_source,
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -11167,20 +11187,29 @@ def reorganize_all_artist_albums(artist_id):
         source (optional): same pick applied to every album. Per-album
             overrides aren't supported here — use the per-album modal
             for that.
+        mode (optional): 'api' or 'tags' applied to every album, same
+            shape as the per-album endpoint.
     """
     try:
         from core.reorganize_queue import get_queue
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
+        metadata_source = data.get('mode') or config_manager.get(
+            'library.reorganize_metadata_source', 'api'
+        ) or 'api'
+        if metadata_source not in ('api', 'tags'):
+            metadata_source = 'api'
 
         albums = get_database().get_artist_albums_for_reorganize(artist_id)
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
-        # Apply the user's chosen source to every album, then hand off
-        # to the queue's bulk-enqueue helper which owns the loop+tally.
+        # Apply the user's chosen source + mode to every album, then
+        # hand off to the queue's bulk-enqueue helper which owns the
+        # loop+tally.
         for album in albums:
             album['source'] = chosen_source
+            album['metadata_source'] = metadata_source
         result = get_queue().enqueue_many(albums)
 
         return jsonify({
