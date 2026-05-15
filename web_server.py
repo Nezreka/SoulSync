@@ -8761,16 +8761,16 @@ def get_artist_detail(artist_id):
 
         logger.info(f"Found artist: {artist_info['name']} with {len(owned_releases['albums'])} albums")
 
-        # Fix artist image URL
-        logger.info(f"Artist image before fix: '{artist_info.get('image_url')}'")
+        # Fix artist image URL.
+        # NOTE: don't log image_url or the full artist_info dict here.
+        # The fixed URL embeds the media-server token (and the proxy
+        # variant URL-encodes it), so logging at INFO writes the token
+        # straight into app.log. Issue: tokens leaked to disk on every
+        # artist-page render until this was scrubbed.
         if artist_info.get('image_url'):
             artist_info['image_url'] = fix_artist_image_url(artist_info['image_url'])
-            logger.info(f"Artist image after fix: '{artist_info['image_url']}'")
         else:
             logger.warning(f"No artist image URL found for {artist_info['name']}")
-
-        # Debug final artist data being sent
-        logger.info(f"Final artist data being sent: {artist_info}")
 
         # Fix image URLs for all albums
         for album in owned_releases['albums']:
