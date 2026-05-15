@@ -4890,7 +4890,7 @@ function _promptNotifyConfig(groupName) {
             if (type === 'discord_webhook') {
                 fieldsDiv.innerHTML = '<input id="deploy-notify-url" type="text" placeholder="Discord Webhook URL" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
             } else if (type === 'telegram') {
-                fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Bot Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-chat" type="text" placeholder="Chat ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
+                fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Bot Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-chat" type="text" placeholder="Chat ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-thread" type="text" placeholder="Thread ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
             } else if (type === 'pushbullet') {
                 fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Access Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
             } else {
@@ -4911,7 +4911,7 @@ function _promptNotifyConfig(groupName) {
             if (type === 'discord_webhook') {
                 config = { webhook_url: (overlay.querySelector('#deploy-notify-url')?.value || '').trim() };
             } else if (type === 'telegram') {
-                config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim() };
+                config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim(), thread_id:  (overlay.querySelector('#deploy-notify-thread')?.value || '').trim() };
             } else if (type === 'pushbullet') {
                 config = { access_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim() };
             } else {
@@ -6004,6 +6004,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
     if (blockType === 'telegram') {
         const botToken = _escAttr(config.bot_token || '');
         const chatId = _escAttr(config.chat_id || '');
+        const threadID = _escAttr(config.thread_id || '');
         return `<div class="config-row">
             <label>Bot Token</label>
             <input type="text" id="cfg-${slotKey}-bot_token" value="${botToken}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
@@ -6011,6 +6012,10 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label>Chat ID</label>
             <input type="text" id="cfg-${slotKey}-chat_id" value="${chatId}" placeholder="-1001234567890 or @channelname">
+        </div>
+        <div class="config-row">
+            <label>Thread ID</label>
+            <input type="text" id="cfg-${slotKey}-thread_id" value="${threadID}" placeholder="Optional integer">
         </div>
         <div class="config-row">
             <label>Message</label>
@@ -6291,6 +6296,7 @@ function _readPlacedConfig(slotKey) {
         return {
             bot_token: document.getElementById('cfg-' + slotKey + '-bot_token')?.value?.trim() || '',
             chat_id: document.getElementById('cfg-' + slotKey + '-chat_id')?.value?.trim() || '',
+            thread_id: document.getElementById('cfg-' + slotKey + '-thread_id')?.value?.trim() || '',
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
         };
     }
