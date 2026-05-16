@@ -3417,6 +3417,7 @@ const WHATS_NEW = {
         { unreleased: true },
         { title: 'Amazon Music Metadata Source', desc: 'Amazon Music is now a selectable primary metadata source alongside Spotify, iTunes, Deezer, and Discogs. backed by the same T2Tunes proxy as the download source — no account needed. covers track search, album lookup with cover art, and artist discography. select it under Settings → Connections → Metadata Source.', page: 'settings' },
         { title: 'Amazon Music Download Source', desc: 'new download source backed by T2Tunes proxy. searches the Amazon Music catalog, downloads 24-bit/48kHz FLAC (or Opus 320kbps / Dolby Atmos EAC3 fallback). codec waterfall mirrors Tidal/Qobuz — best quality first, auto-fallback. selectable as a standalone or hybrid source from Settings.', page: 'settings' },
+        { title: 'Amazon Music Search Quality', desc: 'search results now show album art, artist images (album cover stand-in, same as iTunes), and correct track/disc numbers. feat. credits stripped from artist names so the same artist does not show as duplicates. [Explicit] stripped from album names so MusicBrainz matching works cleanly — Clean / Edited / Censored labels kept as-is. album clicks and artist detail pages now open instead of 404ing.', page: 'search' },
     ],
     '2.5.2': [
         // --- May 13, 2026 — 2.5.2 release ---

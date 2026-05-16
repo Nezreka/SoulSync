@@ -7283,6 +7283,13 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     except Exception as e:
         logger.debug(f"Discogs client resolution failed: {e}")
 
+    az = None
+    try:
+        from core.metadata.registry import get_amazon_client
+        az = get_amazon_client()
+    except Exception as e:
+        logger.debug(f"Amazon client resolution failed: {e}")
+
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
     except Exception:
@@ -7296,6 +7303,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         deezer_client=dz,
         itunes_client=it,
         discogs_client=dc,
+        amazon_client=az,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -18665,6 +18673,9 @@ def get_spotify_album_tracks(album_id):
             client = _get_deezer_client()
         elif source_override == 'discogs':
             client = _get_discogs_client()
+        elif source_override == 'amazon':
+            from core.metadata.registry import get_amazon_client
+            client = get_amazon_client()
         elif source_override == 'musicbrainz':
             try:
                 from core.musicbrainz_search import MusicBrainzSearchClient
