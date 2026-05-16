@@ -298,17 +298,18 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
               if (event.key === 'Enter') onRunSearch();
             }}
           />
-          <Button type="button" className={styles.importPageSearchBtn} onClick={onRunSearch}>
-            Search
-          </Button>
           <Button
             type="button"
-            className={`${styles.importPageClearBtn} ${albumResults === null ? styles.hidden : ''}`}
+            variant="ghost"
+            className={albumResults === null ? styles.hidden : ''}
             id="import-page-album-clear-btn"
             title="Clear search"
             onClick={onBackToSearch}
           >
             x
+          </Button>
+          <Button type="button" variant="primary" onClick={onRunSearch}>
+            Search
           </Button>
         </div>
 
@@ -568,7 +569,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
         </div>
         <Button
           type="button"
-          className={styles.importPageProcessBtn}
+          variant="primary"
           id="import-page-album-process-btn"
           disabled={matchedCount === 0}
           onClick={onProcessAlbum}
