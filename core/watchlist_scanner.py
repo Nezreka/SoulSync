@@ -24,6 +24,19 @@ from core.wishlist_service import get_wishlist_service
 from core.matching_engine import MusicMatchingEngine
 from utils.logging_config import get_logger
 
+
+def _mark_personalized_kinds_stale(database, kinds, profile_id=1):
+    """Module-level helper so the inline call sites stay tiny.
+
+    Constructs a PersonalizedPlaylistManager with the minimal deps
+    needed for `mark_kinds_stale` (database access only — no generator
+    dispatch required) and flips the is_stale flag for matching rows.
+    Best-effort: any exception is swallowed by the caller's try/except
+    since stale-flagging is non-critical for the scan itself."""
+    from core.personalized.manager import PersonalizedPlaylistManager
+    mgr = PersonalizedPlaylistManager(database, deps=None)
+    return mgr.mark_kinds_stale(list(kinds), profile_id=profile_id)
+
 logger = get_logger("watchlist_scanner")
 
 # Rate limiting constants for watchlist operations
@@ -2980,6 +2993,22 @@ class WatchlistScanner:
             self.database.update_discovery_pool_timestamp(track_count=final_count, profile_id=profile_id)
             logger.info(f"Discovery pool now contains {final_count} total tracks (built over time)")
 
+            # Mark every personalized-playlist kind that draws from the
+            # discovery pool as stale so the playlist pipeline auto-
+            # regenerates snapshots on its next run. Without this the
+            # server playlists stay frozen even though the source pool
+            # just got fresh tracks. Best-effort — pool refresh succeeds
+            # even if the manager isn't wired (no personalized tables).
+            try:
+                _mark_personalized_kinds_stale(
+                    self.database,
+                    kinds=['hidden_gems', 'discovery_shuffle', 'popular_picks',
+                           'time_machine', 'genre_playlist', 'daily_mix'],
+                    profile_id=profile_id,
+                )
+            except Exception as e:  # noqa: BLE001 — never abort scan for staleness flag
+                logger.debug("Failed to mark personalized kinds stale: %s", e)
+
             # Cache recent albums for discovery page
             logger.info("Caching recent albums for discovery page...")
             if progress_callback:
@@ -3660,6 +3689,14 @@ class WatchlistScanner:
                 playlist_key = f'release_radar_{source}'
                 self.database.save_curated_playlist(playlist_key, release_radar_tracks, profile_id=profile_id)
                 logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
+                # Flag personalized Fresh Tape snapshot as stale so the
+                # pipeline auto-regenerates it on the next run.
+                try:
+                    _mark_personalized_kinds_stale(
+                        self.database, kinds=['fresh_tape'], profile_id=profile_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Fresh Tape stale-flag failed: %s", e)
 
                 # 2. Curate Discovery Weekly - 50 tracks from discovery pool
                 logger.info(f"Curating Discovery Weekly for {source}...")
@@ -3735,6 +3772,12 @@ class WatchlistScanner:
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
+                try:
+                    _mark_personalized_kinds_stale(
+                        self.database, kinds=['archives'], profile_id=profile_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Archives stale-flag failed: %s", e)
 
             # 3. "Because You Listen To" — personalized sections based on top played artists
             if profile['has_data']:

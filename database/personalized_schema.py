@@ -66,10 +66,16 @@ CREATE TABLE IF NOT EXISTS personalized_playlists (
     last_synced_at TIMESTAMP,
     last_generation_source TEXT,
     last_generation_error TEXT,
+    is_stale INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (profile_id, kind, variant)
 )
+"""
+
+# Migration for installs that created the table before is_stale existed.
+PERSONALIZED_PLAYLISTS_STALE_MIGRATION = """
+ALTER TABLE personalized_playlists ADD COLUMN is_stale INTEGER NOT NULL DEFAULT 0
 """
 
 PERSONALIZED_PLAYLIST_TRACKS_DDL = """
@@ -126,6 +132,20 @@ def ensure_personalized_schema(connection: Any) -> None:
     cursor.execute(PERSONALIZED_PLAYLIST_TRACKS_INDEX)
     cursor.execute(PERSONALIZED_TRACK_HISTORY_DDL)
     cursor.execute(PERSONALIZED_TRACK_HISTORY_INDEX)
+
+    # Add is_stale column on installs that created the table before
+    # this column existed. SQLite has no `ADD COLUMN IF NOT EXISTS` so
+    # we probe with PRAGMA + tolerate the OperationalError that fires
+    # when the column is already there.
+    cursor.execute("PRAGMA table_info(personalized_playlists)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'is_stale' not in cols:
+        try:
+            cursor.execute(PERSONALIZED_PLAYLISTS_STALE_MIGRATION)
+            logger.info("Added is_stale column to personalized_playlists")
+        except Exception as e:
+            logger.debug("is_stale column migration: %s", e)
+
     logger.debug("Personalized-playlist schema ensured")
 
 

@@ -102,7 +102,8 @@ class PersonalizedPlaylistManager:
                 """
                 SELECT id, profile_id, kind, variant, name, config_json,
                        track_count, last_generated_at, last_synced_at,
-                       last_generation_source, last_generation_error
+                       last_generation_source, last_generation_error,
+                       is_stale
                 FROM personalized_playlists
                 WHERE profile_id = ?
                 ORDER BY COALESCE(last_generated_at, created_at) DESC
@@ -231,6 +232,34 @@ class PersonalizedPlaylistManager:
             rows = cursor.fetchall()
         return [self._row_to_track(r) for r in rows]
 
+    # ─── snapshot freshness vs source data ───────────────────────────
+
+    def mark_kinds_stale(self, kinds: List[str], profile_id: Optional[int] = None) -> int:
+        """Flag every playlist row matching one of ``kinds`` as stale.
+
+        Called by upstream data refreshers (watchlist scan finishing
+        / Spotify enrichment worker re-pulling Release Radar / etc)
+        so pipelines auto-regenerate snapshots before the next sync
+        instead of pushing stale data to the media server.
+
+        Returns the number of rows touched. When ``profile_id`` is
+        None, flags rows across every profile.
+        """
+        if not kinds:
+            return 0
+        placeholders = ','.join('?' * len(kinds))
+        sql = f"UPDATE personalized_playlists SET is_stale = 1, updated_at = CURRENT_TIMESTAMP WHERE kind IN ({placeholders})"
+        params: List[Any] = list(kinds)
+        if profile_id is not None:
+            sql += " AND profile_id = ?"
+            params.append(profile_id)
+        with self.database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            count = cursor.rowcount
+            conn.commit()
+        return count
+
     # ─── staleness history ───────────────────────────────────────────
 
     def recent_track_ids(self, profile_id: int, kind: str, days: int) -> List[str]:
@@ -294,6 +323,7 @@ class PersonalizedPlaylistManager:
                     UPDATE personalized_playlists
                     SET track_count = ?, last_generated_at = CURRENT_TIMESTAMP,
                         last_generation_source = ?, last_generation_error = NULL,
+                        is_stale = 0,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
@@ -346,7 +376,8 @@ class PersonalizedPlaylistManager:
                 """
                 SELECT id, profile_id, kind, variant, name, config_json,
                        track_count, last_generated_at, last_synced_at,
-                       last_generation_source, last_generation_error
+                       last_generation_source, last_generation_error,
+                       is_stale
                 FROM personalized_playlists
                 WHERE profile_id = ? AND kind = ? AND variant = ?
                 """,
@@ -362,7 +393,8 @@ class PersonalizedPlaylistManager:
                 """
                 SELECT id, profile_id, kind, variant, name, config_json,
                        track_count, last_generated_at, last_synced_at,
-                       last_generation_source, last_generation_error
+                       last_generation_source, last_generation_error,
+                       is_stale
                 FROM personalized_playlists
                 WHERE id = ?
                 """,
@@ -386,6 +418,7 @@ class PersonalizedPlaylistManager:
                 last_synced_at=row.get('last_synced_at'),
                 last_generation_source=row.get('last_generation_source'),
                 last_generation_error=row.get('last_generation_error'),
+                is_stale=bool(row.get('is_stale') or 0),
             )
         # Tuple form: positional access matches SELECT order above.
         return PlaylistRecord(
@@ -398,6 +431,7 @@ class PersonalizedPlaylistManager:
             last_synced_at=row[8],
             last_generation_source=row[9],
             last_generation_error=row[10],
+            is_stale=bool(row[11] or 0) if len(row) > 11 else False,
         )
 
     @staticmethod

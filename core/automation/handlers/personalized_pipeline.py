@@ -196,10 +196,19 @@ def _build_payloads_for_kinds(
             continue
 
         try:
+            # Determine whether to refresh: explicit user flag, OR the
+            # snapshot is marked stale because the underlying source
+            # data (discovery_pool, curated_playlists) changed since
+            # last generation. Either way → refresh; otherwise just
+            # read the existing snapshot.
             if refresh_first:
                 record = manager.refresh_playlist(kind, variant, profile_id)
             else:
-                record = manager.ensure_playlist(kind, variant, profile_id)
+                existing = manager.ensure_playlist(kind, variant, profile_id)
+                if existing.is_stale:
+                    record = manager.refresh_playlist(kind, variant, profile_id)
+                else:
+                    record = existing
         except Exception as exc:  # noqa: BLE001 — log + continue with next kind
             deps.update_progress(
                 automation_id,

@@ -173,6 +173,7 @@ class _StubManagerWithTracks:
         return SimpleNamespace(
             id=hash((kind, variant)) % 10000,
             name=f'{kind}-{variant or "S"}', kind=kind, variant=variant,
+            is_stale=False,
         )
 
     def refresh_playlist(self, kind, variant, profile_id):
@@ -182,6 +183,7 @@ class _StubManagerWithTracks:
         return SimpleNamespace(
             id=hash((kind, variant)) % 10000,
             name=f'{kind}-{variant or "S"}', kind=kind, variant=variant,
+            is_stale=False,
         )
 
     def get_playlist_tracks(self, playlist_id):
@@ -267,6 +269,72 @@ class TestPayloadBuilding:
         assert len(p['tracks_json']) == 2
         assert p['tracks_json'][0]['id'] == 'sp-1'
 
+    def test_stale_snapshot_auto_refreshes_even_without_refresh_first(self):
+        """When the manager reports is_stale=True, the pipeline refreshes
+        regardless of the refresh_first config flag — the source data
+        (discovery_pool / curated lists) changed, so the snapshot must
+        be regenerated before syncing or we'd push stale data."""
+        deps = _build_deps()
+        # Stub manager whose ensure_playlist returns a stale record.
+        # refresh_playlist should still get called.
+        refresh_called = []
+
+        class _StaleMgr:
+            def ensure_playlist(self, kind, variant, profile_id):
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant, is_stale=True,
+                )
+            def refresh_playlist(self, kind, variant, profile_id):
+                refresh_called.append((kind, variant))
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant, is_stale=False,
+                )
+            def get_playlist_tracks(self, _id):
+                return [SimpleNamespace(
+                    track_name='Refreshed', artist_name='A', album_name='Al',
+                    spotify_track_id='sp-fresh', itunes_track_id=None,
+                    deezer_track_id=None, duration_ms=200000,
+                )]
+
+        payloads = _build_payloads_for_kinds(
+            deps, _StaleMgr(),
+            [{'kind': 'hidden_gems'}],
+            profile_id=1, automation_id=None, refresh_first=False,
+        )
+        assert refresh_called == [('hidden_gems', '')]
+        assert len(payloads) == 1
+        assert payloads[0]['tracks_json'][0]['name'] == 'Refreshed'
+
+    def test_non_stale_snapshot_skips_refresh(self):
+        """When the snapshot is fresh AND refresh_first is False, just
+        read the existing tracks without re-running the generator."""
+        deps = _build_deps()
+        refresh_called = []
+
+        class _FreshMgr:
+            def ensure_playlist(self, kind, variant, profile_id):
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant, is_stale=False,
+                )
+            def refresh_playlist(self, *_a, **_k):
+                refresh_called.append('called')
+                return SimpleNamespace(
+                    id=1, name='x', kind='x', variant='', is_stale=False,
+                )
+            def get_playlist_tracks(self, _id):
+                return [SimpleNamespace(
+                    track_name='Cached', artist_name='A', album_name='Al',
+                    spotify_track_id='sp-1', itunes_track_id=None,
+                    deezer_track_id=None, duration_ms=200000,
+                )]
+
+        _build_payloads_for_kinds(
+            deps, _FreshMgr(),
+            [{'kind': 'hidden_gems'}],
+            profile_id=1, automation_id=None, refresh_first=False,
+        )
+        assert refresh_called == []
+
     def test_manager_exception_swallowed_continues_to_next(self):
         deps = _build_deps()
 
@@ -277,7 +345,7 @@ class TestPayloadBuilding:
                 self.calls.append(kind)
                 if kind == 'broken':
                     raise RuntimeError('manager boom')
-                return SimpleNamespace(id=1, name=kind, kind=kind, variant=variant)
+                return SimpleNamespace(id=1, name=kind, kind=kind, variant=variant, is_stale=False)
             def get_playlist_tracks(self, _id):
                 return []
 
