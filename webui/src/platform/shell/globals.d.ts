@@ -9,6 +9,13 @@ import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './b
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    showConfirmDialog?: (options?: {
+      title?: string;
+      message?: string;
+      confirmText?: string;
+      cancelText?: string;
+      destructive?: boolean;
+    }) => Promise<boolean>;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;

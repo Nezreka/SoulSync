@@ -31,6 +31,13 @@ describe('shellRouteManifest', () => {
     expect(resolveShellPageFromPath('/issues/')).toBe('issues');
   });
 
+  it('resolves nested React route paths to their shell page', () => {
+    expect(resolveShellPageFromPath('/import/album')).toBe('import');
+    expect(resolveShellPageFromPath('/import/auto')).toBe('import');
+    expect(resolveShellPageFromPath('/import/singles')).toBe('import');
+    expect(resolveLegacyShellPageFromPath('/import/album')).toBeNull();
+  });
+
   it('keeps a route entry for every manifest page id', () => {
     expect(shellRouteManifest).not.toHaveLength(0);
     expect(getShellRouteByPageId('dashboard')?.path).toBe('/dashboard');
@@ -43,8 +50,9 @@ describe('shellRouteManifest', () => {
   it('tracks whether a route is rendered by React or the legacy shell', () => {
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
+    expect(getShellRouteByPageId('import')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['stats', 'issues']);
+    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['import', 'stats', 'issues']);
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
   });
 
