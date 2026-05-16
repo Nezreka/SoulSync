@@ -196,16 +196,20 @@ def _build_payloads_for_kinds(
             continue
 
         try:
-            # Determine whether to refresh: explicit user flag, OR the
-            # snapshot is marked stale because the underlying source
-            # data (discovery_pool, curated_playlists) changed since
-            # last generation. Either way → refresh; otherwise just
-            # read the existing snapshot.
+            # Refresh when ANY of:
+            #   - explicit user flag (cron use case: regenerate each run)
+            #   - snapshot marked stale by upstream data refresher
+            #   - playlist was never generated yet (auto-created by
+            #     ensure_playlist; track_count=0, last_generated_at=NULL).
+            #     Without this branch, a first-run pipeline reads the
+            #     empty snapshot and silently skips — user picks a kind,
+            #     hits run, gets "No tracks to sync" with no clue why.
             if refresh_first:
                 record = manager.refresh_playlist(kind, variant, profile_id)
             else:
                 existing = manager.ensure_playlist(kind, variant, profile_id)
-                if existing.is_stale:
+                needs_first_gen = existing.last_generated_at is None
+                if existing.is_stale or needs_first_gen:
                     record = manager.refresh_playlist(kind, variant, profile_id)
                 else:
                     record = existing
