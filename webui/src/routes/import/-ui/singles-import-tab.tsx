@@ -197,14 +197,16 @@ export function SinglesImportPanel({
                 }`}
                 data-single-idx={index}
               >
-                <button
-                  type="button"
-                  aria-label={`Select ${file.filename}`}
-                  className={`${styles.importPageSingleCheckbox} ${
-                    isSelected ? styles.checked : ''
-                  }`}
-                  onClick={() => onToggleSingle(index)}
-                />
+                <label className={styles.importPageSingleCheckboxWrap}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${file.filename}`}
+                    className={styles.importPageSingleCheckboxInput}
+                    checked={isSelected}
+                    onChange={() => onToggleSingle(index)}
+                  />
+                  <span className={styles.importPageSingleCheckbox} aria-hidden="true" />
+                </label>
                 <div className={styles.importPageSingleInfo}>
                   <div className={styles.importPageSingleFilename}>{file.filename}</div>
                   <div className={styles.importPageSingleMeta}>
