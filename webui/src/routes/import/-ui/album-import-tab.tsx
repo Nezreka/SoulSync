@@ -256,7 +256,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
                           {group.album}
                         </div>
                         <div className={styles.importPageAlbumCardArtist} title={group.artist}>
-                          {group.artist} - {group.file_count} tracks
+                          {group.artist} · {group.file_count} tracks
                         </div>
                       </div>
                     </button>
@@ -369,7 +369,7 @@ function AlbumCard({
         {album.artist}
       </div>
       <div className={styles.importPageAlbumCardMeta}>
-        {album.total_tracks || 0} tracks - {album.release_date?.substring(0, 4) || ''}
+        {album.total_tracks || 0} tracks · {album.release_date?.substring(0, 4) || ''}
       </div>
     </button>
   );
@@ -422,7 +422,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
           <div className={styles.importPageAlbumHeroTitle}>{albumMatch.album.name}</div>
           <div className={styles.importPageAlbumHeroArtist}>{albumMatch.album.artist}</div>
           <div className={styles.importPageAlbumHeroMeta}>
-            {albumMatch.album.total_tracks || albumMatch.matches?.length || 0} tracks -{' '}
+            {albumMatch.album.total_tracks || albumMatch.matches?.length || 0} tracks ·{' '}
             {albumMatch.album.release_date?.substring(0, 4) || ''}
           </div>
         </div>

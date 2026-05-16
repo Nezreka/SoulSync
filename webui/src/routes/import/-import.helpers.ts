@@ -235,15 +235,15 @@ export function getAutoImportStatusMeta(status: string): {
   };
 
   const icons: Record<string, string> = {
-    completed: 'OK',
-    pending_review: '!',
-    needs_identification: 'x',
-    failed: 'x',
-    scanning: '~',
-    matched: 'OK',
-    rejected: 'x',
-    approved: 'OK',
-    processing: '~',
+    completed: '✓',
+    pending_review: '⚠',
+    needs_identification: '✗',
+    failed: '✗',
+    scanning: '⌛',
+    matched: '✓',
+    rejected: '✕',
+    approved: '✓',
+    processing: '⧗',
   };
 
   return {
