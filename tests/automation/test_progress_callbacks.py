@@ -78,6 +78,7 @@ def _build_deps(**overrides) -> AutomationDeps:
         get_beatport_data_cache=lambda: {'cache_lock': threading.Lock(), 'homepage': {}},
         init_automation_progress=lambda *a, **k: None,
         record_progress_history=lambda *a, **k: None,
+        build_personalized_manager=lambda: None,
     )
     defaults.update(overrides)
     return AutomationDeps(**defaults)  # type: ignore[arg-type]

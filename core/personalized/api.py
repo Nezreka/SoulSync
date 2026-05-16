@@ -62,23 +62,35 @@ def _track_to_dict(track: Track) -> Dict[str, Any]:
     }
 
 
-def list_kinds(registry: Optional[PlaylistKindRegistry] = None) -> Dict[str, Any]:
+def list_kinds(
+    registry: Optional[PlaylistKindRegistry] = None,
+    manager: Optional[PersonalizedPlaylistManager] = None,
+) -> Dict[str, Any]:
     """Return every registered playlist kind with metadata.
 
     UI uses this to render the "available playlists" picker. Each
-    kind reports whether it requires a variant and the resolved
-    variant set so the UI can render variant choices when relevant."""
+    kind reports whether it requires a variant; when a manager is
+    supplied AND the kind has a variant_resolver, the resolved
+    variant list is also included so the UI can render variant
+    checkboxes without a second round-trip per kind."""
     reg = registry or get_registry()
     out = []
     for spec in reg.all():
-        out.append({
+        entry = {
             'kind': spec.kind,
             'name_template': spec.name_template,
             'description': spec.description,
             'requires_variant': spec.requires_variant,
             'tags': list(spec.tags),
             'default_config': spec.default_config.to_json_dict(),
-        })
+            'variants': [],
+        }
+        if manager is not None and spec.variant_resolver is not None:
+            try:
+                entry['variants'] = list(spec.variant_resolver(manager.deps) or [])
+            except Exception:
+                entry['variants'] = []
+        out.append(entry)
     return {'success': True, 'kinds': out}
 
 

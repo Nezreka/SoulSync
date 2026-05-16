@@ -474,10 +474,16 @@ def _add_discover_cache_headers(response):
 
 
 def get_current_profile_id() -> int:
-    """Get the current profile ID from Flask g context or default to 1"""
+    """Get the current profile ID from Flask g context or default to 1.
+
+    Background callers (automation engine, sync threads, watchlist
+    scanner) have no request context, so `g.profile_id` raises
+    `RuntimeError("Working outside of application context")` rather
+    than `AttributeError`. Catch both so non-request callers degrade
+    to the admin profile instead of crashing the handler."""
     try:
         return g.profile_id
-    except AttributeError:
+    except (AttributeError, RuntimeError):
         return 1
 
 
@@ -992,6 +998,7 @@ def _register_automation_handlers():
         get_beatport_data_cache=lambda: beatport_data_cache,
         init_automation_progress=_init_automation_progress,
         record_progress_history=_auto_progress.record_history,
+        build_personalized_manager=_build_personalized_manager,
     )
     _register_extracted_handlers(_automation_deps)
 
@@ -26855,9 +26862,12 @@ def _build_personalized_manager():
 
 @app.route('/api/personalized/kinds', methods=['GET'])
 def personalized_list_kinds():
-    """List every registered personalized-playlist kind."""
+    """List every registered personalized-playlist kind. Includes the
+    resolved variant list per kind that supports variants so the UI
+    can render kind+variant checkboxes without per-kind round-trips."""
     try:
-        return jsonify(_personalized_api.list_kinds())
+        manager = _build_personalized_manager()
+        return jsonify(_personalized_api.list_kinds(manager=manager))
     except Exception as e:
         logger.error(f"Personalized kinds list error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

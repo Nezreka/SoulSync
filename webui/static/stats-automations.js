@@ -5754,6 +5754,18 @@ function _renderBuilderCanvas() {
     canvas.innerHTML = html;
     // Load mirrored playlist selects if any are present
     _autoLoadMirroredSelects();
+    // Personalized-pipeline kind pickers (one per slot that uses it)
+    ['when', 'do'].forEach(sk => {
+        if (document.getElementById('cfg-' + sk + '-kinds-picker')) {
+            _autoLoadPersonalizedKinds(sk);
+        }
+    });
+    _autoBuilder.then.forEach((item, i) => {
+        const sk = 'then-' + i;
+        if (document.getElementById('cfg-' + sk + '-kinds-picker')) {
+            _autoLoadPersonalizedKinds(sk);
+        }
+    });
     // Set up checkbox state for refresh_mirrored
     ['when', 'do'].forEach(sk => {
         const allCb = document.getElementById('cfg-' + sk + '-all');
@@ -5961,6 +5973,33 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 4 phases: Refresh → Discover → Sync → Download Missing</div>`;
     }
+    if (blockType === 'personalized_pipeline') {
+        const refreshFirstChecked = config.refresh_first ? ' checked' : '';
+        const skipWishlistChecked = config.skip_wishlist ? ' checked' : '';
+        // Stash existing selections on a hidden input as JSON so the
+        // async populator can mark them checked once kinds load. The
+        // visible picker container starts as a loading message.
+        const initialKinds = JSON.stringify(Array.isArray(config.kinds) ? config.kinds : []);
+        // The default `.config-row` flex layout puts label on the left
+        // and input on the right — wrong for a tall multi-select picker.
+        // Use a dedicated column-layout wrapper so the picker spans
+        // the full card width.
+        return `<div class="config-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+            <label style="min-width:0;">Personalized playlists to sync</label>
+            <input type="hidden" id="cfg-${slotKey}-kinds" data-initial='${_escAttr(initialKinds)}' value='${_escAttr(initialKinds)}'>
+            <div id="cfg-${slotKey}-kinds-picker" class="personalized-kinds-picker" style="max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,0.25);width:100%;box-sizing:border-box;">
+                <div style="color:rgba(255,255,255,0.4);font-size:12px;">Loading personalized playlists…</div>
+            </div>
+            <div style="color:rgba(255,255,255,0.35);font-size:11px;text-transform:none;letter-spacing:0;">Pick which Discover-page playlists this automation will sync. Variant kinds (Time Machine, Genre, Daily Mix, Seasonal Mix) expose individual instances below their kind row.</div>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-refresh_first"${refreshFirstChecked}> Refresh playlists before sync (regenerate snapshots)</label>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 2 phases: Snapshot → Sync → Download Missing</div>`;
+    }
     // Shared variable tags builder for notification types
     function _notifyVarHtml(slotKey) {
         let allVars = ['time', 'name', 'run_count', 'status'];
@@ -6156,6 +6195,86 @@ function _autoTogglePlaylistSelect(slotKey) {
     if (sel) sel.disabled = allCb && allCb.checked;
 }
 
+// --- Personalized Playlist Picker (multi-select kind+variant) ---
+
+// Cached so the second action card renders instantly without re-fetching.
+let _autoPersonalizedKinds = null;
+
+async function _autoLoadPersonalizedKinds(slotKey) {
+    const picker = document.getElementById('cfg-' + slotKey + '-kinds-picker');
+    const hidden = document.getElementById('cfg-' + slotKey + '-kinds');
+    if (!picker || !hidden) return;
+
+    // Read existing selection so we can pre-check matching boxes after render.
+    let selected = [];
+    try {
+        const initial = hidden.dataset.initial || hidden.value || '[]';
+        selected = JSON.parse(initial);
+        if (!Array.isArray(selected)) selected = [];
+    } catch (_) { selected = []; }
+    const selectedKey = (kind, variant) => `${kind}::${variant || ''}`;
+    const selectedSet = new Set(selected.map(s => selectedKey(s.kind, s.variant)));
+
+    // Fetch + cache the kinds catalog.
+    if (!_autoPersonalizedKinds) {
+        try {
+            const res = await fetch('/api/personalized/kinds');
+            const data = await res.json();
+            _autoPersonalizedKinds = (data && data.kinds) || [];
+        } catch (e) {
+            _autoPersonalizedKinds = [];
+        }
+    }
+
+    if (!_autoPersonalizedKinds.length) {
+        picker.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:12px;">No personalized playlists registered. Restart the server if you just upgraded.</div>';
+        return;
+    }
+
+    // Render: one row per (kind, variant). Singletons get one row;
+    // variant kinds get one row per resolved variant + an "all" toggle.
+    // Inline styles override the parent `.placed-block-config label`
+    // rule (uppercase / min-width / letter-spacing) — without these
+    // overrides every row would render as a tiny narrow chip.
+    const rowStyle = 'display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;text-transform:none;letter-spacing:0;color:rgba(255,255,255,0.85);min-width:0;';
+    const variantRowStyle = rowStyle + 'padding-left:20px;font-size:12px;color:rgba(255,255,255,0.7);';
+    const sectionHeader = 'font-weight:600;margin:8px 0 2px;color:rgba(255,255,255,0.85);font-size:13px;text-transform:none;letter-spacing:0;';
+    let html = '';
+    _autoPersonalizedKinds.forEach(spec => {
+        const baseLabel = spec.name_template
+            ? spec.name_template.replace('{variant}', '').replace(/\s*[—-]\s*$/,'').trim()
+            : spec.kind;
+
+        if (!spec.requires_variant) {
+            // Singleton: one checkbox.
+            const key = selectedKey(spec.kind, '');
+            const checked = selectedSet.has(key) ? ' checked' : '';
+            html += `<label style="${rowStyle}font-weight:600;">
+                <input type="checkbox" data-kind="${_escAttr(spec.kind)}"${checked}>
+                <span>${_escAttr(baseLabel)}</span>
+            </label>`;
+        } else {
+            const variants = Array.isArray(spec.variants) ? spec.variants : [];
+            html += `<div style="margin:6px 0 4px;border-top:1px solid rgba(255,255,255,0.05);padding-top:6px;">
+                <div style="${sectionHeader}">${_escAttr(baseLabel)}</div>`;
+            if (variants.length === 0) {
+                html += `<div style="font-size:11px;color:rgba(255,255,255,0.35);padding-left:20px;text-transform:none;letter-spacing:0;">(no variants available — populate via the discover page first)</div>`;
+            } else {
+                variants.forEach(variant => {
+                    const key = selectedKey(spec.kind, variant);
+                    const checked = selectedSet.has(key) ? ' checked' : '';
+                    html += `<label style="${variantRowStyle}">
+                        <input type="checkbox" data-kind="${_escAttr(spec.kind)}" data-variant="${_escAttr(variant)}"${checked}>
+                        <span>${_escAttr(variant)}</span>
+                    </label>`;
+                });
+            }
+            html += '</div>';
+        }
+    });
+    picker.innerHTML = html;
+}
+
 async function _autoLoadMirroredSelects() {
     const selects = document.querySelectorAll('.mirrored-playlist-select');
     const nameSelects = document.querySelectorAll('.mirrored-playlist-name-select');
@@ -6262,6 +6381,26 @@ function _readPlacedConfig(slotKey) {
         return {
             playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
             all: allCb ? allCb.checked : false,
+            skip_wishlist: skipWl ? skipWl.checked : false,
+        };
+    }
+    if (type === 'personalized_pipeline') {
+        // Each checked box has data-kind / data-variant attributes;
+        // walk them to assemble the kinds list.
+        const picker = document.getElementById('cfg-' + slotKey + '-kinds-picker');
+        const kinds = [];
+        if (picker) {
+            picker.querySelectorAll('input[type="checkbox"][data-kind]:checked').forEach(cb => {
+                const entry = { kind: cb.dataset.kind };
+                if (cb.dataset.variant) entry.variant = cb.dataset.variant;
+                kinds.push(entry);
+            });
+        }
+        const refreshFirstCb = document.getElementById('cfg-' + slotKey + '-refresh_first');
+        const skipWl = document.getElementById('cfg-' + slotKey + '-skip_wishlist');
+        return {
+            kinds,
+            refresh_first: refreshFirstCb ? refreshFirstCb.checked : false,
             skip_wishlist: skipWl ? skipWl.checked : false,
         };
     }

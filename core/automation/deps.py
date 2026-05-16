@@ -138,3 +138,9 @@ class AutomationDeps:
     # the engine's progress callback hooks). ---
     init_automation_progress: Callable[..., Any]
     record_progress_history: Callable[..., Any]
+
+    # --- Personalized playlist pipeline ---
+    # Lazy builder so the pipeline handler can construct a fresh
+    # PersonalizedPlaylistManager per run (cheap accessors inside,
+    # no caching needed yet).
+    build_personalized_manager: Callable[[], Any]
