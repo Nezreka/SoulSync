@@ -483,7 +483,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             # Use ALL tracks (tracks_json), not just missing ones, to correctly detect multi-disc
             # even when only one disc has missing tracks
             if batch_is_album and batch_album_context:
-                total_discs = max((t.get('disc_number', 1) for t in tracks_json), default=1)
+                total_discs = max((t.get('disc_number') or 1 for t in tracks_json), default=1)
                 batch_album_context['total_discs'] = total_discs
                 if total_discs > 1:
                     logger.info(f"[Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
@@ -507,7 +507,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     # Fallback album key: use album name when ID is missing (e.g. mirrored playlist tracks)
                     if not album_id and isinstance(album_val, dict) and album_val.get('name'):
                         album_id = f"_name_{album_val['name'].lower().strip()}"
-                    disc_num = sp_data.get('disc_number', t.get('disc_number', 1))
+                    disc_num = sp_data.get('disc_number') or t.get('disc_number') or 1
                     if album_id:
                         wishlist_album_disc_counts[album_id] = max(
                             wishlist_album_disc_counts.get(album_id, 1), disc_num
