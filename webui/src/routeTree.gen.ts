@@ -12,7 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
+import { Route as ImportRouteRouteImport } from './routes/import/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ImportIndexRouteImport } from './routes/import/index'
+import { Route as ImportSinglesRouteImport } from './routes/import/singles'
+import { Route as ImportAutoRouteImport } from './routes/import/auto'
+import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 
 const SplatRoute = SplatRouteImport.update({
@@ -30,10 +35,35 @@ const IssuesRouteRoute = IssuesRouteRouteImport.update({
   path: '/issues',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ImportRouteRoute = ImportRouteRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ImportIndexRoute = ImportIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ImportRouteRoute,
+} as any)
+const ImportSinglesRoute = ImportSinglesRouteImport.update({
+  id: '/singles',
+  path: '/singles',
+  getParentRoute: () => ImportRouteRoute,
+} as any)
+const ImportAutoRoute = ImportAutoRouteImport.update({
+  id: '/auto',
+  path: '/auto',
+  getParentRoute: () => ImportRouteRoute,
+} as any)
+const ImportAlbumRoute = ImportAlbumRouteImport.update({
+  id: '/album',
+  path: '/album',
+  getParentRoute: () => ImportRouteRoute,
 } as any)
 const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
   id: '/artist-detail/$source/$id',
@@ -43,9 +73,14 @@ const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/import/album': typeof ImportAlbumRoute
+  '/import/auto': typeof ImportAutoRoute
+  '/import/singles': typeof ImportSinglesRoute
+  '/import/': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesByTo {
@@ -53,32 +88,66 @@ export interface FileRoutesByTo {
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/import/album': typeof ImportAlbumRoute
+  '/import/auto': typeof ImportAutoRoute
+  '/import/singles': typeof ImportSinglesRoute
+  '/import': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/import/album': typeof ImportAlbumRoute
+  '/import/auto': typeof ImportAutoRoute
+  '/import/singles': typeof ImportSinglesRoute
+  '/import/': typeof ImportIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/issues' | '/stats' | '/$' | '/artist-detail/$source/$id'
+  fullPaths:
+    | '/'
+    | '/import'
+    | '/issues'
+    | '/stats'
+    | '/$'
+    | '/import/album'
+    | '/import/auto'
+    | '/import/singles'
+    | '/import/'
+    | '/artist-detail/$source/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/issues' | '/stats' | '/$' | '/artist-detail/$source/$id'
-  id:
-    | '__root__'
+  to:
     | '/'
     | '/issues'
     | '/stats'
     | '/$'
+    | '/import/album'
+    | '/import/auto'
+    | '/import/singles'
+    | '/import'
+    | '/artist-detail/$source/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/import'
+    | '/issues'
+    | '/stats'
+    | '/$'
+    | '/import/album'
+    | '/import/auto'
+    | '/import/singles'
+    | '/import/'
     | '/artist-detail/$source/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
   SplatRoute: typeof SplatRoute
@@ -108,12 +177,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IssuesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/import': {
+      id: '/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof ImportRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/import/': {
+      id: '/import/'
+      path: '/'
+      fullPath: '/import/'
+      preLoaderRoute: typeof ImportIndexRouteImport
+      parentRoute: typeof ImportRouteRoute
+    }
+    '/import/singles': {
+      id: '/import/singles'
+      path: '/singles'
+      fullPath: '/import/singles'
+      preLoaderRoute: typeof ImportSinglesRouteImport
+      parentRoute: typeof ImportRouteRoute
+    }
+    '/import/auto': {
+      id: '/import/auto'
+      path: '/auto'
+      fullPath: '/import/auto'
+      preLoaderRoute: typeof ImportAutoRouteImport
+      parentRoute: typeof ImportRouteRoute
+    }
+    '/import/album': {
+      id: '/import/album'
+      path: '/album'
+      fullPath: '/import/album'
+      preLoaderRoute: typeof ImportAlbumRouteImport
+      parentRoute: typeof ImportRouteRoute
     }
     '/artist-detail/$source/$id': {
       id: '/artist-detail/$source/$id'
@@ -125,8 +229,27 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ImportRouteRouteChildren {
+  ImportAlbumRoute: typeof ImportAlbumRoute
+  ImportAutoRoute: typeof ImportAutoRoute
+  ImportSinglesRoute: typeof ImportSinglesRoute
+  ImportIndexRoute: typeof ImportIndexRoute
+}
+
+const ImportRouteRouteChildren: ImportRouteRouteChildren = {
+  ImportAlbumRoute: ImportAlbumRoute,
+  ImportAutoRoute: ImportAutoRoute,
+  ImportSinglesRoute: ImportSinglesRoute,
+  ImportIndexRoute: ImportIndexRoute,
+}
+
+const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
+  ImportRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
   SplatRoute: SplatRoute,

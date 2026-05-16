@@ -38,7 +38,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'wishlist', path: '/wishlist', kind: 'legacy' },
   { pageId: 'automations', path: '/automations', kind: 'legacy' },
   { pageId: 'active-downloads', path: '/active-downloads', kind: 'legacy' },
-  { pageId: 'import', path: '/import', kind: 'legacy' },
+  { pageId: 'import', path: '/import', kind: 'react' },
   { pageId: 'library', path: '/library', kind: 'legacy' },
   { pageId: 'tools', path: '/tools', kind: 'legacy' },
   { pageId: 'artist-detail', path: '/artist-detail', kind: 'legacy' },
@@ -67,7 +67,11 @@ export function getShellRouteByPageId(pageId: ShellPageId): ShellRouteDefinition
 }
 
 export function getShellRouteByPath(pathname: string): ShellRouteDefinition | undefined {
-  return routeByPath.get(normalizeShellPath(pathname) as `/${string}`);
+  const normalized = normalizeShellPath(pathname);
+  const exactRoute = routeByPath.get(normalized as `/${string}`);
+  if (exactRoute) return exactRoute;
+
+  return reactShellRoutes.find((route) => normalized.startsWith(`${route.path}/`));
 }
 
 export function resolveShellPageFromPath(pathname: string): ShellPageId | null {

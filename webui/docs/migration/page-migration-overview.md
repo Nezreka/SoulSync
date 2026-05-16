@@ -1,10 +1,10 @@
 # WebUI Page Migration Overview
 
-Snapshot date: 2026-05-14
+Snapshot date: 2026-05-15
 
 ## Summary
 - The shell route manifest now has 18 page ids.
-- `issues` and `stats` are now React-owned routes.
+- `issues`, `stats`, and `import` are now React-owned routes.
 - Since the last snapshot, the biggest changes are:
   - `downloads` was renamed into `search`.
   - The live queue became `active-downloads`.
@@ -78,9 +78,9 @@ Rollups:
 | --- | --- | --- | --- | --- | --- |
 | `issues` | React | 2 / 2 / 2 / 2 / 2 | Low | Low | Completed |
 | `stats` | React | 2 / 2 / 2 / 2 / 2 | Low | Low | Completed |
+| `import` | React | 3 / 3 / 3 / 2 / 3 | Medium | Medium | Completed |
 | `help` | Legacy | 3 / 2 / 1 / 1 / 2 | Low | Low | Wave 1 |
 | `hydrabase` | Legacy | 2 / 2 / 2 / 2 / 2 | Low | Low | Wave 1 |
-| `import` | Legacy | 3 / 3 / 3 / 2 / 3 | Medium | Medium | Wave 1 |
 | `search` | Legacy | 4 / 4 / 4 / 3 / 4 | High | High | Wave 2 |
 | `watchlist` | Legacy | 4 / 4 / 4 / 3 / 4 | High | High | Wave 3 |
 | `wishlist` | Legacy | 4 / 4 / 4 / 3 / 4 | High | High | Wave 3 |
@@ -130,11 +130,12 @@ Rollups:
 - Recommendation: low-risk route with a narrow surface.
 
 #### `import`
-- Current owner: Legacy.
-- Primary files: `webui/index.html`, `webui/static/stats-automations.js`, `webui/static/helper.js`.
+- Current owner: React.
+- Primary files: `webui/src/routes/import/*`, `webui/src/platform/shell/route-manifest.ts`.
 - Main surface: staging files, album and singles matching, suggestion cards, processing queue.
 - Key coupling: settings-derived staging path assumptions and downstream library state.
-- Recommendation: still bounded enough for an early wave, though more workflow-heavy than `help` or `hydrabase`.
+- Recommendation: completed as the next migration after `stats`. Follow-up cleanup should remove the dead legacy import functions from `webui/static/stats-automations.js`.
+- Route plan: `webui/docs/migration/import-migration-plan.md`.
 
 ### Wave 2: Search split
 
@@ -264,9 +265,10 @@ Rollups:
 - Waves 6-10 defer the broadest, most coupled, or most orchestration-heavy surfaces until the team has the most leverage.
 
 ## Final Recommendation
-- Keep `issues` and `stats` as the current React reference implementations, and preserve the explicit bridge contract between React routes and legacy shell behavior.
+- Keep `issues`, `stats`, and `import` as the current React reference implementations, and preserve the explicit bridge contract between React routes and legacy shell behavior.
 - Treat `search`, `watchlist`, `wishlist`, `active-downloads`, and `tools` as the current route ids, and keep `downloads` and `artists` only as compatibility history.
-- Migrate the remaining safe legacy routes first: `help`, `hydrabase`, and `import`.
+- Migrate the remaining safe legacy routes first: `help` and `hydrabase`.
+- `import` has already been migrated and should be treated as the first React-owned workflow route.
 - During each migration, actively look for small reuse opportunities across route slices and shared UI primitives, but only extract once the overlap is clearly real.
-- Use `search` as the next meaningful proving ground now that the download queue has been split out.
+- Use `search` as the next larger proving ground after `import`, now that the download queue has been split out.
 - Avoid pulling `settings`, `sync`, `library`, `artist-detail`, or `automations` forward unless there is a separate product priority strong enough to justify the added regression risk.
