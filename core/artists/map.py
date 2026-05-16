@@ -20,10 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_current_profile_id() -> int:
-    """Mirror of web_server.get_current_profile_id — uses Flask g."""
+    """Mirror of web_server.get_current_profile_id — uses Flask g.
+
+    Catches RuntimeError too because reading `g` outside a request
+    context raises that (not AttributeError) — happens when this is
+    called from background threads (sync, automation, scanners)."""
     try:
         return g.profile_id
-    except AttributeError:
+    except (AttributeError, RuntimeError):
         return 1
 
 

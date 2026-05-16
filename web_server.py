@@ -474,10 +474,16 @@ def _add_discover_cache_headers(response):
 
 
 def get_current_profile_id() -> int:
-    """Get the current profile ID from Flask g context or default to 1"""
+    """Get the current profile ID from Flask g context or default to 1.
+
+    Background callers (automation engine, sync threads, watchlist
+    scanner) have no request context, so `g.profile_id` raises
+    `RuntimeError("Working outside of application context")` rather
+    than `AttributeError`. Catch both so non-request callers degrade
+    to the admin profile instead of crashing the handler."""
     try:
         return g.profile_id
-    except AttributeError:
+    except (AttributeError, RuntimeError):
         return 1
 
 
