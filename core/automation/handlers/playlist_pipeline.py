@@ -28,12 +28,12 @@ import time
 from typing import Any, Dict
 
 from core.automation.deps import AutomationDeps
+from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
 
 
 # Per-playlist sync poll cap inside Phase 3.
-_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS = 600
 # Discovery poll cap inside Phase 2.
 _DISCOVERY_TIMEOUT_SECONDS = 3600
 
@@ -165,124 +165,31 @@ def auto_playlist_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> Dict
             log_type='success',
         )
 
-        # ── PHASE 3: SYNC ─────────────────────────────────────────────
-        deps.update_progress(
+        # ── PHASE 3 + 4: SYNC + WISHLIST (delegated to shared helper) ──
+        # Each mirrored playlist payload only needs `id` + `name` for
+        # the helper; `auto_sync_playlist` reads the rest from the
+        # mirrored DB by id.
+        sync_summary = run_sync_and_wishlist(
+            deps,
             automation_id,
-            progress=56,
-            phase='Phase 3/4: Syncing to server...',
-            log_line='Phase 3: Sync',
-            log_type='info',
+            [pl for pl in playlists if pl.get('id')],
+            sync_one_fn=lambda pl: auto_sync_playlist(
+                {'playlist_id': str(pl['id']), '_automation_id': None},
+                deps,
+            ),
+            sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",
+            skip_wishlist=skip_wishlist,
+            progress_start=56,
+            progress_end=85,
+            sync_phase_label='Phase 3/4: Syncing to server...',
+            sync_phase_start_log='Phase 3: Sync',
+            wishlist_phase_label='Phase 4/4: Processing wishlist...',
+            wishlist_phase_start_log='Phase 4: Wishlist',
         )
-
-        total_synced = 0
-        total_skipped = 0
-        sync_errors = 0
-        sync_states = deps.get_sync_states()
-
-        for pl_idx, pl in enumerate(playlists):
-            pl_id = pl.get('id')
-            if not pl_id:
-                continue
-
-            sync_config = {
-                'playlist_id': str(pl_id),
-                '_automation_id': None,  # Don't let sync handler hijack our progress.
-            }
-            sync_result = auto_sync_playlist(sync_config, deps)
-            sync_status = sync_result.get('status', '')
-
-            if sync_status == 'started':
-                # Sync launched a background thread — wait for it.
-                sync_id = f"auto_mirror_{pl_id}"
-                sync_poll_start = time.time()
-                while time.time() - sync_poll_start < _SYNC_PER_PLAYLIST_TIMEOUT_SECONDS:
-                    if (sync_id in sync_states
-                            and sync_states[sync_id].get('status')
-                            in ('finished', 'complete', 'error', 'failed')):
-                        break
-                    time.sleep(2)
-                    elapsed = int(time.time() - sync_poll_start)
-                    sub_progress = 56 + ((pl_idx + 1) / max(1, len(playlists))) * 29
-                    deps.update_progress(
-                        automation_id,
-                        progress=min(int(sub_progress), 84),
-                        phase=f'Phase 3/4: Syncing "{pl.get("name", "")}" ({elapsed}s)',
-                    )
-
-                # Check result.
-                ss = sync_states.get(sync_id, {})
-                ss_result = ss.get('result', ss.get('progress', {}))
-                matched = ss_result.get('matched_tracks', 0) if isinstance(ss_result, dict) else 0
-                total_synced += int(matched) if matched else 0
-                deps.update_progress(
-                    automation_id,
-                    log_line=f'Synced "{pl.get("name", "")}": {matched} tracks matched',
-                    log_type='success',
-                )
-
-            elif sync_status == 'skipped':
-                total_skipped += 1
-                reason = sync_result.get('reason', 'unchanged')
-                deps.update_progress(
-                    automation_id,
-                    log_line=f'Skipped "{pl.get("name", "")}": {reason}',
-                    log_type='skip',
-                )
-            elif sync_status == 'error':
-                sync_errors += 1
-                deps.update_progress(
-                    automation_id,
-                    log_line=f'Sync error "{pl.get("name", "")}": {sync_result.get("reason", "unknown")}',
-                    log_type='error',
-                )
-
-        deps.update_progress(
-            automation_id,
-            progress=85,
-            phase='Phase 3/4: Sync complete',
-            log_line=f'Phase 3 done: {total_synced} matched, {total_skipped} skipped, {sync_errors} errors',
-            log_type='success' if sync_errors == 0 else 'warning',
-        )
-
-        # ── PHASE 4: WISHLIST ─────────────────────────────────────────
-        wishlist_queued = 0
-        if not skip_wishlist:
-            deps.update_progress(
-                automation_id,
-                progress=86,
-                phase='Phase 4/4: Processing wishlist...',
-                log_line='Phase 4: Wishlist',
-                log_type='info',
-            )
-
-            try:
-                if not deps.is_wishlist_actually_processing():
-                    deps.process_wishlist_automatically(automation_id=None)
-                    deps.update_progress(
-                        automation_id,
-                        log_line='Wishlist processing triggered',
-                        log_type='success',
-                    )
-                    wishlist_queued = 1
-                else:
-                    deps.update_progress(
-                        automation_id,
-                        log_line='Wishlist already running — skipped',
-                        log_type='skip',
-                    )
-            except Exception as e:
-                deps.update_progress(
-                    automation_id,
-                    log_line=f'Wishlist error: {e}',
-                    log_type='warning',
-                )
-        else:
-            deps.update_progress(
-                automation_id,
-                progress=86,
-                log_line='Phase 4: Wishlist skipped (disabled)',
-                log_type='skip',
-            )
+        total_synced = sync_summary['synced']
+        total_skipped = sync_summary['skipped']
+        sync_errors = sync_summary['errors']
+        wishlist_queued = sync_summary['wishlist_queued']
 
         # ── COMPLETE ──────────────────────────────────────────────────
         duration = int(time.time() - pipeline_start)
