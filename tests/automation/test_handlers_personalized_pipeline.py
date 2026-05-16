@@ -151,8 +151,11 @@ class TestEmptyConfig:
 
 class _StubManagerNoTracks:
     def ensure_playlist(self, kind, variant, profile_id):
+        # last_generated_at non-None so pipeline treats the snapshot as
+        # already-generated-but-empty (rather than first-run-needs-gen).
         return SimpleNamespace(
             id=1, name=f'{kind}-{variant}', kind=kind, variant=variant,
+            is_stale=False, last_generated_at='2026-05-15T20:00:00',
         )
 
     def refresh_playlist(self, kind, variant, profile_id):
@@ -173,7 +176,7 @@ class _StubManagerWithTracks:
         return SimpleNamespace(
             id=hash((kind, variant)) % 10000,
             name=f'{kind}-{variant or "S"}', kind=kind, variant=variant,
-            is_stale=False,
+            is_stale=False, last_generated_at='2026-05-15T20:00:00',
         )
 
     def refresh_playlist(self, kind, variant, profile_id):
@@ -183,7 +186,7 @@ class _StubManagerWithTracks:
         return SimpleNamespace(
             id=hash((kind, variant)) % 10000,
             name=f'{kind}-{variant or "S"}', kind=kind, variant=variant,
-            is_stale=False,
+            is_stale=False, last_generated_at='2026-05-15T20:00:00',
         )
 
     def get_playlist_tracks(self, playlist_id):
@@ -283,11 +286,13 @@ class TestPayloadBuilding:
             def ensure_playlist(self, kind, variant, profile_id):
                 return SimpleNamespace(
                     id=1, name=kind, kind=kind, variant=variant, is_stale=True,
+                    last_generated_at='2026-05-15T20:00:00',
                 )
             def refresh_playlist(self, kind, variant, profile_id):
                 refresh_called.append((kind, variant))
                 return SimpleNamespace(
                     id=1, name=kind, kind=kind, variant=variant, is_stale=False,
+                    last_generated_at='2026-05-15T20:00:00',
                 )
             def get_playlist_tracks(self, _id):
                 return [SimpleNamespace(
@@ -315,11 +320,13 @@ class TestPayloadBuilding:
             def ensure_playlist(self, kind, variant, profile_id):
                 return SimpleNamespace(
                     id=1, name=kind, kind=kind, variant=variant, is_stale=False,
+                    last_generated_at='2026-05-15T20:00:00',
                 )
             def refresh_playlist(self, *_a, **_k):
                 refresh_called.append('called')
                 return SimpleNamespace(
                     id=1, name='x', kind='x', variant='', is_stale=False,
+                    last_generated_at='2026-05-15T20:00:00',
                 )
             def get_playlist_tracks(self, _id):
                 return [SimpleNamespace(
@@ -335,6 +342,43 @@ class TestPayloadBuilding:
         )
         assert refresh_called == []
 
+    def test_never_generated_snapshot_triggers_first_refresh(self):
+        """First-run case: pipeline picks a brand-new kind, ensure_playlist
+        auto-creates the row with track_count=0 and last_generated_at=None.
+        Without this branch the pipeline would read the empty snapshot and
+        silently skip — user picked a kind and got nothing. With the branch,
+        last_generated_at=None forces a refresh so the generator actually runs."""
+        deps = _build_deps()
+        refresh_called = []
+
+        class _NeverGenMgr:
+            def ensure_playlist(self, kind, variant, profile_id):
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant,
+                    is_stale=False, last_generated_at=None,
+                )
+            def refresh_playlist(self, kind, variant, profile_id):
+                refresh_called.append((kind, variant))
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant,
+                    is_stale=False, last_generated_at='2026-05-15T20:00:00',
+                )
+            def get_playlist_tracks(self, _id):
+                return [SimpleNamespace(
+                    track_name='Generated', artist_name='A', album_name='Al',
+                    spotify_track_id='sp-new', itunes_track_id=None,
+                    deezer_track_id=None, duration_ms=200000,
+                )]
+
+        payloads = _build_payloads_for_kinds(
+            deps, _NeverGenMgr(),
+            [{'kind': 'fresh_tape'}],
+            profile_id=1, automation_id=None, refresh_first=False,
+        )
+        assert refresh_called == [('fresh_tape', '')]
+        assert len(payloads) == 1
+        assert payloads[0]['tracks_json'][0]['name'] == 'Generated'
+
     def test_manager_exception_swallowed_continues_to_next(self):
         deps = _build_deps()
 
@@ -345,7 +389,10 @@ class TestPayloadBuilding:
                 self.calls.append(kind)
                 if kind == 'broken':
                     raise RuntimeError('manager boom')
-                return SimpleNamespace(id=1, name=kind, kind=kind, variant=variant, is_stale=False)
+                return SimpleNamespace(
+                    id=1, name=kind, kind=kind, variant=variant, is_stale=False,
+                    last_generated_at='2026-05-15T20:00:00',
+                )
             def get_playlist_tracks(self, _id):
                 return []
 
