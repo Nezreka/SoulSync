@@ -277,13 +277,9 @@ describe('import route', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     await waitFor(() =>
-      expect((screen.getByLabelText('Select 02-track.flac') as HTMLInputElement).checked).toBe(
-        true,
-      ),
+      expect(screen.getByRole('checkbox', { name: 'Select 02-track.flac' })).toBeChecked(),
     );
-    expect((screen.getByLabelText('Select 01-track.flac') as HTMLInputElement).checked).toBe(
-      false,
-    );
+    expect(screen.getByRole('checkbox', { name: 'Select 01-track.flac' })).not.toBeChecked();
     expect(screen.getByText('Process Selected (1)')).toBeInTheDocument();
   });
 

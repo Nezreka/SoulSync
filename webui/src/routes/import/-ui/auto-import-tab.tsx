@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { Button, RangeInput, Select } from '@/components/form/form';
+
 import type {
   ImportAutoFilter,
   ImportAutoImportResult,
@@ -171,7 +173,7 @@ export function AutoImportPanel({
             {getAutoImportStatusText(statusQuery.data)}
           </span>
           {statusQuery.data?.running ? (
-            <button
+            <Button
               type="button"
               className={styles.autoImportScanNowBtn}
               id="auto-import-scan-now"
@@ -181,26 +183,27 @@ export function AutoImportPanel({
             >
               <RefreshIcon />
               Scan Now
-            </button>
+            </Button>
           ) : null}
         </div>
         {statusQuery.data?.running ? (
           <div className={styles.autoImportSettingsRow} id="auto-import-settings-row">
-            <label>
-              Confidence:{' '}
-              <input
-                type="range"
-                id="auto-import-confidence"
-                min="50"
-                max="100"
+            <div className={styles.autoImportSetting}>
+              <span>Confidence:</span>
+              <RangeInput
+                label="Confidence"
+                min={50}
+                max={100}
                 value={confidence}
-                onChange={(event) => setConfidence(Number(event.target.value))}
-              />{' '}
-              <span id="auto-import-conf-val">{confidence}%</span>
-            </label>
-            <label>
-              Interval:{' '}
-              <select
+                onValueChange={setConfidence}
+              />
+              <span className={styles.autoImportConfidenceValue} id="auto-import-conf-val">
+                {confidence}%
+              </span>
+            </div>
+            <div className={styles.autoImportSetting}>
+              <span>Interval:</span>
+              <Select
                 id="auto-import-interval"
                 value={interval}
                 onChange={(event) => setInterval(Number(event.target.value))}
@@ -209,9 +212,9 @@ export function AutoImportPanel({
                 <option value="60">60s</option>
                 <option value="120">2m</option>
                 <option value="300">5m</option>
-              </select>
-            </label>
-            <button
+              </Select>
+            </div>
+            <Button
               type="button"
               className={`${styles.autoImportActionBtn} ${styles.autoImportActionSecondary}`}
               disabled={saveSettingsMutation.isPending}
@@ -223,7 +226,7 @@ export function AutoImportPanel({
               }
             >
               Save
-            </button>
+            </Button>
           </div>
         ) : null}
         {activeLines.length > 0 ? (
@@ -264,7 +267,7 @@ export function AutoImportPanel({
           </div>
           <div className={styles.autoImportFilters} id="auto-import-filters">
             {(['all', 'pending', 'imported', 'failed'] as const).map((filter) => (
-              <button
+              <Button
                 key={filter}
                 type="button"
                 className={`${styles.autoImportFilterPill} ${
@@ -274,11 +277,11 @@ export function AutoImportPanel({
                 onClick={() => onFilterChange(filter)}
               >
                 {filter === 'pending' ? 'Needs Review' : titleCase(filter)}
-              </button>
+              </Button>
             ))}
             <div className={styles.importPageFlexSpacer} />
             {counts.review > 0 ? (
-              <button
+              <Button
                 type="button"
                 className={styles.autoImportBatchBtn}
                 id="auto-import-approve-all"
@@ -286,10 +289,10 @@ export function AutoImportPanel({
                 onClick={() => approveAllMutation.mutate()}
               >
                 Approve All
-              </button>
+              </Button>
             ) : null}
             {counts.imported + counts.failed > 0 ? (
-              <button
+              <Button
                 type="button"
                 className={`${styles.autoImportBatchBtn} ${styles.autoImportClearBtn}`}
                 id="auto-import-clear-completed"
@@ -297,7 +300,7 @@ export function AutoImportPanel({
                 onClick={() => clearMutation.mutate()}
               >
                 Clear History
-              </button>
+              </Button>
             ) : null}
           </div>
         </>
@@ -445,7 +448,7 @@ function AutoImportResultCard({
           <div className={styles.autoImportConfidenceText}>{confidencePercent}% confidence</div>
           {result.status === 'pending_review' ? (
             <div className={styles.autoImportActions}>
-              <button
+              <Button
                 type="button"
                 className={`${styles.autoImportActionBtn} ${styles.autoImportActionPrimary}`}
                 disabled={approvePending}
@@ -455,8 +458,8 @@ function AutoImportResultCard({
                 }}
               >
                 Approve & Import
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 className={`${styles.autoImportActionBtn} ${styles.autoImportActionSecondary}`}
                 disabled={rejectPending}
@@ -466,7 +469,7 @@ function AutoImportResultCard({
                 }}
               >
                 Dismiss
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
