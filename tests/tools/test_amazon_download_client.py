@@ -325,6 +325,7 @@ class TestUniquePath:
 class TestRecordToStatus:
     def test_fields_mapped(self):
         rec = {
+            "id": "dl-001",
             "filename": "B1||Artist - Title",
             "state": "downloading",
             "progress": 0.5,
@@ -334,7 +335,7 @@ class TestRecordToStatus:
             "time_remaining": 5,
             "file_path": "/tmp/track.flac",
         }
-        status = AmazonDownloadClient._record_to_status("dl-001", rec)
+        status = AmazonDownloadClient._record_to_status(rec)
 
         assert status.id == "dl-001"
         assert status.filename == "B1||Artist - Title"
@@ -348,7 +349,8 @@ class TestRecordToStatus:
         assert status.file_path == "/tmp/track.flac"
 
     def test_defaults_for_missing_fields(self):
-        status = AmazonDownloadClient._record_to_status("dl-002", {})
+        status = AmazonDownloadClient._record_to_status({})
+        assert status.id == ""
         assert status.state == "queued"
         assert status.progress == 0.0
         assert status.size == 0
@@ -716,22 +718,22 @@ class TestStatusInterface:
     def test_get_all_downloads_converts_records(self, tmp_path):
         client = _make_client(tmp_path)
         engine = MagicMock()
-        engine.get_all_records.return_value = {
-            "dl-001": {
-                "filename": "B1||A - T",
-                "state": "complete",
-                "progress": 1.0,
-                "size": 5_000_000,
-                "transferred": 5_000_000,
-                "speed": 0,
-            }
-        }
+        engine.iter_records_for_source.return_value = iter([{
+            "id": "dl-001",
+            "filename": "B1||A - T",
+            "state": "complete",
+            "progress": 1.0,
+            "size": 5_000_000,
+            "transferred": 5_000_000,
+            "speed": 0,
+        }])
         client._engine = engine
 
         statuses = run(client.get_all_downloads())
         assert len(statuses) == 1
         assert statuses[0].id == "dl-001"
         assert statuses[0].state == "complete"
+        engine.iter_records_for_source.assert_called_once_with('amazon')
 
     def test_get_download_status_returns_none_without_engine(self, tmp_path):
         client = _make_client(tmp_path)
@@ -741,7 +743,8 @@ class TestStatusInterface:
         client = _make_client(tmp_path)
         engine = MagicMock()
         engine.get_record.return_value = {
-            "original_filename": "B1||A - T",
+            "id": "dl-001",
+            "filename": "B1||A - T",
             "state": "downloading",
             "progress": 0.7,
             "size": 10_000_000,
@@ -752,9 +755,10 @@ class TestStatusInterface:
 
         status = run(client.get_download_status("dl-001"))
         assert status is not None
+        assert status.id == "dl-001"
         assert status.state == "downloading"
         assert status.progress == 0.7
-        engine.get_record.assert_called_once_with("amazon", "dl-001")
+        engine.get_record.assert_called_once_with('amazon', 'dl-001')
 
     def test_get_download_status_miss(self, tmp_path):
         client = _make_client(tmp_path)
@@ -771,36 +775,55 @@ class TestStatusInterface:
     def test_cancel_delegates_to_engine(self, tmp_path):
         client = _make_client(tmp_path)
         engine = MagicMock()
-        engine.cancel_record.return_value = True
+        engine.get_record.return_value = {'id': 'dl-001', 'state': 'downloading'}
         client._engine = engine
 
         result = run(client.cancel_download("dl-001", remove=True))
         assert result is True
-        engine.cancel_record.assert_called_once_with("amazon", "dl-001", remove=True)
+        engine.update_record.assert_called_once_with('amazon', 'dl-001', {'state': 'Cancelled'})
+        engine.remove_record.assert_called_once_with('amazon', 'dl-001')
 
-    def test_clear_completed_returns_false_without_engine(self, tmp_path):
-        client = _make_client(tmp_path)
-        assert run(client.clear_all_completed_downloads()) is False
-
-    def test_clear_completed_delegates_to_engine(self, tmp_path):
+    def test_cancel_returns_false_when_record_not_found(self, tmp_path):
         client = _make_client(tmp_path)
         engine = MagicMock()
+        engine.get_record.return_value = None
+        client._engine = engine
+
+        result = run(client.cancel_download("nonexistent"))
+        assert result is False
+        engine.update_record.assert_not_called()
+
+    def test_clear_completed_returns_true_without_engine(self, tmp_path):
+        client = _make_client(tmp_path)
+        assert run(client.clear_all_completed_downloads()) is True
+
+    def test_clear_completed_removes_terminal_records(self, tmp_path):
+        client = _make_client(tmp_path)
+        engine = MagicMock()
+        engine.iter_records_for_source.return_value = iter([
+            {'id': 'dl-001', 'state': 'Completed, Succeeded'},
+            {'id': 'dl-002', 'state': 'InProgress, Downloading'},
+            {'id': 'dl-003', 'state': 'Errored'},
+        ])
         client._engine = engine
 
         result = run(client.clear_all_completed_downloads())
         assert result is True
-        engine.clear_completed.assert_called_once_with("amazon")
+        # Only terminal records removed
+        removed_ids = [c[0][1] for c in engine.remove_record.call_args_list]
+        assert 'dl-001' in removed_ids
+        assert 'dl-003' in removed_ids
+        assert 'dl-002' not in removed_ids
 
-    def test_status_methods_return_gracefully_on_engine_error(self, tmp_path):
+    def test_status_methods_no_records(self, tmp_path):
+        """Engine with no Amazon records returns empty/None gracefully."""
         client = _make_client(tmp_path)
         engine = MagicMock()
-        engine.get_all_records.side_effect = Exception("engine crash")
-        engine.get_record.side_effect = Exception("engine crash")
-        engine.cancel_record.side_effect = Exception("engine crash")
-        engine.clear_completed.side_effect = Exception("engine crash")
+        engine.iter_records_for_source.return_value = iter([])
+        engine.get_record.return_value = None
         client._engine = engine
 
         assert run(client.get_all_downloads()) == []
         assert run(client.get_download_status("dl-001")) is None
         assert run(client.cancel_download("dl-001")) is False
-        assert run(client.clear_all_completed_downloads()) is False
+        assert run(client.clear_all_completed_downloads()) is True
