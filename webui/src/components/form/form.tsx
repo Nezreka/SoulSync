@@ -3,6 +3,7 @@ import { Checkbox as BaseCheckbox } from '@base-ui/react/checkbox';
 import { Field } from '@base-ui/react/field';
 import { Input as BaseInput } from '@base-ui/react/input';
 import { Slider } from '@base-ui/react/slider';
+import { Switch as BaseSwitch } from '@base-ui/react/switch';
 import { Toggle as BaseToggle } from '@base-ui/react/toggle';
 import clsx from 'clsx';
 import {
@@ -103,6 +104,23 @@ export const Checkbox = forwardRef<HTMLElement, CheckboxProps>(function Checkbox
         </span>
       </BaseCheckbox.Indicator>
     </BaseCheckbox.Root>
+  );
+});
+
+type BaseSwitchProps = ComponentPropsWithoutRef<typeof BaseSwitch.Root>;
+
+export type SwitchProps = Omit<BaseSwitchProps, 'className' | 'children'> & {
+  className?: string;
+};
+
+export const Switch = forwardRef<HTMLElement, SwitchProps>(function Switch(
+  { className, ...props },
+  ref,
+) {
+  return (
+    <BaseSwitch.Root ref={ref} className={clsx(styles.switch, className)} {...props}>
+      <BaseSwitch.Thumb className={styles.switchThumb} />
+    </BaseSwitch.Root>
   );
 });
 

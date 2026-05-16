@@ -1024,44 +1024,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
   font-size: 13px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.7);
-}
-
-.autoImportToggleLabel input {
-  display: none;
-}
-
-.autoImportToggleSlider {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  transition: background 0.2s ease;
-  display: inline-block;
-}
-
-.autoImportToggleSlider::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.2s ease;
-}
-
-.autoImportToggleLabel input:checked + .autoImportToggleSlider {
-  background: var(--accent-color, #6366f1);
-}
-
-.autoImportToggleLabel input:checked + .autoImportToggleSlider::after {
-  transform: translateX(20px);
 }
 
 .autoImportStatus {
@@ -1102,7 +1067,7 @@
   display: inline-block;
   flex: 0 0 5ch;
   width: 5ch;
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 .autoImportEmpty {

@@ -169,6 +169,7 @@ export function SinglesImportPanel({
 }) {
   const selectedCount = files.filter((file) => selected.has(getStagingFileKey(file))).length;
   const allSelected = files.length > 0 && selectedCount === files.length;
+  const processVariant = selectedCount > 0 ? 'primary' : 'default';
 
   return (
     <>
@@ -181,7 +182,7 @@ export function SinglesImportPanel({
           </Button>
           <Button
             type="button"
-            variant="primary"
+            variant={processVariant}
             id="import-page-singles-process-btn"
             disabled={selectedCount === 0}
             onClick={onProcessSingles}
