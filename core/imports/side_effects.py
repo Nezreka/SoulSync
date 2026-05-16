@@ -235,7 +235,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         source_track_id = search_result.get("track_id", "") or search_result.get("id", "") or ti.get("id", "")
         source_track_title = search_result.get("title", "") or search_result.get("name", "")
         source_artist = search_result.get("artist", "")
-        if source_filename and "||" in source_filename and username in ("tidal", "youtube", "qobuz", "hifi", "deezer_dl", "lidarr", "soundcloud"):
+        if source_filename and "||" in source_filename and username in ("tidal", "youtube", "qobuz", "hifi", "deezer_dl", "lidarr", "soundcloud", "amazon"):
             stream_id = source_filename.split("||")[0]
             if stream_id and not source_track_id:
                 source_track_id = stream_id
