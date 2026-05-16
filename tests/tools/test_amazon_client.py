@@ -844,6 +844,30 @@ class TestGetAlbumTracks:
         assert item["track_number"] == 3
         assert item["disc_number"] == 1
 
+    def test_duration_enriched_from_search(self):
+        search_resp = {
+            "results": [{"hits": [
+                {"document": {
+                    "asin": "B09XYZ1234", "__type": "track",
+                    "title": "Not Like Us", "artistName": "Kendrick Lamar",
+                    "albumAsin": "B09XYZ1234", "duration": 217,
+                }},
+            ]}]
+        }
+        client = _make_client({
+            "amazon-music/media-from-asin": [MEDIA_RESPONSE_FLAC],
+            "amazon-music/search": search_resp,
+        })
+        with patch("core.amazon_client._rate_limit"):
+            result = client.get_album_tracks("B09XYZ1234")
+        assert result["items"][0]["duration_ms"] == 217_000
+
+    def test_duration_zero_when_search_fails(self):
+        client = _make_client({"amazon-music/media-from-asin": [MEDIA_RESPONSE_FLAC]})
+        with patch("core.amazon_client._rate_limit"):
+            result = client.get_album_tracks("B09XYZ1234")
+        assert result["items"][0]["duration_ms"] == 0
+
     def test_returns_none_on_api_error(self):
         client = _make_client()
         client.session.get.return_value = _mock_response({}, 500)

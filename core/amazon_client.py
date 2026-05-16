@@ -501,12 +501,28 @@ class AmazonClient:
             streams = self.media_from_asin(asin)
         except AmazonClientError:
             return None
+
+        # media_from_asin has no duration — enrich from search results which do.
+        duration_map: Dict[str, int] = {}  # track asin → duration_ms
+        if streams:
+            album_name = _strip_edition(streams[0].album)
+            artist_name = _primary_artist(streams[0].artist)
+            try:
+                search_items = self.search_raw(
+                    f"{album_name} {artist_name}", types="track,album"
+                )
+                for item in search_items:
+                    if item.album_asin == asin and item.duration_seconds:
+                        duration_map[item.asin] = item.duration_seconds * 1000
+            except Exception:
+                pass
+
         items = [
             {
                 "id": s.asin,
                 "name": _strip_edition(s.title),
                 "artists": [{"name": _primary_artist(s.artist), "id": ""}],
-                "duration_ms": 0,
+                "duration_ms": duration_map.get(s.asin, 0),
                 "track_number": s.track_number,
                 "disc_number": s.disc_number,
                 "release_date": s.date or "",
