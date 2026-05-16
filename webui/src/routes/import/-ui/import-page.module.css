@@ -157,7 +157,6 @@
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
-  position: relative;
 }
 
 .importPageSearchInput {
@@ -176,38 +175,10 @@
   border-color: rgba(var(--accent-light-rgb), 0.5);
 }
 
-.importPageSearchBtn {
-  padding: 10px 20px;
-  background: rgb(var(--accent-light-rgb));
-  border: none;
-  border-radius: 10px;
-  color: #000;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-
-.importPageSearchBtn:hover {
-  background: #1fdf64;
-}
-
-.importPageClearBtn {
-  position: absolute;
-  right: 100px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-
-.importPageClearBtn:hover {
-  color: #fff;
+.importPageSearchBar > button {
+  align-self: stretch;
+  min-width: 40px;
+  padding: 0 12px;
 }
 
 /* Album grid */
@@ -537,37 +508,10 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Buttons */
-.importPageProcessBtn {
-  padding: 10px 24px;
-  background: rgb(var(--accent-light-rgb));
-  border: none;
-  border-radius: 10px;
-  color: #000;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.importPageProcessBtn:hover {
-  background: #1fdf64;
-}
-
-.importPageProcessBtn:disabled {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.3);
-  cursor: not-allowed;
-}
-
 .importPageSecondaryBtn {
-  padding: 8px 16px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
   color: #ccc;
-  font-size: 13px;
-  cursor: pointer;
   transition: all 0.2s;
 }
 
@@ -577,13 +521,9 @@
 }
 
 .importPageBackBtn {
-  padding: 8px 16px;
   background: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
   color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  cursor: pointer;
   transition: all 0.2s;
 }
 

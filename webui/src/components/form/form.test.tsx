@@ -112,7 +112,9 @@ function FormDemo() {
 
       <FormActions>
         <Button type="button">Cancel</Button>
-        <Button type="submit">Save</Button>
+        <Button type="submit" variant="primary">
+          Save
+        </Button>
       </FormActions>
     </form>
   );
@@ -154,6 +156,9 @@ describe('form primitives', () => {
     expect(highPriority).toHaveAttribute('aria-pressed', 'true');
 
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute(
+      'data-variant',
+      'primary',
+    );
   });
 });

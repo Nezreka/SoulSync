@@ -247,13 +247,35 @@ type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
 
 export type ButtonProps = Omit<BaseButtonProps, 'className'> & {
   className?: string;
+  size?: 'sm' | 'md' | 'lg' | 'icon';
+  variant?: 'default' | 'primary' | 'ghost';
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, type = 'button', ...props },
+  { className, size = 'md', type = 'button', variant = 'default', ...props },
   ref,
 ) {
-  return <BaseButton ref={ref} className={clsx(styles.button, className)} type={type} {...props} />;
+  return (
+    <BaseButton
+      ref={ref}
+      className={clsx(
+        styles.button,
+        {
+          [styles.buttonSizeSm]: size === 'sm',
+          [styles.buttonSizeMd]: size === 'md',
+          [styles.buttonSizeLg]: size === 'lg',
+          [styles.buttonIcon]: size === 'icon',
+          [styles.buttonPrimary]: variant === 'primary',
+          [styles.buttonGhost]: variant === 'ghost',
+        },
+        className,
+      )}
+      data-variant={variant}
+      data-size={size}
+      type={type}
+      {...props}
+    />
+  );
 });
 
 export function FormError({ className, message }: { className?: string; message?: ReactNode }) {

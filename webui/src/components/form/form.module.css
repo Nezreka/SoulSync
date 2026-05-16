@@ -363,17 +363,42 @@
   color: #fff;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
-  min-height: 36px;
-  padding: 8px 12px;
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     background 0.18s ease,
     color 0.18s ease;
+}
+
+.buttonSizeSm {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.buttonSizeMd {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.buttonSizeLg {
+  min-height: 40px;
+  padding: 10px 20px;
+  font-size: 14px;
+}
+
+.buttonIcon {
+  width: var(--button-icon-size, 36px);
+  height: var(--button-icon-size, 36px);
+  min-height: var(--button-icon-size, 36px);
+  min-width: var(--button-icon-size, 36px);
+  padding: 0;
+  font-size: var(--button-icon-font-size, 15px);
+  line-height: 1;
 }
 
 .button:hover:not(:disabled) {
@@ -392,6 +417,51 @@
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+
+.buttonPrimary {
+  border-color: rgba(var(--accent-light-rgb), 0.45);
+  background: rgb(var(--accent-light-rgb));
+  color: #000;
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  border-color: rgba(var(--accent-light-rgb), 0.55);
+  background: rgba(var(--accent-light-rgb), 0.95);
+  color: #000;
+}
+
+.buttonPrimary:focus-visible {
+  border-color: rgba(var(--accent-light-rgb), 0.8);
+  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.16);
+}
+
+.buttonPrimary:disabled {
+  opacity: 0.62;
+  background: rgba(var(--accent-light-rgb), 0.45);
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.buttonGhost {
+  border-color: transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.buttonGhost:hover:not(:disabled) {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.buttonGhost:focus-visible {
+  border-color: rgba(var(--accent-light-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
+}
+
+.buttonGhost:disabled {
+  opacity: 0.5;
 }
 
 .formError {

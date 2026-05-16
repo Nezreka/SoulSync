@@ -181,7 +181,7 @@ export function SinglesImportPanel({
           </Button>
           <Button
             type="button"
-            className={styles.importPageProcessBtn}
+            variant="primary"
             id="import-page-singles-process-btn"
             disabled={selectedCount === 0}
             onClick={onProcessSingles}
