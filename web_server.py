@@ -1858,6 +1858,7 @@ SERVICE_CONFIG_REGISTRY = {
     'spotify':      {'required': ['client_id', 'client_secret']},
     'itunes':       {'always': True},   # default storefront works anon
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
+    'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
