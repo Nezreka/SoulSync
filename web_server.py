@@ -26818,6 +26818,115 @@ def get_discovery_shuffle():
         logger.error(f"Error getting discovery shuffle playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ========================================================================
+# Personalized Playlists v2 — unified storage + manager-backed routes.
+# Wraps every personalized playlist (Group A + Group B) behind one API
+# surface. Generators in `core/personalized/generators/` register at
+# import time; this set of routes exposes the manager for the UI.
+# Legacy `/api/discover/personalized/...` endpoints stay alive for
+# backward compat during the UI migration window.
+# ========================================================================
+
+# Trigger registration of every generator (side-effect import).
+from core.personalized import generators as _personalized_generators  # noqa: F401
+from core.personalized import api as _personalized_api
+from core.personalized.manager import PersonalizedPlaylistManager as _PersonalizedManager
+
+
+def _build_personalized_manager():
+    """Construct a manager wired with whatever each generator needs.
+
+    Per-request construction: the underlying services are cheap
+    accessors, so we don't bother caching. If profiling shows
+    overhead, this becomes a module-level lazy singleton."""
+    from core.personalized_playlists import get_personalized_playlists_service
+    from core.seasonal_discovery import get_seasonal_discovery_service
+    database = get_database()
+    deps = types.SimpleNamespace(
+        database=database,
+        service=get_personalized_playlists_service(database, spotify_client),
+        seasonal_service=get_seasonal_discovery_service(spotify_client, database),
+        get_current_profile_id=get_current_profile_id,
+        get_active_discovery_source=_get_active_discovery_source,
+    )
+    return _PersonalizedManager(database=database, deps=deps)
+
+
+@app.route('/api/personalized/kinds', methods=['GET'])
+def personalized_list_kinds():
+    """List every registered personalized-playlist kind."""
+    try:
+        return jsonify(_personalized_api.list_kinds())
+    except Exception as e:
+        logger.error(f"Personalized kinds list error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlists', methods=['GET'])
+def personalized_list_playlists():
+    """List every persisted personalized playlist for the active profile."""
+    try:
+        manager = _build_personalized_manager()
+        return jsonify(_personalized_api.list_playlists(manager, get_current_profile_id()))
+    except Exception as e:
+        logger.error(f"Personalized playlists list error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>', methods=['GET'])
+@app.route('/api/personalized/playlist/<kind>/<variant>', methods=['GET'])
+def personalized_get_playlist(kind, variant=''):
+    """Get one personalized playlist + its current track snapshot.
+
+    Auto-creates the row from default config if it doesn't exist."""
+    try:
+        manager = _build_personalized_manager()
+        return jsonify(_personalized_api.get_playlist_with_tracks(
+            manager, kind, variant, get_current_profile_id(),
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist get error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>/refresh', methods=['POST'])
+@app.route('/api/personalized/playlist/<kind>/<variant>/refresh', methods=['POST'])
+def personalized_refresh_playlist(kind, variant=''):
+    """Run the kind's generator and persist the snapshot."""
+    try:
+        manager = _build_personalized_manager()
+        body = request.get_json(silent=True) or {}
+        overrides = body.get('config_overrides') if isinstance(body.get('config_overrides'), dict) else None
+        return jsonify(_personalized_api.refresh_playlist(
+            manager, kind, variant, get_current_profile_id(), config_overrides=overrides,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist refresh error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/personalized/playlist/<kind>/config', methods=['PUT'])
+@app.route('/api/personalized/playlist/<kind>/<variant>/config', methods=['PUT'])
+def personalized_update_config(kind, variant=''):
+    """Patch the playlist's per-instance config."""
+    try:
+        manager = _build_personalized_manager()
+        body = request.get_json(silent=True) or {}
+        return jsonify(_personalized_api.update_config(
+            manager, kind, variant, get_current_profile_id(), body,
+        ))
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Personalized playlist config error ({kind}/{variant}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/artist-blacklist', methods=['GET'])
 def get_discovery_artist_blacklist():
     """Get all blacklisted discovery artists."""
