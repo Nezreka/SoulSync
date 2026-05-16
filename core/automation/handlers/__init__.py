@@ -17,6 +17,7 @@ from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
 from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
+from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
 from core.automation.handlers.database_update import auto_start_database_update, auto_deep_scan_library
 from core.automation.handlers.duplicate_cleaner import auto_run_duplicate_cleaner
 from core.automation.handlers.quality_scanner import auto_start_quality_scan
@@ -44,6 +45,7 @@ __all__ = [
     'auto_sync_playlist',
     'auto_discover_playlist',
     'auto_playlist_pipeline',
+    'auto_personalized_pipeline',
     'auto_start_database_update',
     'auto_deep_scan_library',
     'auto_run_duplicate_cleaner',

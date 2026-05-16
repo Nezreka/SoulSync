@@ -38,6 +38,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'sync_playlist',
     'discover_playlist',
     'playlist_pipeline',
+    'personalized_pipeline',
     'start_database_update',
     'deep_scan_library',
     'run_duplicate_cleaner',
@@ -60,6 +61,7 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'scan_watchlist',
     'scan_library',
     'playlist_pipeline',
+    'personalized_pipeline',
     'start_database_update',
     'deep_scan_library',
     'run_duplicate_cleaner',
@@ -156,6 +158,7 @@ def _build_deps(engine, scan_mgr=None) -> AutomationDeps:
         get_beatport_data_cache=lambda: {'cache_lock': threading.Lock(), 'homepage': {}},
         init_automation_progress=lambda *a, **k: None,
         record_progress_history=lambda *a, **k: None,
+        build_personalized_manager=lambda: None,
     )
 
 

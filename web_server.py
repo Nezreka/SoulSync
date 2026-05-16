@@ -992,6 +992,7 @@ def _register_automation_handlers():
         get_beatport_data_cache=lambda: beatport_data_cache,
         init_automation_progress=_init_automation_progress,
         record_progress_history=_auto_progress.record_history,
+        build_personalized_manager=_build_personalized_manager,
     )
     _register_extracted_handlers(_automation_deps)
 
