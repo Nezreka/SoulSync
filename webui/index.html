@@ -4616,6 +4616,39 @@
                                     </div>
                                 </div>
 
+                                <!-- Amazon Music Download Settings (shown only when amazon mode is selected) -->
+                                <div id="amazon-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Amazon Music Quality:</label>
+                                        <select id="amazon-quality" class="form-select">
+                                            <option value="flac">FLAC Lossless (24-bit/48kHz Hi-Res)</option>
+                                            <option value="opus">Opus (320kbps)</option>
+                                            <option value="eac3">EAC3 Dolby Atmos (768kbps 5.1)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Preferred codec tier. FLAC is 24-bit/48kHz Hi-Res — no subscription required.
+                                            Downloads via T2Tunes proxy.
+                                        </div>
+                                        <label class="checkbox-inline" style="margin-top: 8px;">
+                                            <input type="checkbox" id="amazon-allow-fallback" checked>
+                                            Allow quality fallback
+                                        </label>
+                                        <div class="setting-help-text">
+                                            Fall back to the next codec tier if the preferred one is unavailable.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Connection:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" onclick="testAmazonConnection()">Test Connection</button>
+                                            <span id="amazon-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div class="setting-help-text">
+                                            No account required — T2Tunes is a public Amazon Music proxy.
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- SoundCloud Download Settings -->
                                 <div id="soundcloud-download-settings-container" style="display: none;">
                                     <div class="form-group">

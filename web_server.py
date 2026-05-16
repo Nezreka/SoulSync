@@ -1750,21 +1750,22 @@ def _find_downloaded_file(download_path, track_data):
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
-    # YOUTUBE/TIDAL/QOBUZ/HIFI SUPPORT: Handle encoded filename format "id||title"
+    # YOUTUBE/TIDAL/QOBUZ/HIFI/AMAZON SUPPORT: Handle encoded filename format "id||title"
     # The file on disk will be "title.ext", not "id||title"
     is_youtube = track_data.get('username') == 'youtube'
     is_tidal = track_data.get('username') == 'tidal'
     is_qobuz = track_data.get('username') == 'qobuz'
     is_hifi = track_data.get('username') == 'hifi'
-    is_streaming_source = is_youtube or is_tidal or is_qobuz or is_hifi
+    is_amazon = track_data.get('username') == 'amazon'
+    is_streaming_source = is_youtube or is_tidal or is_qobuz or is_hifi or is_amazon
     target_filename_youtube = None
     if is_streaming_source and '||' in target_filename:
         _, title = target_filename.split('||', 1)
-        if is_tidal or is_qobuz or is_hifi:
-            # Tidal/Qobuz/HiFi files can be flac or m4a — match any audio extension
+        if is_tidal or is_qobuz or is_hifi or is_amazon:
+            # Tidal/Qobuz/HiFi/Amazon files can be flac, opus, eac3, or m4a — match any audio extension
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
-            source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else 'Tidal')
+            source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else 'Tidal'))
             logger.debug(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
@@ -1802,11 +1803,11 @@ def _find_downloaded_file(download_path, track_data):
                     # For Tidal, compare without extension (file could be .flac or .m4a)
                     compare_target = target_filename_youtube.lower()
                     compare_file = file.lower()
-                    if is_tidal or is_qobuz or is_hifi:
+                    if is_tidal or is_qobuz or is_hifi or is_amazon:
                         compare_file = os.path.splitext(compare_file)[0]
                     similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
-                    source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube'))
+                    source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube')))
                     logger.debug(f"[{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
@@ -1826,7 +1827,7 @@ def _find_downloaded_file(download_path, track_data):
 
         # For YouTube/Tidal, if we found a good enough match (80%+), use it
         if is_streaming_source and best_match and best_similarity >= 0.80:
-            source_label = 'Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube')
+            source_label = 'Qobuz' if is_qobuz else ('Amazon' if is_amazon else ('Tidal' if is_tidal else 'YouTube'))
             logger.debug(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 
@@ -2121,7 +2122,7 @@ def get_status():
             # don't depend on slskd being reachable — when one of these is the
             # active source, surface "connected" without probing slskd so the
             # dashboard / sidebar indicator stays green.
-            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl', 'lidarr', 'soundcloud')
+            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
@@ -2748,7 +2749,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -19683,6 +19684,26 @@ def deezer_download_test_download():
 
 
 # ===================================================================
+# AMAZON DOWNLOAD ENDPOINTS
+# ===================================================================
+
+@app.route('/api/amazon/test-connection', methods=['GET'])
+@admin_only
+def amazon_test_connection():
+    """Check whether the T2Tunes proxy is up and Amazon Music is reachable."""
+    try:
+        from core.amazon_client import AmazonClient
+        c = AmazonClient()
+        status = c.status()
+        amazon_up = str(status.get('amazonMusic', '')).lower() == 'up'
+        return jsonify({
+            'connected': amazon_up,
+            'status': status,
+        })
+    except Exception as e:
+        return jsonify({'connected': False, 'error': str(e)}), 200
+
+
 # TIDAL DOWNLOAD AUTH ENDPOINTS
 # ===================================================================
 
