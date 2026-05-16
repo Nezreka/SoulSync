@@ -449,6 +449,62 @@ class TestStalenessFilter:
         assert r2.track_count == 1
 
 
+class TestStaleFlag:
+    """`is_stale` flips when upstream data changes; refresh clears it."""
+
+    def test_default_is_false(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        record = mgr.ensure_playlist('hidden_gems', '', 1)
+        assert record.is_stale is False
+
+    def test_mark_kinds_stale_flips_flag(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [], kind='hidden_gems')
+        _register_simple_kind(registry, lambda *a, **k: [], kind='discovery_shuffle')
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        mgr.ensure_playlist('discovery_shuffle', '', 1)
+        n = mgr.mark_kinds_stale(['hidden_gems', 'discovery_shuffle'])
+        assert n == 2
+        assert mgr.ensure_playlist('hidden_gems', '', 1).is_stale is True
+        assert mgr.ensure_playlist('discovery_shuffle', '', 1).is_stale is True
+
+    def test_mark_kinds_stale_only_matching_kinds(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [], kind='hidden_gems')
+        _register_simple_kind(registry, lambda *a, **k: [], kind='popular_picks')
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        mgr.ensure_playlist('popular_picks', '', 1)
+        mgr.mark_kinds_stale(['hidden_gems'])
+        assert mgr.ensure_playlist('hidden_gems', '', 1).is_stale is True
+        assert mgr.ensure_playlist('popular_picks', '', 1).is_stale is False
+
+    def test_mark_kinds_stale_scopes_to_profile(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        mgr.ensure_playlist('hidden_gems', '', 2)
+        mgr.mark_kinds_stale(['hidden_gems'], profile_id=1)
+        assert mgr.ensure_playlist('hidden_gems', '', 1).is_stale is True
+        assert mgr.ensure_playlist('hidden_gems', '', 2).is_stale is False
+
+    def test_refresh_clears_stale_flag(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [_make_track()])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        mgr.mark_kinds_stale(['hidden_gems'])
+        assert mgr.ensure_playlist('hidden_gems', '', 1).is_stale is True
+        record = mgr.refresh_playlist('hidden_gems', '', 1)
+        assert record.is_stale is False
+
+    def test_mark_kinds_stale_empty_list_noop(self, db, registry):
+        _register_simple_kind(registry, lambda *a, **k: [])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.ensure_playlist('hidden_gems', '', 1)
+        n = mgr.mark_kinds_stale([])
+        assert n == 0
+
+
 class TestStalenessHistory:
     def test_recent_track_ids_returns_zero_when_days_zero(self, db, registry):
         _register_simple_kind(registry, lambda *a, **k: [_make_track(sid='spot-1')])

@@ -152,7 +152,13 @@ class PlaylistRecord:
     The live track list is fetched separately via
     ``PersonalizedPlaylistManager.get_playlist_tracks(playlist_id)``
     so list / detail responses can stay cheap when the caller only
-    needs metadata."""
+    needs metadata.
+
+    ``is_stale`` flips to True when the underlying source data
+    changes (e.g. watchlist scan updates the discovery pool) and is
+    cleared on the next successful refresh. Pipelines auto-refresh
+    stale snapshots before syncing so the server playlist always
+    reflects the latest source data."""
 
     id: int
     profile_id: int
@@ -165,6 +171,7 @@ class PlaylistRecord:
     last_synced_at: Optional[str]
     last_generation_source: Optional[str]
     last_generation_error: Optional[str]
+    is_stale: bool = False
 
 
 __all__ = [
