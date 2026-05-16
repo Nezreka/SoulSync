@@ -325,7 +325,7 @@ class TestUniquePath:
 class TestRecordToStatus:
     def test_fields_mapped(self):
         rec = {
-            "original_filename": "B1||Artist - Title",
+            "filename": "B1||Artist - Title",
             "state": "downloading",
             "progress": 0.5,
             "size": 10_000_000,
@@ -718,7 +718,7 @@ class TestStatusInterface:
         engine = MagicMock()
         engine.get_all_records.return_value = {
             "dl-001": {
-                "original_filename": "B1||A - T",
+                "filename": "B1||A - T",
                 "state": "complete",
                 "progress": 1.0,
                 "size": 5_000_000,
