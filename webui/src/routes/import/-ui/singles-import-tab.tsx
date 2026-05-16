@@ -169,13 +169,13 @@ export function SinglesImportPanel({
 }) {
   const selectedCount = files.filter((file) => selected.has(getStagingFileKey(file))).length;
   const allSelected = files.length > 0 && selectedCount === files.length;
-  const processVariant = selectedCount > 0 ? 'primary' : 'default';
+  const processVariant = selectedCount > 0 ? 'primary' : 'secondary';
 
   return (
     <>
       <div className={styles.importPageSinglesHeader}>
         <div className={styles.importPageSinglesActions}>
-          <Button type="button" className={styles.importPageSecondaryBtn} onClick={onSelectAll}>
+          <Button type="button" variant="secondary" size="sm" onClick={onSelectAll}>
             <span id="import-page-select-all-text">
               {allSelected ? 'Deselect All' : 'Select All'}
             </span>
@@ -236,13 +236,14 @@ export function SinglesImportPanel({
                   ) : null}
                 </div>
                 <div className={styles.importPageSingleActions}>
-                  <button
+                  <Button
                     type="button"
-                    className={styles.importPageIdentifyBtn}
+                    variant="secondary"
+                    size="sm"
                     onClick={() => onOpenSearch(file)}
                   >
                     🔍 Identify
-                  </button>
+                  </Button>
                 </div>
                 {openSearchKey === fileKey ? (
                   <SingleSearchPanel
@@ -292,7 +293,8 @@ function SingleSearchPanel({
         />
         <Button
           type="button"
-          className={styles.importPageSingleSearchGo}
+          variant="primary"
+          size="sm"
           onClick={() => onRunSearch(fileKey, query)}
         >
           Search

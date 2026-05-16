@@ -79,9 +79,7 @@ function ImportHeader({
         </h1>
         <Button
           type="button"
-          className={`${styles.importPageRefreshBtn} ${
-            refreshing ? styles.importPageRefreshBtnRefreshing : ''
-          }`}
+          variant="secondary"
           title="Re-scan import folder"
           aria-busy={refreshing}
           disabled={refreshing}
@@ -121,7 +119,8 @@ function ImportProcessingQueue() {
         <span className={styles.importPageQueueTitle}>Processing</span>
         <Button
           type="button"
-          className={styles.importPageQueueClear}
+          variant="ghost"
+          size="sm"
           id="import-page-queue-clear"
           style={{ display: hasFinished ? undefined : 'none' }}
           onClick={clearFinishedJobs}
