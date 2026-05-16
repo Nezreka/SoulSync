@@ -124,6 +124,8 @@ MEDIA_RESPONSE_FLAC = {
         "artist": "Kendrick Lamar",
         "album": "GNX",
         "isrc": "USRC12345678",
+        "trackNumber": "3",
+        "discNumber": "1",
     },
 }
 
@@ -536,6 +538,42 @@ class TestSearchArtists:
             artists = client.search_artists("Kendrick")
         assert isinstance(artists[0], Artist)
 
+    def test_artist_image_from_album(self):
+        resp = {
+            "results": [{"hits": [
+                {"document": {"asin": "A1", "title": "T1", "artistName": "Kendrick Lamar",
+                               "__type": "track", "albumAsin": "B0ABCDE123"}},
+            ]}]
+        }
+        client = _make_client({
+            "amazon-music/search": resp,
+            "amazon-music/metadata": ALBUM_METADATA_RESPONSE,
+        })
+        with patch("core.amazon_client._rate_limit"):
+            artists = client.search_artists("Kendrick")
+        assert artists[0].image_url == "https://example.com/cover.jpg"
+
+    def test_deduplicates_feat_credits(self):
+        resp = {
+            "results": [
+                {
+                    "hits": [
+                        {"document": {"asin": "A1", "title": "T1", "artistName": "Kendrick Lamar", "__type": "track"}},
+                        {"document": {"asin": "A2", "title": "T2", "artistName": "Kendrick Lamar feat. SZA", "__type": "track"}},
+                        {"document": {"asin": "A3", "title": "T3", "artistName": "Kendrick Lamar ft. Drake", "__type": "track"}},
+                        {"document": {"asin": "A4", "title": "T4", "artistName": "SZA featuring Kendrick Lamar", "__type": "track"}},
+                    ]
+                }
+            ]
+        }
+        client = _make_client({"amazon-music/search": resp})
+        with patch("core.amazon_client._rate_limit"):
+            artists = client.search_artists("Kendrick")
+        names = [a.name for a in artists]
+        assert "Kendrick Lamar" in names
+        assert "SZA" in names
+        assert len(artists) == 2
+
     def test_respects_limit(self):
         resp = {
             "results": [
@@ -590,6 +628,43 @@ class TestSearchAlbums:
         with patch("core.amazon_client._rate_limit"):
             albums = client.search_albums("Kendrick")
         assert albums == []
+
+    def test_strips_explicit_from_album_name(self):
+        resp = {
+            "results": [{"hits": [
+                {"document": {**ALBUM_DOC, "albumName": "GNX (Explicit)", "title": "GNX (Explicit)"}},
+            ]}]
+        }
+        client = _make_client({"amazon-music/search": resp})
+        with patch("core.amazon_client._rate_limit"):
+            albums = client.search_albums("GNX")
+        assert albums[0].name == "GNX"
+
+    def test_keeps_clean_suffix(self):
+        resp = {
+            "results": [{"hits": [
+                {"document": {**ALBUM_DOC, "albumName": "GNX [Clean]", "title": "GNX [Clean]"}},
+            ]}]
+        }
+        client = _make_client({"amazon-music/search": resp})
+        with patch("core.amazon_client._rate_limit"):
+            albums = client.search_albums("GNX")
+        assert albums[0].name == "GNX [Clean]"
+
+    def test_deduplicates_explicit_clean_as_separate(self):
+        resp = {
+            "results": [{"hits": [
+                {"document": {**ALBUM_DOC, "asin": "B1", "albumAsin": "B1", "albumName": "GNX (Explicit)", "title": "GNX (Explicit)"}},
+                {"document": {**ALBUM_DOC, "asin": "B2", "albumAsin": "B2", "albumName": "GNX [Clean]", "title": "GNX [Clean]"}},
+            ]}]
+        }
+        client = _make_client({"amazon-music/search": resp})
+        with patch("core.amazon_client._rate_limit"):
+            albums = client.search_albums("GNX")
+        names = [a.name for a in albums]
+        assert "GNX" in names        # explicit stripped
+        assert "GNX [Clean]" in names
+        assert len(albums) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +841,8 @@ class TestGetAlbumTracks:
         assert item["id"] == "B09XYZ1234"
         assert item["name"] == "Not Like Us"
         assert item["isrc"] == "USRC12345678"
+        assert item["track_number"] == 3
+        assert item["disc_number"] == 1
 
     def test_returns_none_on_api_error(self):
         client = _make_client()
