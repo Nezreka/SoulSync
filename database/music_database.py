@@ -752,13 +752,21 @@ class MusicDatabase:
                 )
             """)
 
+            # Personalized-playlists subsystem schema (Group A + Group B
+            # unified storage). Idempotent — safe on every startup.
+            try:
+                from database.personalized_schema import ensure_personalized_schema
+                ensure_personalized_schema(conn)
+            except Exception as ps_err:
+                logger.error(f"Personalized-playlist schema init failed: {ps_err}")
+
             conn.commit()
             logger.info("Database initialized successfully")
 
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
-    
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
