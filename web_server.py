@@ -26856,9 +26856,12 @@ def _build_personalized_manager():
 
 @app.route('/api/personalized/kinds', methods=['GET'])
 def personalized_list_kinds():
-    """List every registered personalized-playlist kind."""
+    """List every registered personalized-playlist kind. Includes the
+    resolved variant list per kind that supports variants so the UI
+    can render kind+variant checkboxes without per-kind round-trips."""
     try:
-        return jsonify(_personalized_api.list_kinds())
+        manager = _build_personalized_manager()
+        return jsonify(_personalized_api.list_kinds(manager=manager))
     except Exception as e:
         logger.error(f"Personalized kinds list error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
