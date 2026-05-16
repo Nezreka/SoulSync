@@ -375,20 +375,16 @@ class AmazonDownloadClient(DownloadSourcePlugin):
     async def get_all_downloads(self) -> List[DownloadStatus]:
         if self._engine is None:
             return []
-        try:
-            records = self._engine.get_all_records("amazon")
-            return [self._record_to_status(dl_id, rec) for dl_id, rec in records.items()]
-        except Exception:
-            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('amazon')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
         if self._engine is None:
             return None
-        try:
-            rec = self._engine.get_record("amazon", download_id)
-            return self._record_to_status(download_id, rec) if rec is not None else None
-        except Exception:
-            return None
+        record = self._engine.get_record('amazon', download_id)
+        return self._record_to_status(record) if record is not None else None
 
     async def cancel_download(
         self,
@@ -398,19 +394,21 @@ class AmazonDownloadClient(DownloadSourcePlugin):
     ) -> bool:
         if self._engine is None:
             return False
-        try:
-            return self._engine.cancel_record("amazon", download_id, remove=remove)
-        except Exception:
+        if self._engine.get_record('amazon', download_id) is None:
             return False
+        self._engine.update_record('amazon', download_id, {'state': 'Cancelled'})
+        if remove:
+            self._engine.remove_record('amazon', download_id)
+        return True
 
     async def clear_all_completed_downloads(self) -> bool:
         if self._engine is None:
-            return False
-        try:
-            self._engine.clear_completed("amazon")
             return True
-        except Exception:
-            return False
+        terminal = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+        for record in list(self._engine.iter_records_for_source('amazon')):
+            if record.get('state') in terminal:
+                self._engine.remove_record('amazon', record['id'])
+        return True
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -428,16 +426,16 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         return path.with_name(f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")
 
     @staticmethod
-    def _record_to_status(download_id: str, rec: Dict[str, Any]) -> DownloadStatus:
+    def _record_to_status(rec: Dict[str, Any]) -> DownloadStatus:
         return DownloadStatus(
-            id=download_id,
-            filename=str(rec.get("filename", "")),
-            username="amazon",
-            state=str(rec.get("state", "queued")),
-            progress=float(rec.get("progress", 0.0)),
-            size=int(rec.get("size", 0)),
-            transferred=int(rec.get("transferred", 0)),
-            speed=int(rec.get("speed", 0)),
-            time_remaining=rec.get("time_remaining"),
-            file_path=rec.get("file_path"),
+            id=str(rec.get('id', '')),
+            filename=str(rec.get('filename', '')),
+            username='amazon',
+            state=str(rec.get('state', 'queued')),
+            progress=float(rec.get('progress', 0.0)),
+            size=int(rec.get('size', 0)),
+            transferred=int(rec.get('transferred', 0)),
+            speed=int(rec.get('speed', 0)),
+            time_remaining=rec.get('time_remaining'),
+            file_path=rec.get('file_path'),
         )
