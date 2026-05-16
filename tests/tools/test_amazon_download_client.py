@@ -679,6 +679,29 @@ class TestDownloadDispatch:
         assert call[1]["target_id"] == "B09XYZ1234"
         assert call[1]["display_name"] == "Artist - Title"
 
+    def test_set_engine_wires_engine(self, tmp_path):
+        client = _make_client(tmp_path)
+        assert client._engine is None
+        engine = MagicMock()
+        client.set_engine(engine)
+        assert client._engine is engine
+
+    def test_set_shutdown_check_wires_callback(self, tmp_path):
+        client = _make_client(tmp_path)
+        assert client.shutdown_check is None
+        check = lambda: False
+        client.set_shutdown_check(check)
+        assert client.shutdown_check is check
+
+    def test_set_engine_allows_download_dispatch(self, tmp_path):
+        """set_engine() must unblock download() — the live failure mode."""
+        client = _make_client(tmp_path)
+        engine = MagicMock()
+        engine.worker.dispatch.return_value = "dl-wired"
+        client.set_engine(engine)
+        result = run(client.download("amazon", "B09XYZ1234||Artist - Title"))
+        assert result == "dl-wired"
+
 
 # ---------------------------------------------------------------------------
 # Status interface

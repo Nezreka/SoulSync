@@ -95,6 +95,13 @@ class AmazonDownloadClient(DownloadSourcePlugin):
     # DownloadSourcePlugin — lifecycle
     # ------------------------------------------------------------------
 
+    def set_engine(self, engine) -> None:
+        """Engine callback — wires the central thread worker + state store."""
+        self._engine = engine
+
+    def set_shutdown_check(self, check_callable) -> None:
+        self.shutdown_check = check_callable
+
     def is_configured(self) -> bool:
         # T2Tunes has a public default instance; no credentials required.
         # Return True unconditionally so the source shows as available.
