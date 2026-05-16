@@ -38,6 +38,7 @@ each other.)"""
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -245,16 +246,89 @@ def _build_payloads_for_kinds(
 def _track_to_sync_shape(track: Any) -> Dict[str, Any]:
     """Convert a personalized.types.Track into the dict shape
     `_run_sync_task` expects. Mirrors what the mirrored pipeline
-    builds from extra_data.matched_data — name/artists/album/duration/id."""
+    builds from extra_data.matched_data, preserving enriched metadata
+    from personalized snapshots when available."""
     primary_id = track.spotify_track_id or track.itunes_track_id or track.deezer_track_id or ''
-    artists = [{'name': track.artist_name}]
-    return {
-        'name': track.track_name,
-        'artists': artists,
-        'album': {'name': track.album_name or ''},
-        'duration_ms': int(track.duration_ms or 0),
-        'id': primary_id,
-    }
+    rich_data = _coerce_track_data_json(getattr(track, 'track_data_json', None))
+
+    if not rich_data:
+        album = {'name': track.album_name or ''}
+        cover_url = getattr(track, 'album_cover_url', None)
+        if cover_url:
+            album['images'] = [{'url': cover_url}]
+        return {
+            'name': track.track_name,
+            'artists': [{'name': track.artist_name}],
+            'album': album,
+            'duration_ms': int(track.duration_ms or 0),
+            'id': primary_id,
+        }
+
+    payload = dict(rich_data)
+    cover_url = (
+        getattr(track, 'album_cover_url', None)
+        or payload.get('album_cover_url')
+        or payload.get('image_url')
+    )
+    payload['id'] = payload.get('id') or primary_id
+    payload['name'] = payload.get('name') or track.track_name
+    payload['artists'] = _normalize_artists(payload.get('artists'), track.artist_name)
+    payload['album'] = _normalize_album(payload.get('album'), track, cover_url=cover_url)
+    payload['duration_ms'] = int(payload.get('duration_ms') or track.duration_ms or 0)
+    if 'popularity' not in payload and getattr(track, 'popularity', None) is not None:
+        payload['popularity'] = int(track.popularity or 0)
+
+    if cover_url and not payload.get('image_url'):
+        payload['image_url'] = cover_url
+
+    return payload
+
+
+def _coerce_track_data_json(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+    return {}
+
+
+def _normalize_artists(artists: Any, fallback_artist: str) -> List[Dict[str, Any]]:
+    if not artists:
+        return [{'name': fallback_artist or 'Unknown Artist'}]
+    if isinstance(artists, list):
+        normalized = []
+        for artist in artists:
+            if isinstance(artist, dict):
+                normalized.append(artist if artist.get('name') else {'name': str(artist)})
+            elif isinstance(artist, str):
+                normalized.append({'name': artist})
+            else:
+                normalized.append({'name': str(artist)})
+        return normalized or [{'name': fallback_artist or 'Unknown Artist'}]
+    if isinstance(artists, dict):
+        return [artists if artists.get('name') else {'name': str(artists)}]
+    return [{'name': str(artists)}]
+
+
+def _normalize_album(album: Any, track: Any, cover_url: Optional[str] = None) -> Dict[str, Any]:
+    if isinstance(album, dict):
+        normalized = dict(album)
+    else:
+        normalized = {'name': str(album) if album else (track.album_name or '')}
+
+    normalized['name'] = normalized.get('name') or track.album_name or ''
+    images = normalized.get('images')
+    if not isinstance(images, list):
+        images = []
+    if cover_url and not images:
+        images = [{'url': cover_url}]
+    if images:
+        normalized['images'] = images
+    return normalized
 
 
 def _sync_personalized_playlist(deps: AutomationDeps, payload: Dict[str, Any]) -> Dict[str, Any]:

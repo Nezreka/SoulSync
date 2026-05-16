@@ -121,6 +121,48 @@ class TestTrackToSyncShape:
                              deezer_track_id=None, duration_ms=0)
         assert _track_to_sync_shape(t)['id'] == ''
 
+    def test_preserves_enriched_track_data_for_wishlist_metadata(self):
+        track = SimpleNamespace(
+            track_name='Bare Name', artist_name='Bare Artist', album_name='Bare Album',
+            spotify_track_id='sp-rich', itunes_track_id=None, deezer_track_id=None,
+            album_cover_url=None, duration_ms=200000, popularity=33,
+            track_data_json={
+                'id': 'sp-rich',
+                'name': 'Rich Name',
+                'artists': [{'name': 'Rich Artist', 'id': 'artist-1'}],
+                'album': {
+                    'id': 'album-1',
+                    'name': 'Rich Album',
+                    'images': [{'url': 'https://example.test/cover.jpg'}],
+                },
+                'duration_ms': 201000,
+                'preview_url': 'https://example.test/preview.mp3',
+            },
+        )
+
+        out = _track_to_sync_shape(track)
+
+        assert out['name'] == 'Rich Name'
+        assert out['artists'][0] == {'name': 'Rich Artist', 'id': 'artist-1'}
+        assert out['album']['id'] == 'album-1'
+        assert out['album']['images'][0]['url'] == 'https://example.test/cover.jpg'
+        assert out['preview_url'] == 'https://example.test/preview.mp3'
+
+    def test_album_cover_url_fills_album_images_when_no_rich_blob(self):
+        track = SimpleNamespace(
+            track_name='Song', artist_name='Artist', album_name='Album',
+            spotify_track_id='sp-1', itunes_track_id=None, deezer_track_id=None,
+            album_cover_url='https://example.test/fallback.jpg',
+            duration_ms=200000, track_data_json=None,
+        )
+
+        out = _track_to_sync_shape(track)
+
+        assert out['album'] == {
+            'name': 'Album',
+            'images': [{'url': 'https://example.test/fallback.jpg'}],
+        }
+
 
 # ─── Empty / config validation ──────────────────────────────────────
 
