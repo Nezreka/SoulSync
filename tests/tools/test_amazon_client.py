@@ -126,6 +126,7 @@ MEDIA_RESPONSE_FLAC = {
         "isrc": "USRC12345678",
         "trackNumber": "3",
         "discNumber": "1",
+        "date": "2024-11-22",
     },
 }
 
@@ -809,6 +810,13 @@ class TestGetAlbum:
         with patch("core.amazon_client._rate_limit"):
             album = client.get_album("B0ABCDE123", include_tracks=False)
         assert "tracks" not in album
+
+    def test_release_date_backfilled_from_stream_tags(self):
+        # ALBUM_METADATA_RESPONSE has no release_date — should fall back to track date tag
+        client = self._client()
+        with patch("core.amazon_client._rate_limit"):
+            album = client.get_album("B0ABCDE123")
+        assert album["release_date"] == "2024-11-22"
 
     def test_returns_none_on_empty_albumlist(self):
         client = _make_client({"amazon-music/metadata": {"albumList": []}})
