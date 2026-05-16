@@ -214,7 +214,7 @@ export function SinglesImportPanel({
                   </div>
                   {manualMatch ? (
                     <div className={styles.importPageSingleMatchedInfo}>
-                      OK {manualMatch.name} - {manualMatch.artist}
+                      ✓ {manualMatch.name} - {manualMatch.artist}
                       <button
                         type="button"
                         className={styles.importPageSingleMatchedChange}
@@ -231,7 +231,7 @@ export function SinglesImportPanel({
                     className={styles.importPageIdentifyBtn}
                     onClick={() => onOpenSearch(index)}
                   >
-                    Search Identify
+                    🔍 Identify
                   </button>
                 </div>
                 {openSearchIndex === index ? (

@@ -417,7 +417,7 @@ function AutoImportResultCard({
               onError={fallbackImage}
             />
           ) : (
-            <div className={styles.autoImportCardArtFallback}>Album</div>
+            <div className={styles.autoImportCardArtFallback}>💿</div>
           )}
         </div>
         <div className={styles.autoImportCardCenter}>

@@ -156,7 +156,7 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
           onError={fallbackImage}
         />
       ) : (
-        <div className={`${styles.importPageQueueArt} ${styles.importPageQueueArtEmpty}`}>A</div>
+        <div className={`${styles.importPageQueueArt} ${styles.importPageQueueArtEmpty}`}>♪</div>
       )}
       <div className={styles.importPageQueueInfo}>
         <div className={styles.importPageQueueName}>{entry.label}</div>
