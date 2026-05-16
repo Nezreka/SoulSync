@@ -81,6 +81,7 @@ def _hydrate_seasonal_tracks(db, season_key: str, source: str, track_ids: List[s
                 ('spotify_track_id', 'track_name', 'artist_name', 'album_name',
                  'album_cover_url', 'duration_ms', 'popularity', 'track_data_json'),
                 r,
+                strict=False,
             ))
         td = r.get('track_data_json')
         if isinstance(td, str):
