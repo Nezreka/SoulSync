@@ -14,6 +14,7 @@ import {
   OptionCardGroup,
   RangeInput,
   Select,
+  Switch,
   TextArea,
   TextInput,
 } from './form';
@@ -25,6 +26,7 @@ function FormDemo() {
   const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [status, setStatus] = useState('open');
   const [archive, setArchive] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [confidence, setConfidence] = useState(90);
 
   return (
@@ -98,6 +100,10 @@ function FormDemo() {
         <Checkbox checked={archive} onCheckedChange={setArchive} />
       </FormField>
 
+      <FormField label="Enabled" helperText="Shared switch primitive">
+        <Switch checked={enabled} onCheckedChange={setEnabled} />
+      </FormField>
+
       <FormField label="Confidence" helperText="Shared range primitive">
         <RangeInput
           label="Confidence"
@@ -136,6 +142,11 @@ describe('form primitives', () => {
     expect(archiveCheckbox).not.toBeChecked();
     fireEvent.click(archiveCheckbox);
     expect(archiveCheckbox).toBeChecked();
+
+    const enabledSwitch = screen.getByRole('switch', { name: 'Enabled' });
+    expect(enabledSwitch).toBeChecked();
+    fireEvent.click(enabledSwitch);
+    expect(enabledSwitch).not.toBeChecked();
 
     const confidenceSlider = screen.getByLabelText('Confidence', { selector: 'input' });
     expect(confidenceSlider).toHaveValue('90');

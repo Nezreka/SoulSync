@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { Button, RangeInput, Select } from '@/components/form/form';
+import { Button, RangeInput, Select, Switch } from '@/components/form/form';
 
 import type {
   ImportAutoFilter,
@@ -155,17 +155,16 @@ export function AutoImportPanel({
     <>
       <div className={styles.autoImportControls}>
         <div className={styles.autoImportToggleRow}>
-          <label className={styles.autoImportToggleLabel}>
-            <input
-              type="checkbox"
-              id="auto-import-enabled"
+          <div className={styles.autoImportToggleLabel}>
+            <Switch
               checked={Boolean(statusQuery.data?.running)}
               disabled={toggleMutation.isPending}
-              onChange={(event) => toggleMutation.mutate(event.target.checked)}
+              aria-labelledby="auto-import-toggle-label"
+              id="auto-import-enabled"
+              onCheckedChange={(checked) => toggleMutation.mutate(checked)}
             />
-            <span className={styles.autoImportToggleSlider} />
-            <span>Auto-Import</span>
-          </label>
+            <span id="auto-import-toggle-label">Auto-Import</span>
+          </div>
           <span
             className={`${styles.autoImportStatus} ${styles[statusClassName]}`}
             id="auto-import-status-text"
