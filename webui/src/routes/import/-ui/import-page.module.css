@@ -637,53 +637,6 @@
   margin-top: 2px;
 }
 
-.importPageSingleCheckboxInput {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  margin: 0;
-}
-
-.importPageSingleCheckbox {
-  width: 18px;
-  height: 18px;
-  box-sizing: border-box;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  background: transparent;
-  padding: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.importPageSingleCheckbox::after {
-  content: '✓';
-  color: #000;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  opacity: 0;
-  transform: translateY(-0.5px) scaleX(1.18);
-}
-
-.importPageSingleCheckboxInput:focus-visible + .importPageSingleCheckbox {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.14);
-}
-
-.importPageSingleCheckboxInput:checked + .importPageSingleCheckbox {
-  background: rgb(var(--accent-light-rgb));
-  border-color: rgb(var(--accent-light-rgb));
-}
-
-.importPageSingleCheckboxInput:checked + .importPageSingleCheckbox::after {
-  opacity: 1;
-}
-
 .importPageSingleInfo {
   grid-column: 2;
   min-width: 0;
@@ -1199,23 +1152,19 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-.autoImportSettingsRow label {
+.autoImportSetting {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.autoImportSettingsRow input[type='range'] {
-  width: 100px;
-}
-.autoImportSettingsRow select {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-radius: 6px;
-  padding: 3px 8px;
-  font-size: 12px;
-}
 
+.autoImportConfidenceValue {
+  display: inline-block;
+  flex: 0 0 5ch;
+  width: 5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .autoImportEmpty {
   text-align: center;
   padding: 40px 20px;
@@ -1468,12 +1417,6 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 9px 18px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
   letter-spacing: 0.1px;

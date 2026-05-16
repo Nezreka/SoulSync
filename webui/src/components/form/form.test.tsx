@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   Button,
+  Checkbox,
   FormActions,
   FormError,
   FormField,
@@ -11,6 +12,7 @@ import {
   OptionButtonGroup,
   OptionCard,
   OptionCardGroup,
+  RangeInput,
   Select,
   TextArea,
   TextInput,
@@ -22,6 +24,8 @@ function FormDemo() {
   const [category, setCategory] = useState<'wrong_cover' | 'wrong_metadata'>('wrong_cover');
   const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [status, setStatus] = useState('open');
+  const [archive, setArchive] = useState(false);
+  const [confidence, setConfidence] = useState(90);
 
   return (
     <form>
@@ -90,6 +94,20 @@ function FormDemo() {
         </Select>
       </FormField>
 
+      <FormField label="Archive" helperText="Shared checkbox primitive">
+        <Checkbox checked={archive} onCheckedChange={setArchive} />
+      </FormField>
+
+      <FormField label="Confidence" helperText="Shared range primitive">
+        <RangeInput
+          label="Confidence"
+          min={50}
+          max={100}
+          value={confidence}
+          onValueChange={setConfidence}
+        />
+      </FormField>
+
       <FormError message="Validation failed" />
 
       <FormActions>
@@ -111,6 +129,16 @@ describe('form primitives', () => {
     expect(screen.getByLabelText('Status')).toHaveValue('open');
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'resolved' } });
     expect(screen.getByLabelText('Status')).toHaveValue('resolved');
+
+    const archiveCheckbox = screen.getByRole('checkbox', { name: 'Archive' });
+    expect(archiveCheckbox).not.toBeChecked();
+    fireEvent.click(archiveCheckbox);
+    expect(archiveCheckbox).toBeChecked();
+
+    const confidenceSlider = screen.getByLabelText('Confidence', { selector: 'input' });
+    expect(confidenceSlider).toHaveValue('90');
+    fireEvent.change(confidenceSlider, { target: { value: '75' } });
+    expect(confidenceSlider).toHaveValue('75');
 
     const wrongCover = screen.getByRole('button', { name: /wrong cover/i });
     const wrongMetadata = screen.getByRole('button', { name: /wrong metadata/i });

@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { type DragEvent, type KeyboardEvent, useState } from 'react';
 
+import { Button, TextInput } from '@/components/form/form';
+
 import type { ImportAlbumResult } from '../-import.types';
 import styles from './import-page.module.css';
 
@@ -285,7 +287,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
         )}
 
         <div className={styles.importPageSearchBar}>
-          <input
+          <TextInput
             type="text"
             id="import-page-album-search-input"
             className={styles.importPageSearchInput}
@@ -296,10 +298,10 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
               if (event.key === 'Enter') onRunSearch();
             }}
           />
-          <button type="button" className={styles.importPageSearchBtn} onClick={onRunSearch}>
+          <Button type="button" className={styles.importPageSearchBtn} onClick={onRunSearch}>
             Search
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             className={`${styles.importPageClearBtn} ${albumResults === null ? styles.hidden : ''}`}
             id="import-page-album-clear-btn"
@@ -307,7 +309,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
             onClick={onBackToSearch}
           >
             x
-          </button>
+          </Button>
         </div>
 
         <div className={styles.importPageAlbumGrid} id="import-page-album-results">
@@ -431,20 +433,20 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
       <div className={styles.importPageMatchHeader}>
         <h3>Track Matching</h3>
         <div className={styles.importPageMatchActions}>
-          <button
+          <Button
             type="button"
             className={styles.importPageSecondaryBtn}
             onClick={onAutoRematch}
           >
             Re-match Automatically
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             className={styles.importPageBackBtn}
             onClick={onBackToSearch}
           >
             Back to Search
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -504,7 +506,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
               </span>
               <span>
                 {file ? (
-                  <button
+                  <Button
                     type="button"
                     className={styles.importPageMatchUnmatch}
                     onClick={(event) => {
@@ -513,7 +515,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
                     }}
                   >
                     x
-                  </button>
+                  </Button>
                 ) : null}
               </span>
             </div>
@@ -564,7 +566,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
         <div className={styles.importPageMatchStats} id="import-page-match-stats">
           {matchedCount} of {albumMatch.matches?.length ?? 0} tracks matched
         </div>
-        <button
+        <Button
           type="button"
           className={styles.importPageProcessBtn}
           id="import-page-album-process-btn"
@@ -572,7 +574,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
           onClick={onProcessAlbum}
         >
           Process {matchedCount} Track{matchedCount === 1 ? '' : 's'}
-        </button>
+        </Button>
       </div>
     </>
   ) : (

@@ -1,10 +1,13 @@
 import { Button as BaseButton } from '@base-ui/react/button';
+import { Checkbox as BaseCheckbox } from '@base-ui/react/checkbox';
 import { Field } from '@base-ui/react/field';
 import { Input as BaseInput } from '@base-ui/react/input';
+import { Slider } from '@base-ui/react/slider';
 import { Toggle as BaseToggle } from '@base-ui/react/toggle';
 import clsx from 'clsx';
 import {
   forwardRef,
+  type CSSProperties,
   type ComponentPropsWithoutRef,
   type ButtonHTMLAttributes,
   type SelectHTMLAttributes,
@@ -80,6 +83,84 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   ref,
 ) {
   return <select ref={ref} className={clsx(styles.select, className)} {...props} />;
+});
+
+type BaseCheckboxProps = ComponentPropsWithoutRef<typeof BaseCheckbox.Root>;
+
+export type CheckboxProps = Omit<BaseCheckboxProps, 'className' | 'children'> & {
+  className?: string;
+};
+
+export const Checkbox = forwardRef<HTMLElement, CheckboxProps>(function Checkbox(
+  { className, ...props },
+  ref,
+) {
+  return (
+    <BaseCheckbox.Root ref={ref} className={clsx(styles.checkbox, className)} {...props}>
+      <BaseCheckbox.Indicator className={styles.checkboxIndicator}>
+        <span className={styles.checkboxIcon} aria-hidden="true">
+          ✓
+        </span>
+      </BaseCheckbox.Indicator>
+    </BaseCheckbox.Root>
+  );
+});
+
+export interface RangeInputProps {
+  className?: string;
+  disabled?: boolean;
+  defaultValue?: number;
+  label?: ReactNode;
+  max?: number;
+  min?: number;
+  name?: string;
+  step?: number;
+  style?: CSSProperties;
+  value?: number;
+  onValueChange?: (value: number) => void;
+}
+
+export const RangeInput = forwardRef<HTMLDivElement, RangeInputProps>(function RangeInput(
+  {
+    className,
+    defaultValue,
+    disabled,
+    label,
+    max = 100,
+    min = 0,
+    name,
+    onValueChange,
+    step = 1,
+    style,
+    value,
+  },
+  ref,
+) {
+  return (
+    <Slider.Root
+      ref={ref}
+      className={clsx(styles.rangeRoot, className)}
+      min={min}
+      max={max}
+      thumbAlignment="edge"
+      style={style}
+      disabled={disabled}
+      name={name}
+      step={step}
+      value={value}
+      defaultValue={defaultValue}
+      onValueChange={(nextValue) => {
+        onValueChange?.(Array.isArray(nextValue) ? nextValue[0] : nextValue);
+      }}
+    >
+      <Slider.Control className={styles.rangeControl}>
+        <Slider.Track className={styles.rangeTrack}>
+          <Slider.Indicator className={styles.rangeIndicator} />
+          <Slider.Thumb aria-label={typeof label === 'string' ? label : undefined} className={styles.rangeThumb} />
+        </Slider.Track>
+      </Slider.Control>
+    </Slider.Root>
+  );
 });
 
 export function OptionCardGroup({

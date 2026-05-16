@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 
+import { Button, Checkbox, TextInput } from '@/components/form/form';
+
 import type { SingleSearchState } from '../-import.store';
 import type { ImportTrackResult } from '../-import.types';
 import type { ImportStagingFile } from '../-import.types';
@@ -172,12 +174,12 @@ export function SinglesImportPanel({
     <>
       <div className={styles.importPageSinglesHeader}>
         <div className={styles.importPageSinglesActions}>
-          <button type="button" className={styles.importPageSecondaryBtn} onClick={onSelectAll}>
+          <Button type="button" className={styles.importPageSecondaryBtn} onClick={onSelectAll}>
             <span id="import-page-select-all-text">
               {allSelected ? 'Deselect All' : 'Select All'}
             </span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             className={styles.importPageProcessBtn}
             id="import-page-singles-process-btn"
@@ -185,7 +187,7 @@ export function SinglesImportPanel({
             onClick={onProcessSingles}
           >
             Process Selected ({selectedCount})
-          </button>
+          </Button>
         </div>
       </div>
       <div className={styles.importPageSinglesList} id="import-page-singles-list">
@@ -206,14 +208,11 @@ export function SinglesImportPanel({
                 data-single-key={fileKey}
               >
                 <label className={styles.importPageSingleCheckboxWrap}>
-                  <input
-                    type="checkbox"
-                    aria-label={`Select ${file.filename}`}
-                    className={styles.importPageSingleCheckboxInput}
+                  <Checkbox
                     checked={isSelected}
-                    onChange={() => onToggleSingle(fileKey)}
+                    aria-label={`Select ${file.filename}`}
+                    onCheckedChange={() => onToggleSingle(fileKey)}
                   />
-                  <span className={styles.importPageSingleCheckbox} aria-hidden="true" />
                 </label>
                 <div className={styles.importPageSingleInfo}>
                   <div className={styles.importPageSingleFilename}>{file.filename}</div>
@@ -280,7 +279,7 @@ function SingleSearchPanel({
   return (
     <div className={styles.importPageSingleSearchPanel}>
       <div className={styles.importPageSingleSearchBar}>
-        <input
+        <TextInput
           type="text"
           className={styles.importPageSingleSearchInput}
           value={query}
@@ -290,13 +289,13 @@ function SingleSearchPanel({
             if (event.key === 'Enter') onRunSearch(fileKey, query);
           }}
         />
-        <button
+        <Button
           type="button"
           className={styles.importPageSingleSearchGo}
           onClick={() => onRunSearch(fileKey, query)}
         >
           Search
-        </button>
+        </Button>
       </div>
       <div className={styles.importPageSingleSearchResults}>
         {searchState?.loading ? (

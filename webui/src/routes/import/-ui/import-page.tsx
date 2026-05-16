@@ -1,6 +1,7 @@
 import { Link, Outlet } from '@tanstack/react-router';
 
 import { Show } from '@/components/primitives';
+import { Button } from '@/components/form/form';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ImportQueueEntry } from '../-import.types';
@@ -76,7 +77,7 @@ function ImportHeader({
           <img src="/static/import.png" className="page-header-icon" alt="" />
           <span>Import Music</span>
         </h1>
-        <button
+        <Button
           type="button"
           className={`${styles.importPageRefreshBtn} ${
             refreshing ? styles.importPageRefreshBtnRefreshing : ''
@@ -88,7 +89,7 @@ function ImportHeader({
         >
           <RefreshIcon />
           {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
+        </Button>
       </div>
       <div className={styles.importPageStagingBar} id="import-staging-bar">
         <span className={styles.importStagingPath} id="import-page-staging-path">
@@ -118,7 +119,7 @@ function ImportProcessingQueue() {
     >
       <div className={styles.importPageQueueHeader}>
         <span className={styles.importPageQueueTitle}>Processing</span>
-        <button
+        <Button
           type="button"
           className={styles.importPageQueueClear}
           id="import-page-queue-clear"
@@ -126,7 +127,7 @@ function ImportProcessingQueue() {
           onClick={clearFinishedJobs}
         >
           Clear finished
-        </button>
+        </Button>
       </div>
       <div className={styles.importPageQueueList} id="import-page-queue-list">
         {queue.map((entry) => (
