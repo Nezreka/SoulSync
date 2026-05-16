@@ -3415,7 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.5.3': [
         { unreleased: true },
-        { title: 'Amazon Music Download Source', desc: 'new download source backed by T2Tunes proxy. searches the Amazon Music catalog, downloads 24-bit/48kHz FLAC (or Opus 320kbps / Dolby Atmos EAC3 fallback). codec waterfall mirrors the same pattern as Tidal/Qobuz — best quality first, auto-fallback. not yet wired into the main source selector — coming in a follow-up PR.', page: 'settings' },
+        { title: 'Amazon Music Download Source', desc: 'new download source backed by T2Tunes proxy. searches the Amazon Music catalog, downloads 24-bit/48kHz FLAC (or Opus 320kbps / Dolby Atmos EAC3 fallback). codec waterfall mirrors Tidal/Qobuz — best quality first, auto-fallback. selectable as a standalone or hybrid source from Settings.', page: 'settings' },
     ],
     '2.5.2': [
         // --- May 13, 2026 — 2.5.2 release ---

@@ -59,6 +59,7 @@ def _import_plugin_classes():
     from core.deezer_download_client import DeezerDownloadClient
     from core.lidarr_download_client import LidarrDownloadClient
     from core.soundcloud_client import SoundcloudClient
+    from core.amazon_download_client import AmazonDownloadClient
 
     return {
         'soulseek': SoulseekClient,
@@ -69,10 +70,11 @@ def _import_plugin_classes():
         'deezer': DeezerDownloadClient,
         'lidarr': LidarrDownloadClient,
         'soundcloud': SoundcloudClient,
+        'amazon': AmazonDownloadClient,
     }
 
 
-def test_default_registry_registers_all_eight_sources():
+def test_default_registry_registers_all_sources():
     """Smoke check that the foundation registry knows about every
     source the orchestrator historically dispatched to. If someone
     drops a registration here, every other test in this module would
@@ -82,7 +84,7 @@ def test_default_registry_registers_all_eight_sources():
     registry = build_default_registry()
     expected = {
         'soulseek', 'youtube', 'tidal', 'qobuz',
-        'hifi', 'deezer', 'lidarr', 'soundcloud',
+        'hifi', 'deezer', 'lidarr', 'soundcloud', 'amazon',
     }
     assert set(registry.names()) == expected
 
@@ -102,7 +104,7 @@ def test_deezer_dl_alias_is_registered_against_deezer_spec():
 
 @pytest.mark.parametrize('plugin_name', [
     'soulseek', 'youtube', 'tidal', 'qobuz',
-    'hifi', 'deezer', 'lidarr', 'soundcloud',
+    'hifi', 'deezer', 'lidarr', 'soundcloud', 'amazon',
 ])
 def test_plugin_class_has_all_required_methods(plugin_name):
     """Every registered plugin class exposes every protocol method
@@ -122,7 +124,7 @@ def test_plugin_class_has_all_required_methods(plugin_name):
 
 @pytest.mark.parametrize('plugin_name', [
     'soulseek', 'youtube', 'tidal', 'qobuz',
-    'hifi', 'deezer', 'lidarr', 'soundcloud',
+    'hifi', 'deezer', 'lidarr', 'soundcloud', 'amazon',
 ])
 def test_plugin_class_async_methods_are_coroutines(plugin_name):
     """Methods declared async in the protocol must be async on every

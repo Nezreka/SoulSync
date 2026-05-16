@@ -294,7 +294,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 source_clients = {
                     name: orch.client(name)
                     for name in ('soulseek', 'youtube', 'tidal', 'qobuz',
-                                 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
+                                 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
                 }
 
                 # The orchestrator tried sources in order but stopped at the first with results.
