@@ -1,9 +1,9 @@
 import { Link, Outlet } from '@tanstack/react-router';
 
+import { Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ImportQueueEntry } from '../-import.types';
-import styles from './import-page.module.css';
 
 import {
   getQueueProgressPercent,
@@ -11,12 +11,16 @@ import {
   getStagingStatsText,
 } from '../-import.helpers';
 import { useImportQueueWorkflow } from '../-import.store';
+import styles from './import-page.module.css';
 import { fallbackImage, RefreshIcon, useImportStaging } from './import-shared';
 
 export function ImportPage() {
   useReactPageShell('import');
 
   const { refreshStaging, stagingFiles, stagingPath, stagingQuery } = useImportStaging();
+  const isRefreshing = stagingQuery.isRefetching;
+  const lastRefreshedAt =
+    stagingQuery.dataUpdatedAt > 0 ? formatShortTime(stagingQuery.dataUpdatedAt) : null;
 
   return (
     <div id="import-page" data-testid="import-page">
@@ -26,6 +30,8 @@ export function ImportPage() {
           fileCountText={getStagingStatsText(stagingFiles)}
           loading={stagingQuery.isLoading}
           stagingPath={stagingPath}
+          refreshing={isRefreshing}
+          lastRefreshedAt={lastRefreshedAt}
           onRefresh={refreshStaging}
         />
         <ImportProcessingQueue />
@@ -38,17 +44,29 @@ export function ImportPage() {
   );
 }
 
+function formatShortTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function ImportHeader({
   error,
   fileCountText,
   loading,
   stagingPath,
+  refreshing,
+  lastRefreshedAt,
   onRefresh,
 }: {
   error: unknown;
   fileCountText: string;
   loading: boolean;
   stagingPath: string;
+  refreshing: boolean;
+  lastRefreshedAt: string | null;
   onRefresh: () => void;
 }) {
   return (
@@ -60,18 +78,27 @@ function ImportHeader({
         </h1>
         <button
           type="button"
-          className={styles.importPageRefreshBtn}
+          className={`${styles.importPageRefreshBtn} ${
+            refreshing ? styles.importPageRefreshBtnRefreshing : ''
+          }`}
           title="Re-scan import folder"
+          aria-busy={refreshing}
+          disabled={refreshing}
           onClick={onRefresh}
         >
           <RefreshIcon />
-          Refresh
+          {refreshing ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
       <div className={styles.importPageStagingBar} id="import-staging-bar">
         <span className={styles.importStagingPath} id="import-page-staging-path">
           {error ? 'Import folder: error' : `Import: ${stagingPath}`}
         </span>
+        <Show when={lastRefreshedAt != null}>
+          <span className={styles.importStagingRefreshAt}>
+            {lastRefreshedAt ? `Last refreshed: ${lastRefreshedAt}` : null}
+          </span>
+        </Show>
         <span className={styles.importStagingStats} id="import-page-staging-stats">
           {loading ? 'loading...' : fileCountText}
         </span>
@@ -129,9 +156,7 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
           onError={fallbackImage}
         />
       ) : (
-        <div className={`${styles.importPageQueueArt} ${styles.importPageQueueArtEmpty}`}>
-          A
-        </div>
+        <div className={`${styles.importPageQueueArt} ${styles.importPageQueueArtEmpty}`}>A</div>
       )}
       <div className={styles.importPageQueueInfo}>
         <div className={styles.importPageQueueName}>{entry.label}</div>

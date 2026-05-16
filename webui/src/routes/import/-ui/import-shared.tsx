@@ -19,9 +19,9 @@ export function useImportStaging() {
   });
 
   return {
-    refreshStaging: () => {
+    refreshStaging: async () => {
       clearFinishedJobs();
-      void invalidateImportStagingQueries(queryClient);
+      await invalidateImportStagingQueries(queryClient);
     },
     stagingFiles: stagingQuery.data?.files ?? [],
     stagingPath: stagingQuery.data?.staging_path || 'Not configured',
