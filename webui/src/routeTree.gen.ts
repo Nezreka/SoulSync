@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatsRouteRoute = StatsRouteRouteImport.update({
+  id: '/stats',
+  path: '/stats',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesRouteRoute = IssuesRouteRouteImport.update({
@@ -32,30 +38,34 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/issues' | '/$'
+  fullPaths: '/' | '/issues' | '/stats' | '/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/issues' | '/$'
-  id: '__root__' | '/' | '/issues' | '/$'
+  to: '/' | '/issues' | '/stats' | '/$'
+  id: '__root__' | '/' | '/issues' | '/stats' | '/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   IssuesRouteRoute: typeof IssuesRouteRoute
+  StatsRouteRoute: typeof StatsRouteRoute
   SplatRoute: typeof SplatRoute
 }
 
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/$'
       fullPath: '/$'
       preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/issues': {
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   IssuesRouteRoute: IssuesRouteRoute,
+  StatsRouteRoute: StatsRouteRoute,
   SplatRoute: SplatRoute,
 }
 export const routeTree = rootRouteImport

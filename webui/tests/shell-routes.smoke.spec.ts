@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { shellRouteManifest, type ShellPageId } from '../src/platform/shell/route-manifest';
+import {
+  getShellRouteByPageId,
+  resolveShellNavPage,
+  shellRouteManifest,
+  type ShellPageId,
+} from '../src/platform/shell/route-manifest';
 
 async function selectProfile(page: Page, baseURL: string, profileId = 1) {
   const response = await page.request.post(new URL('/api/profiles/select', baseURL).toString(), {
@@ -11,13 +16,14 @@ async function selectProfile(page: Page, baseURL: string, profileId = 1) {
 }
 
 async function waitForShellRoute(page: Page, pageId: string) {
-  if (pageId === 'issues') {
+  const route = getShellRouteByPageId(pageId as ShellPageId);
+
+  if (route?.kind === 'react') {
     await expect
       .poll(async () => page.evaluate(() => document.querySelector('.page.active')?.id ?? ''), {
         timeout: 15000,
       })
       .toBe('webui-react-root');
-    await expect(page.getByTestId('issues-board')).toBeVisible({ timeout: 15000 });
     return;
   }
 
@@ -29,11 +35,7 @@ async function waitForShellRoute(page: Page, pageId: string) {
 }
 
 function getExpectedNavPage(pageId: ShellPageId): string {
-  if (pageId === 'artist-detail') {
-    return '';
-  }
-
-  return pageId;
+  return resolveShellNavPage(pageId);
 }
 
 async function expectNavHighlight(page: Page, pageId: ShellPageId) {
@@ -51,15 +53,19 @@ async function verifyIssuesRoute(page: Page) {
   await expect(page.getByTestId('issues-board')).toContainText('Issues');
 }
 
-function expectedUrlPattern(path: string): RegExp {
-  if (path === '/issues') {
+function expectedUrlPattern(path: string, pageId: ShellPageId): RegExp {
+  if (pageId === 'issues') {
     return /\/issues(?:\?status=open&category=all)?$/;
+  }
+
+  if (pageId === 'stats') {
+    return /\/stats(?:\?range=7d)?$/;
   }
 
   return new RegExp(`${path.replace('/', '\\/')}$`);
 }
 
-test('direct load activates all known top-level routes', async ({ page, baseURL }) => {
+test('direct load activates all known shell routes', async ({ page, baseURL }) => {
   if (!baseURL) {
     test.skip();
     return;
@@ -72,7 +78,7 @@ test('direct load activates all known top-level routes', async ({ page, baseURL 
     try {
       await routePage.goto(new URL(route.path, baseURL).toString(), { waitUntil: 'domcontentloaded' });
       await waitForShellRoute(routePage, route.pageId);
-      await expect(routePage).toHaveURL(expectedUrlPattern(route.path));
+      await expect(routePage).toHaveURL(expectedUrlPattern(route.path, route.pageId));
       await expectNavHighlight(routePage, route.pageId);
 
       if (route.pageId === 'issues') {
@@ -84,7 +90,7 @@ test('direct load activates all known top-level routes', async ({ page, baseURL 
   }
 });
 
-test('browser history restores top-level routes', async ({ page, baseURL }) => {
+test('browser history restores shell routes', async ({ page, baseURL }) => {
   if (!baseURL) {
     test.skip();
     return;

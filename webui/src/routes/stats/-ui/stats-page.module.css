@@ -1,0 +1,916 @@
+.statsContainer {
+  margin: 20px;
+  padding: 28px 24px 30px;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(20, 20, 20, 0.55) 0%, rgba(12, 12, 12, 0.62) 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.statsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -28px -24px 20px;
+  padding: 20px 24px;
+  min-height: 176px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.1) 0%,
+    rgba(var(--accent-rgb), 0.04) 40%,
+    transparent 100%
+  );
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  position: relative;
+  overflow: hidden;
+  flex-wrap: wrap;
+}
+
+.statsHeader::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(var(--accent-rgb), 0.08) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: headerSweep 12s ease-in-out infinite;
+}
+
+@keyframes headerSweep {
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.statsHeaderTitle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.headerIcon {
+  width: 176px;
+  height: 176px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
+  transition:
+    transform 0.3s ease,
+    filter 0.3s ease;
+}
+
+.headerIcon:hover {
+  transform: scale(1.08) rotate(-3deg);
+  filter: drop-shadow(0 4px 14px rgba(var(--accent-rgb), 0.5));
+}
+
+.headerTitle {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.statsHeaderControls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.statsTimeRange {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsRangeButton {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.statsRangeButton:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.statsRangeButtonActive {
+  background: rgb(var(--accent-rgb));
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+}
+
+.statsSyncControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statsLastSynced {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.statsSyncButton {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.statsSyncButton:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.statsSyncButtonSyncing {
+  pointer-events: none;
+  color: transparent;
+  position: relative;
+}
+
+.statsSyncButtonSyncing::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
+  border-top-color: rgba(var(--accent-rgb), 0.8);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.statsOverview {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.statsCard {
+  background: linear-gradient(135deg, rgba(20, 20, 20, 0.95) 0%, rgba(12, 12, 12, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.statsCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
+}
+
+.statsCard:hover {
+  transform: translateY(-3px);
+  border-color: rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.statsCardValue {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+
+.statsCardLabel {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.statsMainGrid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 20px;
+  min-width: 0;
+  margin-bottom: 20px;
+}
+
+.statsLeftCol,
+.statsRightCol {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.statsSectionCard {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 20px;
+  transition: border-color 0.2s ease;
+  min-width: 0;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.statsSectionCard:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.statsSectionTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.chartContainer {
+  position: relative;
+  height: 220px;
+}
+
+.statsGenreChartContainer {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.statsGenreChartWrap {
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.statsGenreLegend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.statsGenreLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.statsGenreDot,
+.statsDbLegendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.statsGenrePct {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.statsTopArtistsVisual {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.statsArtistBubbles {
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.statsArtistBubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.statsArtistBubble:disabled {
+  cursor: default;
+}
+
+.statsArtistBubble:hover {
+  transform: translateY(-3px);
+}
+
+.statsBubbleImage {
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.statsBubbleInitial {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsBubbleBarContainer {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.statsBubbleBar {
+  height: 100%;
+  background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.4));
+  border-radius: 2px;
+}
+
+.statsBubbleName {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.statsBubbleCount {
+  font-size: 0.65rem;
+  color: rgba(var(--accent-rgb), 0.7);
+  font-weight: 600;
+}
+
+.statsRankedList,
+.statsRecentList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.statsRankedItem,
+.statsRecentItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.statsRankedItem:hover,
+.statsRecentItem:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.statsRankedNum {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.25);
+  font-weight: 700;
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.statsRankedImage,
+.statsRankedImageFallback {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  object-fit: cover;
+}
+
+.statsRankedInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.statsRankedName {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statsRankedMeta {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsRankedCount {
+  font-size: 0.78rem;
+  color: rgba(var(--accent-rgb), 0.8);
+  font-weight: 600;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.statsArtistLink {
+  color: inherit;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.statsArtistLink:hover {
+  color: rgb(var(--accent-rgb));
+}
+
+.statsSoulIdBadge {
+  width: 12px;
+  height: 12px;
+  opacity: 0.5;
+}
+
+.statsPlayButton {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(var(--accent-rgb), 0.15);
+  color: rgb(var(--accent-rgb));
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.statsRankedItem:hover .statsPlayButton,
+.statsRecentItem:hover .statsPlayButton {
+  opacity: 1;
+}
+
+.statsPlayButton:hover {
+  background: rgb(var(--accent-rgb));
+  color: #fff;
+  transform: scale(1.1);
+}
+
+.statsPlayButtonSmall {
+  width: 22px;
+  height: 22px;
+  font-size: 8px;
+}
+
+.statsRecentTitle {
+  flex: 1;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statsRecentArtist {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.statsRecentTime {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.25);
+  flex-shrink: 0;
+  min-width: 65px;
+  text-align: right;
+}
+
+.statsHealthGrid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.statsHealthItem {
+  text-align: center;
+}
+
+.statsHealthItemWide {
+  text-align: left;
+}
+
+.statsHealthValue {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.statsHealthLabel {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.statsFormatBar {
+  display: flex;
+  height: 28px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.statsFormatSegment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  min-width: 30px;
+}
+
+.statsEnrichment {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  flex-wrap: wrap;
+}
+
+.statsEnrichItem {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statsEnrichName {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.45);
+  min-width: 70px;
+  font-weight: 500;
+}
+
+.statsEnrichBar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.statsEnrichFill {
+  height: 100%;
+  border-radius: 2px;
+}
+
+.statsEnrichPct {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+  min-width: 30px;
+  text-align: right;
+}
+
+.statsDiskUsageWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.statsDiskTotalRow {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.statsDiskTotalValue {
+  font-size: 28px;
+  font-weight: 700;
+  color: rgb(var(--accent-rgb));
+}
+
+.statsDiskTotalMeta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.statsDiskFormats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.statsDiskFormatRow {
+  display: grid;
+  grid-template-columns: 60px 1fr 80px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.statsDiskFormatName {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.statsDiskFormatBar {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.statsDiskFormatFill {
+  height: 100%;
+  background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.6) 100%);
+  border-radius: 4px;
+}
+
+.statsDiskFormatSize {
+  text-align: right;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.statsDbStorageWrap {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 8px;
+}
+
+.statsDbChartContainer {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+.statsDbTotal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.statsDbTotalValue {
+  font-size: 20px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+}
+
+.statsDbTotalLabel {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.statsDbLegend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.statsDbLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.statsDbLegendName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statsDbLegendSize {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+}
+
+.statsEmpty,
+.statsLoading {
+  text-align: center;
+  padding: 80px 20px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.statsEmptyIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.statsEmpty h3 {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+
+.statsEmpty p,
+.statsSubtleError,
+.emptyListState {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.emptyListState {
+  padding: 12px;
+}
+
+.statsSubtleError {
+  padding: 12px 0;
+}
+
+@media (max-width: 768px) {
+  .statsContainer {
+    margin: 8px;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .statsHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
+    margin: -12px -12px 20px;
+    min-height: 0;
+    gap: 10px;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+  }
+
+  .statsHeaderControls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .statsTimeRange {
+    width: 100%;
+  }
+
+  .statsRangeButton {
+    padding: 6px 12px;
+    font-size: 11px;
+    flex: 1;
+    text-align: center;
+  }
+
+  .statsSyncControls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .headerIcon {
+    width: 100px;
+    height: 100px;
+  }
+
+  .statsOverview {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .statsCard {
+    padding: 12px 10px;
+    border-radius: 10px;
+  }
+
+  .statsCardValue {
+    font-size: 18px;
+  }
+
+  .statsCardLabel {
+    font-size: 9px;
+  }
+
+  .statsMainGrid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .statsLeftCol,
+  .statsRightCol {
+    gap: 14px;
+  }
+
+  .statsSectionCard {
+    padding: 12px;
+  }
+
+  .chartContainer {
+    height: 160px;
+  }
+
+  .statsGenreChartContainer,
+  .statsDbStorageWrap {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .statsHealthGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

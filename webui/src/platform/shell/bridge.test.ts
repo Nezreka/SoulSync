@@ -18,6 +18,11 @@ describe('waitForShellContext', () => {
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
       showReactHost: vi.fn(),
+      navigateToArtistDetail: vi.fn(),
+      playLibraryTrack: vi.fn(),
+      startStream: vi.fn(),
+      showLoadingOverlay: vi.fn(),
+      hideLoadingOverlay: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 
     await expect(waitForShellContext()).resolves.toEqual({
@@ -39,6 +44,11 @@ describe('waitForShellContext', () => {
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
       showReactHost: vi.fn(),
+      navigateToArtistDetail: vi.fn(),
+      playLibraryTrack: vi.fn(),
+      startStream: vi.fn(),
+      showLoadingOverlay: vi.fn(),
+      hideLoadingOverlay: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 
     const contextPromise = waitForShellContext();
