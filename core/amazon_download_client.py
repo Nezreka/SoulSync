@@ -431,7 +431,7 @@ class AmazonDownloadClient(DownloadSourcePlugin):
     def _record_to_status(download_id: str, rec: Dict[str, Any]) -> DownloadStatus:
         return DownloadStatus(
             id=download_id,
-            filename=str(rec.get("original_filename", "")),
+            filename=str(rec.get("filename", "")),
             username="amazon",
             state=str(rec.get("state", "queued")),
             progress=float(rec.get("progress", 0.0)),
