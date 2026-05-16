@@ -511,6 +511,11 @@ class AmazonClient:
         """Not available from Amazon Music — returns None for compatibility."""
         return None
 
+    # ==================== Interface Aliases (match DeezerClient method names) ====================
+    get_album_metadata = get_album
+    get_artist_info = get_artist
+    get_artist_albums_list = get_artist_albums
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
