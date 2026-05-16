@@ -2452,12 +2452,27 @@ async function openDiscographyModal() {
                     <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
                 </div>
                 <div class="discog-select-actions">
-                    <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
-                    <button class="discog-select-btn" onclick="discogSelectAll(false)">Deselect All</button>
+                    <select class="discog-sort-select" onchange="sortDiscogGrid(this.value)">
+                        <option value="date-desc">Date ↓</option>
+                        <option value="date-asc">Date ↑</option>
+                        <option value="name-asc">Name A–Z</option>
+                        <option value="name-desc">Name Z–A</option>
+                    </select>
+                    <button class="discog-select-btn" id="discog-select-toggle" onclick="discogToggleSelectAll()">Select All</button>
+                    <button class="discog-select-btn discog-expand-btn" id="discog-variant-toggle" onclick="toggleVariantPanel()">Filters ▾</button>
                 </div>
+            </div>
+            <div class="discog-variant-panel" id="discog-variant-panel">
+                <div class="discog-variant-filters" id="discog-variant-filters"></div>
             </div>
             <div class="discog-grid" id="discog-grid">
                 ${allReleases.map((r, i) => _renderDiscogCard(r, i, completionData)).join('')}
+            </div>
+            <div class="discog-deselected-section" id="discog-deselected-section" style="display:none;">
+                <button class="discog-deselected-toggle" id="discog-deselected-toggle" onclick="toggleDeselectedSection()">
+                    <span id="discog-deselected-count">0</span> not selected <span class="discog-expand-chevron">▾</span>
+                </button>
+                <div class="discog-grid" id="discog-grid-deselected" style="display:none;"></div>
             </div>
             <div class="discog-progress" id="discog-progress" style="display:none;"></div>
             <div class="discog-footer" id="discog-footer">
@@ -2475,6 +2490,7 @@ async function openDiscographyModal() {
 
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('visible'));
+    _discogAllReleases = allReleases;
     _updateDiscogFooterCount();
 
     // Bind submit button (avoids onclick being intercepted by helper system)
@@ -2500,8 +2516,12 @@ function _renderDiscogCard(release, index, completionData) {
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+        <label class="discog-card ${statusClass}"
+            data-type="${release._type}"
+            data-year="${year || '0'}" data-name="${albumName.toLowerCase().replace(/"/g, '&quot;')}"
+            data-variants="${_detectReleaseVariants(albumName).join(' ')}" data-initially-checked="${!isOwned}"
+            style="animation-delay:${index * 0.03}s">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_onDiscogCardChange(this)">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
@@ -2515,32 +2535,264 @@ function _renderDiscogCard(release, index, completionData) {
     `;
 }
 
+function _detectReleaseVariants(name) {
+    const t = name.toLowerCase();
+    const v = [];
+    if (/\b(remaster(ed)?|\d{4}\s+(digital\s+)?remaster(ed)?|\d{4}\s+mix)\b/.test(t)) v.push('remaster');
+    if (/\b(super\s+)?deluxe\b/.test(t))              v.push('deluxe');
+    if (/\bexpanded\b/.test(t))                        v.push('expanded');
+    if (/\b(live(\s+(at|from|in))?|in\s+concert|unplugged|acoustic)\b/.test(t)) v.push('live');
+    if (/\banniversary\b/.test(t))                     v.push('anniversary');
+    if (/\bcommentary\b/.test(t))                      v.push('commentary');
+    if (/\blegacy\b/.test(t))                          v.push('legacy');
+    if (/\b(special|limited)\s+edition\b/.test(t))     v.push('special');
+    if (/\b(greatest\s+hits|best\s+of|anthology|essentials)\b/.test(t)) v.push('compilation');
+    if (/\bclean\b/.test(t))                           v.push('clean');
+    if (/\bexplicit\b/.test(t))                        v.push('explicit');
+    return v.length ? v : ['original'];
+}
+
+let _discogAllReleases = [];
+
+function _normalizeTitle(name) {
+    let t = name.toLowerCase();
+    t = t.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, match => {
+        const inner = match.replace(/^[\s\(\[]+|[\)\]\s]+$/g, '');
+        return /^(remaster|deluxe|super\s+deluxe|expanded|anniversary|special|limited|bonus|legacy|collector|platinum|\d{4})/i.test(inner) ? '' : match;
+    });
+    t = t.replace(/\s+(remaster(ed)?|deluxe(\s+edition)?|super\s+deluxe(\s+edition)?|expanded(\s+edition)?|anniversary(\s+edition)?|special\s+edition|limited\s+edition|legacy\s+edition|collector'?s?\s+edition|platinum\s+edition|\d{4}\s+(remaster|mix|digital\s+remaster))\s*$/i, '');
+    return t.trim();
+}
+
+function _computeRedundancy() {
+    document.querySelectorAll('.discog-card').forEach(card => { card.dataset.redundant = ''; });
+    const onePerAlbum = document.getElementById('discog-one-per-album')?.checked;
+    if (!onePerAlbum) return;
+    const preference = document.getElementById('discog-prefer-select')?.value || 'complete';
+    const groups = {};
+    _discogAllReleases.forEach(r => {
+        const key = `${r._type}::${_normalizeTitle(r.name || r.title || '')}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(r);
+    });
+    Object.values(groups).forEach(group => {
+        if (group.length < 2) return;
+        let winner;
+        if (preference === 'complete') {
+            winner = group.reduce((best, r) => {
+                const bt = best.total_tracks || 0, rt = r.total_tracks || 0;
+                if (rt > bt) return r;
+                if (rt === bt) return ((r.release_date || '') > (best.release_date || '')) ? r : best;
+                return best;
+            });
+        } else {
+            winner = group.reduce((best, r) => {
+                const by = (best.release_date || '9999').substring(0, 4);
+                const ry = (r.release_date || '9999').substring(0, 4);
+                if (ry < by) return r;
+                if (ry === by) return ((r.total_tracks || 0) < (best.total_tracks || 0)) ? r : best;
+                return best;
+            });
+        }
+        group.forEach(r => {
+            if (r === winner) return;
+            const card = document.querySelector(`.discog-card-cb[data-album-id="${r.id}"]`)?.closest('.discog-card');
+            if (card) card.dataset.redundant = 'true';
+        });
+    });
+}
+
+function _onRedundancyChange() {
+    const sel = document.getElementById('discog-prefer-select');
+    const cb = document.getElementById('discog-one-per-album');
+    if (sel) sel.disabled = !cb?.checked;
+    _computeRedundancy();
+    _applyAllFilters();
+}
+
+function _buildVariantPanel() {
+    const panel = document.getElementById('discog-variant-filters');
+    const toggleBtn = document.getElementById('discog-variant-toggle');
+    if (!panel) return;
+    const counts = {};
+    document.querySelectorAll('.discog-card').forEach(card => {
+        (card.dataset.variants || 'original').split(' ').forEach(v => {
+            counts[v] = (counts[v] || 0) + 1;
+        });
+    });
+    const titleGroups = {};
+    _discogAllReleases.forEach(r => {
+        const key = `${r._type}::${_normalizeTitle(r.name || r.title || '')}`;
+        titleGroups[key] = (titleGroups[key] || 0) + 1;
+    });
+    const hasRedundancy = Object.values(titleGroups).some(c => c > 1);
+    const hasVariants = Object.keys(counts).some(v => v !== 'original');
+    if (!hasVariants && !hasRedundancy) {
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        return;
+    }
+    const labels = {
+        original: 'Original', remaster: 'Remaster', deluxe: 'Deluxe',
+        expanded: 'Expanded', live: 'Live', anniversary: 'Anniversary',
+        commentary: 'Commentary', legacy: 'Legacy', special: 'Special Ed.',
+        compilation: 'Compilation', clean: 'Clean', explicit: 'Explicit'
+    };
+    const order = ['original','remaster','deluxe','expanded','anniversary','special',
+                   'legacy','live','commentary','compilation','clean','explicit'];
+    const chipsHtml = order
+        .filter(v => counts[v])
+        .map(v => `<button class="discog-filter active discog-variant-filter" data-variant="${v}" onclick="toggleVariantFilter(this)">${labels[v] || v} <span class="discog-filter-count">${counts[v]}</span></button>`)
+        .join('');
+    const redundancyHtml = hasRedundancy ? `
+        <div class="discog-redundancy-row">
+            <label class="discog-one-per-label">
+                <input type="checkbox" id="discog-one-per-album" onchange="_onRedundancyChange()">
+                One per album
+            </label>
+            <select class="discog-pref-select" id="discog-prefer-select" onchange="_onRedundancyChange()" disabled>
+                <option value="complete">Most complete</option>
+                <option value="original">Original</option>
+            </select>
+        </div>` : '';
+    const variantChipsHtml = hasVariants ? `
+        <div class="discog-variant-chips">
+            ${chipsHtml}
+        </div>` : '';
+    panel.innerHTML = redundancyHtml + variantChipsHtml;
+}
+
+function toggleVariantPanel() {
+    const panel = document.getElementById('discog-variant-panel');
+    const btn = document.getElementById('discog-variant-toggle');
+    if (!panel) return;
+    const isOpen = panel.classList.contains('open');
+    if (!isOpen && !panel.dataset.built) {
+        _buildVariantPanel();
+        panel.dataset.built = 'true';
+    }
+    panel.classList.toggle('open', !isOpen);
+    if (btn) btn.textContent = isOpen ? 'Filters ▾' : 'Filters ▴';
+}
+
+function toggleVariantFilter(btn) {
+    btn.classList.toggle('active');
+    _applyAllFilters();
+}
+
 function toggleDiscogFilter(btn) {
     btn.classList.toggle('active');
     const type = btn.dataset.type;
+    const isActive = btn.classList.contains('active');
     document.querySelectorAll(`.discog-card[data-type="${type}"]`).forEach(card => {
-        card.style.display = btn.classList.contains('active') ? '' : 'none';
+        card.dataset.typeHidden = isActive ? '' : 'true';
     });
+    _applyAllFilters();
+}
+
+function _applyAllFilters() {
+    const variantBtns = document.querySelectorAll('.discog-variant-filter');
+    const activeVariants = new Set();
+    variantBtns.forEach(b => { if (b.classList.contains('active')) activeVariants.add(b.dataset.variant); });
+    const hasVariantFilter = variantBtns.length > 0;
+    const onePerAlbum = document.getElementById('discog-one-per-album')?.checked;
+    document.querySelectorAll('.discog-card').forEach(card => {
+        const cb = card.querySelector('.discog-card-cb');
+        const typeOk = card.dataset.typeHidden !== 'true';
+        let variantOk = true;
+        if (hasVariantFilter) {
+            const cardVariants = (card.dataset.variants || 'original').split(' ');
+            variantOk = cardVariants.some(v => activeVariants.has(v));
+        }
+        const redundantOk = !onePerAlbum || card.dataset.redundant !== 'true';
+        const shouldFilter = !typeOk || !variantOk || !redundantOk;
+        if (shouldFilter && card.dataset.filterOff !== 'true') {
+            card.dataset.filterOff = 'true';
+            card.classList.add('discog-card--filtered');
+            if (cb) cb.checked = false;
+        } else if (!shouldFilter && card.dataset.filterOff === 'true') {
+            card.dataset.filterOff = '';
+            card.classList.remove('discog-card--filtered');
+            if (cb) cb.checked = 'userChecked' in card.dataset ? card.dataset.userChecked === 'true' : card.dataset.initiallyChecked === 'true';
+        }
+    });
+    _resortGrid();
     _updateDiscogFooterCount();
 }
 
-function discogSelectAll(select) {
-    document.querySelectorAll('.discog-card-cb').forEach(cb => {
-        if (cb.closest('.discog-card').style.display !== 'none') {
-            cb.checked = select;
+function _resortGrid() {
+    const selectedGrid = document.getElementById('discog-grid');
+    const deselectedGrid = document.getElementById('discog-grid-deselected');
+    const deselectedSection = document.getElementById('discog-deselected-section');
+    if (!selectedGrid || !deselectedGrid) return;
+    document.querySelectorAll('.discog-card').forEach(card => {
+        if (card.dataset.filterOff === 'true') {
+            deselectedGrid.appendChild(card);
+        } else {
+            selectedGrid.appendChild(card);
         }
     });
+    const count = deselectedGrid.querySelectorAll('.discog-card').length;
+    if (deselectedSection) deselectedSection.style.display = count > 0 ? '' : 'none';
+    const countEl = document.getElementById('discog-deselected-count');
+    if (countEl) countEl.textContent = count;
+    const sortVal = document.querySelector('.discog-sort-select')?.value;
+    if (sortVal) sortDiscogGrid(sortVal);
+}
+
+function toggleDeselectedSection() {
+    const grid = document.getElementById('discog-grid-deselected');
+    const chevron = document.querySelector('#discog-deselected-toggle .discog-expand-chevron');
+    if (!grid) return;
+    const isOpen = grid.style.display !== 'none';
+    grid.style.display = isOpen ? 'none' : '';
+    if (chevron) chevron.textContent = isOpen ? '▾' : '▴';
+}
+
+function sortDiscogGrid(value) {
+    ['discog-grid', 'discog-grid-deselected'].forEach(id => {
+        const grid = document.getElementById(id);
+        if (!grid) return;
+        const cards = Array.from(grid.querySelectorAll('.discog-card'));
+        cards.sort((a, b) => {
+            if (value === 'date-desc') return parseInt(b.dataset.year || '0') - parseInt(a.dataset.year || '0');
+            if (value === 'date-asc')  return parseInt(a.dataset.year || '0') - parseInt(b.dataset.year || '0');
+            if (value === 'name-asc')  return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+            if (value === 'name-desc') return (b.dataset.name || '').localeCompare(a.dataset.name || '');
+            return 0;
+        });
+        cards.forEach(card => grid.appendChild(card));
+    });
+}
+
+function discogToggleSelectAll() {
+    const selectedGrid = document.getElementById('discog-grid');
+    if (!selectedGrid) return;
+    const cbs = Array.from(selectedGrid.querySelectorAll('.discog-card-cb'));
+    const allChecked = cbs.length > 0 && cbs.every(cb => cb.checked);
+    cbs.forEach(cb => { cb.checked = !allChecked; });
+    _updateDiscogFooterCount();
+}
+
+function _updateSelectToggleBtn() {
+    const btn = document.getElementById('discog-select-toggle');
+    const selectedGrid = document.getElementById('discog-grid');
+    if (!btn || !selectedGrid) return;
+    const cbs = Array.from(selectedGrid.querySelectorAll('.discog-card-cb'));
+    const allChecked = cbs.length > 0 && cbs.every(cb => cb.checked);
+    btn.textContent = allChecked ? 'Deselect All' : 'Select All';
+}
+
+function _onDiscogCardChange(cb) {
+    const card = cb.closest('.discog-card');
+    if (card) card.dataset.userChecked = cb.checked;
     _updateDiscogFooterCount();
 }
 
 function _updateDiscogFooterCount() {
-    const checked = document.querySelectorAll('.discog-card-cb:checked');
     let releases = 0, tracks = 0;
-    checked.forEach(cb => {
-        if (cb.closest('.discog-card').style.display !== 'none') {
-            releases++;
-            tracks += parseInt(cb.dataset.tracks) || 0;
-        }
+    document.querySelectorAll('.discog-card-cb:checked').forEach(cb => {
+        releases++;
+        tracks += parseInt(cb.dataset.tracks) || 0;
     });
     const info = document.getElementById('discog-footer-info');
     const btn = document.getElementById('discog-submit-text');
@@ -2548,6 +2800,7 @@ function _updateDiscogFooterCount() {
     if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases';
     const submitBtn = document.getElementById('discog-submit-btn');
     if (submitBtn) submitBtn.disabled = releases === 0;
+    _updateSelectToggleBtn();
 }
 
 async function startDiscographyDownload() {
@@ -2561,17 +2814,12 @@ async function startDiscographyDownload() {
         return;
     }
 
-    const checked = document.querySelectorAll('.discog-card-cb:checked');
-    const albumEntries = [];
-    checked.forEach(cb => {
-        if (cb.closest('.discog-card').style.display !== 'none') {
-            albumEntries.push({
-                id: cb.dataset.albumId,
-                name: cb.dataset.albumName || '',
-                tracks: parseInt(cb.dataset.tracks) || 0
-            });
-        }
-    });
+    const checked = Array.from(document.querySelectorAll('.discog-card-cb:checked'));
+    const albumEntries = checked.map(cb => ({
+        id: cb.dataset.albumId,
+        name: cb.dataset.albumName || '',
+        tracks: parseInt(cb.dataset.tracks) || 0
+    }));
     // Sort by track count descending — process Deluxe/expanded editions first
     // so their tracks get added before standard editions (which then get deduped)
     albumEntries.sort((a, b) => b.tracks - a.tracks);
@@ -2579,12 +2827,16 @@ async function startDiscographyDownload() {
     if (albumEntries.length === 0) return;
 
     // Switch to progress view
-    const grid = document.getElementById('discog-grid');
+    const selectedGrid = document.getElementById('discog-grid');
+    const deselectedSection = document.getElementById('discog-deselected-section');
+    const variantPanel = document.getElementById('discog-variant-panel');
     const progress = document.getElementById('discog-progress');
     const footer = document.getElementById('discog-footer');
     const filterBar = document.querySelector('.discog-filter-bar');
 
-    if (grid) grid.style.display = 'none';
+    if (selectedGrid) selectedGrid.style.display = 'none';
+    if (deselectedSection) deselectedSection.style.display = 'none';
+    if (variantPanel) variantPanel.style.display = 'none';
     if (filterBar) filterBar.style.display = 'none';
     if (progress) {
         progress.style.display = '';
@@ -2594,26 +2846,24 @@ async function startDiscographyDownload() {
     // Build progress items
     const albumMap = {};
     checked.forEach(cb => {
-        if (cb.closest('.discog-card').style.display !== 'none') {
-            const card = cb.closest('.discog-card');
-            const id = cb.dataset.albumId;
-            const title = card.querySelector('.discog-card-title')?.textContent || '';
-            const img = card.querySelector('.discog-card-art img')?.src || '';
-            albumMap[id] = { title, img };
+        const card = cb.closest('.discog-card');
+        const id = cb.dataset.albumId;
+        const title = card.querySelector('.discog-card-title')?.textContent || '';
+        const img = card.querySelector('.discog-card-art img')?.src || '';
+        albumMap[id] = { title, img };
 
-            const item = document.createElement('div');
-            item.className = 'discog-progress-item';
-            item.id = `discog-prog-${id}`;
-            item.innerHTML = `
-                <div class="discog-prog-art">${img ? `<img src="${img}">` : '🎵'}</div>
-                <div class="discog-prog-info">
-                    <div class="discog-prog-title">${_esc(title)}</div>
-                    <div class="discog-prog-status">Waiting...</div>
-                </div>
-                <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
-            `;
-            progress.appendChild(item);
-        }
+        const item = document.createElement('div');
+        item.className = 'discog-progress-item';
+        item.id = `discog-prog-${id}`;
+        item.innerHTML = `
+            <div class="discog-prog-art">${img ? `<img src="${img}">` : '🎵'}</div>
+            <div class="discog-prog-info">
+                <div class="discog-prog-title">${_esc(title)}</div>
+                <div class="discog-prog-status">Waiting...</div>
+            </div>
+            <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
+        `;
+        progress.appendChild(item);
     });
 
     // Update footer
