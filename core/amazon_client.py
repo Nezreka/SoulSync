@@ -169,7 +169,7 @@ class Album:
             id=str(album_meta.get("asin") or asin or ""),
             name=str(album_meta.get("title") or ""),
             artists=[str(album_meta.get("artistName") or "Unknown Artist")],
-            release_date=str(album_meta.get("release_date") or ""),
+            release_date=str(album_meta.get("release_date") or album_meta.get("releaseDate") or ""),
             total_tracks=int(album_meta.get("trackCount") or 0),
             album_type="album",
             image_url=album_meta.get("image"),
@@ -349,7 +349,7 @@ class AmazonClient:
             if album_asin and album_asin in album_metas:
                 meta = album_metas[album_asin]
                 track.image_url = meta.get("image")
-                track.release_date = str(meta.get("release_date") or "")
+                track.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
                 track.total_tracks = meta.get("trackCount")
             tracks.append(track)
         return tracks
@@ -409,7 +409,7 @@ class AmazonClient:
             if asin in album_metas:
                 meta = album_metas[asin]
                 album.image_url = meta.get("image")
-                album.release_date = str(meta.get("release_date") or "")
+                album.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
                 album.total_tracks = int(meta.get("trackCount") or 0)
             albums.append(album)
         return albums
@@ -442,7 +442,7 @@ class AmazonClient:
                 "id": album_data.get("asin", ""),
                 "name": _strip_edition(s.album),
                 "images": [{"url": album_data["image"]}] if album_data.get("image") else [],
-                "release_date": album_data.get("release_date", ""),
+                "release_date": album_data.get("release_date") or album_data.get("releaseDate") or s.date or "",
                 "total_tracks": album_data.get("trackCount", 0),
             },
             "duration_ms": 0,
@@ -478,7 +478,7 @@ class AmazonClient:
             "id": asin,
             "name": _strip_edition(album.get("title", "")),
             "artists": [{"name": _primary_artist(album.get("artistName", "")), "id": ""}],
-            "release_date": album.get("release_date", ""),
+            "release_date": album.get("release_date") or album.get("releaseDate") or "",
             "total_tracks": album.get("trackCount", 0),
             "album_type": "album",
             "images": [{"url": album["image"]}] if album.get("image") else [],
@@ -509,6 +509,7 @@ class AmazonClient:
                 "duration_ms": 0,
                 "track_number": s.track_number,
                 "disc_number": s.disc_number,
+                "release_date": s.date or "",
                 "isrc": s.isrc,
             }
             for s in streams
