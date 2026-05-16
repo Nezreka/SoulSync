@@ -104,6 +104,15 @@ class DownloadOrchestrator:
             deezer_dl.reconnect(deezer_arl)
             deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
+        # Reload Amazon quality preference (T2Tunes needs no reconnect — public proxy)
+        amazon = self.client('amazon')
+        if amazon:
+            quality = config_manager.get('amazon_download.quality', 'flac')
+            amazon._quality = quality
+            amazon._allow_fallback = config_manager.get('amazon_download.allow_fallback', True)
+            if hasattr(amazon, '_client') and amazon._client:
+                amazon._client.preferred_codec = quality
+
         # Reload download path for all clients that cache it.
         # Soulseek owns the path config and is reloaded above; every
         # other source mirrors that path so files all land in one
@@ -319,7 +328,7 @@ class DownloadOrchestrator:
             return None
 
         # 2. Filter and validate results
-        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
+        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
         is_streaming = tracks[0].username in _streaming_sources if tracks else False
 
         if is_streaming and expected_track:

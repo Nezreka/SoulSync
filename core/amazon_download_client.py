@@ -78,7 +78,10 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        self._client = AmazonClient()
+        self._quality = config_manager.get("amazon_download.quality", "flac")
+        self._allow_fallback = config_manager.get("amazon_download.allow_fallback", True)
+
+        self._client = AmazonClient(preferred_codec=self._quality)
         self.session = http_requests.Session()
         self.session.headers.update({
             "User-Agent": "SoulSync/1.0",
@@ -213,7 +216,8 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         display_name: str,
     ) -> Optional[str]:
         asin = str(target_id)
-        for codec in CODEC_PREFERENCE:
+        codecs = CODEC_PREFERENCE if self._allow_fallback else [self._quality]
+        for codec in codecs:
             try:
                 streams = self._client.media_from_asin(asin, codec=codec)
             except AmazonClientError as exc:
