@@ -616,6 +616,24 @@ class TestDownloadSync:
         states = [c[0][2].get("state") for c in update_calls if "state" in c[0][2]]
         assert "downloading" in states
 
+    def test_final_size_update_syncs_transferred_to_size(self, tmp_path):
+        """size == transferred after success so monitor bytes-incomplete guard doesn't block."""
+        client, audio_data = self._setup(tmp_path, decryption_key=None)
+        engine = MagicMock()
+        client._engine = engine
+
+        result = client._download_sync("dl-001", "B09XYZ1234", "Artist - Track")
+
+        assert result is not None
+        # Last update must set size == transferred (both equal the output file size)
+        final_calls = [
+            c[0][2] for c in engine.update_record.call_args_list
+            if 'size' in c[0][2] and 'transferred' in c[0][2]
+            and c[0][2]['size'] == c[0][2]['transferred']
+            and c[0][2]['size'] > 0
+        ]
+        assert final_calls, "Expected a final engine update with size == transferred > 0"
+
     def test_clear_stream_skips_ffmpeg(self, tmp_path):
         client, audio_data = self._setup(tmp_path, decryption_key=None)
 

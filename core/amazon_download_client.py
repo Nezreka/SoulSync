@@ -285,10 +285,21 @@ class AmazonDownloadClient(DownloadSourcePlugin):
             else:
                 enc_path.rename(out_path)
 
+            final_size = out_path.stat().st_size
             logger.info(
                 f"Amazon download complete ({codec}): {out_path} "
-                f"({out_path.stat().st_size / (1024 * 1024):.1f} MB)"
+                f"({final_size / (1024 * 1024):.1f} MB)"
             )
+            # Sync size == transferred so the download monitor's bytes-incomplete
+            # guard doesn't block post-processing. The throttled updates in
+            # _stream_to_file leave transferred < size after the last 0.5s tick;
+            # other streaming clients avoid this by not tracking bytes at all
+            # (size stays 0, the guard is skipped). Writing the final output size
+            # here restores parity.
+            if self._engine is not None:
+                self._engine.update_record(
+                    "amazon", download_id, {'size': final_size, 'transferred': final_size}
+                )
             return str(out_path)
 
         logger.error(f"All codec tiers exhausted for '{display_name}' ({asin})")
