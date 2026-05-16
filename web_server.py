@@ -12013,7 +12013,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
     logger.info(f"Processing enhanced album download for '{spotify_album['name']}' with {len(enhanced_tracks)} matched tracks")
 
     # Compute total_discs for multi-disc album subfolder support
-    total_discs = max((t['spotify_track'].get('disc_number', 1) for t in enhanced_tracks), default=1)
+    total_discs = max((t['spotify_track'].get('disc_number') or 1 for t in enhanced_tracks), default=1)
     spotify_album['total_discs'] = total_discs
 
     started_count = 0
@@ -12155,7 +12155,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 
     # Compute total_discs for multi-disc album subfolder support
     if official_spotify_tracks:
-        total_discs = max((t.get('disc_number', 1) for t in official_spotify_tracks), default=1)
+        total_discs = max((t.get('disc_number') or 1 for t in official_spotify_tracks), default=1)
     else:
         total_discs = 1
     spotify_album['total_discs'] = total_discs

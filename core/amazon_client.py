@@ -436,11 +436,11 @@ class AmazonClient:
 
         return {
             "id": s.asin,
-            "name": s.title,
-            "artists": [{"name": s.artist, "id": ""}],
+            "name": _strip_edition(s.title),
+            "artists": [{"name": _primary_artist(s.artist), "id": ""}],
             "album": {
                 "id": album_data.get("asin", ""),
-                "name": s.album,
+                "name": _strip_edition(s.album),
                 "images": [{"url": album_data["image"]}] if album_data.get("image") else [],
                 "release_date": album_data.get("release_date", ""),
                 "total_tracks": album_data.get("trackCount", 0),
@@ -448,8 +448,8 @@ class AmazonClient:
             "duration_ms": 0,
             "popularity": 0,
             "external_urls": {"amazon": f"https://music.amazon.com/albums/{asin}"},
-            "track_number": None,
-            "disc_number": None,
+            "track_number": s.track_number,
+            "disc_number": s.disc_number,
             "isrc": s.isrc,
             "is_album_track": True,
             "raw_data": {
@@ -504,8 +504,8 @@ class AmazonClient:
         items = [
             {
                 "id": s.asin,
-                "name": s.title,
-                "artists": [{"name": s.artist, "id": ""}],
+                "name": _strip_edition(s.title),
+                "artists": [{"name": _primary_artist(s.artist), "id": ""}],
                 "duration_ms": 0,
                 "track_number": s.track_number,
                 "disc_number": s.disc_number,
