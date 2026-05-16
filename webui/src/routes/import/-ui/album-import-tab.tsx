@@ -301,6 +301,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
           <Button
             type="button"
             variant="ghost"
+            size="icon"
             className={albumResults === null ? styles.hidden : ''}
             id="import-page-album-clear-btn"
             title="Clear search"
@@ -436,14 +437,16 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
         <div className={styles.importPageMatchActions}>
           <Button
             type="button"
-            className={styles.importPageSecondaryBtn}
+            variant="secondary"
+            size="sm"
             onClick={onAutoRematch}
           >
             Re-match Automatically
           </Button>
           <Button
             type="button"
-            className={styles.importPageBackBtn}
+            variant="ghost"
+            size="sm"
             onClick={onBackToSearch}
           >
             Back to Search
@@ -509,7 +512,8 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
                 {file ? (
                   <Button
                     type="button"
-                    className={styles.importPageMatchUnmatch}
+                    variant="ghost"
+                    size="icon"
                     onClick={(event) => {
                       event.stopPropagation();
                       onUnmatchTrack(index);

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { Button, RangeInput, Select, Switch } from '@/components/form/form';
+import { Button, OptionButton, OptionButtonGroup, RangeInput, Select, Switch } from '@/components/form/form';
 
 import type {
   ImportAutoFilter,
@@ -171,10 +171,12 @@ export function AutoImportPanel({
           >
             {getAutoImportStatusText(statusQuery.data)}
           </span>
+          <div className={styles.importPageFlexSpacer} />
           {statusQuery.data?.running ? (
             <Button
               type="button"
-              className={styles.autoImportScanNowBtn}
+              variant="secondary"
+              size="sm"
               id="auto-import-scan-now"
               title="Scan import folder now"
               disabled={scanMutation.isPending}
@@ -215,7 +217,8 @@ export function AutoImportPanel({
             </div>
             <Button
               type="button"
-              className={`${styles.autoImportActionBtn} ${styles.autoImportActionSecondary}`}
+              variant="primary"
+              size="sm"
               disabled={saveSettingsMutation.isPending}
               onClick={() =>
                 saveSettingsMutation.mutate({
@@ -264,25 +267,22 @@ export function AutoImportPanel({
               {counts.failed} failed
             </span>
           </div>
-          <div className={styles.autoImportFilters} id="auto-import-filters">
+          <OptionButtonGroup className={styles.autoImportFilters}>
             {(['all', 'pending', 'imported', 'failed'] as const).map((filter) => (
-              <Button
+              <OptionButton
                 key={filter}
-                type="button"
-                className={`${styles.autoImportFilterPill} ${
-                  autoFilter === filter ? styles.active : ''
-                }`}
-                data-filter={filter}
+                selected={autoFilter === filter}
                 onClick={() => onFilterChange(filter)}
               >
                 {filter === 'pending' ? 'Needs Review' : titleCase(filter)}
-              </Button>
+              </OptionButton>
             ))}
             <div className={styles.importPageFlexSpacer} />
             {counts.review > 0 ? (
               <Button
                 type="button"
-                className={styles.autoImportBatchBtn}
+                variant="secondary"
+                size="sm"
                 id="auto-import-approve-all"
                 disabled={approveAllMutation.isPending}
                 onClick={() => approveAllMutation.mutate()}
@@ -293,7 +293,8 @@ export function AutoImportPanel({
             {counts.imported + counts.failed > 0 ? (
               <Button
                 type="button"
-                className={`${styles.autoImportBatchBtn} ${styles.autoImportClearBtn}`}
+                variant="ghost"
+                size="sm"
                 id="auto-import-clear-completed"
                 disabled={clearMutation.isPending}
                 onClick={() => clearMutation.mutate()}
@@ -301,7 +302,7 @@ export function AutoImportPanel({
                 Clear History
               </Button>
             ) : null}
-          </div>
+          </OptionButtonGroup>
         </>
       ) : null}
 
@@ -449,7 +450,8 @@ function AutoImportResultCard({
             <div className={styles.autoImportActions}>
               <Button
                 type="button"
-                className={`${styles.autoImportActionBtn} ${styles.autoImportActionPrimary}`}
+                variant="primary"
+                size="sm"
                 disabled={approvePending}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -460,7 +462,8 @@ function AutoImportResultCard({
               </Button>
               <Button
                 type="button"
-                className={`${styles.autoImportActionBtn} ${styles.autoImportActionSecondary}`}
+                variant="secondary"
+                size="sm"
                 disabled={rejectPending}
                 onClick={(event) => {
                   event.stopPropagation();

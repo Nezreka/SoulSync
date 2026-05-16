@@ -266,7 +266,7 @@ type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
 export type ButtonProps = Omit<BaseButtonProps, 'className'> & {
   className?: string;
   size?: 'sm' | 'md' | 'lg' | 'icon';
-  variant?: 'default' | 'primary' | 'ghost';
+  variant?: 'default' | 'primary' | 'secondary' | 'ghost';
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -284,6 +284,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
           [styles.buttonSizeLg]: size === 'lg',
           [styles.buttonIcon]: size === 'icon',
           [styles.buttonPrimary]: variant === 'primary',
+          [styles.buttonSecondary]: variant === 'secondary',
           [styles.buttonGhost]: variant === 'ghost',
         },
         className,

@@ -408,6 +408,14 @@
   box-shadow: 0 0 0 1px rgba(var(--accent-light-rgb), 0.08);
 }
 
+.optionButtonSelected:hover {
+  border-color: rgba(var(--accent-light-rgb), 0.62);
+  background: rgba(var(--accent-rgb), 0.26);
+  box-shadow:
+    0 0 0 1px rgba(var(--accent-light-rgb), 0.12),
+    0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -496,6 +504,29 @@
   opacity: 0.62;
   background: rgba(var(--accent-light-rgb), 0.45);
   color: rgba(0, 0, 0, 0.55);
+}
+
+.buttonSecondary {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+}
+
+.buttonSecondary:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.buttonSecondary:focus-visible {
+  border-color: rgba(var(--accent-light-rgb), 0.45);
+  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
+}
+
+.buttonSecondary:disabled {
+  opacity: 0.55;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .buttonGhost {

@@ -44,30 +44,6 @@
   animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
-.importPageRefreshBtn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #ccc;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.importPageRefreshBtn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-
-.importPageRefreshBtnRefreshing {
-  opacity: 0.72;
-  cursor: progress;
-}
-
 .importPageStagingBar {
   display: flex;
   align-items: center;
@@ -173,12 +149,6 @@
 
 .importPageSearchInput:focus {
   border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.importPageSearchBar > button {
-  align-self: stretch;
-  min-width: 40px;
-  padding: 0 12px;
 }
 
 /* Album grid */
@@ -416,25 +386,6 @@
   font-style: italic;
 }
 
-.importPageMatchUnmatch {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.importPageMatchUnmatch:hover {
-  color: #ff4444;
-  background: rgba(255, 68, 68, 0.1);
-}
-
 /* Unmatched file pool */
 .importPageUnmatchedPool {
   padding: 16px;
@@ -506,30 +457,6 @@
 .importPageMatchStats {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.5);
-}
-
-.importPageSecondaryBtn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #ccc;
-  transition: all 0.2s;
-}
-
-.importPageSecondaryBtn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-
-.importPageBackBtn {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.5);
-  transition: all 0.2s;
-}
-
-.importPageBackBtn:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Singles */
@@ -631,25 +558,6 @@
   flex-shrink: 0;
 }
 
-.importPageIdentifyBtn {
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  color: #ccc;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.importPageIdentifyBtn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-
 /* Inline search panel for singles */
 .importPageSingleSearchPanel {
   grid-column: 1 / -1;
@@ -675,17 +583,6 @@
 
 .importPageSingleSearchInput:focus {
   border-color: rgba(var(--accent-light-rgb), 0.4);
-}
-
-.importPageSingleSearchGo {
-  padding: 8px 14px;
-  background: rgb(var(--accent-light-rgb));
-  border: none;
-  border-radius: 8px;
-  color: #000;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .importPageSingleSearchResults {
@@ -794,19 +691,6 @@
   color: rgba(255, 255, 255, 0.6);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-.importPageQueueClear {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 8px;
-}
-
-.importPageQueueClear:hover {
-  color: #fff;
 }
 
 .importPageQueueList {
@@ -956,11 +840,6 @@
     min-width: 0;
   }
 
-  .importPageMatchUnmatch {
-    grid-area: unmatch;
-    justify-self: end;
-  }
-
   .importPageSinglesHeader {
     flex-direction: column;
     align-items: flex-start;
@@ -1097,7 +976,6 @@
 
 .autoImportCard:hover {
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .autoImportCompleted {
@@ -1214,27 +1092,6 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Scan Now button */
-.autoImportScanNowBtn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 11px;
-  padding: 4px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  transition: all 0.15s;
-  margin-left: auto;
-}
-
-.autoImportScanNowBtn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
-}
-
 /* Live progress */
 .autoImportProgress {
   margin-top: 8px;
@@ -1288,103 +1145,8 @@
 
 /* Filter pills */
 .autoImportFilters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 6px 0;
   margin-bottom: 8px;
-}
-
-.autoImportFilterPill {
-  padding: 6px 16px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.autoImportFilterPill:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.autoImportFilterPill.active {
-  background: rgba(var(--accent-rgb), 0.15);
-  color: rgb(var(--accent-light-rgb));
-  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
-}
-
-.autoImportActionBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-  letter-spacing: 0.1px;
-}
-
-.autoImportActionPrimary {
-  background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.85));
-  color: #fff;
-  border-color: rgba(var(--accent-rgb), 0.3);
-  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.autoImportActionPrimary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.3);
-  filter: brightness(1.1);
-}
-
-.autoImportActionPrimary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.autoImportActionSecondary {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.autoImportActionSecondary:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateY(-1px);
-}
-
-/* Batch action buttons */
-.autoImportBatchBtn {
-  font-size: 11px;
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-  background: rgba(var(--accent-rgb), 0.08);
-  color: rgba(var(--accent-rgb), 1);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.autoImportBatchBtn:hover {
-  background: rgba(var(--accent-rgb), 0.15);
-}
-
-.autoImportClearBtn {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.autoImportClearBtn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.8);
 }
 
 .autoImportCardMeta {
@@ -1539,11 +1301,6 @@
   display: flex;
   gap: 4px;
   margin-top: 4px;
-}
-
-.autoImportActions button {
-  font-size: 10px;
-  padding: 3px 10px;
 }
 
 @media (max-width: 768px) {
