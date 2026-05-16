@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { Button, OptionButton, OptionButtonGroup, RangeInput, Select, Switch } from '@/components/form/form';
+import {
+  Badge,
+  Button,
+  OptionButton,
+  OptionButtonGroup,
+  RangeInput,
+  Select,
+  Switch,
+} from '@/components/form/form';
 
 import type {
   ImportAutoFilter,
@@ -250,31 +258,13 @@ export function AutoImportPanel({
 
       {allResults.length > 0 ? (
         <>
-          <div className={styles.autoImportStats} id="auto-import-stats">
-            <span className={styles.autoImportStat} id="auto-import-stat-imported">
-              {counts.imported} imported
-            </span>
-            <span
-              className={`${styles.autoImportStat} ${styles.autoImportStatReview}`}
-              id="auto-import-stat-review"
-            >
-              {counts.review} review
-            </span>
-            <span
-              className={`${styles.autoImportStat} ${styles.autoImportStatFailed}`}
-              id="auto-import-stat-failed"
-            >
-              {counts.failed} failed
-            </span>
-          </div>
           <OptionButtonGroup className={styles.autoImportFilters}>
             {(['all', 'pending', 'imported', 'failed'] as const).map((filter) => (
-              <OptionButton
-                key={filter}
-                selected={autoFilter === filter}
-                onClick={() => onFilterChange(filter)}
-              >
-                {filter === 'pending' ? 'Needs Review' : titleCase(filter)}
+              <OptionButton key={filter} selected={autoFilter === filter} onClick={() => onFilterChange(filter)}>
+                <span>{getAutoImportFilterLabel(filter)}</span>
+                <Badge tone={getAutoImportFilterTone(filter)}>
+                  {getAutoImportFilterCount(filter, counts, allResults.length)}
+                </Badge>
               </OptionButton>
             ))}
             <div className={styles.importPageFlexSpacer} />
@@ -555,6 +545,49 @@ function getAutoImportConfidenceClass(status: string): string {
   return classes[status] ?? '';
 }
 
+function getAutoImportFilterLabel(filter: ImportAutoFilter): string {
+  switch (filter) {
+    case 'all':
+      return 'All';
+    case 'pending':
+      return 'Needs Review';
+    case 'imported':
+      return 'Imported';
+    case 'failed':
+      return 'Failed';
+  }
+}
+
+function getAutoImportFilterCount(
+  filter: ImportAutoFilter,
+  counts: ReturnType<typeof getAutoImportCounts>,
+  totalCount: number,
+): number {
+  switch (filter) {
+    case 'all':
+      return totalCount;
+    case 'pending':
+      return counts.review;
+    case 'imported':
+      return counts.imported;
+    case 'failed':
+      return counts.failed;
+  }
+}
+
+function getAutoImportFilterTone(filter: ImportAutoFilter): 'neutral' | 'warning' | 'success' | 'danger' {
+  switch (filter) {
+    case 'pending':
+      return 'warning';
+    case 'imported':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'all':
+      return 'neutral';
+  }
+}
+
 function getMethodLabel(method: string | null | undefined): string {
   const labels: Record<string, string> = {
     tags: 'Tags',
@@ -563,10 +596,6 @@ function getMethodLabel(method: string | null | undefined): string {
     filename: 'Filename',
   };
   return method ? labels[method] || method : '';
-}
-
-function titleCase(value: string): string {
-  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
 async function confirmAction({

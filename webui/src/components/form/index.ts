@@ -1,5 +1,6 @@
 export {
   Button,
+  Badge,
   FormActions,
   FormError,
   FormField,

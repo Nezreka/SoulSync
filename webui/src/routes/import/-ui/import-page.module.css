@@ -1122,27 +1122,6 @@
   animation: adlPulse 1.5s ease-in-out infinite;
 }
 
-/* Stats summary */
-.autoImportStats {
-  display: flex;
-  gap: 16px;
-  padding: 8px 0;
-  margin-bottom: 4px;
-}
-
-.autoImportStat {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  font-weight: 500;
-}
-
-.autoImportStatReview {
-  color: #fbbf24;
-}
-.autoImportStatFailed {
-  color: #f87171;
-}
-
 /* Filter pills */
 .autoImportFilters {
   padding: 6px 0;

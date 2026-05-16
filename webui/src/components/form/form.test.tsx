@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import {
+  Badge,
   Button,
   Checkbox,
   FormActions,
@@ -114,6 +115,8 @@ function FormDemo() {
         />
       </FormField>
 
+      <Badge tone="warning">12</Badge>
+
       <FormError message="Validation failed" />
 
       <FormActions>
@@ -166,6 +169,7 @@ describe('form primitives', () => {
     fireEvent.click(highPriority);
     expect(highPriority).toHaveAttribute('aria-pressed', 'true');
 
+    expect(screen.getByText('12')).toHaveAttribute('data-tone', 'warning');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute(
       'data-variant',

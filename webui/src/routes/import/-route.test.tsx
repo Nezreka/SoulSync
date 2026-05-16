@@ -301,9 +301,8 @@ describe('import route', () => {
   it('renders auto-import results from route search state', async () => {
     renderImportRoute(['/import/auto?autoFilter=pending']);
 
-    expect(await screen.findByText('1 review')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Needs Review\s*1$/ })).toBeInTheDocument();
     expect(screen.getAllByText('Album A').length).toBeGreaterThan(0);
-    expect(screen.getByText('Needs Review')).toBeInTheDocument();
     expect(getFetchUrls().some((url) => url.includes('/api/import/staging/groups'))).toBe(false);
     expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(
       false,
