@@ -174,7 +174,42 @@ class PersonalizedPlaylistManager:
             self._record_generation_failure(record.id, str(exc))
             return self._fetch_playlist_row(kind, variant, profile_id)  # type: ignore[return-value]
 
+        # Quality post-filters — applied uniformly to every kind so
+        # generators stay focused on selection logic, not staleness
+        # bookkeeping. Filters are config-driven; defaults preserve
+        # the pre-overhaul behavior (no filtering).
+        tracks = self._apply_quality_filters(tracks, kind, profile_id, config)
+
         return self._persist_snapshot(record.id, kind, profile_id, tracks)
+
+    def _apply_quality_filters(
+        self,
+        tracks: List[Track],
+        kind: str,
+        profile_id: int,
+        config: PlaylistConfig,
+    ) -> List[Track]:
+        """Apply manager-level quality filters to a generator's output.
+
+        Currently:
+        - **Staleness window** (`config.exclude_recent_days > 0`): drops
+          any track whose primary id was served by this `kind` for this
+          `profile_id` in the last N days. Prevents the same track
+          from showing up across consecutive refreshes — e.g. a daily
+          Discovery Shuffle that shouldn't replay yesterday's picks.
+          Tracks without a primary id pass through unchanged (nothing
+          to dedupe on).
+
+        Returns a new list (never mutates input). When no filter
+        applies, returns ``tracks`` unchanged."""
+        if config.exclude_recent_days <= 0 or not tracks:
+            return tracks
+
+        recent_set = set(self.recent_track_ids(profile_id, kind, config.exclude_recent_days))
+        if not recent_set:
+            return tracks
+
+        return [t for t in tracks if not t.primary_id() or t.primary_id() not in recent_set]
 
     # ─── track read ──────────────────────────────────────────────────
 

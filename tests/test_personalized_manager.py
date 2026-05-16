@@ -394,6 +394,61 @@ class TestListPlaylists:
         assert len(mgr.list_playlists(2)) == 1
 
 
+class TestStalenessFilter:
+    """`config.exclude_recent_days > 0` drops tracks served by this
+    kind for this profile in the last N days."""
+
+    def test_zero_days_means_no_filter(self, db, registry):
+        # Default config has exclude_recent_days=0; everything passes.
+        tracks = [_make_track(sid='spot-1'), _make_track(sid='spot-2')]
+        run = {'tracks': tracks}
+        _register_simple_kind(registry, lambda *a, **k: run['tracks'])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        r1 = mgr.refresh_playlist('hidden_gems', '', 1)
+        # Refresh again with same tracks — no filter, all should persist.
+        r2 = mgr.refresh_playlist('hidden_gems', '', 1)
+        assert r2.track_count == 2
+
+    def test_positive_days_filters_recently_served(self, db, registry):
+        run = {'tracks': [_make_track(sid='spot-1'), _make_track(sid='spot-2')]}
+        _register_simple_kind(registry, lambda *a, **k: run['tracks'])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        r1 = mgr.refresh_playlist('hidden_gems', '', 1)
+        assert r1.track_count == 2
+        # Update config to exclude tracks served in last 7 days.
+        mgr.update_config('hidden_gems', '', 1, {'exclude_recent_days': 7})
+        # Same generator output now → all tracks just got served, all filtered out.
+        r2 = mgr.refresh_playlist('hidden_gems', '', 1)
+        assert r2.track_count == 0
+
+    def test_filter_preserves_non_recent_tracks(self, db, registry):
+        run = {'tracks': [_make_track(sid='spot-1')]}
+        _register_simple_kind(registry, lambda *a, **k: run['tracks'])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        r1 = mgr.refresh_playlist('hidden_gems', '', 1)
+        mgr.update_config('hidden_gems', '', 1, {'exclude_recent_days': 7})
+        # New generator output with a NEW id — should pass.
+        run['tracks'] = [_make_track(sid='spot-1'), _make_track(sid='spot-NEW')]
+        r2 = mgr.refresh_playlist('hidden_gems', '', 1)
+        # spot-1 was just served, dropped. spot-NEW is fresh, kept.
+        assert r2.track_count == 1
+        persisted = mgr.get_playlist_tracks(r2.id)
+        assert persisted[0].spotify_track_id == 'spot-NEW'
+
+    def test_tracks_without_primary_id_pass_through(self, db, registry):
+        # Track with no source IDs — primary_id() is None — staleness
+        # filter has nothing to dedupe on, so the track passes.
+        track_no_id = Track(track_name='X', artist_name='Y', source='spotify')
+        run = {'tracks': [track_no_id]}
+        _register_simple_kind(registry, lambda *a, **k: run['tracks'])
+        mgr = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        mgr.refresh_playlist('hidden_gems', '', 1)
+        mgr.update_config('hidden_gems', '', 1, {'exclude_recent_days': 7})
+        r2 = mgr.refresh_playlist('hidden_gems', '', 1)
+        # Track is kept because there's no id to match against history.
+        assert r2.track_count == 1
+
+
 class TestStalenessHistory:
     def test_recent_track_ids_returns_zero_when_days_zero(self, db, registry):
         _register_simple_kind(registry, lambda *a, **k: [_make_track(sid='spot-1')])
