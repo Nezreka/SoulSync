@@ -7,6 +7,7 @@ import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 
+import type { ImportStagingFile } from './-import.types';
 import { resetImportWorkflowStore } from './-import.store';
 
 function createResponse(body: unknown, status = 200) {
@@ -54,9 +55,30 @@ function getFetchUrls() {
 
 describe('import route', () => {
   let albumMatchBodies: Record<string, unknown>[];
+  let stagingFilesPayload: ImportStagingFile[];
 
   beforeEach(() => {
     albumMatchBodies = [];
+    stagingFilesPayload = [
+      {
+        filename: '01-track.flac',
+        rel_path: 'Album/01-track.flac',
+        full_path: '/music/Staging/Album/01-track.flac',
+        title: 'Track One',
+        artist: 'Artist A',
+        album: 'Album A',
+        extension: '.flac',
+      },
+      {
+        filename: '02-track.flac',
+        rel_path: 'Album/02-track.flac',
+        full_path: '/music/Staging/Album/02-track.flac',
+        title: 'Track Two',
+        artist: 'Artist A',
+        album: 'Album A',
+        extension: '.flac',
+      },
+    ];
     resetImportWorkflowStore();
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showToast = vi.fn();
@@ -71,17 +93,7 @@ describe('import route', () => {
           return createResponse({
             success: true,
             staging_path: '/music/Staging',
-            files: [
-              {
-                filename: '01-track.flac',
-                rel_path: 'Album/01-track.flac',
-                full_path: '/music/Staging/Album/01-track.flac',
-                title: 'Track One',
-                artist: 'Artist A',
-                album: 'Album A',
-                extension: '.flac',
-              },
-            ],
+            files: stagingFilesPayload,
           });
         }
 
@@ -241,6 +253,38 @@ describe('import route', () => {
     renderImportRoute();
 
     expect(await screen.findByDisplayValue('half matched album')).toBeInTheDocument();
+  });
+
+  it('keeps singles selection tied to file identity across refreshes', async () => {
+    renderImportRoute(['/import/singles']);
+
+    const secondTrack = await screen.findByLabelText('Select 02-track.flac');
+    fireEvent.click(secondTrack);
+
+    stagingFilesPayload = [
+      {
+        filename: '00-intro.flac',
+        rel_path: 'Album/00-intro.flac',
+        full_path: '/music/Staging/Album/00-intro.flac',
+        title: 'Intro',
+        artist: 'Artist A',
+        album: 'Album A',
+        extension: '.flac',
+      },
+      ...stagingFilesPayload,
+    ];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Select 02-track.flac') as HTMLInputElement).checked).toBe(
+        true,
+      ),
+    );
+    expect((screen.getByLabelText('Select 01-track.flac') as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect(screen.getByText('Process Selected (1)')).toBeInTheDocument();
   });
 
   it('preserves album source details when matching an album', async () => {

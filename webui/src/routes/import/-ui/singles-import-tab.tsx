@@ -1,10 +1,12 @@
+import { useEffect } from 'react';
+
 import type { SingleSearchState } from '../-import.store';
 import type { ImportTrackResult } from '../-import.types';
 import type { ImportStagingFile } from '../-import.types';
 
 import styles from './import-page.module.css';
 import { searchImportTracks } from '../-import.api';
-import { formatDuration } from '../-import.helpers';
+import { formatDuration, getStagingFileKey } from '../-import.helpers';
 import { useSinglesImportWorkflow } from '../-import.store';
 import {
   fallbackImage,
@@ -26,32 +28,37 @@ export function SinglesImportTab() {
     setSingleSearch,
     singleSearches,
     singlesManualMatches,
+    syncSinglesWorkflow,
     toggleAllSingles,
     toggleSingleInStore,
   } = useSinglesImportWorkflow();
 
-  const openSingleSearchPanel = (index: number) => {
-    if (openSingleSearch === index) {
+  useEffect(() => {
+    syncSinglesWorkflow(stagingFiles);
+  }, [stagingFiles, syncSinglesWorkflow]);
+
+  const openSingleSearchPanel = (file: ImportStagingFile) => {
+    const fileKey = getStagingFileKey(file);
+    if (openSingleSearch === fileKey) {
       setOpenSingleSearch(null);
       return;
     }
 
-    setOpenSingleSearch(index);
-    const file = stagingFiles[index];
+    setOpenSingleSearch(fileKey);
     const defaultQuery =
       [file?.artist, file?.title].filter(Boolean).join(' ') ||
       (file?.filename || '').replace(/\.[^.]+$/, '');
-    ensureSingleSearch(index, defaultQuery);
-    if (defaultQuery && !singleSearches[index]?.results.length) {
-      void runSingleSearch(index, defaultQuery);
+    ensureSingleSearch(fileKey, defaultQuery);
+    if (defaultQuery && !singleSearches[fileKey]?.results.length) {
+      void runSingleSearch(fileKey, defaultQuery);
     }
   };
 
-  const runSingleSearch = async (index: number, query: string) => {
+  const runSingleSearch = async (fileKey: string, query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
 
-    setSingleSearch(index, (current) => ({
+    setSingleSearch(fileKey, (current) => ({
       query: trimmed,
       loading: true,
       error: null,
@@ -60,14 +67,14 @@ export function SinglesImportTab() {
 
     try {
       const payload = await searchImportTracks(trimmed);
-      setSingleSearch(index, {
+      setSingleSearch(fileKey, {
         query: trimmed,
         loading: false,
         error: null,
         results: payload.tracks ?? [],
       });
     } catch (error) {
-      setSingleSearch(index, {
+      setSingleSearch(fileKey, {
         query: trimmed,
         loading: false,
         error: getErrorMessage(error),
@@ -76,16 +83,15 @@ export function SinglesImportTab() {
     }
   };
 
-  const selectSingleMatch = (fileIndex: number, track: ImportTrackResult) => {
-    selectSingleMatchInStore(fileIndex, track);
+  const selectSingleMatch = (fileKey: string, track: ImportTrackResult) => {
+    selectSingleMatchInStore(fileKey, track);
   };
 
   const processSingles = () => {
-    if (selectedSingles.size === 0) return;
-    const filesToProcess = Array.from(selectedSingles).flatMap((index) => {
-      const file = stagingFiles[index];
-      if (!file) return [];
-      const manualMatch = singlesManualMatches[index];
+    const filesToProcess = stagingFiles.flatMap((file) => {
+      const fileKey = getStagingFileKey(file);
+      if (!selectedSingles.has(fileKey)) return [];
+      const manualMatch = singlesManualMatches[fileKey];
       return manualMatch ? [{ ...file, manual_match: manualMatch }] : [file];
     });
 
@@ -111,21 +117,21 @@ export function SinglesImportTab() {
     <SinglesImportPanel
       files={stagingFiles}
       manualMatches={singlesManualMatches}
-      openSearchIndex={openSingleSearch}
+      openSearchKey={openSingleSearch}
       searchStates={singleSearches}
       selected={selectedSingles}
       onOpenSearch={openSingleSearchPanel}
       onProcessSingles={processSingles}
       onRunSearch={runSingleSearch}
-      onSearchQueryChange={(index, query) => {
-        setSingleSearch(index, (current) => ({
+      onSearchQueryChange={(fileKey, query) => {
+        setSingleSearch(fileKey, (current) => ({
           query,
           loading: current.loading,
           error: current.error,
           results: current.results,
         }));
       }}
-      onSelectAll={() => toggleAllSingles(stagingFiles.length)}
+      onSelectAll={() => toggleAllSingles(stagingFiles)}
       onSelectMatch={selectSingleMatch}
       onToggleSingle={toggleSingleInStore}
     />
@@ -135,7 +141,7 @@ export function SinglesImportTab() {
 export function SinglesImportPanel({
   files,
   manualMatches,
-  openSearchIndex,
+  openSearchKey,
   searchStates,
   selected,
   onOpenSearch,
@@ -147,19 +153,20 @@ export function SinglesImportPanel({
   onToggleSingle,
 }: {
   files: ImportStagingFile[];
-  manualMatches: Record<number, ImportTrackResult>;
-  openSearchIndex: number | null;
-  searchStates: Record<number, SingleSearchState>;
-  selected: Set<number>;
-  onOpenSearch: (index: number) => void;
+  manualMatches: Record<string, ImportTrackResult>;
+  openSearchKey: string | null;
+  searchStates: Record<string, SingleSearchState>;
+  selected: Set<string>;
+  onOpenSearch: (file: ImportStagingFile) => void;
   onProcessSingles: () => void;
-  onRunSearch: (index: number, query: string) => void;
-  onSearchQueryChange: (index: number, query: string) => void;
+  onRunSearch: (fileKey: string, query: string) => void;
+  onSearchQueryChange: (fileKey: string, query: string) => void;
   onSelectAll: () => void;
-  onSelectMatch: (fileIndex: number, track: ImportTrackResult) => void;
-  onToggleSingle: (index: number) => void;
+  onSelectMatch: (fileKey: string, track: ImportTrackResult) => void;
+  onToggleSingle: (fileKey: string) => void;
 }) {
-  const allSelected = files.length > 0 && selected.size === files.length;
+  const selectedCount = files.filter((file) => selected.has(getStagingFileKey(file))).length;
+  const allSelected = files.length > 0 && selectedCount === files.length;
 
   return (
     <>
@@ -174,28 +181,29 @@ export function SinglesImportPanel({
             type="button"
             className={styles.importPageProcessBtn}
             id="import-page-singles-process-btn"
-            disabled={selected.size === 0}
+            disabled={selectedCount === 0}
             onClick={onProcessSingles}
           >
-            Process Selected ({selected.size})
+            Process Selected ({selectedCount})
           </button>
         </div>
       </div>
-              <div className={styles.importPageSinglesList} id="import-page-singles-list">
+      <div className={styles.importPageSinglesList} id="import-page-singles-list">
         {files.length === 0 ? (
           <div className={styles.importPageEmptyState}>No audio files found in import folder</div>
         ) : (
-          files.map((file, index) => {
-            const manualMatch = manualMatches[index];
-            const isSelected = selected.has(index);
-            const searchState = searchStates[index];
+          files.map((file) => {
+            const fileKey = getStagingFileKey(file);
+            const manualMatch = manualMatches[fileKey];
+            const isSelected = selected.has(fileKey);
+            const searchState = searchStates[fileKey];
             return (
               <div
-                key={`${file.full_path}-${index}`}
+                key={fileKey}
                 className={`${styles.importPageSingleItem} ${
                   manualMatch ? styles.matched : ''
                 }`}
-                data-single-idx={index}
+                data-single-key={fileKey}
               >
                 <label className={styles.importPageSingleCheckboxWrap}>
                   <input
@@ -203,7 +211,7 @@ export function SinglesImportPanel({
                     aria-label={`Select ${file.filename}`}
                     className={styles.importPageSingleCheckboxInput}
                     checked={isSelected}
-                    onChange={() => onToggleSingle(index)}
+                    onChange={() => onToggleSingle(fileKey)}
                   />
                   <span className={styles.importPageSingleCheckbox} aria-hidden="true" />
                 </label>
@@ -220,7 +228,7 @@ export function SinglesImportPanel({
                       <button
                         type="button"
                         className={styles.importPageSingleMatchedChange}
-                        onClick={() => onOpenSearch(index)}
+                        onClick={() => onOpenSearch(file)}
                       >
                         change
                       </button>
@@ -231,14 +239,14 @@ export function SinglesImportPanel({
                   <button
                     type="button"
                     className={styles.importPageIdentifyBtn}
-                    onClick={() => onOpenSearch(index)}
+                    onClick={() => onOpenSearch(file)}
                   >
                     🔍 Identify
                   </button>
                 </div>
-                {openSearchIndex === index ? (
+                {openSearchKey === fileKey ? (
                   <SingleSearchPanel
-                    fileIndex={index}
+                    fileKey={fileKey}
                     searchState={searchState}
                     onQueryChange={onSearchQueryChange}
                     onRunSearch={onRunSearch}
@@ -255,17 +263,17 @@ export function SinglesImportPanel({
 }
 
 function SingleSearchPanel({
-  fileIndex,
+  fileKey,
   searchState,
   onQueryChange,
   onRunSearch,
   onSelectMatch,
 }: {
-  fileIndex: number;
+  fileKey: string;
   searchState: SingleSearchState | undefined;
-  onQueryChange: (index: number, query: string) => void;
-  onRunSearch: (index: number, query: string) => void;
-  onSelectMatch: (fileIndex: number, track: ImportTrackResult) => void;
+  onQueryChange: (fileKey: string, query: string) => void;
+  onRunSearch: (fileKey: string, query: string) => void;
+  onSelectMatch: (fileKey: string, track: ImportTrackResult) => void;
 }) {
   const query = searchState?.query ?? '';
 
@@ -277,20 +285,20 @@ function SingleSearchPanel({
           className={styles.importPageSingleSearchInput}
           value={query}
           placeholder="Search artist - title..."
-          onChange={(event) => onQueryChange(fileIndex, event.target.value)}
+          onChange={(event) => onQueryChange(fileKey, event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') onRunSearch(fileIndex, query);
+            if (event.key === 'Enter') onRunSearch(fileKey, query);
           }}
         />
         <button
           type="button"
           className={styles.importPageSingleSearchGo}
-          onClick={() => onRunSearch(fileIndex, query)}
+          onClick={() => onRunSearch(fileKey, query)}
         >
           Search
         </button>
       </div>
-      <div className={styles.importPageSingleSearchResults} id={`import-single-results-${fileIndex}`}>
+      <div className={styles.importPageSingleSearchResults}>
         {searchState?.loading ? (
           <div className={styles.importPageEmptyState}>Searching...</div>
         ) : searchState?.error ? (
@@ -303,7 +311,7 @@ function SingleSearchPanel({
               key={`${track.source || 'source'}-${track.id}-${index}`}
               type="button"
               className={styles.importPageSingleResultItem}
-              onClick={() => onSelectMatch(fileIndex, track)}
+              onClick={() => onSelectMatch(fileKey, track)}
             >
               {track.image_url ? (
                 <img

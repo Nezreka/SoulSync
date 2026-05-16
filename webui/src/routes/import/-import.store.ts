@@ -7,8 +7,10 @@ import type {
   ImportAlbumResult,
   ImportQueueEntry,
   ImportQueueJob,
+  ImportStagingFile,
   ImportTrackResult,
 } from './-import.types';
+import { getStagingFileKey } from './-import.helpers';
 
 export type SingleSearchState = {
   query: string;
@@ -37,10 +39,10 @@ function createInitialWorkflowState() {
     albumMatchError: null as string | null,
     albumMatchLoading: false,
     matchOverrides: {} as Record<number, number>,
-    selectedSingles: new Set<number>(),
-    singlesManualMatches: {} as Record<number, ImportTrackResult>,
-    openSingleSearch: null as number | null,
-    singleSearches: {} as Record<number, SingleSearchState>,
+    selectedSingles: new Set<string>(),
+    singlesManualMatches: {} as Record<string, ImportTrackResult>,
+    openSingleSearch: null as string | null,
+    singleSearches: {} as Record<string, SingleSearchState>,
   };
 }
 
@@ -111,34 +113,53 @@ export const useImportWorkflowStore = create(
     setMatchOverrides: (updater: StateUpdater<Record<number, number>>) => {
       set((state) => ({ matchOverrides: resolveState(state.matchOverrides, updater) }));
     },
-    toggleSingle: (index: number) => {
+    toggleSingle: (fileKey: string) => {
       set((state) => {
         const selectedSingles = new Set(state.selectedSingles);
-        if (selectedSingles.has(index)) selectedSingles.delete(index);
-        else selectedSingles.add(index);
+        if (selectedSingles.has(fileKey)) selectedSingles.delete(fileKey);
+        else selectedSingles.add(fileKey);
         return { selectedSingles };
       });
     },
-    toggleAllSingles: (fileCount: number) => {
+    toggleAllSingles: (stagingFiles: ImportStagingFile[]) => {
       set((state) => ({
-        selectedSingles:
-          state.selectedSingles.size === fileCount
-            ? new Set<number>()
-            : new Set(Array.from({ length: fileCount }, (_, index) => index)),
+        selectedSingles: (() => {
+          const fileKeys = stagingFiles.map(getStagingFileKey);
+          return state.selectedSingles.size === fileKeys.length &&
+            fileKeys.every((key) => state.selectedSingles.has(key))
+            ? new Set<string>()
+            : new Set(fileKeys);
+        })(),
       }));
     },
     clearSinglesSelection: () => {
       set({
-        selectedSingles: new Set<number>(),
+        selectedSingles: new Set<string>(),
         singlesManualMatches: {},
       });
     },
-    setOpenSingleSearch: (openSingleSearch: number | null) => set({ openSingleSearch }),
-    ensureSingleSearch: (index: number, query: string) => {
+    syncSinglesWorkflow: (stagingFiles: ImportStagingFile[]) => {
+      const validKeys = new Set(stagingFiles.map(getStagingFileKey));
+      set((state) => ({
+        selectedSingles: new Set([...state.selectedSingles].filter((key) => validKeys.has(key))),
+        singlesManualMatches: Object.fromEntries(
+          Object.entries(state.singlesManualMatches).filter(([key]) => validKeys.has(key)),
+        ),
+        openSingleSearch:
+          state.openSingleSearch && validKeys.has(state.openSingleSearch)
+            ? state.openSingleSearch
+            : null,
+        singleSearches: Object.fromEntries(
+          Object.entries(state.singleSearches).filter(([key]) => validKeys.has(key)),
+        ),
+      }));
+    },
+    setOpenSingleSearch: (openSingleSearch: string | null) => set({ openSingleSearch }),
+    ensureSingleSearch: (fileKey: string, query: string) => {
       set((state) => ({
         singleSearches: {
           ...state.singleSearches,
-          [index]: state.singleSearches[index] ?? {
+          [fileKey]: state.singleSearches[fileKey] ?? {
             query,
             loading: false,
             error: null,
@@ -147,9 +168,9 @@ export const useImportWorkflowStore = create(
         },
       }));
     },
-    setSingleSearch: (index: number, updater: StateUpdater<SingleSearchState>) => {
+    setSingleSearch: (fileKey: string, updater: StateUpdater<SingleSearchState>) => {
       set((state) => {
-        const current = state.singleSearches[index] ?? {
+        const current = state.singleSearches[fileKey] ?? {
           query: '',
           loading: false,
           error: null,
@@ -158,15 +179,15 @@ export const useImportWorkflowStore = create(
         return {
           singleSearches: {
             ...state.singleSearches,
-            [index]: resolveState(current, updater),
+            [fileKey]: resolveState(current, updater),
           },
         };
       });
     },
-    selectSingleMatch: (fileIndex: number, track: ImportTrackResult) => {
+    selectSingleMatch: (fileKey: string, track: ImportTrackResult) => {
       set((state) => ({
-        singlesManualMatches: { ...state.singlesManualMatches, [fileIndex]: track },
-        selectedSingles: new Set(state.selectedSingles).add(fileIndex),
+        singlesManualMatches: { ...state.singlesManualMatches, [fileKey]: track },
+        selectedSingles: new Set(state.selectedSingles).add(fileKey),
         openSingleSearch: null,
       }));
     },
@@ -229,6 +250,7 @@ export function useSinglesImportWorkflow() {
       setSingleSearch: state.setSingleSearch,
       singleSearches: state.singleSearches,
       singlesManualMatches: state.singlesManualMatches,
+      syncSinglesWorkflow: state.syncSinglesWorkflow,
       toggleAllSingles: state.toggleAllSingles,
       toggleSingleInStore: state.toggleSingle,
     })),
