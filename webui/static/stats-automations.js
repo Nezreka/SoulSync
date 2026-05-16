@@ -5980,13 +5980,17 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         // async populator can mark them checked once kinds load. The
         // visible picker container starts as a loading message.
         const initialKinds = JSON.stringify(Array.isArray(config.kinds) ? config.kinds : []);
-        return `<div class="config-row">
-            <label>Personalized playlists to sync</label>
+        // The default `.config-row` flex layout puts label on the left
+        // and input on the right — wrong for a tall multi-select picker.
+        // Use a dedicated column-layout wrapper so the picker spans
+        // the full card width.
+        return `<div class="config-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+            <label style="min-width:0;">Personalized playlists to sync</label>
             <input type="hidden" id="cfg-${slotKey}-kinds" data-initial='${_escAttr(initialKinds)}' value='${_escAttr(initialKinds)}'>
-            <div id="cfg-${slotKey}-kinds-picker" class="personalized-kinds-picker" style="max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;background:rgba(0,0,0,0.2);">
+            <div id="cfg-${slotKey}-kinds-picker" class="personalized-kinds-picker" style="max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,0.25);width:100%;box-sizing:border-box;">
                 <div style="color:rgba(255,255,255,0.4);font-size:12px;">Loading personalized playlists…</div>
             </div>
-            <div style="color:rgba(255,255,255,0.35);font-size:11px;margin-top:4px;">Pick which Discover-page playlists this automation will sync. Variant kinds (Time Machine, Genre, Daily Mix, Seasonal Mix) expose individual instances below their kind row.</div>
+            <div style="color:rgba(255,255,255,0.35);font-size:11px;text-transform:none;letter-spacing:0;">Pick which Discover-page playlists this automation will sync. Variant kinds (Time Machine, Genre, Daily Mix, Seasonal Mix) expose individual instances below their kind row.</div>
         </div>
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-refresh_first"${refreshFirstChecked}> Refresh playlists before sync (regenerate snapshots)</label>
@@ -6229,6 +6233,12 @@ async function _autoLoadPersonalizedKinds(slotKey) {
 
     // Render: one row per (kind, variant). Singletons get one row;
     // variant kinds get one row per resolved variant + an "all" toggle.
+    // Inline styles override the parent `.placed-block-config label`
+    // rule (uppercase / min-width / letter-spacing) — without these
+    // overrides every row would render as a tiny narrow chip.
+    const rowStyle = 'display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;text-transform:none;letter-spacing:0;color:rgba(255,255,255,0.85);min-width:0;';
+    const variantRowStyle = rowStyle + 'padding-left:20px;font-size:12px;color:rgba(255,255,255,0.7);';
+    const sectionHeader = 'font-weight:600;margin:8px 0 2px;color:rgba(255,255,255,0.85);font-size:13px;text-transform:none;letter-spacing:0;';
     let html = '';
     _autoPersonalizedKinds.forEach(spec => {
         const baseLabel = spec.name_template
@@ -6239,21 +6249,21 @@ async function _autoLoadPersonalizedKinds(slotKey) {
             // Singleton: one checkbox.
             const key = selectedKey(spec.kind, '');
             const checked = selectedSet.has(key) ? ' checked' : '';
-            html += `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;">
+            html += `<label style="${rowStyle}font-weight:600;">
                 <input type="checkbox" data-kind="${_escAttr(spec.kind)}"${checked}>
-                <span style="font-weight:600;">${_escAttr(baseLabel)}</span>
+                <span>${_escAttr(baseLabel)}</span>
             </label>`;
         } else {
             const variants = Array.isArray(spec.variants) ? spec.variants : [];
             html += `<div style="margin:6px 0 4px;border-top:1px solid rgba(255,255,255,0.05);padding-top:6px;">
-                <div style="font-weight:600;margin-bottom:2px;">${_escAttr(baseLabel)}</div>`;
+                <div style="${sectionHeader}">${_escAttr(baseLabel)}</div>`;
             if (variants.length === 0) {
-                html += `<div style="font-size:11px;color:rgba(255,255,255,0.35);padding-left:18px;">(no variants available — populate via the discover page first)</div>`;
+                html += `<div style="font-size:11px;color:rgba(255,255,255,0.35);padding-left:20px;text-transform:none;letter-spacing:0;">(no variants available — populate via the discover page first)</div>`;
             } else {
                 variants.forEach(variant => {
                     const key = selectedKey(spec.kind, variant);
                     const checked = selectedSet.has(key) ? ' checked' : '';
-                    html += `<label style="display:flex;align-items:center;gap:8px;padding:2px 0 2px 18px;cursor:pointer;font-size:13px;">
+                    html += `<label style="${variantRowStyle}">
                         <input type="checkbox" data-kind="${_escAttr(spec.kind)}" data-variant="${_escAttr(variant)}"${checked}>
                         <span>${_escAttr(variant)}</span>
                     </label>`;
