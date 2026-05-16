@@ -486,12 +486,18 @@ class AmazonClient:
             "label": album.get("label", ""),
         }
         if include_tracks:
-            result["tracks"] = self.get_album_tracks(asin) or {
-                "items": [],
-                "total": 0,
-                "limit": 50,
-                "next": None,
+            tracks_data = self.get_album_tracks(asin) or {
+                "items": [], "total": 0, "limit": 50, "next": None,
             }
+            result["tracks"] = tracks_data
+            # Backfill release_date from stream tags when album metadata lacks it.
+            if not result["release_date"]:
+                items = tracks_data.get("items") or []
+                for item in items:
+                    rd = item.get("release_date") or ""
+                    if rd and len(rd) >= 4:
+                        result["release_date"] = rd
+                        break
         return result
 
     def get_album_tracks(self, asin: str) -> Optional[Dict[str, Any]]:
