@@ -1190,9 +1190,7 @@ async function loadInitialData() {
         if (route?.kind === 'react') {
             showReactHost(targetPage);
             setActivePageChrome(targetPage);
-            if (window.location.pathname !== route.path) {
-                history.replaceState({ page: targetPage }, '', route.path);
-            }
+            // Keep nested react-tab URLs like /import/auto or /import/singles intact.
             return;
         }
 
