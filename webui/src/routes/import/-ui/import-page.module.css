@@ -629,7 +629,7 @@
 }
 
 .importPageSingleCheckboxWrap {
-  grid-area: checkbox;
+  grid-column: 1;
   position: relative;
   width: 18px;
   height: 18px;
@@ -685,6 +685,7 @@
 }
 
 .importPageSingleInfo {
+  grid-column: 2;
   min-width: 0;
 }
 
@@ -729,6 +730,8 @@
 }
 
 .importPageSingleActions {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -1082,6 +1085,10 @@
       "search search search";
     align-items: start;
     gap: 8px;
+  }
+
+  .importPageSingleCheckboxWrap {
+    grid-area: checkbox;
   }
 
   .importPageSingleInfo {

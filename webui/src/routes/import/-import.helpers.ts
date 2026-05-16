@@ -11,6 +11,10 @@ import type {
 
 export const IMPORT_PLACEHOLDER_IMAGE = '/static/placeholder.png';
 
+export function getStagingFileKey(file: ImportStagingFile): string {
+  return file.full_path;
+}
+
 export function formatImportBytes(bytes: number): string {
   if (bytes > 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
   if (bytes > 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`;
