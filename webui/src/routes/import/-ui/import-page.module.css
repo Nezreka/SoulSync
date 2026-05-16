@@ -63,6 +63,11 @@
   color: #fff;
 }
 
+.importPageRefreshBtnRefreshing {
+  opacity: 0.72;
+  cursor: progress;
+}
+
 .importPageStagingBar {
   display: flex;
   align-items: center;
@@ -86,6 +91,11 @@
   color: rgb(var(--accent-light-rgb));
   font-weight: 500;
   white-space: nowrap;
+}
+
+.importStagingRefreshAt {
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 /* Tab Bar */
