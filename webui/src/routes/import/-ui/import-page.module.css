@@ -628,9 +628,26 @@
   border-color: rgba(var(--accent-light-rgb), 0.2);
 }
 
+.importPageSingleCheckboxWrap {
+  grid-area: checkbox;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.importPageSingleCheckboxInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+}
+
 .importPageSingleCheckbox {
   width: 18px;
   height: 18px;
+  box-sizing: border-box;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: transparent;
   padding: 0;
@@ -643,16 +660,28 @@
   flex-shrink: 0;
 }
 
-.importPageSingleCheckbox.checked {
-  background: rgb(var(--accent-light-rgb));
-  border-color: rgb(var(--accent-light-rgb));
-}
-
-.importPageSingleCheckbox.checked::after {
+.importPageSingleCheckbox::after {
   content: '✓';
   color: #000;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  transform: translateY(-0.5px) scaleX(1.18);
+}
+
+.importPageSingleCheckboxInput:focus-visible + .importPageSingleCheckbox {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.14);
+}
+
+.importPageSingleCheckboxInput:checked + .importPageSingleCheckbox {
+  background: rgb(var(--accent-light-rgb));
+  border-color: rgb(var(--accent-light-rgb));
+}
+
+.importPageSingleCheckboxInput:checked + .importPageSingleCheckbox::after {
+  opacity: 1;
 }
 
 .importPageSingleInfo {
@@ -1010,17 +1039,29 @@
   }
 
   .importPageMatchRow {
-    grid-template-columns: 28px 1fr;
-    gap: 8px;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num track track"
+      "num file unmatch";
+    gap: 6px 8px;
+    align-items: center;
+  }
+
+  .importPageMatchNum {
+    grid-area: num;
+  }
+
+  .importPageMatchTrack {
+    grid-area: track;
   }
 
   .importPageMatchFile {
-    grid-column: 1 / -1;
-    padding-left: 28px;
+    grid-area: file;
+    min-width: 0;
   }
 
   .importPageMatchUnmatch {
-    grid-column: 1 / -1;
+    grid-area: unmatch;
     justify-self: end;
   }
 
@@ -1035,12 +1076,26 @@
   }
 
   .importPageSingleItem {
-    grid-template-columns: 28px 1fr;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "checkbox info actions"
+      "search search search";
+    align-items: start;
+    gap: 8px;
+  }
+
+  .importPageSingleInfo {
+    grid-area: info;
   }
 
   .importPageSingleActions {
-    grid-column: 1 / -1;
+    grid-area: actions;
     justify-self: end;
+    align-self: start;
+  }
+
+  .importPageSingleSearchPanel {
+    grid-area: search;
   }
 
   .importPageSingleSearchPanel {
