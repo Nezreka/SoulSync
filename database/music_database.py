@@ -2039,13 +2039,50 @@ class MusicDatabase:
             logger.error(f"Error adding Discogs columns: {e}")
 
     def _add_amazon_columns(self, cursor):
-        """Add Amazon artist ID column to artists table."""
+        """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
         try:
+            # --- Artists ---
             cursor.execute("PRAGMA table_info(artists)")
             artists_columns = [column[1] for column in cursor.fetchall()]
+
             if 'amazon_id' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_last_attempted TIMESTAMP")
+
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'amazon_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'amazon_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
+
             logger.info("Amazon columns added/verified successfully")
         except Exception as e:
             logger.error(f"Error adding Amazon columns: {e}")
