@@ -1206,6 +1206,112 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// AMAZON MUSIC ENRICHMENT WORKER
+// ===================================================================
+
+async function updateAmazonEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/enrichment/amazon/status');
+        if (!response.ok) { console.warn('Amazon enrichment status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateAmazonEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Amazon enrichment status:', error);
+    }
+}
+
+function updateAmazonEnrichmentStatusFromData(data) {
+    const button = document.getElementById('amazon-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('amazon-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('amazon-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('amazon-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        } else {
+            tooltipCurrent.textContent = 'No active matches';
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+        const currentType = data.current_item?.type;
+        let progressText = '';
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        }
+        tooltipProgress.textContent = progressText;
+    }
+}
+
+async function toggleAmazonEnrichment() {
+    try {
+        const button = document.getElementById('amazon-enrich-button');
+        if (!button) return;
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/amazon/pause' : '/api/enrichment/amazon/resume';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Amazon enrichment`);
+        }
+        await updateAmazonEnrichmentStatus();
+        console.log(`Amazon enrichment ${isRunning ? 'paused' : 'resumed'}`);
+    } catch (error) {
+        console.error('Error toggling Amazon enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('amazon-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleAmazonEnrichment);
+            updateAmazonEnrichmentStatus();
+            setInterval(updateAmazonEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('amazon-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleAmazonEnrichment);
+        updateAmazonEnrichmentStatus();
+        setInterval(updateAmazonEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
 // HYDRABASE P2P MIRROR WORKER
 // ===================================================================
 
