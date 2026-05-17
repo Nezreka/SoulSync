@@ -10655,6 +10655,7 @@ _SERVICE_ID_COLUMNS = {
     'genius': {'artist': 'genius_id', 'track': 'genius_id'},
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
+    'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -24372,6 +24373,7 @@ def get_watchlist_artists():
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
                 "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
                 "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),
+                "amazon_artist_id": getattr(artist, 'amazon_artist_id', None),
                 "include_albums": artist.include_albums,
                 "include_eps": artist.include_eps,
                 "include_singles": artist.include_singles,
@@ -25171,10 +25173,10 @@ def watchlist_artist_config(artist_id):
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
-                       lookback_days, discogs_artist_id, preferred_metadata_source
+                       lookback_days, discogs_artist_id, preferred_metadata_source, amazon_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -25183,10 +25185,11 @@ def watchlist_artist_config(artist_id):
 
             # Determine if this is an iTunes or Spotify artist
             is_itunes_artist = artist_id.isdigit()
-            spotify_id = result[9]  # spotify_artist_id from query
+            spotify_id = result[9]   # spotify_artist_id from query
             itunes_id = result[10]  # itunes_artist_id from query
             deezer_id = result[14]  # deezer_artist_id from query
             discogs_id = result[16]  # discogs_artist_id from query
+            amazon_id = result[18] if len(result) > 18 else None  # amazon_artist_id from query
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
@@ -25294,6 +25297,7 @@ def watchlist_artist_config(artist_id):
                 "itunes_artist_id": itunes_id,
                 "deezer_artist_id": deezer_id,
                 "discogs_artist_id": discogs_id,
+                "amazon_artist_id": amazon_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
             })
@@ -25394,7 +25398,7 @@ def watchlist_artist_link_provider(artist_id):
         new_provider_id = data.get('provider_id', '').strip()
         provider = data.get('provider', '').strip()
 
-        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs')
+        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs', 'amazon')
         if provider not in valid_providers:
             return jsonify({"success": False, "error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"}), 400
 
@@ -25408,8 +25412,8 @@ def watchlist_artist_link_provider(artist_id):
         cursor.execute("""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id
             FROM watchlist_artists
-            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
-        """, (artist_id, artist_id, artist_id, artist_id))
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
+        """, (artist_id, artist_id, artist_id, artist_id, artist_id))
         row = cursor.fetchone()
 
         if not row:
@@ -25420,7 +25424,7 @@ def watchlist_artist_link_provider(artist_id):
         artist_name = row[1]
 
         # Check for duplicate — another watchlist artist already has this provider ID
-        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}
+        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id', 'amazon': 'amazon_artist_id'}
         col = col_map[provider]
 
         if not is_clear:
@@ -32422,6 +32426,7 @@ _init_service_search(
     qobuz_worker=qobuz_enrichment_worker,
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
+    amazon_worker_obj=amazon_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the

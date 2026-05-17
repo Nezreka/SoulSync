@@ -64,6 +64,10 @@ MIN_API_INTERVAL = 0.5  # seconds — T2Tunes has no published rate limit
 _last_api_call: float = 0.0
 _api_call_lock = threading.Lock()
 
+_META_CACHE_TTL = 300  # seconds
+_meta_cache: Dict[str, tuple] = {}  # asin -> (fetched_at, meta_dict)
+_meta_cache_lock = threading.Lock()
+
 
 class AmazonClientError(RuntimeError):
     """Raised on unrecoverable T2Tunes API errors."""
@@ -657,12 +661,21 @@ class AmazonClient:
         metas: Dict[str, Dict[str, Any]] = {}
 
         def _fetch(asin: str) -> None:
+            now = time.monotonic()
+            with _meta_cache_lock:
+                entry = _meta_cache.get(asin)
+                if entry and (now - entry[0]) < _META_CACHE_TTL:
+                    metas[asin] = entry[1]
+                    return
             _rate_limit()
             try:
                 raw = self.album_metadata(asin)
                 lst = raw.get("albumList")
                 if isinstance(lst, list) and lst and isinstance(lst[0], dict):
-                    metas[asin] = lst[0]
+                    meta = lst[0]
+                    with _meta_cache_lock:
+                        _meta_cache[asin] = (time.monotonic(), meta)
+                    metas[asin] = meta
             except Exception:
                 pass
 

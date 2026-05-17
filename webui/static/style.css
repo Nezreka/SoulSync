@@ -16439,6 +16439,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #D4A574;
 }
 
+.watchlist-source-amazon {
+    background: rgba(255, 153, 0, 0.15);
+    color: #FF9900;
+}
+
 .watchlist-card-pills {
     position: relative;
     z-index: 2;
