@@ -31,11 +31,217 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any, Callable
 
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 
 logger = logging.getLogger(__name__)
+
+
+_ALBUM_PREFLIGHT_MIN_SCORE = 0.62
+_EDITION_WORDS = {
+    'deluxe', 'expanded', 'anniversary', 'special', 'platinum', 'bonus',
+    'remaster', 'remastered', 'edition', 'version',
+}
+_VARIANT_WORDS = {
+    'remix', 'rmx', 'acapella', 'a cappella', 'instrumental', 'karaoke',
+    'live', 'demo', 'extended',
+}
+
+
+def _norm_text(value: Any) -> str:
+    text = str(value or '').lower()
+    text = re.sub(r'[_./\\|()[\]{}:;,+]', ' ', text)
+    text = re.sub(r'[^a-z0-9\s-]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def _similarity(left: Any, right: Any) -> float:
+    a = _norm_text(left)
+    b = _norm_text(right)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if a in b or b in a:
+        return min(len(a), len(b)) / max(len(a), len(b))
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _track_title_from_candidate(candidate: Any) -> str:
+    title = getattr(candidate, 'title', None)
+    if title:
+        return str(title)
+    filename = getattr(candidate, 'filename', '') or ''
+    stem = Path(filename.replace('\\', '/')).stem
+    stem = re.sub(r'^\s*(?:disc\s*)?\d+[-_.\s]+', '', stem, flags=re.IGNORECASE)
+    return stem
+
+
+def _track_number_from_track(track_data: dict) -> int:
+    value = track_data.get('track_number') or track_data.get('trackNumber') or 0
+    try:
+        return int(str(value).split('/')[0])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _track_number_from_candidate(candidate: Any) -> int:
+    value = getattr(candidate, 'track_number', None) or 0
+    try:
+        return int(str(value).split('/')[0])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _folder_variant_penalty(expected_album_name: str, folder_text: str) -> float:
+    expected = _norm_text(expected_album_name)
+    folder = _norm_text(folder_text)
+    if not folder:
+        return 0.0
+
+    penalty = 0.0
+    for word in _VARIANT_WORDS:
+        if word in folder and word not in expected:
+            penalty += 0.12
+    for word in _EDITION_WORDS:
+        if word in folder and word not in expected:
+            penalty += 0.06
+    return min(penalty, 0.30)
+
+
+def _source_quality_score(source: Any) -> float:
+    score = getattr(source, 'quality_score', None)
+    if callable(score):
+        try:
+            return float(score())
+        except Exception:
+            return 0.0
+    try:
+        return float(score or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _album_context_richness(album_ctx: dict) -> int:
+    if not isinstance(album_ctx, dict):
+        return 0
+    fields = ('id', 'name', 'release_date', 'total_tracks', 'album_type')
+    score = sum(1 for field in fields if album_ctx.get(field))
+    images = album_ctx.get('images')
+    if images:
+        score += 1
+    artists = album_ctx.get('artists')
+    if artists:
+        score += 1
+    return score
+
+
+def _score_album_folder(album_result: Any, album_context: dict, artist_context: dict,
+                        tracks_json: list[dict], filtered_track_count: int) -> float:
+    """Score one slskd folder as a whole release, not as isolated tracks."""
+    expected_album = str((album_context or {}).get('name') or '')
+    expected_artist = str((artist_context or {}).get('name') or '')
+    expected_count = int((album_context or {}).get('total_tracks') or len(tracks_json) or 0)
+    expected_year = str((album_context or {}).get('release_date') or '')[:4]
+
+    folder_text = ' '.join(
+        str(getattr(album_result, attr, '') or '')
+        for attr in ('album_title', 'album_path')
+    )
+    album_score = max(
+        _similarity(expected_album, getattr(album_result, 'album_title', '')),
+        _similarity(expected_album, getattr(album_result, 'album_path', '')),
+    )
+    artist_score = max(
+        _similarity(expected_artist, getattr(album_result, 'artist', '')),
+        _similarity(expected_artist, getattr(album_result, 'album_path', '')),
+    )
+
+    actual_count = int(getattr(album_result, 'track_count', 0) or len(getattr(album_result, 'tracks', []) or []))
+    if expected_count > 0 and actual_count > 0:
+        diff = abs(actual_count - expected_count)
+        if diff == 0:
+            count_score = 1.0
+        elif diff <= 2:
+            count_score = 0.75
+        elif diff <= 5:
+            count_score = 0.35
+        else:
+            count_score = 0.0
+    else:
+        count_score = 0.4
+
+    candidate_tracks = list(getattr(album_result, 'tracks', []) or [])
+    matched = 0
+    expected_tracks = [
+        (track_data, _norm_text(track_data.get('name', '')))
+        for track_data in tracks_json
+        if track_data.get('name')
+    ]
+    for track_data, expected_title in expected_tracks:
+        expected_number = _track_number_from_track(track_data)
+        best = 0.0
+        for candidate in candidate_tracks:
+            cand_title = _norm_text(_track_title_from_candidate(candidate))
+            title_sim = _similarity(expected_title, cand_title)
+            cand_number = _track_number_from_candidate(candidate)
+            if expected_number and cand_number and expected_number == cand_number:
+                title_sim = min(1.0, title_sim + 0.12)
+            best = max(best, title_sim)
+        if best >= 0.72:
+            matched += 1
+    coverage_score = matched / max(1, len(expected_tracks))
+
+    year_score = 0.5
+    folder_year = str(getattr(album_result, 'year', '') or '')
+    if expected_year and folder_year:
+        year_score = 1.0 if expected_year == folder_year else 0.2
+    elif expected_year and expected_year in _norm_text(folder_text):
+        year_score = 1.0
+
+    quality_count_score = min(1.0, filtered_track_count / max(1, expected_count or actual_count or 1))
+    peer_score = _source_quality_score(album_result)
+    penalty = _folder_variant_penalty(expected_album, folder_text)
+
+    score = (
+        album_score * 0.24
+        + artist_score * 0.16
+        + count_score * 0.16
+        + coverage_score * 0.28
+        + year_score * 0.06
+        + quality_count_score * 0.06
+        + peer_score * 0.04
+        - penalty
+    )
+    return max(0.0, min(score, 1.0))
+
+
+def _resolve_soulseek_client(download_orchestrator: Any) -> Any:
+    if hasattr(download_orchestrator, 'client'):
+        try:
+            client = download_orchestrator.client('soulseek')
+            if client:
+                return client
+        except Exception as exc:
+            logger.debug("Soulseek client lookup through orchestrator failed: %s", exc)
+    return getattr(download_orchestrator, 'soulseek', download_orchestrator)
+
+
+def _soulseek_album_preflight_enabled(config_manager: Any) -> bool:
+    mode = config_manager.get('download_source.mode', 'hybrid')
+    if mode == 'soulseek':
+        return True
+    if mode != 'hybrid':
+        return False
+    order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+    if order:
+        return order[0] == 'soulseek'
+    primary = config_manager.get('download_source.hybrid_primary', '')
+    return primary == 'soulseek'
 
 
 @dataclass
@@ -376,12 +582,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)
         preflight_source = None
         preflight_tracks = None
-        dl_source_mode = deps.config_manager.get('download_source.mode', 'hybrid')
-        _dl_hybrid_order = deps.config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
-        _dl_hybrid_first = _dl_hybrid_order[0] if _dl_hybrid_order else deps.config_manager.get('download_source.hybrid_primary', 'hifi')
-        soulseek_is_source = dl_source_mode == 'soulseek' or (
-            dl_source_mode == 'hybrid' and _dl_hybrid_first == 'soulseek'
-        )
+        soulseek_is_source = _soulseek_album_preflight_enabled(deps.config_manager)
         if batch_is_album and batch_album_context and batch_artist_context and soulseek_is_source:
             artist_name = batch_artist_context.get('name', '')
             album_name = batch_album_context.get('name', '')
@@ -391,7 +592,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
                     logger.info(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
-                    slsk = deps.download_orchestrator.client('soulseek') if hasattr(deps.download_orchestrator, 'client') else deps.download_orchestrator
+                    slsk = _resolve_soulseek_client(deps.download_orchestrator)
 
                     # Try multiple query variations (banned keywords in artist/album name can return 0 results)
                     album_queries = [f"{artist_name} {album_name}"]
@@ -405,29 +606,57 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
                     album_results = []
                     track_results = []
+                    album_results_by_source = {}
                     for aq in album_queries:
                         _sr.info(f"[Album Pre-flight] Trying query: '{aq}'")
                         track_results, album_results = deps.run_async(slsk.search(aq, timeout=30))
                         if album_results:
                             _sr.info(f"[Album Pre-flight] Found {len(album_results)} album results with query: '{aq}'")
-                            break
-                        _sr.info(f"[Album Pre-flight] No album results for query: '{aq}'")
+                            for ar in album_results:
+                                key = (getattr(ar, 'username', ''), getattr(ar, 'album_path', ''))
+                                if key[0] and key[1] and key not in album_results_by_source:
+                                    album_results_by_source[key] = ar
+                        else:
+                            _sr.info(f"[Album Pre-flight] No album results for query: '{aq}'")
 
+                    album_results = list(album_results_by_source.values())
                     if album_results:
-                        # Filter by quality preference
-                        quality_filtered = []
+                        # Score complete folders as releases before falling back to per-track search.
+                        scored_albums = []
                         for ar in album_results:
                             filtered_tracks = slsk.filter_results_by_quality_preference(ar.tracks)
                             if filtered_tracks:
-                                quality_filtered.append((ar, len(filtered_tracks)))
+                                folder_score = _score_album_folder(
+                                    ar,
+                                    batch_album_context,
+                                    batch_artist_context,
+                                    tracks_json,
+                                    len(filtered_tracks),
+                                )
+                                scored_albums.append((ar, len(filtered_tracks), folder_score))
+                                _sr.info(
+                                    f"[Album Pre-flight] Candidate {ar.username}:{ar.album_path} "
+                                    f"score={folder_score:.3f}, tracks={ar.track_count}, "
+                                    f"quality_tracks={len(filtered_tracks)}"
+                                )
 
-                        if quality_filtered:
-                            # Sort by track count (most complete album first), then quality score
-                            quality_filtered.sort(key=lambda x: (x[1], x[0].quality_score), reverse=True)
-                            best_album = quality_filtered[0][0]
+                        best_album = None
+                        best_score = 0.0
+                        if scored_albums:
+                            scored_albums.sort(key=lambda x: (x[2], x[1], x[0].quality_score), reverse=True)
+                            best_album, _best_filtered_count, best_score = scored_albums[0]
+                            if best_score < _ALBUM_PREFLIGHT_MIN_SCORE:
+                                _sr.info(
+                                    f"[Album Pre-flight] Best folder score {best_score:.3f} below "
+                                    f"threshold {_ALBUM_PREFLIGHT_MIN_SCORE:.2f}; falling back"
+                                )
+                                logger.warning("[Album Pre-flight] No Soulseek folder passed album-level validation")
+                                best_album = None
+
+                        if best_album:
 
                             _sr.info(f"[Album Pre-flight] Best album result: {best_album.username}:{best_album.album_path} "
-                                     f"({best_album.track_count} tracks, quality={best_album.dominant_quality})")
+                                     f"({best_album.track_count} tracks, quality={best_album.dominant_quality}, score={best_score:.3f})")
                             logger.info(f"[Album Pre-flight] Found album folder: {best_album.username} — "
                                   f"{best_album.track_count} tracks ({best_album.dominant_quality})")
 
@@ -456,7 +685,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 }
                                 preflight_tracks = best_album.tracks
                                 logger.info(f"[Album Pre-flight] Using {len(best_album.tracks)} tracks from search results (browse unavailable)")
-                        else:
+                        elif not scored_albums:
                             _sr.info("[Album Pre-flight] No album results passed quality filter")
                             logger.warning("[Album Pre-flight] No album results matched quality preferences")
                     else:
@@ -492,6 +721,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             # Wishlist tracks aren't batch_is_album but each track has disc_number in spotify_data
             wishlist_album_disc_counts = {}
             wishlist_album_artist_map = {}  # album_id -> resolved artist context (consistent per album)
+            wishlist_album_context_map = {}  # album_id -> richest shared album context
             if playlist_id == 'wishlist':
                 import json as _json
                 # First pass: collect disc_number and resolve ONE artist per album
@@ -512,6 +742,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         wishlist_album_disc_counts[album_id] = max(
                             wishlist_album_disc_counts.get(album_id, 1), disc_num
                         )
+                        if isinstance(album_val, dict):
+                            existing_album_ctx = wishlist_album_context_map.get(album_id, {})
+                            if _album_context_richness(album_val) > _album_context_richness(existing_album_ctx):
+                                wishlist_album_context_map[album_id] = dict(album_val)
                         # Resolve album-level artist once per album (first track wins)
                         if album_id not in wishlist_album_artist_map:
                             _wl_source = t.get('source_info') or {}
@@ -602,17 +836,20 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 _fb_name = track_info.get('artist', '')
                             artist_ctx = {'name': _fb_name or 'Unknown Artist'}
 
-                        # Construct minimal album context
-                        # Ensure images are preserved (important for artwork)
+                        # Construct a shared album context from the richest track in
+                        # this album group so release_date/year and artwork do not
+                        # vary per track and split folders.
                         album_id = s_album.get('id', 'wishlist_album')
+                        shared_album = wishlist_album_context_map.get(album_id_for_lookup, s_album)
                         album_ctx = {
                             'id': album_id,
-                            'name': s_album.get('name'),
-                            'release_date': s_album.get('release_date', ''),
-                            'total_tracks': s_album.get('total_tracks', 1),
-                            'total_discs': wishlist_album_disc_counts.get(album_id, 1),
-                            'album_type': s_album.get('album_type', 'album'),
-                            'images': s_album.get('images', []) # Pass images array directly
+                            'name': shared_album.get('name') or s_album.get('name'),
+                            'release_date': shared_album.get('release_date', ''),
+                            'total_tracks': shared_album.get('total_tracks') or s_album.get('total_tracks', 1),
+                            'total_discs': wishlist_album_disc_counts.get(album_id_for_lookup, 1),
+                            'album_type': shared_album.get('album_type') or s_album.get('album_type', 'album'),
+                            'images': shared_album.get('images') or s_album.get('images', []),
+                            'artists': shared_album.get('artists') or s_album.get('artists', []),
                         }
 
                         track_info['_explicit_album_context'] = album_ctx
