@@ -595,12 +595,13 @@ const HYBRID_SOURCES = [
     { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
+    { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
     { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -942,6 +943,8 @@ async function loadSettingsData() {
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
+        document.getElementById('amazon-quality').value = settings.amazon_download?.quality || 'flac';
+        document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
         // Sync ARL to connections tab field + bidirectional listeners
@@ -1477,6 +1480,7 @@ function updateDownloadSourceUI() {
     const youtubeContainer = document.getElementById('youtube-settings-container');
     const hifiContainer = document.getElementById('hifi-download-settings-container');
     const deezerDlContainer = document.getElementById('deezer-download-settings-container');
+    const amazonContainer = document.getElementById('amazon-download-settings-container');
     const lidarrContainer = document.getElementById('lidarr-download-settings-container');
     const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
@@ -1499,6 +1503,7 @@ function updateDownloadSourceUI() {
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
     if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
+    if (amazonContainer) amazonContainer.style.display = activeSources.has('amazon') ? 'block' : 'none';
     if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
     if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
 
@@ -1519,6 +1524,9 @@ function updateDownloadSourceUI() {
     if (activeSources.has('hifi')) {
         testHiFiConnection();
     }
+    if (activeSources.has('amazon')) {
+        testAmazonConnection();
+    }
     if (activeSources.has('soundcloud')) {
         testSoundcloudConnection();
     }
@@ -1535,6 +1543,7 @@ function updateHybridSecondaryOptions() {
         { value: 'qobuz', label: 'Qobuz' },
         { value: 'hifi', label: 'HiFi' },
         { value: 'deezer_dl', label: 'Deezer' },
+        { value: 'amazon', label: 'Amazon Music' },
         { value: 'lidarr', label: 'Lidarr' },
         { value: 'soundcloud', label: 'SoundCloud' },
     ];
@@ -2675,6 +2684,10 @@ async function saveSettings(quiet = false) {
             arl: document.getElementById('deezer-download-arl').value || '',
             allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
+        amazon_download: {
+            quality: document.getElementById('amazon-quality').value || 'flac',
+            allow_fallback: document.getElementById('amazon-allow-fallback').checked,
+        },
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
@@ -3754,6 +3767,27 @@ async function testDeezerDownloadConnection() {
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testAmazonConnection() {
+    const statusEl = document.getElementById('amazon-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        const resp = await fetch('/api/amazon/test-connection');
+        const data = await resp.json();
+        if (data.connected) {
+            statusEl.textContent = '✓ Connected — T2Tunes up';
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = '✗ ' + (data.error || 'T2Tunes unreachable');
+            statusEl.style.color = '#f44336';
+        }
+    } catch (e) {
+        statusEl.textContent = '✗ Connection error';
         statusEl.style.color = '#f44336';
     }
 }

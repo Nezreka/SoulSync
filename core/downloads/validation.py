@@ -79,7 +79,7 @@ def get_valid_candidates(results, spotify_track, query):
 
     # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer, SoundCloud) return structured API results
     # with proper artist/title metadata — score using the same matching engine as Soulseek
-    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud")
+    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
         expected_artists = spotify_track.artists if spotify_track else []

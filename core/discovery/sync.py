@@ -397,9 +397,12 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
             }
         logger.info(f"Sync finished for {playlist_id} - state updated")
 
-        # Set playlist poster image if available (Plex, Jellyfin, Emby)
+        # Set playlist poster image if available (Plex, Jellyfin, Emby).
+        # Don't log the URL itself — it may carry an auth token (Plex
+        # X-Plex-Token / Jellyfin X-Emby-Token / Subsonic auth) that we
+        # don't want persisted to app.log.
         _synced = getattr(result, 'synced_tracks', 0)
-        logger.info(f"[PLAYLIST IMAGE] image_url={playlist_image_url!r}, synced_tracks={_synced}")
+        logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
         if playlist_image_url and _synced > 0:
             try:
                 active_server = deps.config_manager.get_active_media_server()

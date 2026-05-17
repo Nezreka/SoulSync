@@ -118,6 +118,7 @@ def build_runner(
             primary_source=item.source,
             strict_source=bool(item.source),
             stop_check=is_shutting_down_fn,
+            metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
         )
 
     return runner

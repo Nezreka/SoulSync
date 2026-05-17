@@ -407,6 +407,9 @@ class MusicDatabase:
             # Add Discogs enrichment columns (migration)
             self._add_discogs_columns(cursor)
 
+            # Add Amazon artist ID column (migration)
+            self._add_amazon_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -752,13 +755,21 @@ class MusicDatabase:
                 )
             """)
 
+            # Personalized-playlists subsystem schema (Group A + Group B
+            # unified storage). Idempotent — safe on every startup.
+            try:
+                from database.personalized_schema import ensure_personalized_schema
+                ensure_personalized_schema(conn)
+            except Exception as ps_err:
+                logger.error(f"Personalized-playlist schema init failed: {ps_err}")
+
             conn.commit()
             logger.info("Database initialized successfully")
 
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
-    
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
@@ -1623,6 +1634,10 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN discogs_artist_id TEXT")
                 logger.info("Added discogs_artist_id column to watchlist_artists table for cross-provider support")
 
+            if 'amazon_artist_id' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN amazon_artist_id TEXT")
+                logger.info("Added amazon_artist_id column to watchlist_artists table for Amazon Music support")
+
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
@@ -2026,6 +2041,55 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
+
+    def _add_amazon_columns(self, cursor):
+        """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'amazon_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'amazon_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN amazon_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'amazon_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_id TEXT")
+            if 'amazon_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_match_status TEXT")
+            if 'amazon_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
+
+            logger.info("Amazon columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding Amazon columns: {e}")
 
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
@@ -8895,6 +8959,7 @@ class MusicDatabase:
                         a.tidal_id,
                         a.qobuz_id,
                         a.soul_id,
+                        a.amazon_id,
                         a.server_source
                     FROM artists a
                     WHERE {where_clause}
@@ -8994,6 +9059,7 @@ class MusicDatabase:
                         'tidal_id': row['tidal_id'],
                         'qobuz_id': row['qobuz_id'],
                         'soul_id': row['soul_id'],
+                        'amazon_id': row['amazon_id'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
                         'is_watched': bool(is_watched)
@@ -9052,7 +9118,7 @@ class MusicDatabase:
                         id, name, thumb_url, genres, server_source,
                         musicbrainz_id, deezer_id, audiodb_id, discogs_id,
                         spotify_artist_id, itunes_artist_id, lastfm_url, genius_url,
-                        tidal_id, qobuz_id, soul_id,
+                        tidal_id, qobuz_id, soul_id, amazon_id,
                         lastfm_listeners, lastfm_playcount, lastfm_tags, lastfm_bio
                     FROM artists
                     WHERE id = ?
@@ -9210,6 +9276,7 @@ class MusicDatabase:
                         'tidal_id': artist_row['tidal_id'],
                         'qobuz_id': artist_row['qobuz_id'],
                         'soul_id': artist_row['soul_id'],
+                        'amazon_id': artist_row['amazon_id'],
                         'lastfm_listeners': artist_row['lastfm_listeners'],
                         'lastfm_playcount': artist_row['lastfm_playcount'],
                         'lastfm_tags': artist_row['lastfm_tags'],

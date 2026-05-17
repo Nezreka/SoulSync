@@ -87,7 +87,7 @@ class StatusDeps:
 # Streaming sources the engine fallback applies to. Soulseek goes through
 # slskd's live_transfers path and must NOT hit the engine fallback.
 _STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud',
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
 ))
 
 # Keep these in sync with the engine plugins' state strings.

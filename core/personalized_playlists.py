@@ -779,19 +779,21 @@ class PersonalizedPlaylistsService:
             }
 
     def _get_library_tracks_by_category(self, category: str, limit: int) -> List[Dict]:
-        """
-        Get tracks from library matching genre or artist
+        """Library tracks intentionally excluded from daily mixes.
 
-        NOTE: This requires library tracks to have Spotify metadata which may not be available.
-        Returns empty list if schema incompatible.
-        """
-        try:
-            logger.warning("Library tracks by category requires Spotify-linked library - returning empty")
-            return []
+        The legacy ambition was 50% library + 50% discovery, but the
+        ``tracks`` table doesn't carry source IDs (no
+        ``spotify_track_id`` / ``itunes_track_id`` / ``deezer_track_id``
+        column) — so library rows can't flow through the same
+        sync / wishlist pipeline that discovery tracks do. Returning
+        them here would produce un-syncable, un-downloadable phantom
+        entries.
 
-        except Exception as e:
-            logger.error(f"Error getting library tracks by category: {e}")
-            return []
+        Returns ``[]`` so callers compose with ``_get_discovery_tracks_by_category``
+        for a discovery-only mix. A future PR can backfill source IDs
+        into library rows and lift this restriction.
+        """
+        return []
 
     def _get_discovery_tracks_by_category(self, category: str, limit: int) -> List[Dict]:
         """Get tracks from discovery pool matching genre or artist"""

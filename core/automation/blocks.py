@@ -146,6 +146,15 @@ ACTIONS: list[dict] = [
          {"key": "all", "type": "checkbox", "label": "Process all mirrored playlists", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
      ]},
+    {"type": "personalized_pipeline", "label": "Personalized Playlist Pipeline", "icon": "sparkles",
+     "description": "Sync personalized / discover-page playlists (Hidden Gems, Time Machine, Fresh Tape, etc.) to your media server + queue missing tracks for download.",
+     "available": True,
+     "config_fields": [
+         {"key": "kinds", "type": "personalized_playlist_select", "label": "Playlists to sync",
+          "description": "Multi-select: Hidden Gems, Discovery Shuffle, Time Machine (per decade), Genre playlists, Fresh Tape, The Archives, Seasonal Mix (per season)"},
+         {"key": "refresh_first", "type": "checkbox", "label": "Refresh playlists before sync (regenerate snapshots)", "default": False},
+         {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+     ]},
     {"type": "notify_only", "label": "Notify Only", "icon": "bell", "description": "No action — just send notification", "available": True},
     # Phase 3 actions
     {"type": "start_database_update", "label": "Update Database", "icon": "database",
