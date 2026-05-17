@@ -601,6 +601,25 @@ class AmazonClient:
         """Not available from Amazon Music — returns None for compatibility."""
         return None
 
+    def _get_artist_image_from_albums(self, artist_id: str) -> Optional[str]:
+        """Return an album cover as artist image stand-in (T2Tunes has no artist images)."""
+        search_name = _unslugify(artist_id)
+        try:
+            items = self.search_raw(search_name, types="track,album")
+        except AmazonClientError:
+            return None
+        name_lower = search_name.lower()
+        for item in items:
+            if _primary_artist(item.artist_name).lower() != name_lower:
+                continue
+            asin = item.album_asin or item.asin
+            if not asin:
+                continue
+            metas = self._fetch_album_metas([asin])
+            if asin in metas and metas[asin].get("image"):
+                return metas[asin]["image"]
+        return None
+
     # ==================== Interface Aliases (match DeezerClient method names) ====================
     get_album_metadata = get_album
     get_artist_info = get_artist
