@@ -231,6 +231,7 @@ from core.genius_worker import GeniusWorker
 from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
+from core.amazon_worker import AmazonWorker
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -14212,7 +14213,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -14228,7 +14229,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -32135,6 +32136,20 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+amazon_worker = None
+try:
+    amazon_db = MusicDatabase()
+    amazon_worker = AmazonWorker(database=amazon_db)
+    amazon_worker.start()
+    if config_manager.get('amazon_enrichment_paused', False):
+        amazon_worker.pause()
+        logger.info("Amazon enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("Amazon enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"Amazon worker initialization failed: {e}")
+    amazon_worker = None
+
 
 # ================================================================================================
 # SPOTIFY ENRICHMENT INTEGRATION
@@ -33799,6 +33814,11 @@ _register_enrichment_services([
         config_paused_key='qobuz_enrichment_paused',
         extra_status_defaults={'authenticated': False},
     ),
+    _EnrichmentService(
+        id='amazon', display_name='Amazon Music',
+        worker_getter=lambda: amazon_worker,
+        config_paused_key='amazon_enrichment_paused',
+    ),
 ])
 
 _configure_enrichment_api(
@@ -33818,7 +33838,7 @@ def _emit_rate_monitor_loop():
         'spotify': 'spotify_enrichment', 'itunes': 'itunes_enrichment',
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
-        'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
+        'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
