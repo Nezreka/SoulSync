@@ -598,8 +598,9 @@ class AmazonClient:
                 break
 
         # Fetch metadata for art, release_date, track_count, and type inference.
-        # Cap at 10 parallel fetches — discography views don't need full coverage.
-        asins_to_fetch = [a for _, a in album_candidates[:10]]
+        # No explicit cap here — search_raw naturally bounds results to ~20 items,
+        # so album_candidates is already small.
+        asins_to_fetch = [a for _, a in album_candidates]
         metas = self._fetch_album_metas(asins_to_fetch)
 
         albums: List[Album] = []
