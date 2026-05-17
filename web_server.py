@@ -10779,6 +10779,57 @@ def library_clear_match():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/album/<album_id>/import-existing-track', methods=['POST'])
+@app.route('/api/library/album/<album_id>/missing-track/import-existing', methods=['POST'])
+def library_import_existing_track_for_missing_slot(album_id):
+    """Use an existing library file as source audio for a missing album slot.
+
+    The selected source file is copied to staging, then routed through the
+    normal post-processing pipeline with the target album/track metadata. The
+    original source file is never moved or deleted.
+    """
+    try:
+        from core.library.missing_track_import import (
+            MissingTrackImportDeps,
+            MissingTrackImportError,
+            import_existing_track_for_album_slot,
+        )
+
+        data = request.get_json() or {}
+        database = get_database()
+        deps = MissingTrackImportDeps(
+            database=database,
+            config_manager=config_manager,
+            post_process_fn=_post_process_matched_download,
+            resolve_library_file_path_fn=_resolve_library_file_path,
+            docker_resolve_path_fn=docker_resolve_path,
+            sync_tracks_to_server_fn=_sync_tracks_to_server,
+            service_id_columns=_SERVICE_ID_COLUMNS,
+        )
+
+        result = import_existing_track_for_album_slot(album_id, data, deps)
+        updated = database.get_artist_full_detail(result.get('artist_id'))
+        if updated.get('success'):
+            if updated.get('artist', {}).get('thumb_url'):
+                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
+            for album in updated.get('albums', []):
+                if album.get('thumb_url'):
+                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            "message": "Imported existing track into album",
+            "track_id": result.get('track_id'),
+            "final_path": result.get('final_path'),
+            "updated_data": updated if updated.get('success') else None,
+        })
+    except MissingTrackImportError as e:
+        return jsonify({"success": False, "error": str(e)}), e.status_code
+    except Exception as e:
+        logger.error(f"Error importing existing track for album slot: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/track/<track_id>', methods=['DELETE'])
 def library_delete_track(track_id):
     """Delete a track from the database, optionally deleting the file and blacklisting the source."""

@@ -862,6 +862,9 @@ class MusicDatabase:
             if 'server_source' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN server_source TEXT DEFAULT 'plex'")
                 logger.info("Added server_source column to tracks table")
+            if 'disc_number' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
+                logger.info("Added disc_number column to tracks table")
                 
             # Create indexes for server_source columns for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_server_source ON artists (server_source)")
