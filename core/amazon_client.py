@@ -576,7 +576,7 @@ class AmazonClient:
             items = self.search_raw(f"{search_name} album", types="track,album")
         except AmazonClientError:
             return []
-        albums: List[Album] = []
+        album_candidates: List[tuple] = []  # (Album, asin)
         seen_asins: set = set()
         name_lower = search_name.lower()
         for item in items:
@@ -588,13 +588,33 @@ class AmazonClient:
             if album_asin in seen_asins:
                 continue
             seen_asins.add(album_asin)
-            albums.append(Album.from_search_hit({
+            album = Album.from_search_hit({
                 "albumAsin": album_asin,
-                "albumName": item.album_name or item.title,
-                "artistName": item.artist_name,
-            }))
-            if len(albums) >= limit:
+                "albumName": _strip_edition(item.album_name or item.title),
+                "artistName": _primary_artist(item.artist_name),
+            })
+            album_candidates.append((album, album_asin))
+            if len(album_candidates) >= limit:
                 break
+
+        # Fetch metadata for art, release_date, track_count, and type inference.
+        # Cap at 10 parallel fetches — discography views don't need full coverage.
+        asins_to_fetch = [a for _, a in album_candidates[:10]]
+        metas = self._fetch_album_metas(asins_to_fetch)
+
+        albums: List[Album] = []
+        for album, asin in album_candidates:
+            meta = metas.get(asin, {})
+            if meta:
+                album.image_url = meta.get("image")
+                album.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
+                total = int(meta.get("trackCount") or 0)
+                album.total_tracks = total
+                # T2Tunes doesn't expose release type — infer from track count.
+                # 1-track releases are singles; keep default "album" otherwise.
+                if total == 1:
+                    album.album_type = "single"
+            albums.append(album)
         return albums
 
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
