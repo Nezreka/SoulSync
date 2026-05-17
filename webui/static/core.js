@@ -446,6 +446,7 @@ function initializeWebSocket() {
     socket.on('enrichment:genius-enrichment', (data) => updateGeniusEnrichmentStatusFromData(data));
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
+    socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));

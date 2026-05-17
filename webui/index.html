@@ -541,6 +541,29 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Amazon Music Enrichment Status Icon -->
+                            <div class="amazon-enrich-button-container">
+                                <button class="amazon-enrich-button" id="amazon-enrich-button" title="Amazon Music Library Enrichment"
+                                    onclick="toggleAmazonEnrichment()">
+                                    <img src="/static/amazon.svg"
+                                        alt="Amazon Music" class="amazon-enrich-logo">
+                                    <div class="amazon-enrich-spinner"></div>
+                                </button>
+                                <div class="amazon-enrich-tooltip" id="amazon-enrich-tooltip">
+                                    <div class="amazon-enrich-tooltip-content">
+                                        <div class="amazon-enrich-tooltip-header">Amazon Music Enrichment</div>
+                                        <div class="amazon-enrich-tooltip-body" id="amazon-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="amazon-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="amazon-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="amazon-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Hydrabase P2P Mirror Status Icon -->
                             <div class="hydrabase-button-container" id="hydrabase-button-container" style="display: none;">
                                 <button class="hydrabase-button" id="hydrabase-button" title="Hydrabase P2P Mirror">
