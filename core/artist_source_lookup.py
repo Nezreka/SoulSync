@@ -36,6 +36,7 @@ SOURCE_ID_FIELD = {
     "discogs": "discogs_id",
     "hydrabase": "soul_id",
     "musicbrainz": "musicbrainz_id",
+    "amazon": "amazon_id",
 }
 
 
@@ -58,18 +59,19 @@ def find_library_artist_for_source(
     Returns ``None`` on miss or on any database error.
     """
     column = SOURCE_ID_FIELD.get(source)
+    if not column:
+        return None
 
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            if column:
-                cursor.execute(
-                    f"SELECT id, name FROM artists WHERE {column} = ? LIMIT 1",
-                    (str(source_artist_id),),
-                )
-                row = cursor.fetchone()
-                if row:
-                    return row[0]
+            cursor.execute(
+                f"SELECT id, name FROM artists WHERE {column} = ? LIMIT 1",
+                (str(source_artist_id),),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row[0]
 
             if artist_name and active_server:
                 cursor.execute(

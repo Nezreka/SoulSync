@@ -407,6 +407,9 @@ class MusicDatabase:
             # Add Discogs enrichment columns (migration)
             self._add_discogs_columns(cursor)
 
+            # Add Amazon artist ID column (migration)
+            self._add_amazon_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -2034,6 +2037,18 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
+
+    def _add_amazon_columns(self, cursor):
+        """Add Amazon artist ID column to artists table."""
+        try:
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+            if 'amazon_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN amazon_id TEXT")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
+            logger.info("Amazon columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding Amazon columns: {e}")
 
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
