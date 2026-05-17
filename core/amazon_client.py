@@ -524,8 +524,8 @@ class AmazonClient:
                 for item in search_items:
                     if item.album_asin == asin and item.duration_seconds:
                         duration_map[item.asin] = item.duration_seconds * 1000
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Duration backfill failed for ASIN %s: %s", asin, exc)
 
         items = [
             {
@@ -676,8 +676,8 @@ class AmazonClient:
                     with _meta_cache_lock:
                         _meta_cache[asin] = (time.monotonic(), meta)
                     metas[asin] = meta
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Album metadata fetch failed for ASIN %s: %s", asin, exc)
 
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=min(len(asins), 5)) as pool:
