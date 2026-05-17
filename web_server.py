@@ -231,6 +231,7 @@ from core.genius_worker import GeniusWorker
 from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
+from core.amazon_worker import AmazonWorker
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -1858,6 +1859,7 @@ SERVICE_CONFIG_REGISTRY = {
     'spotify':      {'required': ['client_id', 'client_secret']},
     'itunes':       {'always': True},   # default storefront works anon
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
+    'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -2003,6 +2005,7 @@ def _get_enrichment_status():
         ('genius', 'Genius', lambda: genius_worker),
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
+        ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -7282,6 +7285,13 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     except Exception as e:
         logger.debug(f"Discogs client resolution failed: {e}")
 
+    az = None
+    try:
+        from core.metadata.registry import get_amazon_client
+        az = get_amazon_client()
+    except Exception as e:
+        logger.debug(f"Amazon client resolution failed: {e}")
+
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
     except Exception:
@@ -7295,6 +7305,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         deezer_client=dz,
         itunes_client=it,
         discogs_client=dc,
+        amazon_client=az,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -7400,6 +7411,7 @@ def get_artist_detail(artist_id):
                 'itunes': artist_info.get('itunes_artist_id'),
                 'discogs': artist_info.get('discogs_id'),
                 'hydrabase': artist_info.get('soul_id'),
+                'amazon': artist_info.get('amazon_id'),
             }
 
             artist_detail_discography = _get_artist_detail_discography(
@@ -10643,6 +10655,7 @@ _SERVICE_ID_COLUMNS = {
     'genius': {'artist': 'genius_id', 'track': 'genius_id'},
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
+    'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -12004,7 +12017,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
     logger.info(f"Processing enhanced album download for '{spotify_album['name']}' with {len(enhanced_tracks)} matched tracks")
 
     # Compute total_discs for multi-disc album subfolder support
-    total_discs = max((t['spotify_track'].get('disc_number', 1) for t in enhanced_tracks), default=1)
+    total_discs = max((t['spotify_track'].get('disc_number') or 1 for t in enhanced_tracks), default=1)
     spotify_album['total_discs'] = total_discs
 
     started_count = 0
@@ -12146,7 +12159,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
 
     # Compute total_discs for multi-disc album subfolder support
     if official_spotify_tracks:
-        total_discs = max((t.get('disc_number', 1) for t in official_spotify_tracks), default=1)
+        total_discs = max((t.get('disc_number') or 1 for t in official_spotify_tracks), default=1)
     else:
         total_discs = 1
     spotify_album['total_discs'] = total_discs
@@ -14203,7 +14216,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -14219,7 +14232,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -18664,6 +18677,9 @@ def get_spotify_album_tracks(album_id):
             client = _get_deezer_client()
         elif source_override == 'discogs':
             client = _get_discogs_client()
+        elif source_override == 'amazon':
+            from core.metadata.registry import get_amazon_client
+            client = get_amazon_client()
         elif source_override == 'musicbrainz':
             try:
                 from core.musicbrainz_search import MusicBrainzSearchClient
@@ -24357,6 +24373,7 @@ def get_watchlist_artists():
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
                 "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
                 "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),
+                "amazon_artist_id": getattr(artist, 'amazon_artist_id', None),
                 "include_albums": artist.include_albums,
                 "include_eps": artist.include_eps,
                 "include_singles": artist.include_singles,
@@ -25156,10 +25173,10 @@ def watchlist_artist_config(artist_id):
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
-                       lookback_days, discogs_artist_id, preferred_metadata_source
+                       lookback_days, discogs_artist_id, preferred_metadata_source, amazon_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -25168,10 +25185,11 @@ def watchlist_artist_config(artist_id):
 
             # Determine if this is an iTunes or Spotify artist
             is_itunes_artist = artist_id.isdigit()
-            spotify_id = result[9]  # spotify_artist_id from query
+            spotify_id = result[9]   # spotify_artist_id from query
             itunes_id = result[10]  # itunes_artist_id from query
             deezer_id = result[14]  # deezer_artist_id from query
             discogs_id = result[16]  # discogs_artist_id from query
+            amazon_id = result[18] if len(result) > 18 else None  # amazon_artist_id from query
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
@@ -25279,6 +25297,7 @@ def watchlist_artist_config(artist_id):
                 "itunes_artist_id": itunes_id,
                 "deezer_artist_id": deezer_id,
                 "discogs_artist_id": discogs_id,
+                "amazon_artist_id": amazon_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
             })
@@ -25379,7 +25398,7 @@ def watchlist_artist_link_provider(artist_id):
         new_provider_id = data.get('provider_id', '').strip()
         provider = data.get('provider', '').strip()
 
-        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs')
+        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs', 'amazon')
         if provider not in valid_providers:
             return jsonify({"success": False, "error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"}), 400
 
@@ -25393,8 +25412,8 @@ def watchlist_artist_link_provider(artist_id):
         cursor.execute("""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id
             FROM watchlist_artists
-            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
-        """, (artist_id, artist_id, artist_id, artist_id))
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
+        """, (artist_id, artist_id, artist_id, artist_id, artist_id))
         row = cursor.fetchone()
 
         if not row:
@@ -25405,7 +25424,7 @@ def watchlist_artist_link_provider(artist_id):
         artist_name = row[1]
 
         # Check for duplicate — another watchlist artist already has this provider ID
-        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}
+        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id', 'amazon': 'amazon_artist_id'}
         col = col_map[provider]
 
         if not is_clear:
@@ -32123,6 +32142,20 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+amazon_worker = None
+try:
+    amazon_db = MusicDatabase()
+    amazon_worker = AmazonWorker(database=amazon_db)
+    amazon_worker.start()
+    if config_manager.get('amazon_enrichment_paused', False):
+        amazon_worker.pause()
+        logger.info("Amazon enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("Amazon enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"Amazon worker initialization failed: {e}")
+    amazon_worker = None
+
 
 # ================================================================================================
 # SPOTIFY ENRICHMENT INTEGRATION
@@ -32393,6 +32426,7 @@ _init_service_search(
     qobuz_worker=qobuz_enrichment_worker,
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
+    amazon_worker_obj=amazon_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
@@ -33787,6 +33821,11 @@ _register_enrichment_services([
         config_paused_key='qobuz_enrichment_paused',
         extra_status_defaults={'authenticated': False},
     ),
+    _EnrichmentService(
+        id='amazon', display_name='Amazon Music',
+        worker_getter=lambda: amazon_worker,
+        config_paused_key='amazon_enrichment_paused',
+    ),
 ])
 
 _configure_enrichment_api(
@@ -33806,7 +33845,7 @@ def _emit_rate_monitor_loop():
         'spotify': 'spotify_enrichment', 'itunes': 'itunes_enrichment',
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
-        'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
+        'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -33866,6 +33905,7 @@ def _emit_enrichment_status_loop():
         'genius-enrichment': lambda: genius_worker,
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
+        'amazon-enrichment': lambda: amazon_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,
         'listening-stats': lambda: listening_stats_worker,

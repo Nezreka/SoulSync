@@ -3416,6 +3416,10 @@ const WHATS_NEW = {
     '2.5.3': [
         { unreleased: true },
         { title: 'Amazon Music Download Source', desc: 'new download source backed by T2Tunes proxy. searches the Amazon Music catalog, downloads 24-bit/48kHz FLAC (or Opus 320kbps / Dolby Atmos EAC3 fallback). codec waterfall mirrors Tidal/Qobuz — best quality first, auto-fallback. selectable as a standalone or hybrid source from Settings.', page: 'settings' },
+        { title: 'Amazon Music Search Quality', desc: 'search results now show album art, artist images (album cover stand-in, same as iTunes), and correct track/disc numbers. feat. credits stripped from artist names so the same artist does not show as duplicates. [Explicit] stripped from album names so MusicBrainz matching works cleanly — Clean / Edited / Censored labels kept as-is. album clicks and artist detail pages now open instead of 404ing.', page: 'search' },
+        { title: 'Amazon Music Enrichment Worker', desc: 'background enrichment worker matches library artists, albums, and tracks to Amazon ASINs and backfills artist thumbnails from album covers. shows up in the enrichment panel with its own orb and rate-limit gauge. pauses automatically during library scans.', page: 'settings' },
+        { title: 'Amazon Music Library Badges', desc: 'Amazon Music badges now appear on artist cards, the artist hero section, and the enhanced library view alongside Spotify, Deezer, Tidal, etc. match status chips in the enhanced view show Amazon enrichment progress for artists and albums with click-to-rematch. album and track ASINs link out to music.amazon.com.', page: 'library' },
+        { title: 'Amazon Music Watchlist Linking', desc: 'watchlist linked provider section now includes Amazon Music. shows which Amazon Music artist slug is mapped to a watchlist entry, with match/fix/clear controls and live search backed by the T2Tunes catalog.', page: 'settings' },
     ],
     '2.5.2': [
         // --- May 13, 2026 — 2.5.2 release ---

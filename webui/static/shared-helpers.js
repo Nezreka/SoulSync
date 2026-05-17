@@ -62,6 +62,10 @@ const SOURCE_LABELS = {
         logo: '/static/hydrabase.png',
         tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase',
     },
+    amazon: {
+        text: 'Amazon Music', icon: '🛒',
+        tabClass: 'enh-tab-amazon', badgeClass: 'enh-badge-amazon',
+    },
     musicbrainz: {
         text: 'MusicBrainz', icon: '🧠',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
@@ -82,7 +86,7 @@ const SOURCE_LABELS = {
 // Canonical display order for the source picker. Standard metadata sources
 // first, then YouTube Music Videos, then Soulseek (basic-file source).
 const SOURCE_ORDER = [
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz',
     'youtube_videos', 'soulseek',
 ];
 
@@ -91,7 +95,7 @@ const SOURCE_ORDER = [
 // Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
 // /api/settings/config-status reports its real state and the picker dims it
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['musicbrainz', 'youtube_videos']);
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'youtube_videos']);
 
 // Fetch /api/settings/config-status and return a map { src -> bool }
 // covering every source in SOURCE_ORDER. Sources not present in the backend

@@ -43,6 +43,7 @@ def build_source_only_artist_detail(
     deezer_client: Optional[Any] = None,
     itunes_client: Optional[Any] = None,
     discogs_client: Optional[Any] = None,
+    amazon_client: Optional[Any] = None,
     lastfm_api_key: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], int]:
     """Build the artist-detail payload for a source-only artist.
@@ -84,6 +85,12 @@ def build_source_only_artist_detail(
             dc_artist = discogs_client.get_artist(artist_id)
             if dc_artist:
                 source_genres = dc_artist.get("genres") or []
+        elif source == "amazon" and amazon_client is not None:
+            az_artist = amazon_client.get_artist(resolved_name or artist_id)
+            if az_artist:
+                source_genres = az_artist.get("genres") or []
+                if not image_url and az_artist.get("images"):
+                    image_url = az_artist["images"][0].get("url")
     except Exception as e:
         logger.debug(f"Source-side artist info lookup failed for {source}:{artist_id}: {e}")
 

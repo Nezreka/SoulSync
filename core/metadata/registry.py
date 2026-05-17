@@ -140,6 +140,14 @@ def _get_discogs_factory(client_factory: Optional[MetadataClientFactory]) -> Met
     return DiscogsClient
 
 
+def _get_amazon_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.amazon_client import AmazonClient
+
+    return AmazonClient
+
+
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
     """Get shared Spotify client.
 
@@ -260,6 +268,18 @@ def get_discogs_client(
         return client
 
 
+def get_amazon_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached Amazon Music client."""
+    cache_key = "amazon"
+    factory = _get_amazon_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
 def is_hydrabase_enabled() -> bool:
     """Return True when Hydrabase is connected and app-enabled."""
     try:
@@ -331,6 +351,7 @@ def get_primary_client(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return client for configured primary source."""
     return get_client_for_source(
@@ -339,6 +360,7 @@ def get_primary_client(
         itunes_client_factory=itunes_client_factory,
         deezer_client_factory=deezer_client_factory,
         discogs_client_factory=discogs_client_factory,
+        amazon_client_factory=amazon_client_factory,
     )
 
 
@@ -348,6 +370,7 @@ def get_primary_source_status(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
@@ -361,6 +384,7 @@ def get_primary_source_status(
             itunes_client_factory=itunes_client_factory,
             deezer_client_factory=deezer_client_factory,
             discogs_client_factory=discogs_client_factory,
+            amazon_client_factory=amazon_client_factory,
         )
         if source == "spotify":
             connected = bool(client and client.is_spotify_authenticated())
@@ -387,6 +411,7 @@ def get_client_for_source(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
     if source == "spotify":
@@ -409,5 +434,8 @@ def get_client_for_source(
 
     if source == "itunes":
         return get_itunes_client(client_factory=itunes_client_factory)
+
+    if source == "amazon":
+        return get_amazon_client(client_factory=amazon_client_factory)
 
     return None

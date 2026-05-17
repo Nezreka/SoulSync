@@ -19,6 +19,7 @@ Config keys (all optional — fall back to public defaults):
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -33,6 +34,28 @@ from utils.logging_config import get_logger
 
 logger = get_logger("amazon_client")
 
+# Strips featuring credits like "Artist feat. X", "Artist ft. Y" so artist
+# deduplication works on the primary artist name only.
+_FEAT_RE = re.compile(r'\s+(?:feat(?:uring)?\.?|ft\.?)\s+.*', re.IGNORECASE)
+
+# Strips the Explicit marker — explicit is treated as the default version.
+# Clean/Edited/Censored stay in the name so users can distinguish them.
+_EDITION_RE = re.compile(r'\s*[\[\(]explicit[\]\)]', re.IGNORECASE)
+
+
+def _primary_artist(name: str) -> str:
+    return _FEAT_RE.sub('', name).strip()
+
+
+def _strip_edition(name: str) -> str:
+    return _EDITION_RE.sub('', name).strip()
+
+
+def _unslugify(name: str) -> str:
+    """Convert a slug-form artist ID (e.g. 'kendrick_lamar') to a search name."""
+    return name.replace('_', ' ')
+
+
 DEFAULT_BASE_URL = "https://t2tunes.site"
 DEFAULT_COUNTRY = "US"
 DEFAULT_CODEC = "flac"
@@ -40,6 +63,10 @@ MIN_API_INTERVAL = 0.5  # seconds — T2Tunes has no published rate limit
 
 _last_api_call: float = 0.0
 _api_call_lock = threading.Lock()
+
+_META_CACHE_TTL = 300  # seconds
+_meta_cache: Dict[str, tuple] = {}  # asin -> (fetched_at, meta_dict)
+_meta_cache_lock = threading.Lock()
 
 
 class AmazonClientError(RuntimeError):
@@ -146,7 +173,7 @@ class Album:
             id=str(album_meta.get("asin") or asin or ""),
             name=str(album_meta.get("title") or ""),
             artists=[str(album_meta.get("artistName") or "Unknown Artist")],
-            release_date=str(album_meta.get("release_date") or ""),
+            release_date=str(album_meta.get("release_date") or album_meta.get("releaseDate") or ""),
             total_tracks=int(album_meta.get("trackCount") or 0),
             album_type="album",
             image_url=album_meta.get("image"),
@@ -300,55 +327,95 @@ class AmazonClient:
 
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
         _rate_limit()
-        items = self.search_raw(query, types="track")
-        tracks: List[Track] = []
+        items = self.search_raw(query, types="track,album")
+        track_pairs: List[tuple] = []   # (Track, album_asin)
+        seen_album_asins: List[str] = []
         for item in items:
             if not item.is_track:
                 continue
-            tracks.append(Track.from_search_hit({
+            track = Track.from_search_hit({
                 "asin": item.asin,
-                "title": item.title,
-                "artistName": item.artist_name,
-                "albumName": item.album_name,
+                "title": _strip_edition(item.title),
+                "artistName": _primary_artist(item.artist_name),
+                "albumName": _strip_edition(item.album_name),
                 "albumAsin": item.album_asin,
                 "duration": item.duration_seconds,
                 "isrc": item.isrc,
-            }))
-            if len(tracks) >= limit:
+            })
+            track_pairs.append((track, item.album_asin))
+            if item.album_asin and item.album_asin not in seen_album_asins:
+                seen_album_asins.append(item.album_asin)
+            if len(track_pairs) >= limit:
                 break
+        album_metas = self._fetch_album_metas(seen_album_asins[:5])
+        tracks: List[Track] = []
+        for track, album_asin in track_pairs:
+            if album_asin and album_asin in album_metas:
+                meta = album_metas[album_asin]
+                track.image_url = meta.get("image")
+                track.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
+                track.total_tracks = meta.get("trackCount")
+            tracks.append(track)
         return tracks
 
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
         _rate_limit()
-        items = self.search_raw(query, types="track")
+        items = self.search_raw(query, types="track,album")
         seen: Dict[str, Artist] = {}
+        artist_album_asin: Dict[str, str] = {}  # artist name → first album ASIN seen
         for item in items:
-            name = item.artist_name
-            if name and name not in seen:
+            name = _primary_artist(item.artist_name)
+            if not name:
+                continue
+            if name not in seen:
                 seen[name] = Artist.from_name(name)
+            if name not in artist_album_asin and item.album_asin:
+                artist_album_asin[name] = item.album_asin
             if len(seen) >= limit:
                 break
+        # T2Tunes has no artist images — use an album cover as stand-in.
+        unique_asins = list({v for v in artist_album_asin.values()})[:5]
+        album_metas = self._fetch_album_metas(unique_asins)
+        for name, artist in seen.items():
+            asin = artist_album_asin.get(name)
+            if asin and asin in album_metas:
+                artist.image_url = album_metas[asin].get("image")
         return list(seen.values())
 
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
         _rate_limit()
-        items = self.search_raw(query, types="album")
-        albums: List[Album] = []
-        seen_asins: set = set()
+        items = self.search_raw(query, types="track,album")
+        album_candidates: List[tuple] = []  # (Album, asin)
+        seen_keys: set = set()
         for item in items:
             if not item.is_album:
                 continue
             album_asin = item.album_asin or item.asin
-            if album_asin in seen_asins:
+            raw_name = item.album_name or item.title
+            display_name = _strip_edition(raw_name)
+            artist = _primary_artist(item.artist_name)
+            # Collapse Explicit/Clean variants: same normalised name + artist = same album
+            dedup_key = (display_name.lower(), artist.lower())
+            if dedup_key in seen_keys:
                 continue
-            seen_asins.add(album_asin)
-            albums.append(Album.from_search_hit({
+            seen_keys.add(dedup_key)
+            album = Album.from_search_hit({
                 "albumAsin": album_asin,
-                "albumName": item.album_name or item.title,
-                "artistName": item.artist_name,
-            }))
-            if len(albums) >= limit:
+                "albumName": display_name,
+                "artistName": artist,
+            })
+            album_candidates.append((album, album_asin))
+            if len(album_candidates) >= limit:
                 break
+        album_metas = self._fetch_album_metas([a for _, a in album_candidates[:10]])
+        albums: List[Album] = []
+        for album, asin in album_candidates:
+            if asin in album_metas:
+                meta = album_metas[asin]
+                album.image_url = meta.get("image")
+                album.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
+                album.total_tracks = int(meta.get("trackCount") or 0)
+            albums.append(album)
         return albums
 
     def get_track_details(self, asin: str) -> Optional[Dict[str, Any]]:
@@ -373,20 +440,20 @@ class AmazonClient:
 
         return {
             "id": s.asin,
-            "name": s.title,
-            "artists": [{"name": s.artist, "id": ""}],
+            "name": _strip_edition(s.title),
+            "artists": [{"name": _primary_artist(s.artist), "id": ""}],
             "album": {
                 "id": album_data.get("asin", ""),
-                "name": s.album,
+                "name": _strip_edition(s.album),
                 "images": [{"url": album_data["image"]}] if album_data.get("image") else [],
-                "release_date": album_data.get("release_date", ""),
+                "release_date": album_data.get("release_date") or album_data.get("releaseDate") or s.date or "",
                 "total_tracks": album_data.get("trackCount", 0),
             },
             "duration_ms": 0,
             "popularity": 0,
             "external_urls": {"amazon": f"https://music.amazon.com/albums/{asin}"},
-            "track_number": None,
-            "disc_number": None,
+            "track_number": s.track_number,
+            "disc_number": s.disc_number,
             "isrc": s.isrc,
             "is_album_track": True,
             "raw_data": {
@@ -413,9 +480,9 @@ class AmazonClient:
 
         result: Dict[str, Any] = {
             "id": asin,
-            "name": album.get("title", ""),
-            "artists": [{"name": album.get("artistName", ""), "id": ""}],
-            "release_date": album.get("release_date", ""),
+            "name": _strip_edition(album.get("title", "")),
+            "artists": [{"name": _primary_artist(album.get("artistName", "")), "id": ""}],
+            "release_date": album.get("release_date") or album.get("releaseDate") or "",
             "total_tracks": album.get("trackCount", 0),
             "album_type": "album",
             "images": [{"url": album["image"]}] if album.get("image") else [],
@@ -423,12 +490,18 @@ class AmazonClient:
             "label": album.get("label", ""),
         }
         if include_tracks:
-            result["tracks"] = self.get_album_tracks(asin) or {
-                "items": [],
-                "total": 0,
-                "limit": 50,
-                "next": None,
+            tracks_data = self.get_album_tracks(asin) or {
+                "items": [], "total": 0, "limit": 50, "next": None,
             }
+            result["tracks"] = tracks_data
+            # Backfill release_date from stream tags when album metadata lacks it.
+            if not result["release_date"]:
+                items = tracks_data.get("items") or []
+                for item in items:
+                    rd = item.get("release_date") or ""
+                    if rd and len(rd) >= 4:
+                        result["release_date"] = rd
+                        break
         return result
 
     def get_album_tracks(self, asin: str) -> Optional[Dict[str, Any]]:
@@ -438,14 +511,31 @@ class AmazonClient:
             streams = self.media_from_asin(asin)
         except AmazonClientError:
             return None
+
+        # media_from_asin has no duration — enrich from search results which do.
+        duration_map: Dict[str, int] = {}  # track asin → duration_ms
+        if streams:
+            album_name = _strip_edition(streams[0].album)
+            artist_name = _primary_artist(streams[0].artist)
+            try:
+                search_items = self.search_raw(
+                    f"{album_name} {artist_name}", types="track,album"
+                )
+                for item in search_items:
+                    if item.album_asin == asin and item.duration_seconds:
+                        duration_map[item.asin] = item.duration_seconds * 1000
+            except Exception as exc:
+                logger.debug("Duration backfill failed for ASIN %s: %s", asin, exc)
+
         items = [
             {
                 "id": s.asin,
-                "name": s.title,
-                "artists": [{"name": s.artist, "id": ""}],
-                "duration_ms": 0,
-                "track_number": None,
-                "disc_number": None,
+                "name": _strip_edition(s.title),
+                "artists": [{"name": _primary_artist(s.artist), "id": ""}],
+                "duration_ms": duration_map.get(s.asin, 0),
+                "track_number": s.track_number,
+                "disc_number": s.disc_number,
+                "release_date": s.date or "",
                 "isrc": s.isrc,
             }
             for s in streams
@@ -455,14 +545,15 @@ class AmazonClient:
     def get_artist(self, artist_name: str) -> Optional[Dict[str, Any]]:
         """Return a Spotify-compatible artist dict inferred from search results."""
         _rate_limit()
+        search_name = _unslugify(artist_name)
         try:
-            items = self.search_raw(artist_name, types="track")
+            items = self.search_raw(search_name, types="track,album")
         except AmazonClientError:
             return None
-        name_lower = artist_name.lower()
+        name_lower = search_name.lower()
         match = next(
-            (i for i in items if i.artist_name.lower() == name_lower),
-            next((i for i in items if name_lower in i.artist_name.lower()), None),
+            (i for i in items if _primary_artist(i.artist_name).lower() == name_lower),
+            next((i for i in items if name_lower in _primary_artist(i.artist_name).lower()), None),
         )
         if not match:
             return None
@@ -484,36 +575,114 @@ class AmazonClient:
     ) -> List[Album]:
         """Return albums for an artist inferred from search results."""
         _rate_limit()
+        search_name = _unslugify(artist_name)
         try:
-            items = self.search_raw(f"{artist_name} album", types="album")
+            items = self.search_raw(f"{search_name} album", types="track,album")
         except AmazonClientError:
             return []
-        albums: List[Album] = []
+        album_candidates: List[tuple] = []  # (Album, asin)
         seen_asins: set = set()
-        name_lower = artist_name.lower()
+        name_lower = search_name.lower()
         for item in items:
-            if item.artist_name.lower() != name_lower:
+            if not item.is_album:
+                continue
+            if _primary_artist(item.artist_name).lower() != name_lower:
                 continue
             album_asin = item.album_asin or item.asin
             if album_asin in seen_asins:
                 continue
             seen_asins.add(album_asin)
-            albums.append(Album.from_search_hit({
+            album = Album.from_search_hit({
                 "albumAsin": album_asin,
-                "albumName": item.album_name or item.title,
-                "artistName": item.artist_name,
-            }))
-            if len(albums) >= limit:
+                "albumName": _strip_edition(item.album_name or item.title),
+                "artistName": _primary_artist(item.artist_name),
+            })
+            album_candidates.append((album, album_asin))
+            if len(album_candidates) >= limit:
                 break
+
+        # Fetch metadata for art, release_date, track_count, and type inference.
+        # No explicit cap here — search_raw naturally bounds results to ~20 items,
+        # so album_candidates is already small.
+        asins_to_fetch = [a for _, a in album_candidates]
+        metas = self._fetch_album_metas(asins_to_fetch)
+
+        albums: List[Album] = []
+        for album, asin in album_candidates:
+            meta = metas.get(asin, {})
+            if meta:
+                album.image_url = meta.get("image")
+                album.release_date = str(meta.get("release_date") or meta.get("releaseDate") or "")
+                total = int(meta.get("trackCount") or 0)
+                album.total_tracks = total
+                # T2Tunes doesn't expose release type — infer from track count.
+                # 1-track releases are singles; keep default "album" otherwise.
+                if total == 1:
+                    album.album_type = "single"
+            albums.append(album)
         return albums
 
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Not available from Amazon Music — returns None for compatibility."""
         return None
 
+    def _get_artist_image_from_albums(self, artist_id: str) -> Optional[str]:
+        """Return an album cover as artist image stand-in (T2Tunes has no artist images)."""
+        search_name = _unslugify(artist_id)
+        try:
+            items = self.search_raw(search_name, types="track,album")
+        except AmazonClientError:
+            return None
+        name_lower = search_name.lower()
+        for item in items:
+            if _primary_artist(item.artist_name).lower() != name_lower:
+                continue
+            asin = item.album_asin or item.asin
+            if not asin:
+                continue
+            metas = self._fetch_album_metas([asin])
+            if asin in metas and metas[asin].get("image"):
+                return metas[asin]["image"]
+        return None
+
+    # ==================== Interface Aliases (match DeezerClient method names) ====================
+    get_album_metadata = get_album
+    get_artist_info = get_artist
+    get_artist_albums_list = get_artist_albums
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _fetch_album_metas(self, asins: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Parallel-fetch album metadata for up to N ASINs. Returns {asin: albumList[0]}."""
+        if not asins:
+            return {}
+        metas: Dict[str, Dict[str, Any]] = {}
+
+        def _fetch(asin: str) -> None:
+            now = time.monotonic()
+            with _meta_cache_lock:
+                entry = _meta_cache.get(asin)
+                if entry and (now - entry[0]) < _META_CACHE_TTL:
+                    metas[asin] = entry[1]
+                    return
+            _rate_limit()
+            try:
+                raw = self.album_metadata(asin)
+                lst = raw.get("albumList")
+                if isinstance(lst, list) and lst and isinstance(lst[0], dict):
+                    meta = lst[0]
+                    with _meta_cache_lock:
+                        _meta_cache[asin] = (time.monotonic(), meta)
+                    metas[asin] = meta
+            except Exception as exc:
+                logger.debug("Album metadata fetch failed for ASIN %s: %s", asin, exc)
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(asins), 5)) as pool:
+            list(pool.map(_fetch, asins))
+        return metas
 
     def _get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = urljoin(f"{self.base_url}/", path.lstrip("/"))

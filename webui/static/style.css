@@ -9648,6 +9648,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     .tidal-enrich-tooltip,
     .qobuz-enrich-tooltip,
     .discogs-tooltip,
+    .amazon-enrich-tooltip,
     .hydrabase-tooltip,
     .repair-tooltip,
     .soulid-tooltip {
@@ -16436,6 +16437,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .watchlist-source-discogs {
     background: rgba(212, 165, 116, 0.15);
     color: #D4A574;
+}
+
+.watchlist-source-amazon {
+    background: rgba(255, 153, 0, 0.15);
+    color: #FF9900;
 }
 
 .watchlist-card-pills {
@@ -34545,6 +34551,7 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-deezer.active { background: rgba(162, 56, 255, 0.2); color: #a238ff; }
 .enh-source-tab.enh-tab-discogs.active { background: rgba(212, 165, 116, 0.2); color: #D4A574; }
 .enh-source-tab.enh-tab-hydrabase.active { background: rgba(0, 180, 216, 0.2); color: #00b4d8; }
+.enh-source-tab.enh-tab-amazon.active { background: rgba(255, 153, 0, 0.2); color: #FF9900; }
 .enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
 .enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
 
@@ -36884,6 +36891,185 @@ div.artist-hero-badge {
 
 #discogs-tooltip-status {
     color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+/* ============================================================
+   AMAZON MUSIC ENRICHMENT WORKER BUTTON
+   ============================================================ */
+
+.amazon-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.amazon-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg,
+            rgba(255, 153, 0, 0.10) 0%,
+            rgba(255, 120, 0, 0.16) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(255, 153, 0, 0.22);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 16px rgba(255, 153, 0, 0.12),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.amazon-enrich-logo {
+    width: 24px;
+    height: 24px;
+    opacity: 0.6;
+    filter: brightness(0) invert(1);
+    transition: all 0.3s ease;
+}
+
+.amazon-enrich-button:hover {
+    transform: scale(1.1);
+    border-color: rgba(255, 153, 0, 0.45);
+    box-shadow:
+        0 6px 24px rgba(255, 153, 0, 0.28),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.amazon-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(255, 153, 0, 0.85);
+    border-right-color: rgba(255, 153, 0, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+@keyframes amazon-enrich-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.amazon-enrich-button.active .amazon-enrich-spinner {
+    opacity: 1;
+    animation: amazon-enrich-spin 1.2s linear infinite;
+}
+
+.amazon-enrich-button.active {
+    background: linear-gradient(135deg,
+            rgba(255, 153, 0, 0.20) 0%,
+            rgba(255, 100, 0, 0.26) 100%);
+    border-color: rgba(255, 153, 0, 0.55);
+    box-shadow:
+        0 6px 24px rgba(255, 153, 0, 0.35),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.amazon-enrich-button.active .amazon-enrich-logo {
+    opacity: 1;
+    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(255, 180, 50, 0.5));
+}
+
+.amazon-enrich-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.amazon-enrich-button.complete .amazon-enrich-logo {
+    opacity: 0.8;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(3) hue-rotate(80deg);
+}
+
+.amazon-enrich-button.complete .amazon-enrich-spinner {
+    opacity: 0;
+}
+
+.amazon-enrich-button.paused {
+    background: linear-gradient(135deg,
+            rgba(255, 193, 7, 0.12) 0%,
+            rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow:
+        0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.amazon-enrich-button.paused .amazon-enrich-logo {
+    opacity: 0.5;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(5) hue-rotate(15deg);
+}
+
+.amazon-enrich-button.paused .amazon-enrich-spinner {
+    opacity: 0;
+}
+
+.amazon-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 5000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.amazon-enrich-button:hover + .amazon-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.amazon-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.amazon-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.amazon-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#amazon-enrich-tooltip-status {
+    color: #FF9900;
     font-weight: 600;
 }
 

@@ -446,6 +446,7 @@ function initializeWebSocket() {
     socket.on('enrichment:genius-enrichment', (data) => updateGeniusEnrichmentStatusFromData(data));
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
+    socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
@@ -675,6 +676,7 @@ const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f
 const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
 const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
 const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
+const AMAZON_LOGO_URL = '/static/amazon.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
