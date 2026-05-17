@@ -2005,6 +2005,7 @@ def _get_enrichment_status():
         ('genius', 'Genius', lambda: genius_worker),
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
+        ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
