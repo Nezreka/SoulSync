@@ -38,6 +38,7 @@ from core.download_plugins.base import DownloadSourcePlugin
 # than the legacy module-top imports here. Importing everything at
 # registry-load time pins the bindings the same way the legacy
 # orchestrator did.
+from core.amazon_download_client import AmazonDownloadClient
 from core.deezer_download_client import DeezerDownloadClient
 from core.hifi_client import HiFiClient
 from core.lidarr_download_client import LidarrDownloadClient
@@ -176,6 +177,7 @@ def build_default_registry() -> DownloadPluginRegistry:
     """
     registry = DownloadPluginRegistry()
 
+    registry.register(PluginSpec(name='amazon',    factory=AmazonDownloadClient,   display_name='Amazon Music'))
     registry.register(PluginSpec(name='soulseek',  factory=SoulseekClient,         display_name='Soulseek'))
     registry.register(PluginSpec(name='youtube',   factory=YouTubeClient,          display_name='YouTube'))
     registry.register(PluginSpec(name='tidal',     factory=TidalDownloadClient,    display_name='Tidal'))

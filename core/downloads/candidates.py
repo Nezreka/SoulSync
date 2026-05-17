@@ -235,7 +235,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
 
                         # 1. Try track_info (from frontend, has album track data)
                         tn = track_info.get('track_number', 0) if isinstance(track_info, dict) else 0
-                        dn = track_info.get('disc_number', 1) if isinstance(track_info, dict) else 1
+                        dn = (track_info.get('disc_number') or 1) if isinstance(track_info, dict) else 1
                         if tn and tn > 0:
                             enhanced_payload['track_number'] = tn
                             enhanced_payload['disc_number'] = dn
@@ -255,7 +255,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                                 detailed_track = deps.spotify_client.get_track_details(track.id)
                                 if detailed_track and detailed_track.get('track_number'):
                                     enhanced_payload['track_number'] = detailed_track['track_number']
-                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
+                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number') or 1
                                     got_track_number = True
                                     logger.info(f"[Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
 

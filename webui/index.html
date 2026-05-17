@@ -541,6 +541,29 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Amazon Music Enrichment Status Icon -->
+                            <div class="amazon-enrich-button-container">
+                                <button class="amazon-enrich-button" id="amazon-enrich-button" title="Amazon Music Library Enrichment"
+                                    onclick="toggleAmazonEnrichment()">
+                                    <img src="/static/amazon.svg"
+                                        alt="Amazon Music" class="amazon-enrich-logo">
+                                    <div class="amazon-enrich-spinner"></div>
+                                </button>
+                                <div class="amazon-enrich-tooltip" id="amazon-enrich-tooltip">
+                                    <div class="amazon-enrich-tooltip-content">
+                                        <div class="amazon-enrich-tooltip-header">Amazon Music Enrichment</div>
+                                        <div class="amazon-enrich-tooltip-body" id="amazon-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="amazon-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="amazon-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="amazon-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Hydrabase P2P Mirror Status Icon -->
                             <div class="hydrabase-button-container" id="hydrabase-button-container" style="display: none;">
                                 <button class="hydrabase-button" id="hydrabase-button" title="Hydrabase P2P Mirror">
@@ -619,222 +642,265 @@
                         </div>
                     </div>
 
-                    <div class="dashboard-section">
-                        <h3 class="section-title">Service Status</h3>
-                        <div class="service-status-grid">
-                            <div class="service-card" id="metadata-source-service-card" data-status-ready="false">
-                                <div class="service-card-header">
-                                    <span class="service-card-title" id="metadata-source-title">Metadata Source</span>
-                                    <span class="service-card-indicator disconnected"
-                                        id="metadata-source-status-indicator">●</span>
-                                </div>
-                                <p class="service-card-status-text" id="metadata-source-status-text">Disconnected</p>
-                                <p class="service-card-response-time" id="metadata-source-response-time">Response: --</p>
-                                <div class="service-card-footer">
-                                    <button class="service-card-button"
-                                        onclick="testDashboardConnection(getActiveMetadataSource())">Test Connection</button>
-                                </div>
-                            </div>
-                            <div class="service-card" id="media-server-service-card" data-status-ready="false">
-                                <div class="service-card-header">
-                                    <span class="service-card-title" id="media-server-service-name">Media Server</span>
-                                    <span class="service-card-indicator disconnected"
-                                        id="media-server-status-indicator">●</span>
-                                </div>
-                                <p class="service-card-status-text" id="media-server-status-text">Disconnected</p>
-                                <p class="service-card-response-time" id="media-server-response-time">Response: --</p>
-                                <div class="service-card-footer">
-                                    <button class="service-card-button" onclick="testDashboardConnection('server')">Test
-                                        Connection</button>
-                                </div>
-                            </div>
-                            <div class="service-card" id="soulseek-service-card" data-status-ready="false">
-                                <div class="service-card-header">
-                                    <span class="service-card-title" id="download-source-title">Download Source</span>
-                                    <span class="service-card-indicator disconnected"
-                                        id="soulseek-status-indicator">●</span>
-                                </div>
-                                <p class="service-card-status-text" id="soulseek-status-text">Disconnected</p>
-                                <p class="service-card-response-time" id="soulseek-response-time">Response: --</p>
-                                <div class="service-card-footer">
-                                    <button class="service-card-button"
-                                        onclick="testDashboardConnection('soulseek')">Test Connection</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="enrichment-section" id="enrichment-pills-section" style="display:none">
-                            <div class="enrichment-section-header">
-                                <span class="enrichment-section-label">Enrichment Services</span>
-                            </div>
-                            <div class="enrichment-status-grid" id="enrichment-status-grid">
-                                <!-- Legacy pills — hidden when rate monitor active -->
-                            </div>
-                        </div>
-                    </div>
+                    <!-- ═══════════════════════════════════════════════════════════════
+                         Bento dashboard — bento-style mixed-size cards. Each card has a
+                         bold title + short subtitle + body region + optional actions.
+                         Layout flows in a 3-column grid; cards span 1/2/3 columns to
+                         create visual hierarchy. All existing IDs + child classes
+                         preserved so JS that updates the dashboard keeps working.
+                         ═══════════════════════════════════════════════════════════════ -->
+                    <div class="dash-grid">
 
-                    <!-- API Rate Monitor Section (replaces enrichment pills with richer cards) -->
-                    <div class="dashboard-section" id="rate-monitor-section">
-                        <h3 class="section-title">Enrichment Services</h3>
-                        <div class="rate-monitor-grid" id="rate-monitor-grid">
-                            <!-- Populated dynamically by JS -->
-                        </div>
-                    </div>
-
-                    <!-- Library Status Card -->
-                    <div class="dashboard-section">
-                        <div class="library-status-card" id="library-status-card">
-                            <!-- Animated background accent -->
-                            <div class="library-status-glow"></div>
-
-                            <div class="library-status-header">
-                                <div class="library-status-icon" id="library-status-icon">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg>
-                                </div>
-                                <div class="library-status-info">
-                                    <h4 class="library-status-title" id="library-status-title">Library</h4>
-                                    <p class="library-status-subtitle" id="library-status-subtitle">Checking status...</p>
-                                </div>
-                                <div class="library-status-actions" id="library-status-actions">
-                                    <button class="library-status-btn" id="library-status-scan-btn" style="display: none;" onclick="dashboardLibraryScan(false)">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                                        <span id="library-status-scan-label">Refresh</span>
-                                    </button>
-                                    <button class="library-status-btn library-status-btn-secondary" id="library-status-deep-btn" style="display: none;" onclick="dashboardLibraryDeepScan()">
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                                        Deep Scan
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="library-status-stats" id="library-status-stats" style="display: none;">
-                                <div class="library-status-stat">
-                                    <div class="library-status-stat-icon">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <!-- Card: Service Status (wide, top-left) -->
+                        <article class="dash-card" data-card="services">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Service Status</h3>
+                                <p class="dash-card__sub">Connection health for every service SoulSync uses.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="service-status-grid">
+                                    <div class="service-card" id="metadata-source-service-card" data-status-ready="false">
+                                        <div class="service-card-header">
+                                            <span class="service-card-title" id="metadata-source-title">Metadata Source</span>
+                                            <span class="service-card-indicator disconnected" id="metadata-source-status-indicator">●</span>
+                                        </div>
+                                        <p class="service-card-status-text" id="metadata-source-status-text">Disconnected</p>
+                                        <p class="service-card-response-time" id="metadata-source-response-time">Response: --</p>
+                                        <div class="service-card-footer">
+                                            <button class="service-card-button" onclick="testDashboardConnection(getActiveMetadataSource())">Test</button>
+                                        </div>
                                     </div>
-                                    <div class="library-status-stat-text">
-                                        <span class="library-status-stat-value" id="library-status-artists">0</span>
-                                        <span class="library-status-stat-label">Artists</span>
+                                    <div class="service-card" id="media-server-service-card" data-status-ready="false">
+                                        <div class="service-card-header">
+                                            <span class="service-card-title" id="media-server-service-name">Media Server</span>
+                                            <span class="service-card-indicator disconnected" id="media-server-status-indicator">●</span>
+                                        </div>
+                                        <p class="service-card-status-text" id="media-server-status-text">Disconnected</p>
+                                        <p class="service-card-response-time" id="media-server-response-time">Response: --</p>
+                                        <div class="service-card-footer">
+                                            <button class="service-card-button" onclick="testDashboardConnection('server')">Test</button>
+                                        </div>
+                                    </div>
+                                    <div class="service-card" id="soulseek-service-card" data-status-ready="false">
+                                        <div class="service-card-header">
+                                            <span class="service-card-title" id="download-source-title">Download Source</span>
+                                            <span class="service-card-indicator disconnected" id="soulseek-status-indicator">●</span>
+                                        </div>
+                                        <p class="service-card-status-text" id="soulseek-status-text">Disconnected</p>
+                                        <p class="service-card-response-time" id="soulseek-response-time">Response: --</p>
+                                        <div class="service-card-footer">
+                                            <button class="service-card-button" onclick="testDashboardConnection('soulseek')">Test</button>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="library-status-stat">
-                                    <div class="library-status-stat-icon">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                <div class="enrichment-section" id="enrichment-pills-section" style="display:none">
+                                    <div class="enrichment-section-header">
+                                        <span class="enrichment-section-label">Enrichment Services</span>
                                     </div>
-                                    <div class="library-status-stat-text">
-                                        <span class="library-status-stat-value" id="library-status-albums">0</span>
-                                        <span class="library-status-stat-label">Albums</span>
-                                    </div>
-                                </div>
-                                <div class="library-status-stat">
-                                    <div class="library-status-stat-icon">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                                    </div>
-                                    <div class="library-status-stat-text">
-                                        <span class="library-status-stat-value" id="library-status-tracks">0</span>
-                                        <span class="library-status-stat-label">Tracks</span>
-                                    </div>
-                                </div>
-                                <div class="library-status-stat">
-                                    <div class="library-status-stat-icon">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                                    </div>
-                                    <div class="library-status-stat-text">
-                                        <span class="library-status-stat-value" id="library-status-size">--</span>
-                                        <span class="library-status-stat-label">DB Size</span>
+                                    <div class="enrichment-status-grid" id="enrichment-status-grid">
+                                        <!-- Legacy pills — hidden when rate monitor active -->
                                     </div>
                                 </div>
                             </div>
+                        </article>
 
-                            <div class="library-status-progress" id="library-status-progress" style="display: none;">
-                                <div class="library-status-phase" id="library-status-phase">Scanning...</div>
-                                <div class="library-status-bar">
-                                    <div class="library-status-bar-fill" id="library-status-bar-fill" style="width: 0%;"></div>
+                        <!-- Card: System Stats (row 1, between Services and Library) -->
+                        <article class="dash-card" data-card="stats">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">System Stats</h3>
+                                <p class="dash-card__sub">Live performance metrics.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="stats-grid-dashboard">
+                                    <div class="stat-card-dashboard" id="active-downloads-card">
+                                        <p class="stat-card-title">Active Downloads</p>
+                                        <p class="stat-card-value">0</p>
+                                        <p class="stat-card-subtitle">Currently downloading</p>
+                                    </div>
+                                    <div class="stat-card-dashboard" id="finished-downloads-card">
+                                        <p class="stat-card-title">Finished Downloads</p>
+                                        <p class="stat-card-value">0</p>
+                                        <p class="stat-card-subtitle">Completed this session</p>
+                                    </div>
+                                    <div class="stat-card-dashboard" id="download-speed-card">
+                                        <p class="stat-card-title">Download Speed</p>
+                                        <p class="stat-card-value">0 KB/s</p>
+                                        <p class="stat-card-subtitle">Combined speed</p>
+                                    </div>
+                                    <div class="stat-card-dashboard" id="active-syncs-card">
+                                        <p class="stat-card-title">Active Syncs</p>
+                                        <p class="stat-card-value">0</p>
+                                        <p class="stat-card-subtitle">Playlists syncing</p>
+                                    </div>
+                                    <div class="stat-card-dashboard" id="uptime-card">
+                                        <p class="stat-card-title">System Uptime</p>
+                                        <p class="stat-card-value">0m</p>
+                                        <p class="stat-card-subtitle">Application runtime</p>
+                                    </div>
+                                    <div class="stat-card-dashboard" id="memory-card">
+                                        <p class="stat-card-title">Memory Usage</p>
+                                        <p class="stat-card-value">--</p>
+                                        <p class="stat-card-subtitle">Current usage</p>
+                                    </div>
                                 </div>
-                                <div class="library-status-progress-detail" id="library-status-progress-detail">0 / 0</div>
                             </div>
+                        </article>
 
-                            <div class="library-status-message" id="library-status-message" style="display: none;"></div>
-                        </div>
-                    </div>
+                        <!-- Card: Library (row 1) -->
+                        <article class="dash-card" data-card="library">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Library</h3>
+                                <p class="dash-card__sub">Your collection at a glance.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="library-status-card" id="library-status-card">
+                                    <div class="library-status-glow"></div>
+                                    <div class="library-status-header">
+                                        <div class="library-status-icon" id="library-status-icon">
+                                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg>
+                                        </div>
+                                        <div class="library-status-info">
+                                            <h4 class="library-status-title" id="library-status-title">Library</h4>
+                                            <p class="library-status-subtitle" id="library-status-subtitle">Checking status...</p>
+                                        </div>
+                                        <div class="library-status-actions" id="library-status-actions">
+                                            <button class="library-status-btn" id="library-status-scan-btn" style="display: none;" onclick="dashboardLibraryScan(false)">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                                <span id="library-status-scan-label">Refresh</span>
+                                            </button>
+                                            <button class="library-status-btn library-status-btn-secondary" id="library-status-deep-btn" style="display: none;" onclick="dashboardLibraryDeepScan()">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                                Deep Scan
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="library-status-stats" id="library-status-stats" style="display: none;">
+                                        <div class="library-status-stat">
+                                            <div class="library-status-stat-icon">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                            </div>
+                                            <div class="library-status-stat-text">
+                                                <span class="library-status-stat-value" id="library-status-artists">0</span>
+                                                <span class="library-status-stat-label">Artists</span>
+                                            </div>
+                                        </div>
+                                        <div class="library-status-stat">
+                                            <div class="library-status-stat-icon">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                            </div>
+                                            <div class="library-status-stat-text">
+                                                <span class="library-status-stat-value" id="library-status-albums">0</span>
+                                                <span class="library-status-stat-label">Albums</span>
+                                            </div>
+                                        </div>
+                                        <div class="library-status-stat">
+                                            <div class="library-status-stat-icon">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                                            </div>
+                                            <div class="library-status-stat-text">
+                                                <span class="library-status-stat-value" id="library-status-tracks">0</span>
+                                                <span class="library-status-stat-label">Tracks</span>
+                                            </div>
+                                        </div>
+                                        <div class="library-status-stat">
+                                            <div class="library-status-stat-icon">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                            </div>
+                                            <div class="library-status-stat-text">
+                                                <span class="library-status-stat-value" id="library-status-size">--</span>
+                                                <span class="library-status-stat-label">DB Size</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="library-status-progress" id="library-status-progress" style="display: none;">
+                                        <div class="library-status-phase" id="library-status-phase">Scanning...</div>
+                                        <div class="library-status-bar">
+                                            <div class="library-status-bar-fill" id="library-status-bar-fill" style="width: 0%;"></div>
+                                        </div>
+                                        <div class="library-status-progress-detail" id="library-status-progress-detail">0 / 0</div>
+                                    </div>
+                                    <div class="library-status-message" id="library-status-message" style="display: none;"></div>
+                                </div>
+                            </div>
+                        </article>
 
-                    <!-- Recent Syncs Section -->
-                    <div class="dashboard-section">
-                        <h3 class="section-title">Recent Syncs</h3>
-                        <div class="sync-history-cards" id="sync-history-cards">
-                            <!-- Dynamically populated by JS -->
-                        </div>
-                    </div>
+                        <!-- Card: Recent Syncs (row 2) -->
+                        <article class="dash-card" data-card="syncs">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Recent Syncs</h3>
+                                <p class="dash-card__sub">Playlists you've synced.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="sync-history-cards" id="sync-history-cards">
+                                    <!-- Dynamically populated by JS -->
+                                </div>
+                            </div>
+                        </article>
 
-                    <div class="dashboard-section">
-                        <h3 class="section-title">System Statistics</h3>
-                        <div class="stats-grid-dashboard">
-                            <div class="stat-card-dashboard" id="active-downloads-card">
-                                <p class="stat-card-title">Active Downloads</p>
-                                <p class="stat-card-value">0</p>
-                                <p class="stat-card-subtitle">Currently downloading</p>
+                        <!-- Card: Tools (compact, top-right) — entry point to maintenance ops -->
+                        <article class="dash-card dash-card--cta" data-card="tools" onclick="navigateToPage('tools')">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Tools</h3>
+                                <p class="dash-card__sub">Database, scanning, backups, cache, maintenance &amp; more.</p>
+                            </header>
+                            <div class="dash-card__body dash-card__body--cta">
+                                <div class="dash-card__cta-icon">
+                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                </div>
+                                <div class="dash-card__cta-label">Open Tools</div>
+                                <svg class="dash-card__cta-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                             </div>
-                            <div class="stat-card-dashboard" id="finished-downloads-card">
-                                <p class="stat-card-title">Finished Downloads</p>
-                                <p class="stat-card-value">0</p>
-                                <p class="stat-card-subtitle">Completed this session</p>
-                            </div>
-                            <div class="stat-card-dashboard" id="download-speed-card">
-                                <p class="stat-card-title">Download Speed</p>
-                                <p class="stat-card-value">0 KB/s</p>
-                                <p class="stat-card-subtitle">Combined speed</p>
-                            </div>
-                            <div class="stat-card-dashboard" id="active-syncs-card">
-                                <p class="stat-card-title">Active Syncs</p>
-                                <p class="stat-card-value">0</p>
-                                <p class="stat-card-subtitle">Playlists syncing</p>
-                            </div>
-                            <div class="stat-card-dashboard" id="uptime-card">
-                                <p class="stat-card-title">System Uptime</p>
-                                <p class="stat-card-value">0m</p>
-                                <p class="stat-card-subtitle">Application runtime</p>
-                            </div>
-                            <div class="stat-card-dashboard" id="memory-card">
-                                <p class="stat-card-title">Memory Usage</p>
-                                <p class="stat-card-value">--</p>
-                                <p class="stat-card-subtitle">Current usage</p>
-                            </div>
-                        </div>
-                    </div>
+                        </article>
 
-                    <div class="dashboard-section" id="dashboard-active-downloads-section" style="display: none;">
-                        <h3 class="section-title">Active Downloads</h3>
-                        <div id="dashboard-downloads-container"></div>
-                    </div>
-
-                    <div class="dashboard-section">
-                        <h3 class="section-title">Tools & Operations</h3>
-                        <div class="dashboard-tools-link" onclick="navigateToPage('tools')">
-                            <div class="dashboard-tools-link-content">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                        <!-- Card: Recent Activity (row 2, after Tools) -->
+                        <article class="dash-card" data-card="activity">
+                            <header class="dash-card__head dash-card__head--withaction">
                                 <div>
-                                    <span class="dashboard-tools-link-title">Database, scanning, backups, cache, maintenance & more</span>
+                                    <h3 class="dash-card__title">Recent Activity</h3>
+                                    <p class="dash-card__sub">What just happened.</p>
+                                </div>
+                                <button class="dash-card__head-btn" onclick="openLibraryHistoryModal()" title="View full library history">Download History</button>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="activity-feed-container" id="dashboard-activity-feed">
+                                    <div class="activity-item">
+                                        <span class="activity-icon">📊</span>
+                                        <div class="activity-text-content">
+                                            <p class="activity-title">System Started</p>
+                                            <p class="activity-subtitle">Dashboard initialized successfully</p>
+                                        </div>
+                                        <p class="activity-time">Now</p>
+                                    </div>
                                 </div>
                             </div>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                        </div>
-                    </div>
+                        </article>
 
-
-                    <div class="dashboard-section">
-                        <div class="section-title-row">
-                            <h3 class="section-title">Recent Activity</h3>
-                            <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full library history">Download History</button>
-                        </div>
-                        <div class="activity-feed-container" id="dashboard-activity-feed">
-                            <div class="activity-item">
-                                <span class="activity-icon">📊</span>
-                                <div class="activity-text-content">
-                                    <p class="activity-title">System Started</p>
-                                    <p class="activity-subtitle">Dashboard initialized successfully</p>
-                                </div>
-                                <p class="activity-time">Now</p>
+                        <!-- Card: Active Downloads (full-width, shows when downloads in flight) -->
+                        <article class="dash-card dash-card--full" id="dashboard-active-downloads-section" style="display: none;" data-card="active-downloads">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Active Downloads</h3>
+                                <p class="dash-card__sub">In-flight transfers from your sources.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div id="dashboard-downloads-container"></div>
                             </div>
-                        </div>
+                        </article>
+
+                        <!-- Card: Enrichment Detail (compact, paired with System Stats on the left) -->
+                        <article class="dash-card dash-card--full" id="rate-monitor-section" data-card="enrichment">
+                            <header class="dash-card__head">
+                                <h3 class="dash-card__title">Enrichment Services</h3>
+                                <p class="dash-card__sub">API rate monitoring across providers.</p>
+                            </header>
+                            <div class="dash-card__body">
+                                <div class="rate-monitor-grid" id="rate-monitor-grid">
+                                    <!-- Populated dynamically by JS -->
+                                </div>
+                            </div>
+                        </article>
+
+
+                        <!-- Card: Recent Syncs (full-width) -->
                     </div>
                 </div>
             </div>
@@ -880,12 +946,7 @@
                             <button class="sync-tab-button" data-tab="youtube">
                                 <span class="tab-icon youtube-icon"></span> YouTube
                             </button>
-                            <!-- Beatport tab hidden: Beatport added Cloudflare Turnstile to all
-                                 public pages and locked their official OAuth API behind partner
-                                 registration. No working server-side scrape or auth path right now.
-                                 Tab content + backend endpoints are kept intact for fast revival
-                                 once a workaround is found. -->
-                            <button class="sync-tab-button" data-tab="beatport" style="display: none;">
+                            <button class="sync-tab-button" data-tab="beatport">
                                 <span class="tab-icon beatport-icon"></span> Beatport
                             </button>
                             <button class="sync-tab-button" data-tab="import-file">
@@ -4256,6 +4317,7 @@
                                         <option value="qobuz">Qobuz Only</option>
                                         <option value="hifi">HiFi Only (Free Lossless)</option>
                                         <option value="deezer_dl">Deezer Only</option>
+                                        <option value="amazon">Amazon Music Only</option>
                                         <option value="lidarr">Lidarr Only</option>
                                         <option value="soundcloud">SoundCloud Only</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
@@ -4574,6 +4636,39 @@
                                                 Test Connection
                                             </button>
                                             <span id="deezer-download-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Amazon Music Download Settings (shown only when amazon mode is selected) -->
+                                <div id="amazon-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Amazon Music Quality:</label>
+                                        <select id="amazon-quality" class="form-select">
+                                            <option value="flac">FLAC Lossless (24-bit/48kHz Hi-Res)</option>
+                                            <option value="opus">Opus (320kbps)</option>
+                                            <option value="eac3">EAC3 Dolby Atmos (768kbps 5.1)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Preferred codec tier. FLAC is 24-bit/48kHz Hi-Res — no subscription required.
+                                            Downloads via T2Tunes proxy.
+                                        </div>
+                                        <label class="checkbox-inline" style="margin-top: 8px;">
+                                            <input type="checkbox" id="amazon-allow-fallback" checked>
+                                            Allow quality fallback
+                                        </label>
+                                        <div class="setting-help-text">
+                                            Fall back to the next codec tier if the preferred one is unavailable.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Connection:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" onclick="testAmazonConnection()">Test Connection</button>
+                                            <span id="amazon-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div class="setting-help-text">
+                                            No account required — T2Tunes is a public Amazon Music proxy.
                                         </div>
                                     </div>
                                 </div>

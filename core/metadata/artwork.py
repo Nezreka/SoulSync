@@ -28,6 +28,54 @@ __all__ = [
 logger = _create_logger("metadata.artwork")
 
 
+# Query-string keys whose values must be masked when a media-server
+# URL ends up in a log line. Plex uses X-Plex-Token, Jellyfin uses
+# X-Emby-Token / api_key, Navidrome's Subsonic auth uses t (token) +
+# s (salt) + p (password fallback). Logs end up persisted to disk —
+# leaking any of these gives full read access to the user's library.
+_REDACT_QUERY_KEYS = (
+    'x-plex-token', 'x-emby-token', 'api_key', 'apikey',
+    't', 's', 'p', 'token', 'password',
+)
+_REDACT_KEYS_ALT = '|'.join(re.escape(k) for k in _REDACT_QUERY_KEYS)
+# Plain form: `?key=value` or `&key=value`. Anchored on `?` / `&` (or
+# string start) so short keys like `t` only match at parameter
+# boundaries — not as a substring of `format=Jpg`.
+_REDACT_QUERY_RE = re.compile(
+    r'(?i)(?P<lead>^|[?&])(?P<key>' + _REDACT_KEYS_ALT + r')=(?P<val>[^&\s]+)'
+)
+# URL-encoded form: `%3Fkey%3Dvalue` or `%26key%3Dvalue`. The image
+# proxy wraps the original URL via `?url=<encoded>`, so the auth
+# params end up encoded inside another URL. Without this second pass
+# the encoded form survives plain redaction and ships to logs intact.
+_REDACT_QUERY_RE_ENCODED = re.compile(
+    r'(?i)(?P<lead>%3F|%26)(?P<key>' + _REDACT_KEYS_ALT + r')%3D(?P<val>[^%&\s]+?)(?=%26|&|\s|$)'
+)
+
+
+def _redact_url_secrets(url: str | None) -> str:
+    """Mask sensitive query parameters in a URL so the result is safe
+    to log. Handles both the plain form (``?token=abc``) and the URL-
+    encoded form (``%3Ftoken%3Dabc``) — the latter shows up when an
+    auth-bearing URL is wrapped inside another URL's query string
+    (e.g. our `/api/image-proxy?url=<encoded-plex-url>` flow).
+
+    Returns ``''`` for None/empty input. Idempotent (safe to call on
+    already-redacted strings)."""
+    if not url:
+        return ''
+    out = str(url)
+    out = _REDACT_QUERY_RE.sub(
+        lambda m: f"{m.group('lead')}{m.group('key')}=***REDACTED***",
+        out,
+    )
+    out = _REDACT_QUERY_RE_ENCODED.sub(
+        lambda m: f"{m.group('lead')}{m.group('key')}%3D***REDACTED***",
+        out,
+    )
+    return out
+
+
 def normalize_image_url(thumb_url: str | None) -> str | None:
     """Convert media-server image URLs into browser-safe URLs."""
     if not thumb_url:
@@ -62,7 +110,6 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
                 plex_config = cfg.get_plex_config()
                 plex_base_url = plex_config.get('base_url', '')
                 plex_token = plex_config.get('token', '')
-                logger.info("Plex config - base_url: %s, token: %s...", plex_base_url, plex_token[:10])
 
                 if plex_base_url and plex_token:
                     # Extract the path from URL
@@ -76,18 +123,13 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
 
                     # Construct proper Plex URL with token
                     fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
-                    logger.info("Fixed URL: %s", fixed_url)
+                    logger.debug("Fixed URL: %s", _redact_url_secrets(fixed_url))
                     return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'jellyfin':
                 jellyfin_config = cfg.get_jellyfin_config()
                 jellyfin_base_url = jellyfin_config.get('base_url', '')
                 jellyfin_token = jellyfin_config.get('api_key', '')
-                logger.info(
-                    "Jellyfin config - base_url: %s, token: %s...",
-                    jellyfin_base_url,
-                    jellyfin_token[:10] if jellyfin_token else 'None',
-                )
 
                 if jellyfin_base_url:
                     # Extract the path from URL
@@ -105,7 +147,7 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
                     else:
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
-                    logger.info("Fixed URL: %s", fixed_url)
+                    logger.debug("Fixed URL: %s", _redact_url_secrets(fixed_url))
                     return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'navidrome':
@@ -113,7 +155,6 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
                 navidrome_base_url = navidrome_config.get('base_url', '')
                 navidrome_username = navidrome_config.get('username', '')
                 navidrome_password = navidrome_config.get('password', '')
-                logger.info("Navidrome config - base_url: %s, username: %s", navidrome_base_url, navidrome_username)
 
                 if navidrome_base_url and navidrome_username and navidrome_password:
                     # Extract the path from URL
@@ -137,7 +178,7 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
 
                     # Construct proper Navidrome Subsonic URL
                     fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
-                    logger.info("Fixed URL: %s", fixed_url)
+                    logger.debug("Fixed URL: %s", _redact_url_secrets(fixed_url))
                     return _browser_safe_image_url(fixed_url)
 
             logger.warning("No configuration found for %s or unsupported server type", active_server)
@@ -146,7 +187,7 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
         return _browser_safe_image_url(thumb_url)
 
     except Exception as exc:
-        logger.error("Error fixing image URL '%s': %s", thumb_url, exc)
+        logger.error("Error fixing image URL '%s': %s", _redact_url_secrets(thumb_url), exc)
         return _browser_safe_image_url(thumb_url)
 
 

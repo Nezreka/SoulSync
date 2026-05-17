@@ -259,6 +259,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
     if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     if (artist.discogs_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs', url: `https://www.discogs.com/artist/${artist.discogs_id}` });
+    if (artist.amazon_id) badges.push({ logo: AMAZON_LOGO_URL, fb: 'AMZ', title: 'Amazon Music', url: null });
     if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
@@ -1128,6 +1129,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
+        if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -2959,6 +2961,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_url', label: 'Genius', svc: 'genius' },
         { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
         { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
+        { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
     ];
     idSources.forEach(src => {
         if (artist[src.key]) {
@@ -3094,6 +3097,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
         { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
         { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusServices.forEach(s => {
         const status = artist[s.key];
@@ -3462,6 +3466,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -5125,6 +5130,14 @@ function getServiceUrl(service, entityType, id) {
             album: `https://www.qobuz.com/album/${id}`,
             track: `https://www.qobuz.com/track/${id}`,
         },
+        discogs: {
+            artist: `https://www.discogs.com/artist/${id}`,
+            album: `https://www.discogs.com/release/${id}`,
+        },
+        amazon: {
+            album: `https://music.amazon.com/albums/${id}`,
+            track: `https://music.amazon.com/tracks/${id}`,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }
@@ -5564,7 +5577,8 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
 
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
-        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius'
+        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
     };
 
     const overlay = document.createElement('div');
@@ -6418,10 +6432,24 @@ async function showReorganizeModal(albumId) {
 
     let html = '<div class="reorganize-content">';
 
+    // Metadata MODE picker — API call (default) vs read embedded tags.
+    // Tag-mode (#592) trusts the user's enriched library and issues
+    // zero API calls.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
     // Metadata source picker — populated from /reorganize/sources.
     // Empty value = use configured primary (with fallback chain).
     // Specific source = strict mode, that source only.
-    html += '<div class="reorganize-source-section">';
+    // Hidden when mode = 'tags' since the source picker is irrelevant
+    // (tags are read straight off the file).
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read the album\'s tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6445,6 +6473,21 @@ async function showReorganizeModal(albumId) {
 
     // Populate source picker after the modal mounts
     setTimeout(() => _populateReorganizeSources(_reorganizeAlbumId), 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
+}
+
+function _onReorganizeModeChange() {
+    const mode = document.getElementById('reorganize-mode-select')?.value || 'api';
+    const srcSection = document.getElementById('reorganize-source-section');
+    if (srcSection) srcSection.style.display = (mode === 'tags') ? 'none' : '';
+    try { localStorage.setItem('soulsync-reorganize-mode', mode); } catch (e) {}
 }
 
 async function _populateReorganizeSources(albumId) {
@@ -6496,10 +6539,11 @@ async function loadReorganizePreview() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) {
@@ -6596,10 +6640,11 @@ async function executeReorganize() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
@@ -6690,10 +6735,21 @@ async function _showReorganizeAllModal() {
 
     let html = '<div class="reorganize-content">';
 
-    // Source picker — applies to ALL albums in this run. Albums without
-    // an ID for the chosen source will be skipped at the backend with
-    // a clear status. Auto = use configured primary with fallback chain.
+    // Mode picker — applies to ALL albums.
     html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Source picker — applies to ALL albums in this run. Hidden when
+    // mode = 'tags'. Albums without an ID for the chosen source will
+    // be skipped at the backend with a clear status. Auto = use
+    // configured primary with fallback chain.
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source (applies to all albums)</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6743,6 +6799,14 @@ async function _showReorganizeAllModal() {
             console.error('Failed to load reorganize sources:', err);
         }
     }, 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
 }
 
 async function _executeReorganizeAll() {
@@ -6766,14 +6830,15 @@ async function _executeReorganizeAll() {
     const overlay = document.getElementById('reorganize-overlay');
     if (overlay) overlay.classList.add('hidden');
 
-    // One source pick applies to every album in the batch.
+    // One source + mode pick applies to every album in the batch.
     const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+    const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
 
     try {
         const resp = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource }),
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode }),
         });
         const result = await resp.json();
         if (!result.success) throw new Error(result.error || 'Queue request failed');
