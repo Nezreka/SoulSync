@@ -3413,8 +3413,8 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    '2.5.3': [
-        { unreleased: true },
+    '2.5.4': [
+        { date: 'May 16, 2026 — 2.5.4 release' },
         { title: 'Amazon Music Download Source', desc: 'new download source backed by T2Tunes proxy. searches the Amazon Music catalog, downloads 24-bit/48kHz FLAC (or Opus 320kbps / Dolby Atmos EAC3 fallback). codec waterfall mirrors Tidal/Qobuz — best quality first, auto-fallback. selectable as a standalone or hybrid source from Settings.', page: 'settings' },
         { title: 'Amazon Music Search Quality', desc: 'search results now show album art, artist images (album cover stand-in, same as iTunes), and correct track/disc numbers. feat. credits stripped from artist names so the same artist does not show as duplicates. [Explicit] stripped from album names so MusicBrainz matching works cleanly — Clean / Edited / Censored labels kept as-is. album clicks and artist detail pages now open instead of 404ing.', page: 'search' },
         { title: 'Amazon Music Enrichment Worker', desc: 'background enrichment worker matches library artists, albums, and tracks to Amazon ASINs and backfills artist thumbnails from album covers. shows up in the enrichment panel with its own orb and rate-limit gauge. pauses automatically during library scans.', page: 'settings' },
@@ -4431,7 +4431,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.3';
+    return versions[0] || '2.5.4';
 }
 
 function openWhatsNew() {
