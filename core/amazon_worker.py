@@ -398,8 +398,8 @@ class AmazonWorker:
             if not image_url:
                 try:
                     image_url = self.client._get_artist_image_from_albums(result.id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Artist image from albums failed for %s: %s", result.id, exc)
             if image_url:
                 cursor.execute("""
                     UPDATE artists SET thumb_url = ?
