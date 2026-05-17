@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,6 +109,9 @@ class _FakeSoulseekWrapper:
     """Wraps a soulseek client at .soulseek attribute (matches web_server pattern)."""
     def __init__(self, inner):
         self.soulseek = inner
+
+    def client(self, name):
+        return self.soulseek if name == 'soulseek' else None
 
 
 class _FakeMonitor:
@@ -218,6 +222,38 @@ def _seed_batch(batch_id, **overrides):
     }
     base.update(overrides)
     download_batches[batch_id] = base
+
+
+def _slsk_track(title, number, folder='Artist/Test Album'):
+    return SimpleNamespace(
+        username='peer',
+        filename=f'{folder}/{number:02d} - {title}.flac',
+        title=title,
+        track_number=number,
+        quality='flac',
+        bitrate=None,
+        duration=180000,
+        size=20_000_000,
+        free_upload_slots=1,
+        upload_speed=2_000_000,
+        queue_length=0,
+        quality_score=1.0,
+    )
+
+
+def _album_result(username, path, title, tracks, *, artist='Artist', year='2020',
+                  quality_score=0.9):
+    return SimpleNamespace(
+        username=username,
+        album_path=path,
+        album_title=title,
+        artist=artist,
+        year=year,
+        track_count=len(tracks),
+        tracks=tracks,
+        dominant_quality='flac',
+        quality_score=quality_score,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +491,114 @@ def test_mb_release_preflight_skipped_when_no_mb_worker(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Soulseek album preflight
+# ---------------------------------------------------------------------------
+
+def test_soulseek_album_preflight_scores_release_folder_over_larger_wrong_edition(monkeypatch):
+    """Album preflight chooses the folder whose tracklist matches the target release."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    target_tracks = [
+        {'name': f'Track {i}', 'artists': ['Artist'], 'track_number': i}
+        for i in range(1, 11)
+    ]
+    correct_tracks = [_slsk_track(f'Track {i}', i, folder='Artist/Test Album (2020)') for i in range(1, 11)]
+    wrong_tracks = [
+        _slsk_track(f'Remix {i}', i, folder='Artist/Test Album Deluxe Remixes (2020)')
+        for i in range(1, 13)
+    ]
+    wrong = _album_result(
+        'slow-peer',
+        'Artist/Test Album Deluxe Remixes (2020)',
+        'Test Album Deluxe Remixes',
+        wrong_tracks,
+        quality_score=1.0,
+    )
+    correct = _album_result(
+        'good-peer',
+        'Artist/Test Album (2020)',
+        'Test Album',
+        correct_tracks,
+        quality_score=0.8,
+    )
+    slsk = _FakeSoulseek(album_results=[wrong, correct], browse_files=[{'filename': 'x.flac'}],
+                         parsed_tracks=correct_tracks)
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'soulseek'}),
+        soulseek=_FakeSoulseekWrapper(slsk),
+    )
+    _seed_batch(
+        'B22',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 10, 'release_date': '2020-01-01'},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process('B22', 'album:1', target_tracks, deps)
+
+    assert download_batches['B22']['last_good_source'] == {
+        'username': 'good-peer',
+        'folder_path': 'Artist/Test Album (2020)',
+    }
+    assert download_batches['B22']['source_folder_tracks'] == correct_tracks
+
+
+def test_soulseek_album_preflight_runs_when_soulseek_is_hybrid_primary(monkeypatch):
+    """Album preflight runs for hybrid album downloads when Soulseek is first."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+    folder_tracks = [_slsk_track('T1', 1)]
+    album = _album_result('peer', 'Artist/Test Album', 'Test Album', folder_tracks)
+    slsk = _FakeSoulseek(album_results=[album], browse_files=None, parsed_tracks=folder_tracks)
+    config = _FakeConfig({
+        'download_source.mode': 'hybrid',
+        'download_source.hybrid_order': ['soulseek', 'hifi'],
+    })
+    deps = _build_deps(config=config, soulseek=_FakeSoulseekWrapper(slsk))
+    _seed_batch(
+        'B23',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process('B23', 'album:1', tracks, deps)
+
+    assert slsk.search_calls
+    assert download_batches['B23']['last_good_source']['username'] == 'peer'
+
+
+def test_soulseek_album_preflight_does_not_jump_ahead_of_hybrid_primary(monkeypatch):
+    """If Soulseek is only a fallback source, album preflight does not preempt source order."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+    folder_tracks = [_slsk_track('T1', 1)]
+    album = _album_result('peer', 'Artist/Test Album', 'Test Album', folder_tracks)
+    slsk = _FakeSoulseek(album_results=[album], browse_files=None, parsed_tracks=folder_tracks)
+    config = _FakeConfig({
+        'download_source.mode': 'hybrid',
+        'download_source.hybrid_order': ['deezer_dl', 'soulseek'],
+    })
+    deps = _build_deps(config=config, soulseek=_FakeSoulseekWrapper(slsk))
+    _seed_batch(
+        'B24',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process('B24', 'album:1', tracks, deps)
+
+    assert slsk.search_calls == []
+    assert 'last_good_source' not in download_batches['B24']
+
+
+# ---------------------------------------------------------------------------
 # Task creation
 # ---------------------------------------------------------------------------
 
@@ -536,6 +680,48 @@ def test_wishlist_album_grouping_resolves_artist(monkeypatch):
     # Both tracks should resolve to the same album-level artist
     assert len(artist_names) == 1
     assert 'Album Artist' in artist_names
+
+
+def test_wishlist_album_grouping_uses_shared_rich_album_context(monkeypatch):
+    """Tracks in one wishlist album reuse the richest album context to avoid year folder splits."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    deps = _build_deps()
+    _seed_batch('B14b')
+
+    tracks = [
+        {
+            'name': 'T1', 'artists': [{'name': 'Artist'}],
+            'spotify_data': {
+                'album': {
+                    'id': 'A1', 'name': 'Test Album', 'artists': [{'name': 'Album Artist'}],
+                    'release_date': '2024-05-05', 'total_tracks': 2,
+                    'album_type': 'album', 'images': [{'url': 'http://img'}],
+                },
+                'artists': [{'name': 'Artist'}],
+            },
+        },
+        {
+            'name': 'T2', 'artists': [{'name': 'Artist'}],
+            'spotify_data': {
+                'album': {'id': 'A1', 'name': 'Test Album'},
+                'artists': [{'name': 'Artist'}],
+            },
+        },
+    ]
+
+    mw.run_full_missing_tracks_process('B14b', 'wishlist', tracks, deps)
+
+    release_dates = set()
+    images = set()
+    for tid in download_batches['B14b']['queue']:
+        album_ctx = download_tasks[tid]['track_info']['_explicit_album_context']
+        release_dates.add(album_ctx['release_date'])
+        images.add(album_ctx['images'][0]['url'])
+
+    assert release_dates == {'2024-05-05'}
+    assert images == {'http://img'}
 
 
 def test_playlist_folder_mode_propagates(monkeypatch):
