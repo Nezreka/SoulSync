@@ -974,7 +974,8 @@ async function initializeWatchlistPage() {
                 if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
                 if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
                 if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
-                const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
+                if (artist.amazon_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-amazon">Amazon</span>');
+                const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id || artist.amazon_artist_id;
                 return `
                     <div class="watchlist-artist-card"
                          data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
@@ -1766,7 +1767,8 @@ async function showWatchlistModal() {
             if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
             if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
             if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
-            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
+            if (artist.amazon_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-amazon">Amazon</span>');
+            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id || artist.amazon_artist_id;
             return `
                             <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
@@ -1922,7 +1924,7 @@ function closeWatchlistModal() {
  * Populate the linked provider section in the watchlist config modal.
  * Shows which Spotify/iTunes/Deezer artist is linked and allows changing it.
  */
-function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo, deezerId, discogsId) {
+function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo, deezerId, discogsId, amazonId) {
     const section = document.getElementById('watchlist-linked-provider-section');
     const content = document.getElementById('watchlist-linked-provider-content');
     if (!section || !content) return;
@@ -1934,6 +1936,7 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
         { key: 'itunes', label: 'Apple Music', icon: '🔴', id: itunesId || '', color: '#fc3c44' },
         { key: 'deezer', label: 'Deezer', icon: '🟣', id: deezerId || '', color: '#a238ff' },
         { key: 'discogs', label: 'Discogs', icon: '🟤', id: discogsId || '', color: '#b08968' },
+        { key: 'amazon', label: 'Amazon Music', icon: '🟠', id: amazonId || '', color: '#FF9900' },
     ];
 
     let html = '<div class="wl-linked-sources">';
@@ -1977,7 +1980,7 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
 function _openSourceSearch(sourceKey, artistId, artistName) {
     const panel = document.getElementById('wl-linked-search-panel');
     if (!panel) return;
-    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs' };
+    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', amazon: 'Amazon Music' };
     document.getElementById('wl-linked-search-title').textContent = `Search ${labels[sourceKey] || sourceKey}`;
     const input = document.getElementById('wl-linked-search-input');
     input.value = artistName;
@@ -2105,10 +2108,10 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             return;
         }
 
-        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, watchlist_name } = data;
+        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, amazon_artist_id, watchlist_name } = data;
 
         // Populate linked provider section (use DB watchlist_name for mismatch comparison)
-        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id, discogs_artist_id);
+        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id, discogs_artist_id, amazon_artist_id);
 
         // Check if global override is active
         let globalOverrideActive = false;

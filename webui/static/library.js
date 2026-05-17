@@ -259,6 +259,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
     if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     if (artist.discogs_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs', url: `https://www.discogs.com/artist/${artist.discogs_id}` });
+    if (artist.amazon_id) badges.push({ logo: AMAZON_LOGO_URL, fb: 'AMZ', title: 'Amazon Music', url: null });
     if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
@@ -1128,6 +1129,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
+        if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -2959,6 +2961,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_url', label: 'Genius', svc: 'genius' },
         { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
         { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
+        { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
     ];
     idSources.forEach(src => {
         if (artist[src.key]) {
@@ -3094,6 +3097,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
         { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
         { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusServices.forEach(s => {
         const status = artist[s.key];
@@ -3462,6 +3466,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -5125,6 +5130,14 @@ function getServiceUrl(service, entityType, id) {
             album: `https://www.qobuz.com/album/${id}`,
             track: `https://www.qobuz.com/track/${id}`,
         },
+        discogs: {
+            artist: `https://www.discogs.com/artist/${id}`,
+            album: `https://www.discogs.com/release/${id}`,
+        },
+        amazon: {
+            album: `https://music.amazon.com/albums/${id}`,
+            track: `https://music.amazon.com/tracks/${id}`,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }
@@ -5564,7 +5577,8 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
 
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
-        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius'
+        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
     };
 
     const overlay = document.createElement('div');

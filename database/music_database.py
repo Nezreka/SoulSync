@@ -1634,6 +1634,10 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN discogs_artist_id TEXT")
                 logger.info("Added discogs_artist_id column to watchlist_artists table for cross-provider support")
 
+            if 'amazon_artist_id' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN amazon_artist_id TEXT")
+                logger.info("Added amazon_artist_id column to watchlist_artists table for Amazon Music support")
+
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
@@ -8955,6 +8959,7 @@ class MusicDatabase:
                         a.tidal_id,
                         a.qobuz_id,
                         a.soul_id,
+                        a.amazon_id,
                         a.server_source
                     FROM artists a
                     WHERE {where_clause}
@@ -9054,6 +9059,7 @@ class MusicDatabase:
                         'tidal_id': row['tidal_id'],
                         'qobuz_id': row['qobuz_id'],
                         'soul_id': row['soul_id'],
+                        'amazon_id': row['amazon_id'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
                         'is_watched': bool(is_watched)
@@ -9112,7 +9118,7 @@ class MusicDatabase:
                         id, name, thumb_url, genres, server_source,
                         musicbrainz_id, deezer_id, audiodb_id, discogs_id,
                         spotify_artist_id, itunes_artist_id, lastfm_url, genius_url,
-                        tidal_id, qobuz_id, soul_id,
+                        tidal_id, qobuz_id, soul_id, amazon_id,
                         lastfm_listeners, lastfm_playcount, lastfm_tags, lastfm_bio
                     FROM artists
                     WHERE id = ?
@@ -9270,6 +9276,7 @@ class MusicDatabase:
                         'tidal_id': artist_row['tidal_id'],
                         'qobuz_id': artist_row['qobuz_id'],
                         'soul_id': artist_row['soul_id'],
+                        'amazon_id': artist_row['amazon_id'],
                         'lastfm_listeners': artist_row['lastfm_listeners'],
                         'lastfm_playcount': artist_row['lastfm_playcount'],
                         'lastfm_tags': artist_row['lastfm_tags'],
