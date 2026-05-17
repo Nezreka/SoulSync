@@ -140,6 +140,7 @@ def import_existing_track_for_album_slot(album_id: str, payload: dict, deps: Mis
     if not final_path or not os.path.exists(final_path):
         raise MissingTrackImportError("Post-processing did not produce a final file", 500)
 
+    ensure_tracks_disc_number_column(database)
     copy_album_identity_from_target_sibling(
         database,
         album_id,
@@ -381,6 +382,12 @@ def _ensure_disc_number_column(cursor, conn) -> None:
     if "disc_number" not in track_columns:
         cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
         conn.commit()
+
+
+def ensure_tracks_disc_number_column(database) -> None:
+    with database._get_connection() as conn:
+        cursor = conn.cursor()
+        _ensure_disc_number_column(cursor, conn)
 
 
 def _read_file_stats(final_path: str, source_track: dict) -> tuple[Optional[int], int]:
