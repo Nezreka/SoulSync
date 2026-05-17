@@ -7411,6 +7411,7 @@ def get_artist_detail(artist_id):
                 'itunes': artist_info.get('itunes_artist_id'),
                 'discogs': artist_info.get('discogs_id'),
                 'hydrabase': artist_info.get('soul_id'),
+                'amazon': artist_info.get('amazon_id'),
             }
 
             artist_detail_discography = _get_artist_detail_discography(
