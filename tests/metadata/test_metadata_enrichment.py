@@ -188,7 +188,52 @@ def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_
     assert metadata["track_number"] == 3
     assert metadata["total_tracks"] == 12
     assert metadata["disc_number"] == 2
+    assert metadata["date"] == "2024-01-02"
     assert metadata["album_art_url"] == "https://img.example/album.jpg"
+
+
+@pytest.mark.parametrize(
+    ("raw_release_date", "expected_tag_date"),
+    [
+        ("2024-05-06", "2024-05-06"),
+        ("2024-05", "2024-05"),
+        ("2024", "2024"),
+        ("2024-05-06T07:08:09Z", "2024-05-06"),
+    ],
+)
+def test_extract_source_metadata_preserves_available_release_date_precision(monkeypatch, raw_release_date, expected_tag_date):
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"file_organization.collab_artist_mode": "first"}))
+
+    context = {
+        "source": "spotify",
+        "artist": {"name": "Artist One", "id": "123", "genres": []},
+        "album": {
+            "name": "Album One",
+            "total_tracks": 12,
+            "release_date": raw_release_date,
+        },
+        "track_info": {
+            "artists": [{"name": "Artist One"}],
+            "_source": "spotify",
+            "track_number": 3,
+            "disc_number": 1,
+        },
+        "original_search_result": {
+            "title": "Song One",
+            "artists": [{"name": "Artist One"}],
+            "clean_title": "Song One",
+            "clean_album": "Album One",
+            "clean_artist": "Artist One",
+        },
+    }
+
+    metadata = me.extract_source_metadata(
+        context,
+        context["artist"],
+        {"is_album": True, "album_name": "Album One", "track_number": 3, "disc_number": 1},
+    )
+
+    assert metadata["date"] == expected_tag_date
 
 
 def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatch):

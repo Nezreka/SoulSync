@@ -183,6 +183,27 @@ def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
     return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
 
 
+def _normalize_release_date_tag(value: Any) -> str:
+    """Return a tag-safe release date without inventing missing precision."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    # Source APIs commonly return ISO timestamps. Audio DATE/TDRC tags should
+    # receive only the date precision the source actually provided.
+    raw = raw.split("T", 1)[0].strip()
+    match = re.match(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$", raw)
+    if not match:
+        return ""
+
+    year, month, day = match.groups()
+    if day:
+        return f"{year}-{month}-{day}"
+    if month:
+        return f"{year}-{month}"
+    return year
+
+
 def _collect_source_ids(metadata: dict, cfg) -> dict:
     source_ids = {}
     source = (metadata.get("source") or "").strip().lower()
@@ -1058,7 +1079,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     metadata["disc_number"] = disc_num if disc_num is not None else 1
 
     if album_ctx and album_ctx.get("release_date"):
-        metadata["date"] = album_ctx["release_date"][:4]
+        release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
+        if release_date:
+            metadata["date"] = release_date
 
     genres = artist_dict.get("genres") or []
     if genres:
@@ -1077,11 +1100,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         metadata["album_art_url"] = album_image
 
     logger.info(
-        "[Metadata Summary] title='%s' | artist='%s' | album_artist='%s' | album='%s' | track=%s/%s | disc=%s",
+        "[Metadata Summary] title='%s' | artist='%s' | album_artist='%s' | album='%s' | date=%s | track=%s/%s | disc=%s",
         metadata.get("title"),
         metadata.get("artist"),
         metadata.get("album_artist"),
         metadata.get("album"),
+        metadata.get("date", ""),
         metadata.get("track_number"),
         metadata.get("total_tracks"),
         metadata.get("disc_number"),
