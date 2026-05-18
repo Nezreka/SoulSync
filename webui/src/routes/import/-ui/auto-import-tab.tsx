@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 
 import {
@@ -179,9 +180,7 @@ export function AutoImportPanel({
           <div className={styles.importPageFlexSpacer} />
           {statusQuery.data?.running ? (
             <Button
-              type="button"
               variant="secondary"
-              size="sm"
               id="auto-import-scan-now"
               title="Scan import folder now"
               disabled={scanMutation.isPending}
@@ -222,7 +221,6 @@ export function AutoImportPanel({
               </Select>
             </div>
             <Button
-              type="button"
               variant="primary"
               size="sm"
               disabled={saveSettingsMutation.isPending}
@@ -271,9 +269,7 @@ export function AutoImportPanel({
           <div className={styles.importPageFlexSpacer} />
           {counts.review > 0 ? (
             <Button
-              type="button"
               variant="secondary"
-              size="sm"
               id="auto-import-approve-all"
               disabled={approveAllMutation.isPending}
               onClick={() => approveAllMutation.mutate()}
@@ -283,11 +279,10 @@ export function AutoImportPanel({
           ) : null}
           {counts.imported + counts.failed > 0 ? (
             <Button
-              type="button"
               variant="ghost"
-              size="sm"
               id="auto-import-clear-completed"
               disabled={clearMutation.isPending}
+              size="sm"
               onClick={() => clearMutation.mutate()}
             >
               Clear History
@@ -389,7 +384,7 @@ function AutoImportResultCard({
 
   return (
     <div
-      className={`${styles.autoImportCard} ${statusCardClass}`}
+      className={clsx(styles.autoImportCard, statusCardClass)}
       role="button"
       tabIndex={0}
       onClick={onToggle}
@@ -432,12 +427,12 @@ function AutoImportResultCard({
           ) : null}
         </div>
         <div className={styles.autoImportCardRight}>
-          <div className={`${styles.autoImportStatusBadge} ${statusBadgeClass}`}>
+          <div className={clsx(styles.autoImportStatusBadge, statusBadgeClass)}>
             {statusMeta.icon} {statusMeta.label}
           </div>
           <div className={styles.autoImportConfidenceBar}>
             <div
-              className={`${styles.autoImportConfidenceFill} ${confidenceFillClass}`}
+              className={clsx(styles.autoImportConfidenceFill, confidenceFillClass)}
               style={{ width: `${confidencePercent}%` }}
             />
           </div>
@@ -445,9 +440,7 @@ function AutoImportResultCard({
           {result.status === 'pending_review' ? (
             <div className={styles.autoImportActions}>
               <Button
-                type="button"
                 variant="primary"
-                size="sm"
                 disabled={approvePending}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -457,9 +450,7 @@ function AutoImportResultCard({
                 Approve & Import
               </Button>
               <Button
-                type="button"
                 variant="secondary"
-                size="sm"
                 disabled={rejectPending}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -475,7 +466,9 @@ function AutoImportResultCard({
       <div className={styles.autoImportCardFolderPath}>{result.folder_name}</div>
       {trackDetails.length > 0 ? (
         <div
-          className={`${styles.autoImportTrackList} ${expanded ? styles.expanded : ''}`}
+          className={clsx(styles.autoImportTrackList, {
+            [styles.expanded]: expanded,
+          })}
           id={`auto-import-tracks-${index}`}
         >
           <div className={styles.autoImportTrackListHeader}>
@@ -484,23 +477,21 @@ function AutoImportResultCard({
             <span>Conf</span>
           </div>
           {trackDetails.map((track, trackIndex) => {
-            const rowClassName = [
-              styles.autoImportTrackRow,
-              isLiveProcessing && liveTrackIndex > 0 && trackIndex + 1 === liveTrackIndex
-                ? styles.autoImportTrackRowActive
-                : '',
-              isLiveProcessing && liveTrackIndex > 0 && trackIndex + 1 < liveTrackIndex
-                ? styles.autoImportTrackRowDone
-                : '',
-            ]
-              .filter(Boolean)
-              .join(' ');
+            const rowClassName = clsx(styles.autoImportTrackRow, {
+              [styles.autoImportTrackRowActive]:
+                isLiveProcessing && liveTrackIndex > 0 && trackIndex + 1 === liveTrackIndex,
+              [styles.autoImportTrackRowDone]:
+                isLiveProcessing && liveTrackIndex > 0 && trackIndex + 1 < liveTrackIndex,
+            });
             return (
               <div key={`${track.name}-${track.file}-${trackIndex}`} className={rowClassName}>
                 <span className={styles.autoImportTrackName}>{track.name}</span>
                 <span className={styles.autoImportTrackFile}>{track.file}</span>
                 <span
-                  className={`${styles.autoImportTrackConf} ${getAutoImportConfidenceClass(getConfidenceClass(track.confidence))}`}
+                  className={clsx(
+                    styles.autoImportTrackConf,
+                    getAutoImportConfidenceClass(getConfidenceClass(track.confidence)),
+                  )}
                 >
                   {track.confidence}%
                 </span>

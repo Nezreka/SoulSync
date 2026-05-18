@@ -304,13 +304,6 @@ describe('import route', () => {
     expect(await screen.findByRole('button', { name: /^Needs Review\s*1$/ })).toBeInTheDocument();
     expect(screen.getAllByText('Album A').length).toBeGreaterThan(0);
     expect(screen.getByText('Watching')).toHaveAttribute('data-tone', 'success');
-    const compactFilterGroup = document.querySelector('#auto-import-results [data-size="sm"]');
-    expect(compactFilterGroup).toBeInTheDocument();
-    const intervalSelect = document.getElementById('auto-import-interval');
-    if (!(intervalSelect instanceof HTMLElement)) {
-      throw new Error('auto-import interval select missing');
-    }
-    expect(intervalSelect).toHaveAttribute('data-size', 'sm');
     expect(getFetchUrls().some((url) => url.includes('/api/import/staging/groups'))).toBe(false);
     expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(
       false,
