@@ -6257,7 +6257,7 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
             return []
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -6269,7 +6269,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -6283,7 +6283,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -6306,7 +6306,7 @@ class MusicDatabase:
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -6339,7 +6339,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -6375,7 +6375,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -6394,7 +6394,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -6511,7 +6511,7 @@ class MusicDatabase:
         
         return unique_variations
     
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None) -> float:
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -6530,6 +6530,18 @@ class MusicDatabase:
 
             # Use the best title similarity
             best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
+
+            if strict_discography_match and not self._passes_strict_discography_album_match(
+                search_title,
+                db_album.title,
+                title_similarity,
+                clean_title_similarity,
+                normalized_title_similarity,
+                expected_track_count,
+                db_album.track_count,
+            ):
+                logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
+                return 0.0
 
             # Log when normalized matching helps (only if it's the best score and better than others)
             if normalized_title_similarity == best_title_similarity and normalized_title_similarity > max(title_similarity, clean_title_similarity):
@@ -6567,6 +6579,92 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error calculating album confidence: {e}")
             return 0.0
+
+    def _passes_strict_discography_album_match(
+        self,
+        search_title: str,
+        db_title: str,
+        title_similarity: float,
+        clean_title_similarity: float,
+        normalized_title_similarity: float,
+        expected_track_count: Optional[int],
+        db_track_count: Optional[int],
+    ) -> bool:
+        """Guard artist-page owned status against generic soundtrack false positives."""
+        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
+            return True
+
+        normalized_search_title = self._normalize_for_comparison(search_title)
+        normalized_db_title = self._normalize_for_comparison(db_title)
+        if normalized_search_title == normalized_db_title:
+            return True
+
+        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
+        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
+        if clean_search_title and clean_search_title == clean_db_title:
+            return True
+
+        best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
+        search_tokens = self._distinctive_soundtrack_title_tokens(search_title)
+        db_tokens = self._distinctive_soundtrack_title_tokens(db_title)
+        if not search_tokens or not db_tokens:
+            return False
+
+        shared_tokens = search_tokens & db_tokens
+        smaller_overlap = len(shared_tokens) / min(len(search_tokens), len(db_tokens))
+        jaccard_overlap = len(shared_tokens) / len(search_tokens | db_tokens)
+        if smaller_overlap < 0.75 or jaccard_overlap < 0.55:
+            return False
+
+        if expected_track_count and db_track_count and best_title_similarity < 0.9:
+            track_ratio = min(expected_track_count, db_track_count) / max(expected_track_count, db_track_count)
+            if track_ratio < 0.5:
+                return False
+
+        return True
+
+    def _is_soundtrack_like_album_title(self, title: str) -> bool:
+        title = (title or "").lower()
+        patterns = [
+            r"\bsoundtrack\b",
+            r"\bscore\b",
+            r"\bost\b",
+            r"original\s+motion\s+picture",
+            r"music\s+from\s+(?:the\s+)?(?:motion\s+picture|film|movie|series|anime|tv|television)",
+            r"complete\s+recordings?",
+        ]
+        return any(re.search(pattern, title) for pattern in patterns)
+
+    def _distinctive_soundtrack_title_tokens(self, title: str) -> set[str]:
+        normalized = self._normalize_for_comparison(title)
+        tokens = set(re.findall(r"[a-z0-9]+", normalized))
+        noise = {
+            "album",
+            "anime",
+            "complete",
+            "deluxe",
+            "edition",
+            "film",
+            "from",
+            "motion",
+            "movie",
+            "music",
+            "official",
+            "original",
+            "ost",
+            "picture",
+            "recording",
+            "recordings",
+            "score",
+            "series",
+            "soundtrack",
+            "special",
+            "television",
+            "the",
+            "tv",
+            "version",
+        }
+        return {token for token in tokens if token not in noise and len(token) > 1}
     
     def _generate_track_title_variations(self, title: str) -> List[str]:
         """Generate variations of track title for better matching"""
