@@ -915,7 +915,10 @@
                             <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media
                                 server</p>
                         </div>
-                        <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button class="sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
+                            <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                        </div>
                     </div>
                 </div>
 
@@ -6567,6 +6570,16 @@
                             </div>
                             <div class="tool-card-controls">
                                 <button onclick="openDiscoveryPoolModal()">Open Discovery Pool</button>
+                            </div>
+                        </div>
+
+                        <div class="tool-card" id="manual-library-match-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Manual Library Match</h4>
+                            </div>
+                            <p class="tool-card-info">Link source tracks to existing library tracks to stop re-downloads</p>
+                            <div class="tool-card-controls">
+                                <button onclick="openManualLibraryMatchTool()">Open</button>
                             </div>
                         </div>
 

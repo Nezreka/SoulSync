@@ -61332,3 +61332,183 @@ body.reduce-effects .dash-card::after {
         font-size: 10px;
     }
 }
+
+/* ── Manual Library Match modal ───────────────────────────────────────────── */
+
+/* Modal body: override playlist-modal-body padding; flex column so panels + matches fill height */
+.mlm-modal-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Two-panel search area — mirrors .server-compare-columns visual language */
+.mlm-panels {
+    display: flex;
+    gap: 0;
+    height: 280px;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mlm-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.mlm-panel.source {
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Search input lives between the column header and the scrollable results */
+.mlm-panel-search-wrap {
+    padding: 10px 12px 4px 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.mlm-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.mlm-search:focus {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* Result rows live inside .server-col-scroll (reused directly) */
+.mlm-result-row {
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.mlm-result-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+.mlm-result-row.mlm-row-selected {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-left: 3px solid rgb(var(--accent-light-rgb));
+}
+
+.mlm-row-title {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #ffffff;
+}
+.mlm-row-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+.mlm-row-ctx {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
+.mlm-hint {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.3);
+    text-align: center;
+    padding: 20px 16px;
+}
+.mlm-error { color: #ef4444; }
+
+/* Status message in footer */
+.mlm-status-msg {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Existing matches section */
+.mlm-existing-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Extra class on server-col-header inside the matches section */
+.mlm-matches-header {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mlm-matches-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.mlm-matches-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.mlm-matches-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 8px 14px 6px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mlm-matches-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    vertical-align: middle;
+}
+.mlm-matches-table tr:last-child td {
+    border-bottom: none;
+}
+.mlm-matches-table tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.mlm-source-badge {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.mlm-remove-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+    line-height: 1;
+}
+.mlm-remove-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
+}

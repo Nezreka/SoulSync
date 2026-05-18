@@ -296,6 +296,62 @@ def test_force_download_treats_all_as_missing(monkeypatch):
     assert download_batches['B2']['phase'] == 'downloading'
 
 
+def test_manual_match_overrides_internal_force_download(monkeypatch):
+    """Internal wishlist force mode still honors explicit manual library matches."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr(
+        'core.library.manual_library_match.get_match',
+        lambda *_args, **_kwargs: {'id': 1, 'library_track_id': 42},
+    )
+
+    removed = []
+    _seed_batch(
+        'B2a',
+        force_download_all=True,
+        ignore_manual_matches=False,
+        profile_id=1,
+        batch_source='spotify',
+    )
+    deps = _build_deps(wishlist_remove=lambda td: removed.append(td.get('name')))
+    tracks = [{'id': 'spotify-track-1', 'name': 'T1', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2a', 'wishlist', tracks, deps)
+
+    assert download_batches['B2a']['queue'] == []
+    assert download_batches['B2a']['analysis_results'][0]['found'] is True
+    assert download_batches['B2a']['analysis_results'][0]['match_reason'] == 'manual_library_match'
+    assert removed == ['T1']
+
+
+def test_explicit_force_download_ignores_manual_match(monkeypatch):
+    """User-facing Force Download All can intentionally bypass manual matches."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    calls = []
+    monkeypatch.setattr(
+        'core.library.manual_library_match.get_match',
+        lambda *_args, **_kwargs: calls.append(True) or {'id': 1, 'library_track_id': 42},
+    )
+
+    _seed_batch(
+        'B2b',
+        force_download_all=True,
+        ignore_manual_matches=True,
+        profile_id=1,
+        batch_source='spotify',
+    )
+    deps = _build_deps()
+    tracks = [{'id': 'spotify-track-1', 'name': 'T1', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2b', 'playlist1', tracks, deps)
+
+    assert calls == []
+    assert len(download_batches['B2b']['queue']) == 1
+    assert download_batches['B2b']['analysis_results'][0]['found'] is False
+
+
 def test_found_tracks_trigger_wishlist_removal(monkeypatch):
     """When DB lookup succeeds, master worker invokes wishlist removal callback."""
     db = _FakeDB(found_tracks={('t1', 'a'): 0.9})
