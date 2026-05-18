@@ -285,21 +285,28 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 download_batches[batch_id]['analysis_processed'] = 0
 
         from database.music_database import MusicDatabase
+        from core.library import manual_library_match as _mlm
         db = MusicDatabase()
         active_server = deps.config_manager.get_active_media_server()
         analysis_results = []
 
         # Get force download flag and album context from batch
         force_download_all = False
+        ignore_manual_matches = False
         batch_album_context = None
         batch_artist_context = None
         batch_is_album = False
+        batch_profile_id = 1
+        batch_source = 'spotify'
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
+                ignore_manual_matches = download_batches[batch_id].get('ignore_manual_matches', False)
                 batch_is_album = download_batches[batch_id].get('is_album_download', False)
                 batch_album_context = download_batches[batch_id].get('album_context')
                 batch_artist_context = download_batches[batch_id].get('artist_context')
+                batch_profile_id = download_batches[batch_id].get('profile_id', 1) or 1
+                batch_source = download_batches[batch_id].get('batch_source', 'spotify') or 'spotify'
 
         if force_download_all:
             logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
@@ -372,6 +379,24 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             track_name = track_data.get('name', '')
             artists = track_data.get('artists', [])
             found, confidence = False, 0.0
+
+            # Manual library matches are authoritative unless the user explicitly
+            # requested a force re-download from the normal download modal.
+            _stid = track_data.get('spotify_track_id') or track_data.get('id', '')
+            if not ignore_manual_matches and _stid and _mlm.get_match(db, batch_profile_id, batch_source, _stid):
+                logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
+                try:
+                    deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
+                except Exception as _wl_err:
+                    logger.debug(f"[Manual Match] Wishlist removal attempt failed: {_wl_err}")
+                analysis_results.append({
+                    'track_index': track_index,
+                    'track': track_data,
+                    'found': True,
+                    'confidence': 1.0,
+                    'match_reason': 'manual_library_match',
+                })
+                continue
 
             # Skip database check if force download is enabled
             if force_download_all:

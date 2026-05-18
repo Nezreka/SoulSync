@@ -18189,6 +18189,100 @@ def library_search_tracks():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/manual-library-matches', methods=['GET'])
+def mlm_list():
+    """List manual library matches for the current profile."""
+    try:
+        from core.library import manual_library_match as mlm
+        db = get_database()
+        profile_id = get_current_profile_id()
+        return jsonify({"success": True, "matches": mlm.list_matches(db, profile_id)})
+    except Exception as e:
+        logger.error(f"mlm_list error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/manual-library-matches/source-search', methods=['GET'])
+def mlm_source_search():
+    """Search wishlist + sync history for source track candidates."""
+    try:
+        from core.library import manual_library_match as mlm
+        q = request.args.get('q', '').strip()
+        limit = min(int(request.args.get('limit', 15)), 50)
+        db = get_database()
+        profile_id = get_current_profile_id()
+        return jsonify({"success": True, "tracks": mlm.search_source_candidates(db, q, profile_id, limit)})
+    except Exception as e:
+        logger.error(f"mlm_source_search error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/manual-library-matches/library-search', methods=['GET'])
+def mlm_library_search():
+    """Search the local library for candidate tracks."""
+    try:
+        from core.library import manual_library_match as mlm
+        q = request.args.get('q', '').strip()
+        limit = min(int(request.args.get('limit', 15)), 50)
+        db = get_database()
+        return jsonify({"success": True, "tracks": mlm.search_library_candidates(db, q, limit)})
+    except Exception as e:
+        logger.error(f"mlm_library_search error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/manual-library-matches', methods=['POST'])
+def mlm_save():
+    """Create or replace a manual library match."""
+    try:
+        from core.library import manual_library_match as mlm
+        data = request.get_json(force=True) or {}
+        source = data.get('source', '').strip()
+        source_track_id = data.get('source_track_id', '').strip()
+        library_track_id = data.get('library_track_id')
+        if not source or not source_track_id or not library_track_id:
+            return jsonify({"success": False, "error": "source, source_track_id, library_track_id required"}), 400
+        try:
+            library_track_id = int(library_track_id)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid library track id"}), 400
+        db = get_database()
+        profile_id = get_current_profile_id()
+        # Validate library track exists before saving
+        if not db.api_get_tracks_by_ids([library_track_id]):
+            return jsonify({"success": False, "error": "Library track not found — it may have been removed"}), 400
+        ok = mlm.save_match(
+            db, profile_id, source, source_track_id, library_track_id,
+            source_title=data.get('source_title', ''),
+            source_artist=data.get('source_artist', ''),
+            source_album=data.get('source_album', ''),
+            source_context_json=data.get('source_context_json', ''),
+            server_source=data.get('server_source', ''),
+        )
+        if not ok:
+            return jsonify({"success": False, "error": "Failed to save match"}), 500
+        match = db.get_manual_library_match(profile_id, source, source_track_id, data.get('server_source', ''))
+        enriched = mlm._enrich_match(match, db) if match else {}
+        return jsonify({"success": True, "match": enriched})
+    except Exception as e:
+        logger.error(f"mlm_save error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/manual-library-matches/<int:match_id>', methods=['DELETE'])
+def mlm_delete(match_id):
+    """Delete a manual library match by ID."""
+    try:
+        from core.library import manual_library_match as mlm
+        db = get_database()
+        profile_id = get_current_profile_id()
+        mlm.delete_match(db, match_id, profile_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"mlm_delete error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):
     """
@@ -18201,6 +18295,9 @@ def start_missing_tracks_process(playlist_id):
     force_download_all = data.get('force_download_all', False)
     playlist_folder_mode = data.get('playlist_folder_mode', False)
     wing_it = data.get('wing_it', False)
+    ignore_manual_matches = data.get('ignore_manual_matches')
+    if ignore_manual_matches is None:
+        ignore_manual_matches = bool(force_download_all and not wing_it)
 
     # Get album/artist context for artist album downloads
     is_album_download = data.get('is_album_download', False)
@@ -18249,12 +18346,14 @@ def start_missing_tracks_process(playlist_id):
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
+            'ignore_manual_matches': ignore_manual_matches,
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,
+            'batch_source': _downloads_history.detect_sync_source(playlist_id),
         }
 
     # Record sync history — derive source_page from context
