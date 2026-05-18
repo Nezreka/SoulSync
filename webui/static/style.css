@@ -19904,6 +19904,28 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     transform: scale(1.05);
 }
 
+.approve-quarantine-inline-btn {
+    background: var(--accent-color, #1db954);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.approve-quarantine-inline-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: scale(1.04);
+}
+
+.approve-quarantine-inline-btn:disabled {
+    cursor: default;
+    opacity: 0.65;
+}
+
 /* Modal Footer */
 .download-missing-modal-footer {
     background: linear-gradient(135deg,

@@ -3143,7 +3143,7 @@ function renderQuarantineEntry(entry) {
     const entryIdAttr = escapeHtml(String(entry.id || ''));
     const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
     const approveTitle = entry.has_full_context
-        ? 'Re-run post-processing with only the failing check skipped'
+        ? 'Re-run post-processing with quarantine checks skipped for this approved file'
         : 'Legacy entry — move to Staging, finish via Import flow';
     const approveCall = entry.has_full_context
         ? 'approveQuarantineEntryFromButton(this)'
@@ -3206,7 +3206,7 @@ function deleteQuarantineEntryFromButton(button) {
 async function approveQuarantineEntry(entryId) {
     const ok = await showConfirmDialog({
         title: 'Approve Quarantined File',
-        message: 'Re-run post-processing for this file with only the failing check skipped. The file will be tagged, lyrics generated, and moved into your library. Other quality gates (AcoustID + bit-depth) still run.',
+        message: 'Re-run post-processing for this file with quarantine checks skipped for this approved pass. The file will be tagged, lyrics generated, and moved into your library.',
         confirmText: 'Approve & Import',
         cancelText: 'Cancel',
     });

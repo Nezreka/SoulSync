@@ -312,6 +312,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
                 'playlist_id': task.get('playlist_id'),      # For V2 system identification
                 'error_message': task.get('error_message'),  # Surface failure reasons to UI
+                'quarantine_entry_id': task.get('quarantine_entry_id'),
                 'has_candidates': bool(task.get('cached_candidates')),  # Whether search found results (for clickable review)
             }
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
