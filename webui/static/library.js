@@ -1349,15 +1349,34 @@ function updateArtistHeaderStats(albumCount, trackCount) {
     console.log("📊 Using new hero section instead of old header stats");
 }
 
+function _isUsableArtistHeroImageUrl(url) {
+    return typeof url === 'string' && url.trim() !== '' && url !== 'null';
+}
+
+function _getArtistHeroReleaseImage(discography) {
+    for (const bucket of ['albums', 'eps', 'singles']) {
+        for (const release of (discography?.[bucket] || [])) {
+            if (_isUsableArtistHeroImageUrl(release?.image_url)) {
+                return release.image_url;
+            }
+        }
+    }
+    return '';
+}
+
 function updateArtistHeroSection(artist, discography) {
     console.log("🖼️ Updating artist hero section");
+
+    const artistImageUrl = _isUsableArtistHeroImageUrl(artist.image_url) ? artist.image_url : '';
+    const releaseImageUrl = _getArtistHeroReleaseImage(discography);
+    const primaryHeroImageUrl = artistImageUrl || releaseImageUrl;
 
     // Blurred background image (inline-Artists hero treatment) — set whenever
     // we have an image_url; falls back to clearing the bg if not.
     const heroBg = document.getElementById("artist-detail-hero-bg");
     if (heroBg) {
-        if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
-            heroBg.style.backgroundImage = `url('${artist.image_url}')`;
+        if (primaryHeroImageUrl) {
+            heroBg.style.backgroundImage = `url('${primaryHeroImageUrl}')`;
         } else {
             heroBg.style.backgroundImage = '';
         }
@@ -1374,9 +1393,11 @@ function updateArtistHeroSection(artist, discography) {
     console.log(`   - Image element:`, imageElement);
     console.log(`   - Fallback element:`, fallbackElement);
 
-    if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
-        console.log(`✅ Setting image src to: ${artist.image_url}`);
-        imageElement.src = artist.image_url;
+    if (primaryHeroImageUrl) {
+        console.log(`✅ Setting image src to: ${primaryHeroImageUrl}`);
+        imageElement.dataset.triedDeezer = '';
+        imageElement.dataset.triedReleaseFallback = artistImageUrl ? '' : 'true';
+        imageElement.src = primaryHeroImageUrl;
         imageElement.alt = artist.name;
         imageElement.style.display = "block";
         if (fallbackElement) {
@@ -1388,11 +1409,14 @@ function updateArtistHeroSection(artist, discography) {
         };
 
         imageElement.onerror = () => {
-            console.error(`❌ Failed to load artist image: ${artist.image_url}`);
-            // Try Deezer fallback before emoji
+            console.error(`❌ Failed to load artist image: ${imageElement.src}`);
+            // Try Deezer fallback, then release art, before the generic icon.
             if (artist.deezer_id && !imageElement.dataset.triedDeezer) {
                 imageElement.dataset.triedDeezer = 'true';
                 imageElement.src = `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
+            } else if (releaseImageUrl && imageElement.src !== releaseImageUrl && !imageElement.dataset.triedReleaseFallback) {
+                imageElement.dataset.triedReleaseFallback = 'true';
+                imageElement.src = releaseImageUrl;
             } else {
                 imageElement.style.display = "none";
                 if (fallbackElement) {
