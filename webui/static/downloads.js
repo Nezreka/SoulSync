@@ -501,7 +501,10 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     const heroContext = isDiscoverAlbum && album && artist ? {
         type: 'album',
         artist: {
+            ...artist,
             name: artist.name,
+            id: artist.id || artist.artist_id || null,
+            source: artist.source || album.source || null,
             image_url: artist.image_url || null
         },
         album: {
@@ -634,9 +637,42 @@ function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, play
     if (!artistName) return;
     // Close the download modal
     const process = playlistId ? activeDownloadProcesses[playlistId] : null;
-    const resolvedSource = source || process?.artist?.source || process?.album?.source || process?.source || null;
+    const artistContext = process?.artist || {};
+    const inferredSource = artistContext.spotify_artist_id ? 'spotify'
+        : artistContext.itunes_artist_id ? 'itunes'
+        : (artistContext.deezer_artist_id || artistContext.deezer_id) ? 'deezer'
+        : (artistContext.discogs_artist_id || artistContext.discogs_id) ? 'discogs'
+        : (artistContext.amazon_artist_id || artistContext.amazon_id) ? 'amazon'
+        : (artistContext.soul_id || artistContext.hydrabase_artist_id) ? 'hydrabase'
+        : null;
+    const resolvedSource = source || process?.artist?.source || process?.album?.source || process?.source || inferredSource;
+    const sourceKey = (resolvedSource || '').toString().toLowerCase();
+    const sourceIdFields = {
+        spotify: ['spotify_artist_id', 'id', 'artist_id'],
+        itunes: ['itunes_artist_id', 'artist_id', 'id'],
+        deezer: ['deezer_artist_id', 'deezer_id', 'artist_id', 'id'],
+        discogs: ['discogs_artist_id', 'discogs_id', 'artist_id', 'id'],
+        amazon: ['amazon_artist_id', 'amazon_id', 'artist_id', 'id'],
+        hydrabase: ['soul_id', 'hydrabase_artist_id', 'artist_id', 'id'],
+        musicbrainz: ['musicbrainz_id', 'artist_id', 'id'],
+    };
+    let resolvedArtistId = artistId;
+    for (const field of (sourceIdFields[sourceKey] || ['artist_id', 'id'])) {
+        const candidate = artistContext?.[field];
+        if (candidate) {
+            resolvedArtistId = candidate;
+            break;
+        }
+    }
+    if (resolvedArtistId && String(resolvedArtistId).toLowerCase() === String(artistName).toLowerCase()) {
+        resolvedArtistId = null;
+    }
     if (playlistId) closeDownloadMissingModal(playlistId);
-    navigateToArtistDetail(artistId || artistName, artistName, resolvedSource || null);
+    if (!resolvedArtistId || !resolvedSource) {
+        showToast(`Artist details are not available for ${artistName}`, 'warning');
+        return;
+    }
+    navigateToArtistDetail(resolvedArtistId, artistName, resolvedSource);
 }
 
 async function closeDownloadMissingModal(playlistId) {
