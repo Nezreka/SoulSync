@@ -240,7 +240,7 @@ describe('import route', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Singles' }));
 
     await waitFor(() => expect(history.location.pathname).toBe('/import/singles'));
-    expect(screen.getByText('Process Selected (0)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Process Selected\s*0/ })).toBeInTheDocument();
   });
 
   it('keeps client workflow drafts across page remounts', async () => {
@@ -280,7 +280,7 @@ describe('import route', () => {
       expect(screen.getByRole('checkbox', { name: 'Select 02-track.flac' })).toBeChecked(),
     );
     expect(screen.getByRole('checkbox', { name: 'Select 01-track.flac' })).not.toBeChecked();
-    expect(screen.getByText('Process Selected (1)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Process Selected\s*1/ })).toBeInTheDocument();
   });
 
   it('preserves album source details when matching an album', async () => {
