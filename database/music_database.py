@@ -8424,9 +8424,16 @@ class MusicDatabase:
             logger.error(f"Error checking similar artists freshness: {e}")
             return False  # Default to re-fetching on error
 
-    def get_top_similar_artists(self, limit: int = 50, profile_id: int = 1, require_source: str = None) -> List[SimilarArtist]:
+    def get_top_similar_artists(
+        self,
+        limit: int = 50,
+        profile_id: int = 1,
+        require_source: str = None,
+        exclude_library_server: str = None,
+    ) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support.
-        require_source: if set ('spotify','itunes','deezer'), only returns artists with that source ID."""
+        require_source: if set ('spotify','itunes','deezer'), only returns artists with that source ID.
+        exclude_library_server: if set, also excludes artists already present in that media server."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -8439,6 +8446,27 @@ class MusicDatabase:
                     source_filter = "AND sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id != ''"
                 elif require_source == 'deezer':
                     source_filter = "AND sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id != ''"
+
+                library_artist_keys = None
+                sql_limit = limit
+                if exclude_library_server:
+                    cursor.execute("""
+                        SELECT name, spotify_artist_id, itunes_artist_id, deezer_id
+                        FROM artists
+                        WHERE server_source = ?
+                    """, (exclude_library_server,))
+                    library_rows = cursor.fetchall()
+                    library_artist_keys = {
+                        'spotify': {r['spotify_artist_id'] for r in library_rows if r['spotify_artist_id']},
+                        'itunes': {r['itunes_artist_id'] for r in library_rows if r['itunes_artist_id']},
+                        'deezer': {r['deezer_id'] for r in library_rows if r['deezer_id']},
+                        'names': {
+                            self._normalize_for_comparison(r['name'])
+                            for r in library_rows
+                            if r['name']
+                        },
+                    }
+                    sql_limit = max(limit * 5, limit + 100)
 
                 cursor.execute(f"""
                     SELECT
@@ -8469,11 +8497,24 @@ class MusicDatabase:
                         occurrence_count DESC,
                         similarity_rank ASC
                     LIMIT ?
-                """, (profile_id, profile_id, limit))
+                """, (profile_id, profile_id, sql_limit))
 
                 rows = cursor.fetchall()
                 results = []
                 for row in rows:
+                    if library_artist_keys:
+                        spotify_id = row['similar_artist_spotify_id']
+                        itunes_id = row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None
+                        deezer_id = row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None
+                        normalized_name = self._normalize_for_comparison(row['similar_artist_name'])
+                        if (
+                            (spotify_id and spotify_id in library_artist_keys['spotify'])
+                            or (itunes_id and itunes_id in library_artist_keys['itunes'])
+                            or (deezer_id and deezer_id in library_artist_keys['deezer'])
+                            or (normalized_name and normalized_name in library_artist_keys['names'])
+                        ):
+                            continue
+
                     genres_raw = row['genres'] if 'genres' in row.keys() else None
                     try:
                         genres_list = json.loads(genres_raw) if genres_raw else None
@@ -8493,6 +8534,8 @@ class MusicDatabase:
                         genres=genres_list,
                         popularity=row['popularity'] if 'popularity' in row.keys() else 0,
                     ))
+                    if len(results) >= limit:
+                        break
                 return results
 
         except Exception as e:
