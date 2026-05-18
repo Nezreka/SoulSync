@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { type DragEvent, type KeyboardEvent, useState } from 'react';
+import clsx from 'clsx';
 
 import { Button, TextInput } from '@/components/form/form';
 
 import type { ImportAlbumResult } from '../-import.types';
-import styles from './import-page.module.css';
 
 import {
   importStagingGroupsQueryOptions,
@@ -20,6 +20,7 @@ import {
   IMPORT_PLACEHOLDER_IMAGE,
 } from '../-import.helpers';
 import { useAlbumImportWorkflow } from '../-import.store';
+import styles from './import-page.module.css';
 import {
   fallbackImage,
   getErrorMessage,
@@ -235,10 +236,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
 
   return (
     <>
-      <div
-        id="import-page-album-search-section"
-        className={showingMatch ? styles.hidden : ''}
-      >
+      <div id="import-page-album-search-section" className={clsx({ [styles.hidden]: showingMatch })}>
         {albumResults === null && (
           <>
             {groups.length > 0 && (
@@ -246,10 +244,9 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
                 <div className={styles.importPageSectionLabel}>Auto-Detected Albums</div>
                 <div className={styles.importPageAlbumGrid}>
                   {groups.map((group, index) => (
-                  <button
+                    <button
                       key={`${group.artist}-${group.album}-${index}`}
-                      type="button"
-                      className={`${styles.importPageAlbumCard} ${styles.importPageAutoGroupCard}`}
+                      className={clsx(styles.importPageAlbumCard, styles.importPageAutoGroupCard)}
                       onClick={() => onRunGroupSearch(group)}
                     >
                       <div className={styles.importPageAutoGroupCount}>{group.file_count}</div>
@@ -299,17 +296,16 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
             }}
           />
           <Button
-            type="button"
             variant="ghost"
             size="icon"
-            className={albumResults === null ? styles.hidden : ''}
+            className={clsx({ [styles.hidden]: albumResults === null })}
             id="import-page-album-clear-btn"
             title="Clear search"
             onClick={onBackToSearch}
           >
             x
           </Button>
-          <Button type="button" variant="primary" onClick={onRunSearch}>
+          <Button variant="primary" onClick={onRunSearch}>
             Search
           </Button>
         </div>
@@ -333,10 +329,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
         </div>
       </div>
 
-      <div
-        id="import-page-album-match-section"
-        className={showingMatch ? '' : styles.hidden}
-      >
+      <div id="import-page-album-match-section" className={clsx({ [styles.hidden]: !showingMatch })}>
         {albumMatchLoading ? (
           <div className={styles.importPageEmptyState}>Matching files to tracklist...</div>
         ) : albumMatchError ? (
@@ -344,7 +337,9 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
         ) : albumMatch?.album ? (
           <AlbumMatchPanel viewModel={viewModel} />
         ) : (
-          <div className={styles.importPageEmptyState}>Select an album to start matching files.</div>
+          <div className={styles.importPageEmptyState}>
+            Select an album to start matching files.
+          </div>
         )}
       </div>
     </>
@@ -359,7 +354,7 @@ function AlbumCard({
   onSelect: (album: ImportAlbumResult) => void;
 }) {
   return (
-    <button type="button" className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
+    <button className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
       <img
         src={album.image_url || IMPORT_PLACEHOLDER_IMAGE}
         alt={album.name}
@@ -435,20 +430,10 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
       <div className={styles.importPageMatchHeader}>
         <h3>Track Matching</h3>
         <div className={styles.importPageMatchActions}>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onAutoRematch}
-          >
+          <Button variant="secondary" onClick={onAutoRematch}>
             Re-match Automatically
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onBackToSearch}
-          >
+          <Button variant="ghost" onClick={onBackToSearch}>
             Back to Search
           </Button>
         </div>
@@ -467,9 +452,10 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
           return (
             <div
               key={`${trackInfo.displayTrackNumber}-${trackInfo.name}-${index}`}
-              className={`${styles.importPageMatchRow} ${
-                file ? styles.matched : ''
-              } ${dragOverTrack === index ? styles.dragOver : ''}`}
+              className={clsx(styles.importPageMatchRow, {
+                [styles.matched]: file,
+                [styles.dragOver]: dragOverTrack === index,
+              })}
               onClick={() => {
                 if (tapSelectedChip !== null) onTapAssign(index, tapSelectedChip);
               }}
@@ -488,18 +474,16 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
             >
               <span className={styles.importPageMatchNum}>{trackInfo.displayTrackNumber}</span>
               <span className={styles.importPageMatchTrack}>{trackInfo.name}</span>
-              <span
-                className={`${styles.importPageMatchFile} ${
-                  file ? styles.hasFile : ''
-                }`}
-              >
+              <span className={clsx(styles.importPageMatchFile, {
+                [styles.hasFile]: file,
+              })}>
                 {file ? (
                   <>
                     <span className={styles.importPageMatchFileName}>{file.filename}</span>
                     <span
-                      className={`${styles.importPageMatchConfidence} ${
-                        confidence >= 0.7 ? '' : styles.low
-                      }`}
+                      className={clsx(styles.importPageMatchConfidence, {
+                        [styles.low]: confidence < 0.7,
+                      })}
                     >
                       {confidencePercent}%
                     </span>
@@ -511,7 +495,6 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
               <span>
                 {file ? (
                   <Button
-                    type="button"
                     variant="ghost"
                     size="icon"
                     onClick={(event) => {
@@ -541,9 +524,9 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
                 key={`${file.full_path}-${index}`}
                 role="button"
                 tabIndex={0}
-                className={`${styles.importPageFileChip} ${
-                  tapSelectedChip === index ? styles.selected : ''
-                }`}
+                className={clsx(styles.importPageFileChip, {
+                  [styles.selected]: tapSelectedChip === index,
+                })}
                 draggable
                 onClick={(event) => {
                   event.stopPropagation();
@@ -572,7 +555,6 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
           {matchedCount} of {albumMatch.matches?.length ?? 0} tracks matched
         </div>
         <Button
-          type="button"
           variant="primary"
           id="import-page-album-process-btn"
           disabled={matchedCount === 0}

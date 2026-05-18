@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useEffect } from 'react';
 
 import { Badge, Button, Checkbox, TextInput } from '@/components/form/form';
@@ -175,17 +176,15 @@ export function SinglesImportPanel({
     <>
       <div className={styles.importPageSinglesHeader}>
         <div className={styles.importPageSinglesActions}>
-          <Button type="button" variant="secondary" size="sm" onClick={onSelectAll}>
+          <Button variant="secondary" onClick={onSelectAll}>
             <span id="import-page-select-all-text">
               {allSelected ? 'Deselect All' : 'Select All'}
             </span>
           </Button>
           <Button
-            type="button"
             variant={processVariant}
             id="import-page-singles-process-btn"
             disabled={selectedCount === 0}
-            size="sm"
             onClick={onProcessSingles}
           >
             <span>Process Selected</span>
@@ -205,7 +204,9 @@ export function SinglesImportPanel({
             return (
               <div
                 key={fileKey}
-                className={`${styles.importPageSingleItem} ${manualMatch ? styles.matched : ''}`}
+                className={clsx(styles.importPageSingleItem, {
+                  [styles.matched]: manualMatch,
+                })}
                 data-single-key={fileKey}
               >
                 <label className={styles.importPageSingleCheckboxWrap}>
@@ -226,7 +227,6 @@ export function SinglesImportPanel({
                     <div className={styles.importPageSingleMatchedInfo}>
                       ✓ {manualMatch.name} - {manualMatch.artist}
                       <button
-                        type="button"
                         className={styles.importPageSingleMatchedChange}
                         onClick={() => onOpenSearch(file)}
                       >
@@ -236,12 +236,7 @@ export function SinglesImportPanel({
                   ) : null}
                 </div>
                 <div className={styles.importPageSingleActions}>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onOpenSearch(file)}
-                  >
+                  <Button variant="secondary" size="sm" onClick={() => onOpenSearch(file)}>
                     🔍 Identify
                   </Button>
                 </div>
@@ -291,12 +286,7 @@ function SingleSearchPanel({
             if (event.key === 'Enter') onRunSearch(fileKey, query);
           }}
         />
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          onClick={() => onRunSearch(fileKey, query)}
-        >
+        <Button variant="primary" onClick={() => onRunSearch(fileKey, query)}>
           Search
         </Button>
       </div>
@@ -311,7 +301,6 @@ function SingleSearchPanel({
           searchState?.results.map((track, index) => (
             <button
               key={`${track.source || 'source'}-${track.id}-${index}`}
-              type="button"
               className={styles.importPageSingleResultItem}
               onClick={() => onSelectMatch(fileKey, track)}
             >

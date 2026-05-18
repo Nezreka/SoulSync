@@ -1,7 +1,8 @@
 import { Link, Outlet } from '@tanstack/react-router';
+import clsx from 'clsx';
 
-import { Show } from '@/components/primitives';
 import { Button } from '@/components/form/form';
+import { Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ImportQueueEntry } from '../-import.types';
@@ -37,7 +38,7 @@ export function ImportPage() {
         />
         <ImportProcessingQueue />
         <ImportTabNav />
-        <section className={`${styles.importPageTabContent} ${styles.active}`}>
+        <section className={clsx(styles.importPageTabContent, styles.active)}>
           <Outlet />
         </section>
       </div>
@@ -78,7 +79,6 @@ function ImportHeader({
           <span>Import Music</span>
         </h1>
         <Button
-          type="button"
           variant="secondary"
           title="Re-scan import folder"
           aria-busy={refreshing}
@@ -112,15 +112,15 @@ function ImportProcessingQueue() {
 
   return (
     <section
-      className={`${styles.importPageQueue} ${queue.length === 0 ? styles.hidden : ''}`}
+      className={clsx(styles.importPageQueue, {
+        [styles.hidden]: queue.length === 0,
+      })}
       id="import-page-queue"
     >
       <div className={styles.importPageQueueHeader}>
         <span className={styles.importPageQueueTitle}>Processing</span>
         <Button
-          type="button"
           variant="ghost"
-          size="sm"
           id="import-page-queue-clear"
           style={{ display: hasFinished ? undefined : 'none' }}
           onClick={clearFinishedJobs}
@@ -139,12 +139,10 @@ function ImportProcessingQueue() {
 
 function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
   const statusText = getQueueStatusText(entry);
-  const statusClass =
-    entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0)
-      ? styles.error
-      : entry.status === 'done'
-        ? styles.done
-        : '';
+  const statusClass = clsx({
+    [styles.error]: entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0),
+    [styles.done]: entry.status === 'done',
+  });
 
   return (
     <div className={styles.importPageQueueItem}>
@@ -156,7 +154,7 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
           onError={fallbackImage}
         />
       ) : (
-        <div className={`${styles.importPageQueueArt} ${styles.importPageQueueArtEmpty}`}>♪</div>
+        <div className={clsx(styles.importPageQueueArt, styles.importPageQueueArtEmpty)}>♪</div>
       )}
       <div className={styles.importPageQueueInfo}>
         <div className={styles.importPageQueueName}>{entry.label}</div>
@@ -165,13 +163,13 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
       <div className={styles.importPageQueueProgress}>
         <div className={styles.importPageQueueBar}>
           <div
-            className={`${styles.importPageQueueFill} ${
-              entry.status === 'error' ? styles.error : ''
-            }`}
+            className={clsx(styles.importPageQueueFill, {
+              [styles.error]: entry.status === 'error',
+            })}
             style={{ width: `${getQueueProgressPercent(entry)}%` }}
           />
         </div>
-        <div className={`${styles.importPageQueueStatus} ${statusClass}`}>{statusText}</div>
+        <div className={clsx(styles.importPageQueueStatus, statusClass)}>{statusText}</div>
       </div>
     </div>
   );
@@ -183,7 +181,7 @@ function ImportTabNav() {
       <Link
         to="/import/auto"
         className={styles.importPageTab}
-        activeProps={{ className: `${styles.importPageTab} ${styles.active}` }}
+        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
         id="import-page-tab-auto"
       >
         Auto
@@ -191,7 +189,7 @@ function ImportTabNav() {
       <Link
         to="/import/album"
         className={styles.importPageTab}
-        activeProps={{ className: `${styles.importPageTab} ${styles.active}` }}
+        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
         id="import-page-tab-album"
       >
         Albums
@@ -199,7 +197,7 @@ function ImportTabNav() {
       <Link
         to="/import/singles"
         className={styles.importPageTab}
-        activeProps={{ className: `${styles.importPageTab} ${styles.active}` }}
+        activeProps={{ className: clsx(styles.importPageTab, styles.active) }}
         id="import-page-tab-singles"
       >
         Singles
