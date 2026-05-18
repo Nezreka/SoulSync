@@ -225,6 +225,38 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_library_matches():
     assert wishlist_service.removed == [("sp-1", True, None, 1)]
 
 
+def test_automatic_wishlist_cleanup_after_db_update_removes_manual_matches(monkeypatch):
+    wishlist_service = _CleanupWishlistService(
+        [
+            {
+                "name": "Manual Song",
+                "artists": [{"name": "Artist A"}],
+                "spotify_track_id": "sp-manual",
+                "id": "sp-manual",
+                "provider": "spotify",
+                "album": {"name": "Album A"},
+            },
+        ]
+    )
+    music_db = _CleanupMusicDatabase()
+    monkeypatch.setattr(
+        "core.library.manual_library_match.get_match",
+        lambda *_args, **_kwargs: {"id": 1, "library_track_id": 42},
+    )
+
+    removed = processing.automatic_wishlist_cleanup_after_db_update(
+        wishlist_service=wishlist_service,
+        profiles_database=_CleanupProfilesDatabase(),
+        music_database=music_db,
+        active_server="navidrome",
+        logger=_FakeLogger(),
+    )
+
+    assert removed == 1
+    assert wishlist_service.removed == [("sp-manual", True, None, 1)]
+    assert music_db.track_checks == []
+
+
 class _CleanupProfilesDatabase:
     def get_all_profiles(self):
         return [{"id": 1}]
