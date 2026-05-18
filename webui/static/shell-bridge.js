@@ -80,6 +80,16 @@ function activateLegacyPath(pathname) {
         return;
     }
 
+    if (targetPage === 'artist-detail') {
+        const deepArtist = _getDeepLinkArtistDetail(pathname);
+        if (deepArtist?.artistId && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(deepArtist.artistId, '', deepArtist.source === 'library' ? null : deepArtist.source, { skipOriginPush: true, skipRouteChange: true });
+            return;
+        }
+        navigateToPage('library', { replace: true });
+        return;
+    }
+
     notifyPageWillChange(targetPage);
     activatePage(targetPage, { forceReload: true });
 }
@@ -94,6 +104,16 @@ function syncActivePageFromLocation() {
         if (home !== targetPage) {
             navigateToPage(home, { replace: true });
         }
+        return;
+    }
+
+    if (targetPage === 'artist-detail') {
+        const deepArtist = _getDeepLinkArtistDetail();
+        if (deepArtist?.artistId && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(deepArtist.artistId, '', deepArtist.source === 'library' ? null : deepArtist.source, { skipOriginPush: true, skipRouteChange: true });
+            return;
+        }
+        navigateToPage('library', { replace: true });
         return;
     }
 

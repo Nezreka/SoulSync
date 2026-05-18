@@ -95,6 +95,18 @@ class TestSpaRoutes:
         assert resp.status_code == 200
         assert resp.data == b'INDEX_HTML'
 
+    def test_artist_detail_with_id_serves_index(self, client):
+        # /artist-detail/:id deep-links must serve index so the client can restore the artist.
+        resp = client.get('/artist-detail/42')
+        assert resp.status_code == 200
+        assert resp.data == b'INDEX_HTML'
+
+    def test_artist_detail_with_source_and_id_serves_index(self, client):
+        # /artist-detail/:source/:id is the canonical source-aware artist deep-link.
+        resp = client.get('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')
+        assert resp.status_code == 200
+        assert resp.data == b'INDEX_HTML'
+
 
 # ---------------------------------------------------------------------------
 # Group B — Reserved prefixes are not shadowed

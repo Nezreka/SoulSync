@@ -147,6 +147,7 @@ class TestPerSourceEnrichment:
     def test_spotify_extracts_genres_followers_and_image_fallback(self, _stub_metadata):
         spotify = SimpleNamespace(
             get_artist=lambda aid, allow_fallback=False: {
+                "name": "Artist",
                 "genres": ["alt rock", "emo"],
                 "followers": {"total": 12345},
                 "images": [{"url": "https://sp/img.jpg"}],
@@ -159,6 +160,26 @@ class TestPerSourceEnrichment:
         assert payload["artist"]["followers"] == 12345
         # image_url falls back to Spotify's image when metadata returned None
         assert payload["artist"]["image_url"] == "https://sp/img.jpg"
+
+    def test_empty_name_uses_source_artist_name_when_available(self, _stub_metadata):
+        spotify = SimpleNamespace(
+            get_artist=lambda aid, allow_fallback=False: {
+                "name": "Kendrick Lamar",
+                "genres": [],
+                "followers": {},
+                "images": [],
+            }
+        )
+
+        payload, _ = build_source_only_artist_detail(
+            "2YZyLoL8N0Wb9xBt1NhZWg", "", "spotify", spotify_client=spotify,
+        )
+
+        assert payload["artist"]["name"] == "Kendrick Lamar"
+        assert _stub_metadata["last_discog_call"] == (
+            "2YZyLoL8N0Wb9xBt1NhZWg",
+            "Kendrick Lamar",
+        )
 
     def test_deezer_extracts_genres_and_followers(self, _stub_metadata):
         deezer = SimpleNamespace(
