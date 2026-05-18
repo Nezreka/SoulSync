@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ShellProfileContext } from './bridge';
 
-import { SHELL_PROFILE_CONTEXT_CHANGED_EVENT, waitForShellContext } from './bridge';
+import { SHELL_PROFILE_CONTEXT_CHANGED_EVENT, bindWindowWebRouter, waitForShellContext } from './bridge';
 
 describe('waitForShellContext', () => {
   beforeEach(() => {
@@ -52,6 +52,40 @@ describe('waitForShellContext', () => {
         profileId: 5,
         isAdmin: false,
       },
+    });
+  });
+});
+
+describe('bindWindowWebRouter', () => {
+  it('navigates artist detail pages with source-aware URLs', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await window.SoulSyncWebRouter?.navigateToPage('artist-detail', {
+      artistId: '2YZyLoL8N0Wb9xBt1NhZWg',
+      artistSource: 'spotify',
+    });
+
+    expect(navigate).toHaveBeenCalledWith({
+      href: '/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg',
+      replace: false,
+    });
+  });
+
+  it('falls back artist detail URLs to library source when none is supplied', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await window.SoulSyncWebRouter?.navigateToPage('artist-detail', {
+      artistId: '42',
+      replace: true,
+    });
+
+    expect(navigate).toHaveBeenCalledWith({
+      href: '/artist-detail/library/42',
+      replace: true,
     });
   });
 });
