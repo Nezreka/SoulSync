@@ -1992,6 +1992,7 @@ function generateDownloadModalHeroSection(context) {
             // Artist/album context - show artist + album images
             const artistImage = artist?.image_url || artist?.images?.[0]?.url;
             const albumImage = album?.image_url || album?.images?.[0]?.url;
+            const artistSource = artist?.source || album?.source || context.source || '';
 
             // Use album image as background if available
             if (albumImage) {
@@ -2006,7 +2007,7 @@ function generateDownloadModalHeroSection(context) {
                     </div>
                     <div class="download-missing-modal-hero-metadata">
                         <h1 class="download-missing-modal-hero-title">${escapeHtml(album.name || 'Unknown Album')}</h1>
-                        <div class="download-missing-modal-hero-subtitle">by <a href="#" class="hero-artist-link" onclick="event.preventDefault();_navigateToArtistFromModal('${escapeHtml(artist.id || '')}','${escapeForInlineJs(artist.name || '')}','${escapeHtml(artist.image_url || '')}','${escapeHtml(artist.source || '')}','${escapeHtml(context.playlistId || '')}')">${escapeHtml(artist.name || 'Unknown Artist')}</a></div>
+                        <div class="download-missing-modal-hero-subtitle">by <a href="#" class="hero-artist-link" onclick="event.preventDefault();_navigateToArtistFromModal('${escapeHtml(artist.id || '')}','${escapeForInlineJs(artist.name || '')}','${escapeHtml(artist.image_url || '')}','${escapeHtml(artistSource)}','${escapeHtml(context.playlistId || '')}')">${escapeHtml(artist.name || 'Unknown Artist')}</a></div>
                         <div class="download-missing-modal-hero-details">
                             <span class="download-missing-modal-hero-detail">${album.album_type || 'Album'}</span>
                             <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
