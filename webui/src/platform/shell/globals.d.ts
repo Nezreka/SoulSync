@@ -23,6 +23,8 @@ declare global {
         pageId: ShellPageId,
         options?: {
           replace?: boolean;
+          artistId?: string | number;
+          artistSource?: string | null;
         },
       ) => Promise<boolean>;
     };
