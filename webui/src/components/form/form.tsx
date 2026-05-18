@@ -91,14 +91,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   return (
     <select
       ref={ref}
-      className={clsx(
-        styles.select,
-        {
-          [styles.selectSizeSm]: size === 'sm',
-          [styles.selectSizeMd]: size === 'md',
-        },
-        className,
-      )}
+      className={clsx(styles.select, className)}
       data-size={size}
       {...props}
     />
@@ -230,7 +223,8 @@ export const OptionCard = forwardRef<HTMLButtonElement, OptionCardProps>(functio
     <BaseToggle
       ref={ref}
       pressed={selected}
-      className={clsx(styles.optionCard, selected && styles.optionCardSelected, className)}
+      className={clsx(styles.optionCard, className)}
+      data-selected={selected ? 'true' : undefined}
       type={type}
       {...props}
     >
@@ -261,16 +255,7 @@ export function OptionButtonGroup({
   size = 'md',
 }: OptionButtonGroupProps) {
   return (
-    <div
-      className={clsx(
-        styles.optionButtonGroup,
-        {
-          [styles.optionButtonGroupSizeSm]: size === 'sm',
-        },
-        className,
-      )}
-      data-size={size}
-    >
+    <div className={clsx(styles.optionButtonGroup, className)} data-size={size}>
       {children}
     </div>
   );
@@ -290,7 +275,8 @@ export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(fun
     <BaseToggle
       ref={ref}
       pressed={selected}
-      className={clsx(styles.optionButton, selected && styles.optionButtonSelected, className)}
+      className={clsx(styles.optionButton, className)}
+      data-selected={selected ? 'true' : undefined}
       type={type}
       {...props}
     >
@@ -315,17 +301,7 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
   return (
     <span
       ref={ref}
-      className={clsx(
-        styles.badge,
-        {
-          [styles.badgeNeutral]: tone === 'neutral',
-          [styles.badgeInfo]: tone === 'info',
-          [styles.badgeSuccess]: tone === 'success',
-          [styles.badgeWarning]: tone === 'warning',
-          [styles.badgeDanger]: tone === 'danger',
-        },
-        className,
-      )}
+      className={clsx(styles.badge, className)}
       data-tone={tone}
       {...props}
     />
@@ -347,19 +323,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <BaseButton
       ref={ref}
-      className={clsx(
-        styles.button,
-        {
-          [styles.buttonSizeSm]: size === 'sm',
-          [styles.buttonSizeMd]: size === 'md',
-          [styles.buttonSizeLg]: size === 'lg',
-          [styles.buttonIcon]: size === 'icon',
-          [styles.buttonPrimary]: variant === 'primary',
-          [styles.buttonSecondary]: variant === 'secondary',
-          [styles.buttonGhost]: variant === 'ghost',
-        },
-        className,
-      )}
+      className={clsx(styles.button, className)}
       data-variant={variant}
       data-size={size}
       type={type}
