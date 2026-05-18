@@ -387,6 +387,7 @@ async function watchAllHeroArtists(btn) {
 
 // Cache for recommended artists data so reopening is instant
 let _recommendedArtistsCache = null;
+let _recommendedArtistsSource = null;
 
 async function openRecommendedArtistsModal() {
     let modal = document.getElementById('recommended-artists-modal');
@@ -404,7 +405,7 @@ async function openRecommendedArtistsModal() {
     // If cached, render instantly and refresh watchlist statuses
     if (_recommendedArtistsCache) {
         modal.style.display = 'flex';
-        renderRecommendedArtistsModal(modal, _recommendedArtistsCache);
+        renderRecommendedArtistsModal(modal, _recommendedArtistsCache, _recommendedArtistsSource);
         checkRecommendedWatchlistStatuses(_recommendedArtistsCache);
         return;
     }
@@ -444,13 +445,14 @@ async function openRecommendedArtistsModal() {
             return;
         }
 
-        // Render cards immediately with fallback images
-        _recommendedArtistsCache = data.artists;
-        renderRecommendedArtistsModal(modal, data.artists);
-
         // Phase 2: Enrich with images/genres progressively in batches of 50
         // Skip artists that already have cached metadata from the initial response
         const source = data.source || 'spotify';
+        // Render cards immediately with fallback images
+        _recommendedArtistsCache = data.artists;
+        _recommendedArtistsSource = source;
+        renderRecommendedArtistsModal(modal, data.artists, source);
+
         const idKey = source === 'spotify' ? 'spotify_artist_id' : source === 'deezer' ? 'deezer_artist_id' : 'itunes_artist_id';
         const allIds = data.artists
             .filter(a => !a.image_url)  // Only enrich artists without cached images
@@ -521,7 +523,7 @@ async function openRecommendedArtistsModal() {
     }
 }
 
-function renderRecommendedArtistsModal(modal, artists) {
+function renderRecommendedArtistsModal(modal, artists, source = null) {
     modal.innerHTML = `
         <div class="modal-container playlist-modal recommended-modal">
             <div class="playlist-modal-header">
@@ -555,10 +557,12 @@ function renderRecommendedArtistsModal(modal, artists) {
         const similarText = artist.occurrence_count > 1
             ? `Similar to ${artist.occurrence_count} in your watchlist`
             : 'Similar to an artist in your watchlist';
+        const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
                                  data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
-                                 data-artist-id="${artist.artist_id}">
+                                 data-artist-id="${artist.artist_id}"
+                                 data-artist-source="${escapeHtml(artistSource)}">
                                 <button class="recommended-card-watchlist-btn"
                                         data-artist-id="${artist.artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}">
@@ -601,9 +605,10 @@ function renderRecommendedArtistsModal(modal, artists) {
             const card = e.target.closest('.recommended-artist-card');
             if (card) {
                 const artistId = card.getAttribute('data-artist-id');
+                const artistSource = card.getAttribute('data-artist-source') || _recommendedArtistsSource || null;
                 const nameEl = card.querySelector('.recommended-card-name');
                 const artistName = nameEl ? nameEl.textContent : '';
-                viewRecommendedArtistDiscography(artistId, artistName);
+                viewRecommendedArtistDiscography(artistId, artistName, artistSource);
             }
         });
     }
@@ -734,9 +739,9 @@ async function checkRecommendedWatchlistStatuses(artists) {
     }
 }
 
-async function viewRecommendedArtistDiscography(artistId, artistName) {
+async function viewRecommendedArtistDiscography(artistId, artistName, source = null) {
     closeRecommendedArtistsModal();
-    navigateToArtistDetail(artistId, artistName);
+    navigateToArtistDetail(artistId, artistName, source || null);
 }
 
 async function checkAllHeroWatchlistStatus() {
@@ -4354,6 +4359,31 @@ async function unblockDiscoveryArtist(id, name) {
 
 let _yourArtistsCtrl = null;
 
+function _pickArtistDetailSource(artist) {
+    if (!artist) return { id: '', source: '' };
+    const sourceFields = {
+        spotify: 'spotify_artist_id',
+        deezer: 'deezer_artist_id',
+        itunes: 'itunes_artist_id',
+        discogs: 'discogs_artist_id',
+        amazon: 'amazon_artist_id',
+        musicbrainz: 'musicbrainz_artist_id',
+        hydrabase: 'soul_id',
+    };
+    const active = String(artist.active_source || artist.source || '').toLowerCase();
+    const activeField = sourceFields[active];
+    if (activeField && artist[activeField]) {
+        return { id: String(artist[activeField]), source: active };
+    }
+    for (const [source, field] of Object.entries(sourceFields)) {
+        if (artist[field]) return { id: String(artist[field]), source };
+    }
+    if (artist.active_source_id && activeField) {
+        return { id: String(artist.active_source_id), source: active };
+    }
+    return { id: '', source: '' };
+}
+
 async function loadYourArtists() {
     if (!_yourArtistsCtrl) {
         _yourArtistsCtrl = createDiscoverSectionController({
@@ -4454,11 +4484,12 @@ function _renderYourArtistCard(artist) {
     ).join('');
 
     const watchlistClass = artist.on_watchlist ? 'active' : '';
-    const hasId = artist.active_source_id && artist.active_source_id !== '';
+    const detailSource = _pickArtistDetailSource(artist);
+    const hasId = detailSource.id && detailSource.id !== '';
 
     // Navigate to Artists page (name click) — source artist id, needs inline view
     const navAction = hasId
-        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(artist.active_source_id)}', '${escapeForInlineJs(artist.artist_name)}')`
+        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(detailSource.id)}', '${escapeForInlineJs(artist.artist_name)}', '${escapeForInlineJs(detailSource.source)}' || null)`
         : '';
 
     // Open info modal (card body click) — pass pool ID so we can look up all data
