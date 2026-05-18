@@ -77,13 +77,32 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
   return <textarea ref={ref} className={clsx(styles.textArea, className)} {...props} />;
 });
 
-export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
+export type SelectSize = 'sm' | 'md';
+
+export type SelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'className' | 'size'> & {
+  className?: string;
+  size?: SelectSize;
+};
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
-  { className, ...props },
+  { className, size = 'md', ...props },
   ref,
 ) {
-  return <select ref={ref} className={clsx(styles.select, className)} {...props} />;
+  return (
+    <select
+      ref={ref}
+      className={clsx(
+        styles.select,
+        {
+          [styles.selectSizeSm]: size === 'sm',
+          [styles.selectSizeMd]: size === 'md',
+        },
+        className,
+      )}
+      data-size={size}
+      {...props}
+    />
+  );
 });
 
 type BaseCheckboxProps = ComponentPropsWithoutRef<typeof BaseCheckbox.Root>;
