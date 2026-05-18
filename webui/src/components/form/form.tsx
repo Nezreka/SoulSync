@@ -247,14 +247,33 @@ export const OptionCard = forwardRef<HTMLButtonElement, OptionCardProps>(functio
   );
 });
 
+export type OptionButtonGroupSize = 'sm' | 'md';
+
+export interface OptionButtonGroupProps {
+  children: ReactNode;
+  className?: string;
+  size?: OptionButtonGroupSize;
+}
+
 export function OptionButtonGroup({
   className,
   children,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return <div className={clsx(styles.optionButtonGroup, className)}>{children}</div>;
+  size = 'md',
+}: OptionButtonGroupProps) {
+  return (
+    <div
+      className={clsx(
+        styles.optionButtonGroup,
+        {
+          [styles.optionButtonGroupSizeSm]: size === 'sm',
+        },
+        className,
+      )}
+      data-size={size}
+    >
+      {children}
+    </div>
+  );
 }
 
 export interface OptionButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value'> {

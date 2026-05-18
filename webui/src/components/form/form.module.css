@@ -396,6 +396,17 @@
   gap: 8px;
 }
 
+.optionButtonGroupSizeSm {
+  gap: 6px;
+}
+
+.optionButtonGroupSizeSm .optionButton {
+  min-width: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  gap: 6px;
+}
+
 .optionButton {
   display: inline-flex;
   align-items: center;
