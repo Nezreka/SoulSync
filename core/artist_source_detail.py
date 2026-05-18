@@ -68,6 +68,8 @@ def build_source_only_artist_detail(
         if source == "spotify" and spotify_client is not None:
             sp_artist = spotify_client.get_artist(artist_id, allow_fallback=False)
             if sp_artist:
+                if not artist_name and sp_artist.get("name"):
+                    resolved_name = sp_artist["name"]
                 source_genres = sp_artist.get("genres") or []
                 source_followers = (sp_artist.get("followers") or {}).get("total")
                 if not image_url and sp_artist.get("images"):
@@ -75,19 +77,27 @@ def build_source_only_artist_detail(
         elif source == "deezer" and deezer_client is not None:
             dz_artist = deezer_client.get_artist_info(artist_id)
             if dz_artist:
+                if not artist_name and dz_artist.get("name"):
+                    resolved_name = dz_artist["name"]
                 source_genres = dz_artist.get("genres") or []
                 source_followers = (dz_artist.get("followers") or {}).get("total")
         elif source == "itunes" and itunes_client is not None:
             it_artist = itunes_client.get_artist(artist_id)
             if it_artist:
+                if not artist_name and it_artist.get("name"):
+                    resolved_name = it_artist["name"]
                 source_genres = it_artist.get("genres") or []
         elif source == "discogs" and discogs_client is not None:
             dc_artist = discogs_client.get_artist(artist_id)
             if dc_artist:
+                if not artist_name and dc_artist.get("name"):
+                    resolved_name = dc_artist["name"]
                 source_genres = dc_artist.get("genres") or []
         elif source == "amazon" and amazon_client is not None:
             az_artist = amazon_client.get_artist(resolved_name or artist_id)
             if az_artist:
+                if not artist_name and az_artist.get("name"):
+                    resolved_name = az_artist["name"]
                 source_genres = az_artist.get("genres") or []
                 if not image_url and az_artist.get("images"):
                     image_url = az_artist["images"][0].get("url")

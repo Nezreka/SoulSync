@@ -803,6 +803,24 @@ const _ARTIST_DETAIL_BACK_LABELS = {
 };
 
 function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
+    const normalizedSource = sourceOverride || null;
+
+    // Skip reload if already on this exact artist/source (prevents double-fetch
+    // when the router fires activateLegacyPath after navigating to an
+    // /artist-detail/:source/:id URL).
+    if (artistId &&
+            String(artistId) === String(artistDetailPageState.currentArtistId) &&
+            String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
+        if (currentPage !== 'artist-detail') {
+            navigateToPage('artist-detail', {
+                artistId,
+                artistSource: normalizedSource,
+                skipRouteChange: true
+            });
+            _updateArtistDetailBackButtonLabel();
+        }
+        return;
+    }
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
     // Capture the current location on the origin stack BEFORE navigateToPage
@@ -856,7 +874,7 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     // Store current artist info and reset enhanced view state
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
-    artistDetailPageState.currentArtistSource = sourceOverride || null;
+    artistDetailPageState.currentArtistSource = normalizedSource;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
     artistDetailPageState.selectedTracks = new Set();
@@ -885,7 +903,11 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     if (bulkBar) bulkBar.classList.remove('visible');
 
     // Navigate to artist detail page
-    navigateToPage('artist-detail');
+    navigateToPage('artist-detail', {
+        artistId,
+        artistSource: normalizedSource,
+        skipRouteChange: options.skipRouteChange === true
+    });
 
     // Update back-button label to reflect where the next pop will land.
     _updateArtistDetailBackButtonLabel();

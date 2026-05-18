@@ -71,10 +71,18 @@ export function getShellRouteByPath(pathname: string): ShellRouteDefinition | un
 }
 
 export function resolveShellPageFromPath(pathname: string): ShellPageId | null {
+  const normalized = normalizeShellPath(pathname);
+  if (normalized === '/artist-detail' || normalized.startsWith('/artist-detail/')) {
+    return 'artist-detail';
+  }
   return getShellRouteByPath(pathname)?.pageId ?? null;
 }
 
 export function resolveLegacyShellPageFromPath(pathname: string): ShellPageId | null {
+  const normalized = normalizeShellPath(pathname);
+  if (normalized === '/artist-detail' || normalized.startsWith('/artist-detail/')) {
+    return 'artist-detail';
+  }
   const route = getShellRouteByPath(pathname);
   return route?.kind === 'legacy' ? route.pageId : null;
 }
