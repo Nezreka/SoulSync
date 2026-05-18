@@ -1042,6 +1042,17 @@ async function loadArtistDetailData(artistId, artistName) {
             throw new Error(data.error || 'Failed to load artist data');
         }
 
+        const isSourceOnlyArtist = !data.artist?.server_source;
+        if (isSourceOnlyArtist && data.discography) {
+            for (const bucket of ['albums', 'eps', 'singles']) {
+                for (const release of (data.discography[bucket] || [])) {
+                    if (release.owned === null || typeof release.owned === 'undefined') {
+                        release.owned = false;
+                    }
+                }
+            }
+        }
+
         console.log(`✅ Loaded artist detail data:`, data);
 
         // Hide loading and show all content
@@ -1077,7 +1088,7 @@ async function loadArtistDetailData(artistId, artistName) {
         renderArtistEnrichmentCoverage(data.enrichment_coverage);
 
         // Start streaming ownership checks if we have Spotify discography with checking state
-        if (data.discography && data.discography.albums) {
+        if (!isSourceOnlyArtist && data.discography && data.discography.albums) {
             const hasChecking = [...(data.discography.albums || []), ...(data.discography.eps || []), ...(data.discography.singles || [])]
                 .some(r => r.owned === null);
             if (hasChecking) {
@@ -1091,7 +1102,9 @@ async function loadArtistDetailData(artistId, artistName) {
         // Use currentArtistId (not the closure arg) because the library-upgrade
         // branch above may have rewritten it from the source ID to the library PK,
         // and /api/library/artist/<id>/quality-analysis only works on library PKs.
-        checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
+        if (!isSourceOnlyArtist) {
+            checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
+        }
 
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);
