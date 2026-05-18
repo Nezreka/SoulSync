@@ -6836,8 +6836,7 @@ def delete_quarantine_item(entry_id):
 @app.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
-    matching per-check bypass flag set so the original quarantine trigger
-    is skipped. Other checks still run."""
+    quarantine gates skipped for this explicit user-approved pass."""
     try:
         from core.imports.quarantine import approve_quarantine_entry
         # Restore inside the soulseek download dir so existing path-resolution
@@ -6854,8 +6853,10 @@ def approve_quarantine_item(entry_id):
                 "error": "Cannot one-click approve — entry has thin sidecar (no embedded context). Use 'Recover to Staging' instead.",
             }), 400
         restored_path, context, trigger = result
-        # Mark the bypass so the pipeline skips the trigger that fired.
-        context['_skip_quarantine_check'] = trigger
+        # User approval means "import this file"; skip all quarantine gates
+        # for this one restored pass so multi-reason failures do not loop.
+        context['_skip_quarantine_check'] = 'all'
+        context['_approved_quarantine_trigger'] = trigger
         # Re-dispatch through the same pipeline. Run async so the HTTP
         # request returns quickly — UI polls /list to see the entry vanish.
         context_key = f"approve_{entry_id}_{int(time.time())}"
@@ -6863,8 +6864,8 @@ def approve_quarantine_item(entry_id):
             target=lambda: _post_process_matched_download(context_key, context, restored_path),
             daemon=True,
         ).start()
-        logger.info(f"[Quarantine] Approved {entry_id} (bypass={trigger}) → re-running pipeline")
-        return jsonify({"success": True, "trigger_bypassed": trigger})
+        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all) → re-running pipeline")
+        return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

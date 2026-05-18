@@ -35,6 +35,7 @@ from core.imports.context import (
 from core.imports.file_integrity import check_audio_integrity, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
+from core.imports.quarantine import entry_id_from_quarantined_filename
 from core.imports.side_effects import (
     emit_track_downloaded,
     record_download_provenance,
@@ -77,6 +78,26 @@ __all__ = [
     "post_process_matched_download",
     "post_process_matched_download_with_verification",
 ]
+
+
+def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
+    bypass = context.get('_skip_quarantine_check')
+    if bypass == 'all':
+        return True
+    if isinstance(bypass, (list, tuple, set)):
+        return 'all' in bypass or check_name in bypass
+    return bypass == check_name
+
+
+def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
+    if not quarantine_path:
+        return
+    task_id = context.get('task_id')
+    if not task_id:
+        return
+    with tasks_lock:
+        if task_id in download_tasks:
+            download_tasks[task_id]['quarantine_entry_id'] = entry_id_from_quarantined_filename(quarantine_path)
 
 
 def build_import_pipeline_runtime(
@@ -163,11 +184,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         _duration_tolerance_override = resolve_duration_tolerance(
             config_manager.get('post_processing.duration_tolerance_seconds', 0)
         )
-        # Per-check quarantine bypass — set by `approve_quarantine_entry`
-        # when the user explicitly approves a previously-quarantined
-        # file. Skips ONLY the named check; other gates still run.
-        _bypass_check = context.get('_skip_quarantine_check')
-        if _bypass_check == 'integrity':
+        # User-approved quarantine restores can bypass quarantine gates
+        # for this one post-processing pass.
+        if _should_skip_quarantine_check(context, 'integrity'):
             logger.info(f"[Integrity] Skipped (user approval) for {_basename}")
             integrity = None
         else:
@@ -193,6 +212,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     automation_engine,
                     trigger='integrity',
                 )
+                _mark_task_quarantined(context, quarantine_path)
                 logger.error(f"File quarantined due to integrity failure: {quarantine_path}")
             except Exception as quarantine_error:
                 logger.error(f"Quarantine failed ({quarantine_error}), deleting broken file: {file_path}")
@@ -227,7 +247,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 f"drift={integrity.checks.get('length_drift_s', 'n/a')})"
             )
 
-        _skip_acoustid = context.get('_skip_quarantine_check') == 'acoustid'
+        _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
         if _skip_acoustid:
             logger.info(f"[AcoustID] Skipped (user approval) for {_basename}")
         try:
@@ -273,6 +293,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                                 automation_engine,
                                 trigger='acoustid',
                             )
+                            _mark_task_quarantined(context, quarantine_path)
                             logger.error(f"File quarantined due to verification failure: {quarantine_path}")
                         except Exception as quarantine_error:
                             logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
@@ -444,8 +465,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             if context['_audio_quality']:
                 logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
-            rejection_reason = None if context.get('_skip_quarantine_check') == 'bit_depth' else check_flac_bit_depth(file_path, context)
-            if context.get('_skip_quarantine_check') == 'bit_depth':
+            _skip_bit_depth = _should_skip_quarantine_check(context, 'bit_depth')
+            rejection_reason = None if _skip_bit_depth else check_flac_bit_depth(file_path, context)
+            if _skip_bit_depth:
                 logger.info(f"[BitDepth] Skipped (user approval) for {_basename}")
             if rejection_reason:
                 try:
@@ -456,6 +478,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         automation_engine,
                         trigger='bit_depth',
                     )
+                    _mark_task_quarantined(context, quarantine_path)
                     logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
                 except Exception as quarantine_error:
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
@@ -575,8 +598,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if context['_audio_quality']:
             logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
-            rejection_reason = None if context.get('_skip_quarantine_check') == 'bit_depth' else check_flac_bit_depth(file_path, context)
-            if context.get('_skip_quarantine_check') == 'bit_depth':
+            _skip_bit_depth = _should_skip_quarantine_check(context, 'bit_depth')
+            rejection_reason = None if _skip_bit_depth else check_flac_bit_depth(file_path, context)
+            if _skip_bit_depth:
                 logger.info(f"[BitDepth] Skipped (user approval) for {_basename}")
             if rejection_reason:
                 try:
@@ -587,6 +611,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         automation_engine,
                         trigger='bit_depth',
                     )
+                    _mark_task_quarantined(context, quarantine_path)
                     logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
                 except Exception as quarantine_error:
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
