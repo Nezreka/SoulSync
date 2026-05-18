@@ -1,15 +1,15 @@
 import { useEffect } from 'react';
 
-import { Button, Checkbox, TextInput } from '@/components/form/form';
+import { Badge, Button, Checkbox, TextInput } from '@/components/form/form';
 
 import type { SingleSearchState } from '../-import.store';
 import type { ImportTrackResult } from '../-import.types';
 import type { ImportStagingFile } from '../-import.types';
 
-import styles from './import-page.module.css';
 import { searchImportTracks } from '../-import.api';
 import { formatDuration, getStagingFileKey } from '../-import.helpers';
 import { useSinglesImportWorkflow } from '../-import.store';
+import styles from './import-page.module.css';
 import {
   fallbackImage,
   getErrorMessage,
@@ -185,9 +185,11 @@ export function SinglesImportPanel({
             variant={processVariant}
             id="import-page-singles-process-btn"
             disabled={selectedCount === 0}
+            size="sm"
             onClick={onProcessSingles}
           >
-            Process Selected ({selectedCount})
+            <span>Process Selected</span>
+            <Badge>{selectedCount}</Badge>
           </Button>
         </div>
       </div>
@@ -203,9 +205,7 @@ export function SinglesImportPanel({
             return (
               <div
                 key={fileKey}
-                className={`${styles.importPageSingleItem} ${
-                  manualMatch ? styles.matched : ''
-                }`}
+                className={`${styles.importPageSingleItem} ${manualMatch ? styles.matched : ''}`}
                 data-single-key={fileKey}
               >
                 <label className={styles.importPageSingleCheckboxWrap}>
