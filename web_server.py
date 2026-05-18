@@ -25880,8 +25880,15 @@ def get_discover_similar_artists():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
 
-        similar_artists = database.get_top_similar_artists(limit=200, profile_id=get_current_profile_id(), require_source=active_source)
+        similar_artists = database.get_top_similar_artists(
+            limit=200,
+            profile_id=get_current_profile_id(),
+            require_source=active_source,
+            exclude_library_server=active_server,
+        )
 
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
@@ -25915,7 +25922,10 @@ def get_discover_similar_artists():
                 artist_data["popularity"] = artist.popularity
             result_artists.append(artist_data)
 
-        logger.info(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
+        logger.info(
+            f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
+            f"{active_source} after excluding {active_server} library artists"
+        )
 
         return jsonify({
             "success": True,
