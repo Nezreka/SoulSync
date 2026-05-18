@@ -178,6 +178,17 @@ describe('form primitives', () => {
     );
   });
 
+  it('supports compact option button groups', () => {
+    const { container } = render(
+      <OptionButtonGroup size="sm">
+        <OptionButton selected>All</OptionButton>
+        <OptionButton>Pending</OptionButton>
+      </OptionButtonGroup>,
+    );
+
+    expect(container.querySelector('[data-size="sm"]')).toBeInTheDocument();
+  });
+
   it('supports compact select sizing', () => {
     render(
       <Select aria-label="Compact" defaultValue="one" size="sm">

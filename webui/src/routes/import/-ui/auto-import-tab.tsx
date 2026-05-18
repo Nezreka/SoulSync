@@ -255,43 +255,45 @@ export function AutoImportPanel({
       </div>
 
       {allResults.length > 0 ? (
-        <>
-          <OptionButtonGroup className={styles.autoImportFilters}>
-            {(['all', 'pending', 'imported', 'failed'] as const).map((filter) => (
-              <OptionButton key={filter} selected={autoFilter === filter} onClick={() => onFilterChange(filter)}>
-                <span>{getAutoImportFilterLabel(filter)}</span>
-                <Badge tone={getAutoImportFilterTone(filter)}>
-                  {getAutoImportFilterCount(filter, counts, allResults.length)}
-                </Badge>
-              </OptionButton>
-            ))}
-            <div className={styles.importPageFlexSpacer} />
-            {counts.review > 0 ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                id="auto-import-approve-all"
-                disabled={approveAllMutation.isPending}
-                onClick={() => approveAllMutation.mutate()}
-              >
-                Approve All
-              </Button>
-            ) : null}
-            {counts.imported + counts.failed > 0 ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                id="auto-import-clear-completed"
-                disabled={clearMutation.isPending}
-                onClick={() => clearMutation.mutate()}
-              >
-                Clear History
-              </Button>
-            ) : null}
-          </OptionButtonGroup>
-        </>
+        <OptionButtonGroup size="sm" className={styles.autoImportFilters}>
+          {(['all', 'pending', 'imported', 'failed'] as const).map((filter) => (
+            <OptionButton
+              key={filter}
+              selected={autoFilter === filter}
+              onClick={() => onFilterChange(filter)}
+            >
+              <span>{getAutoImportFilterLabel(filter)}</span>
+              <Badge tone={getAutoImportFilterTone(filter)}>
+                {getAutoImportFilterCount(filter, counts, allResults.length)}
+              </Badge>
+            </OptionButton>
+          ))}
+          <div className={styles.importPageFlexSpacer} />
+          {counts.review > 0 ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              id="auto-import-approve-all"
+              disabled={approveAllMutation.isPending}
+              onClick={() => approveAllMutation.mutate()}
+            >
+              Approve All
+            </Button>
+          ) : null}
+          {counts.imported + counts.failed > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              id="auto-import-clear-completed"
+              disabled={clearMutation.isPending}
+              onClick={() => clearMutation.mutate()}
+            >
+              Clear History
+            </Button>
+          ) : null}
+        </OptionButtonGroup>
       ) : null}
 
       <div className={styles.autoImportResults} id="auto-import-results">
@@ -354,8 +356,8 @@ function AutoImportResultCard({
   status: ImportAutoImportStatusPayload | undefined;
   onApprove: () => void;
   onReject: () => void;
-    onToggle: () => void;
-  }) {
+  onToggle: () => void;
+}) {
   const confidencePercent = Math.round((result.confidence || 0) * 100);
   const confidenceClass = getConfidenceClass(confidencePercent);
   const statusMeta = getAutoImportStatusMeta(result.status);
@@ -412,11 +414,17 @@ function AutoImportResultCard({
           )}
         </div>
         <div className={styles.autoImportCardCenter}>
-          <div className={styles.autoImportCardAlbum}>{result.album_name || result.folder_name}</div>
-          <div className={styles.autoImportCardArtist}>{result.artist_name || 'Unknown Artist'}</div>
+          <div className={styles.autoImportCardAlbum}>
+            {result.album_name || result.folder_name}
+          </div>
+          <div className={styles.autoImportCardArtist}>
+            {result.artist_name || 'Unknown Artist'}
+          </div>
           <div className={styles.autoImportCardMeta}>
             <span>{matchSummary}</span>
-            {methodLabel ? <span className={styles.autoImportMethodBadge}>{methodLabel}</span> : null}
+            {methodLabel ? (
+              <span className={styles.autoImportMethodBadge}>{methodLabel}</span>
+            ) : null}
             {timeAgo ? <span>{timeAgo}</span> : null}
           </div>
           {result.error_message ? (
@@ -488,13 +496,12 @@ function AutoImportResultCard({
               .filter(Boolean)
               .join(' ');
             return (
-              <div
-                key={`${track.name}-${track.file}-${trackIndex}`}
-                className={rowClassName}
-              >
+              <div key={`${track.name}-${track.file}-${trackIndex}`} className={rowClassName}>
                 <span className={styles.autoImportTrackName}>{track.name}</span>
                 <span className={styles.autoImportTrackFile}>{track.file}</span>
-                <span className={`${styles.autoImportTrackConf} ${getAutoImportConfidenceClass(getConfidenceClass(track.confidence))}`}>
+                <span
+                  className={`${styles.autoImportTrackConf} ${getAutoImportConfidenceClass(getConfidenceClass(track.confidence))}`}
+                >
                   {track.confidence}%
                 </span>
               </div>
@@ -573,7 +580,9 @@ function getAutoImportFilterCount(
   }
 }
 
-function getAutoImportFilterTone(filter: ImportAutoFilter): 'neutral' | 'warning' | 'success' | 'danger' {
+function getAutoImportFilterTone(
+  filter: ImportAutoFilter,
+): 'neutral' | 'warning' | 'success' | 'danger' {
   switch (filter) {
     case 'pending':
       return 'warning';
