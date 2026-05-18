@@ -10925,6 +10925,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-radius: 10px;
 }
 
+.manual-library-match-stats .stat-item-value {
+    background-color: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-rgb));
+    white-space: nowrap;
+}
+
 .stat-item {
     display: flex;
     justify-content: space-between;
