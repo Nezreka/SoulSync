@@ -256,8 +256,7 @@ def remove_tracks_already_in_library(
             continue
 
         # Manual match check — skip fuzzy search if user already linked this track.
-        _track_source = track.get('provider') or 'spotify'
-        if _mlm.get_match(music_database, profile_id, _track_source, spotify_track_id):
+        if _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist'):
             try:
                 removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                 if removed:

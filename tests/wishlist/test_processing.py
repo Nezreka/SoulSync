@@ -240,7 +240,7 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_manual_matches(monke
     )
     music_db = _CleanupMusicDatabase()
     monkeypatch.setattr(
-        "core.library.manual_library_match.get_match",
+        "core.library.manual_library_match.get_match_for_track",
         lambda *_args, **_kwargs: {"id": 1, "library_track_id": 42},
     )
 

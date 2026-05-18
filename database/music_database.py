@@ -4219,6 +4219,64 @@ class MusicDatabase:
             logger.error(f"get_manual_library_match error: {e}")
             return None
 
+    def find_manual_library_match_by_source_track_id(self, profile_id: int,
+                                                     source_track_id: str,
+                                                     server_source: str = '') -> Optional[Dict[str, Any]]:
+        """Return a manual match for this source track ID across source labels.
+
+        The UI may save a match from sync history as ``mirrored`` while the
+        wishlist/download flow later sees the same track under ``wishlist`` or
+        the provider name. The source remains useful metadata, but the stored
+        track ID is the stable identity we need to honor.
+        """
+        if not source_track_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ?
+                      AND source_track_id = ?
+                      AND (server_source = ? OR server_source = '')
+                    ORDER BY
+                        CASE WHEN server_source = ? THEN 0 ELSE 1 END,
+                        updated_at DESC
+                    LIMIT 1
+                """, (profile_id, source_track_id, server_source or '', server_source or ''))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"find_manual_library_match_by_source_track_id error: {e}")
+            return None
+
+    def find_manual_library_match_by_metadata(self, profile_id: int,
+                                              source_title: str,
+                                              source_artist: str,
+                                              server_source: str = '') -> Optional[Dict[str, Any]]:
+        """Return a manual match by title/artist when provider IDs differ."""
+        if not source_title or not source_artist:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ?
+                      AND source_title = ? COLLATE NOCASE
+                      AND source_artist = ? COLLATE NOCASE
+                      AND (server_source = ? OR server_source = '')
+                    ORDER BY
+                        CASE WHEN server_source = ? THEN 0 ELSE 1 END,
+                        updated_at DESC
+                    LIMIT 1
+                """, (profile_id, source_title, source_artist, server_source or '', server_source or ''))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"find_manual_library_match_by_metadata error: {e}")
+            return None
+
     def delete_manual_library_match(self, match_id: int, profile_id: int) -> bool:
         """Delete match by PK id, scoped to profile_id."""
         try:
@@ -7315,12 +7373,12 @@ class MusicDatabase:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return False
 
-                track_source = spotify_track_data.get('provider') or spotify_track_data.get('source') or 'spotify'
-                if self.get_manual_library_match(profile_id, track_source, track_id):
+                from core.library import manual_library_match as _mlm
+                if _mlm.get_match_for_track(self, profile_id, spotify_track_data):
                     logger.info(
                         "Skipping wishlist add for manually matched track: '%s' (%s:%s)",
                         spotify_track_data.get('name', 'Unknown Track'),
-                        track_source,
+                        spotify_track_data.get('provider') or spotify_track_data.get('source') or 'unknown',
                         track_id,
                     )
                     return True

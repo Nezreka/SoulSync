@@ -79,6 +79,58 @@ def test_get_returns_none_when_absent(db):
     assert db.get_manual_library_match(1, "spotify", "nonexistent") is None
 
 
+def test_get_match_for_track_falls_back_across_source_labels(db):
+    db.save_manual_library_match(
+        1,
+        "mirrored",
+        "track-abc",
+        42,
+        source_title="Coffee Break",
+        source_artist="Zeds Dead",
+    )
+
+    row = mlm.get_match_for_track(
+        db,
+        1,
+        {
+            "id": "track-abc",
+            "name": "Coffee Break",
+            "artists": [{"name": "Zeds Dead"}],
+            "provider": "wishlist",
+        },
+        default_source="wishlist",
+    )
+
+    assert row is not None
+    assert row["library_track_id"] == 42
+
+
+def test_get_match_for_track_falls_back_to_source_title_artist(db):
+    db.save_manual_library_match(
+        1,
+        "mirrored",
+        "old-id",
+        42,
+        source_title="Coffee Break",
+        source_artist="Zeds Dead",
+    )
+
+    row = mlm.get_match_for_track(
+        db,
+        1,
+        {
+            "id": "new-id",
+            "name": "Coffee Break",
+            "artists": [{"name": "Zeds Dead"}],
+            "provider": "musicbrainz",
+        },
+        default_source="wishlist",
+    )
+
+    assert row is not None
+    assert row["library_track_id"] == 42
+
+
 def test_add_to_wishlist_skips_manual_matched_track(db):
     db.save_manual_library_match(1, "spotify", "track-abc", 42)
 
@@ -89,6 +141,32 @@ def test_add_to_wishlist_skips_manual_matched_track(db):
             "artists": [{"name": "Kendrick Lamar"}],
             "album": {"name": "DAMN."},
             "provider": "spotify",
+        },
+        failure_reason="Download failed",
+        profile_id=1,
+    )
+
+    assert ok is True
+    assert db.get_wishlist_tracks(profile_id=1) == []
+
+
+def test_add_to_wishlist_skips_manual_match_saved_from_mirrored_source(db):
+    db.save_manual_library_match(
+        1,
+        "mirrored",
+        "track-abc",
+        42,
+        source_title="Coffee Break",
+        source_artist="Zeds Dead",
+    )
+
+    ok = db.add_to_wishlist(
+        track_data={
+            "id": "track-abc",
+            "name": "Coffee Break",
+            "artists": [{"name": "Zeds Dead"}],
+            "album": {"name": "Coffee Break"},
+            "provider": "wishlist",
         },
         failure_reason="Download failed",
         profile_id=1,
@@ -167,7 +245,7 @@ def test_wishlist_skips_manual_matched_track():
     mock_music_db = MagicMock()
     mock_music_db.check_track_exists = MagicMock()
 
-    with patch("core.library.manual_library_match.get_match", return_value={"id": 1, "library_track_id": 42}):
+    with patch("core.library.manual_library_match.get_match_for_track", return_value={"id": 1, "library_track_id": 42}):
         from core.wishlist.processing import remove_tracks_already_in_library
         removed = remove_tracks_already_in_library(
             mock_wishlist_svc,
@@ -199,7 +277,7 @@ def test_wishlist_falls_through_when_no_match():
     mock_music_db = MagicMock()
     mock_music_db.check_track_exists.return_value = (None, 0.0)
 
-    with patch("core.library.manual_library_match.get_match", return_value=None):
+    with patch("core.library.manual_library_match.get_match_for_track", return_value=None):
         from core.wishlist.processing import remove_tracks_already_in_library
         removed = remove_tracks_already_in_library(
             mock_wishlist_svc,
@@ -273,7 +351,7 @@ def test_master_analysis_marks_found():
     mock_deps.start_next_batch_of_downloads = MagicMock()
     mock_deps.reset_wishlist_auto_processing = MagicMock()
 
-    with patch("core.library.manual_library_match.get_match", return_value={"id": 1, "library_track_id": 42}), \
+    with patch("core.library.manual_library_match.get_match_for_track", return_value={"id": 1, "library_track_id": 42}), \
          patch("database.music_database.MusicDatabase", return_value=mock_db):
         run_full_missing_tracks_process(batch_id, "playlist-1", [track_data], mock_deps)
 
@@ -345,7 +423,7 @@ def test_master_analysis_manual_match_wins_over_internal_force_download():
     mock_deps.start_next_batch_of_downloads = MagicMock()
     mock_deps.reset_wishlist_auto_processing = MagicMock()
 
-    with patch("core.library.manual_library_match.get_match", return_value={"id": 1, "library_track_id": 42}), \
+    with patch("core.library.manual_library_match.get_match_for_track", return_value={"id": 1, "library_track_id": 42}), \
          patch("database.music_database.MusicDatabase", return_value=mock_db):
         run_full_missing_tracks_process(batch_id, "playlist-1", [track_data], mock_deps)
 

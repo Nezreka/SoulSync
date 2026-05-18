@@ -42,6 +42,93 @@ def get_match(
     return getter(profile_id, source, source_track_id, server_source)
 
 
+def _first_artist_name(track: dict[str, Any]) -> str:
+    artists = track.get("artists") or []
+    if isinstance(artists, list) and artists:
+        first = artists[0]
+        if isinstance(first, dict):
+            return (first.get("name") or "").strip()
+        return str(first).strip()
+    return (track.get("artist") or track.get("artist_name") or "").strip()
+
+
+def _track_source_candidates(track: dict[str, Any], default_source: str = "") -> list[str]:
+    candidates = [
+        track.get("provider"),
+        track.get("source"),
+        default_source,
+        "spotify",
+    ]
+    out = []
+    for source in candidates:
+        source = (source or "").strip()
+        if source and source not in out:
+            out.append(source)
+    return out
+
+
+def _track_id_candidates(track: dict[str, Any]) -> list[str]:
+    candidates = [
+        track.get("source_track_id"),
+        track.get("spotify_track_id"),
+        track.get("track_id"),
+        track.get("id"),
+        track.get("musicbrainz_recording_id"),
+        track.get("deezer_id") or track.get("deezer_track_id"),
+        track.get("itunes_track_id"),
+        track.get("tidal_id") or track.get("tidal_track_id"),
+        track.get("qobuz_id") or track.get("qobuz_track_id"),
+        track.get("amazon_id") or track.get("amazon_track_id"),
+    ]
+    out = []
+    for value in candidates:
+        value = str(value).strip() if value is not None else ""
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def get_match_for_track(
+    db,
+    profile_id: int,
+    track: dict[str, Any],
+    *,
+    default_source: str = "",
+    server_source: str = "",
+) -> Optional[dict]:
+    """Return a manual match for a wishlist/sync track.
+
+    Exact source+ID matches are preferred, but source labels can legitimately
+    change between UI surfaces (for example ``mirrored`` in sync history versus
+    ``wishlist`` in the wishlist batch). Fall back to track ID and finally
+    title/artist so saved manual matches are honored consistently.
+    """
+    if not isinstance(track, dict):
+        return None
+
+    sources = _track_source_candidates(track, default_source)
+    track_ids = _track_id_candidates(track)
+    for track_id in track_ids:
+        for source in sources:
+            match = get_match(db, profile_id, source, track_id, server_source)
+            if match:
+                return match
+
+    id_getter = getattr(db, "find_manual_library_match_by_source_track_id", None)
+    if id_getter is not None:
+        for track_id in track_ids:
+            match = id_getter(profile_id, track_id, server_source)
+            if match:
+                return match
+
+    title = (track.get("name") or track.get("title") or track.get("track_name") or "").strip()
+    artist = _first_artist_name(track)
+    metadata_getter = getattr(db, "find_manual_library_match_by_metadata", None)
+    if metadata_getter is not None and title and artist:
+        return metadata_getter(profile_id, title, artist, server_source)
+    return None
+
+
 def delete_match(db, match_id: int, profile_id: int) -> bool:
     """Delete match by PK id, scoped to profile."""
     return db.delete_manual_library_match(match_id, profile_id)
