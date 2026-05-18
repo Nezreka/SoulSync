@@ -633,8 +633,10 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
 function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, playlistId) {
     if (!artistName) return;
     // Close the download modal
+    const process = playlistId ? activeDownloadProcesses[playlistId] : null;
+    const resolvedSource = source || process?.artist?.source || process?.album?.source || process?.source || null;
     if (playlistId) closeDownloadMissingModal(playlistId);
-    navigateToArtistDetail(artistId || artistName, artistName, source || null);
+    navigateToArtistDetail(artistId || artistName, artistName, resolvedSource || null);
 }
 
 async function closeDownloadMissingModal(playlistId) {

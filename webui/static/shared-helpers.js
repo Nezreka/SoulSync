@@ -1016,6 +1016,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         type: 'artist_album',
         artist: artist,
         album: album,
+        source: artist?.source || album?.source || artistsPageState.artistDiscography?.source || null,
         trackCount: spotifyTracks.length,
         playlistId: virtualPlaylistId
     };
