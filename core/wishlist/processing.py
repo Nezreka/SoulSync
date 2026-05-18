@@ -232,13 +232,18 @@ def remove_tracks_already_in_library(
     log_prefix: str = "[Auto-Wishlist]",
 ) -> int:
     """Remove wishlist entries that are already present in the library."""
+    from core.library import manual_library_match as _mlm
+
     all_profiles = profiles_database.get_all_profiles()
-    cleanup_tracks = []
+    # Carry (profile_id, track) so the match check can be profile-scoped.
+    cleanup_tracks: list[tuple[int, dict]] = []
     for profile in all_profiles:
-        cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile["id"]))
+        pid = profile["id"]
+        for t in wishlist_service.get_wishlist_tracks_for_download(profile_id=pid):
+            cleanup_tracks.append((pid, t))
 
     cleanup_removed = 0
-    for track in cleanup_tracks:
+    for profile_id, track in cleanup_tracks:
         if skip_track_fn and skip_track_fn(track):
             continue
 
@@ -248,6 +253,18 @@ def remove_tracks_already_in_library(
         track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
 
         if not track_name or not artists or not spotify_track_id:
+            continue
+
+        # Manual match check — skip fuzzy search if user already linked this track.
+        _track_source = track.get('provider') or 'spotify'
+        if _mlm.get_match(music_database, profile_id, _track_source, spotify_track_id):
+            try:
+                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                if removed:
+                    cleanup_removed += 1
+                    logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
+            except Exception as _mlm_err:
+                logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
             continue
 
         found_in_db = False

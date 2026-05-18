@@ -770,6 +770,8 @@ class MusicDatabase:
             logger.error(f"Error initializing database: {e}")
             raise
 
+        self._init_manual_library_match_table()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
@@ -4136,6 +4138,114 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error creating repair worker v2 tables: {e}")
+
+    def _init_manual_library_match_table(self):
+        """Create manual_library_track_matches table and indexes."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS manual_library_track_matches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        profile_id INTEGER DEFAULT 1,
+                        source TEXT NOT NULL,
+                        source_track_id TEXT NOT NULL,
+                        source_title TEXT,
+                        source_artist TEXT,
+                        source_album TEXT,
+                        source_context_json TEXT,
+                        server_source TEXT DEFAULT '',
+                        library_track_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(profile_id, source, source_track_id, server_source)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mltm_lookup
+                    ON manual_library_track_matches (profile_id, source, source_track_id, server_source)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mltm_lib_track
+                    ON manual_library_track_matches (library_track_id)
+                """)
+        except Exception as e:
+            logger.error(f"Error creating manual_library_track_matches table: {e}")
+
+    def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
+                                   library_track_id: int, **meta) -> bool:
+        """Insert or replace a manual match. meta keys: source_title, source_artist,
+        source_album, source_context_json, server_source."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO manual_library_track_matches
+                        (profile_id, source, source_track_id, library_track_id,
+                         source_title, source_artist, source_album,
+                         source_context_json, server_source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(profile_id, source, source_track_id, server_source)
+                    DO UPDATE SET
+                        library_track_id = excluded.library_track_id,
+                        source_title = excluded.source_title,
+                        source_artist = excluded.source_artist,
+                        source_album = excluded.source_album,
+                        source_context_json = excluded.source_context_json,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    profile_id, source, source_track_id, library_track_id,
+                    meta.get('source_title'), meta.get('source_artist'),
+                    meta.get('source_album'), meta.get('source_context_json'),
+                    meta.get('server_source', ''),
+                ))
+                return True
+        except Exception as e:
+            logger.error(f"save_manual_library_match error: {e}")
+            return False
+
+    def get_manual_library_match(self, profile_id: int, source: str,
+                                  source_track_id: str, server_source: str = '') -> Optional[Dict[str, Any]]:
+        """Return match row dict or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ? AND source = ? AND source_track_id = ? AND server_source = ?
+                """, (profile_id, source, source_track_id, server_source))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_manual_library_match error: {e}")
+            return None
+
+    def delete_manual_library_match(self, match_id: int, profile_id: int) -> bool:
+        """Delete match by PK id, scoped to profile_id."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    DELETE FROM manual_library_track_matches WHERE id = ? AND profile_id = ?
+                """, (match_id, profile_id))
+                return True
+        except Exception as e:
+            logger.error(f"delete_manual_library_match error: {e}")
+            return False
+
+    def list_manual_library_matches(self, profile_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return matches for profile ordered by updated_at DESC."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                """, (profile_id, limit))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"list_manual_library_matches error: {e}")
+            return []
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
