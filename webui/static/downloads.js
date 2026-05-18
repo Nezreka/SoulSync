@@ -1510,46 +1510,54 @@ async function selectWishlistCategory(category) {
                 // Sort tracks by track number
                 albumData.tracks.sort((a, b) => a.trackNumber - b.trackNumber);
 
-                const tracksListHTML = albumData.tracks.map(track => `
+                const tracksListHTML = albumData.tracks.map(track => {
+                    const safeTrackId = escapeHtml(track.spotifyTrackId || '');
+                    const safeTrackName = escapeHtml(track.name || 'Unknown Track');
+                    return `
                     <div class="wishlist-album-track wishlist-track-item">
                         <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${track.spotifyTrackId}">
+                                   data-track-id="${safeTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
-                        <span class="wishlist-album-track-name">${track.name}</span>
-                        <button class="wishlist-delete-btn wishlist-delete-btn-small" data-track-id="${track.spotifyTrackId}" title="Remove from wishlist">
+                        <span class="wishlist-album-track-name">${safeTrackName}</span>
+                        <button class="wishlist-delete-btn wishlist-delete-btn-small" data-track-id="${safeTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
-                `).join('');
+                `;
+                }).join('');
 
                 // Handle missing album images with a placeholder
+                const safeAlbumId = escapeHtml(albumId);
+                const safeAlbumName = escapeHtml(albumData.albumName || 'Unknown Album');
+                const safeArtistName = escapeHtml(albumData.artistName || 'Unknown Artist');
+                const safeAlbumImage = escapeHtml(albumData.albumImage || '').replace(/'/g, '&#39;');
                 const albumImageStyle = albumData.albumImage
-                    ? `background-image: url('${albumData.albumImage}')`
+                    ? `background-image: url('${safeAlbumImage}')`
                     : `background: linear-gradient(135deg, rgba(30, 30, 30, 0.9) 0%, rgba(50, 50, 50, 0.9) 100%); display: flex; align-items: center; justify-content: center; font-size: 40px;`;
                 const albumImageContent = albumData.albumImage ? '' : '<span style="opacity: 0.3;">💿</span>';
 
                 albumsHTML += `
                     <div class="wishlist-album-card">
-                        <div class="wishlist-album-header" data-album-id="${albumId}">
+                        <div class="wishlist-album-header" data-album-id="${safeAlbumId}">
                             <label class="wishlist-checkbox-wrapper">
                                 <input type="checkbox" class="wishlist-album-select-all-cb"
-                                       data-album-id="${albumId}">
+                                       data-album-id="${safeAlbumId}">
                                 <span class="wishlist-checkbox-custom"></span>
                             </label>
                             <div class="wishlist-album-image" style="${albumImageStyle}">${albumImageContent}</div>
                             <div class="wishlist-album-info">
-                                <div class="wishlist-album-name">${albumData.albumName}</div>
-                                <div class="wishlist-album-artist">${albumData.artistName}</div>
+                                <div class="wishlist-album-name">${safeAlbumName}</div>
+                                <div class="wishlist-album-artist">${safeArtistName}</div>
                                 <div class="wishlist-album-track-count">${albumData.tracks.length} track${albumData.tracks.length !== 1 ? 's' : ''}</div>
                             </div>
-                            <button class="wishlist-delete-btn wishlist-delete-album-btn" data-album-id="${albumId}" title="Remove all tracks from album">
+                            <button class="wishlist-delete-btn wishlist-delete-album-btn" data-album-id="${safeAlbumId}" title="Remove all tracks from album">
                                 🗑️
                             </button>
                             <div class="wishlist-album-expand-icon" id="expand-icon-${albumId}">▼</div>
                         </div>
-                        <div class="wishlist-album-tracks" id="tracks-${albumId}" style="display: none;">
+                        <div class="wishlist-album-tracks" id="tracks-${safeAlbumId}" style="display: none;">
                             ${tracksListHTML}
                         </div>
                     </div>
@@ -1601,20 +1609,25 @@ async function selectWishlistCategory(category) {
 
                 const albumImage = spotifyData?.album?.images?.[0]?.url || '';
                 const spotifyTrackId = track.spotify_track_id || track.id || '';
+                const safeTrackId = escapeHtml(spotifyTrackId);
+                const safeTrackName = escapeHtml(trackName);
+                const safeArtistName = escapeHtml(artistName);
+                const safeAlbumName = escapeHtml(albumName);
+                const safeAlbumImage = escapeHtml(albumImage).replace(/'/g, '&#39;');
 
                 tracksHTML += `
                     <div class="playlist-track-item-with-image wishlist-track-item">
                         <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${spotifyTrackId}">
+                                   data-track-id="${safeTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
-                        <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
+                        <div class="playlist-track-image" style="background-image: url('${safeAlbumImage}')"></div>
                         <div class="playlist-track-info">
-                            <div class="playlist-track-name">${trackName}</div>
-                            <div class="playlist-track-artist">${artistName} • ${albumName}</div>
+                            <div class="playlist-track-name">${safeTrackName}</div>
+                            <div class="playlist-track-artist">${safeArtistName} • ${safeAlbumName}</div>
                         </div>
-                        <button class="wishlist-delete-btn" data-track-id="${spotifyTrackId}" title="Remove from wishlist">
+                        <button class="wishlist-delete-btn" data-track-id="${safeTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
@@ -3250,6 +3263,41 @@ async function downloadCandidate(taskId, candidate, trackName) {
     }
 }
 
+async function approveQuarantineFromDownloadRow(button) {
+    const entryId = button?.dataset?.entryId || '';
+    if (!entryId) {
+        showToast('Open Quarantine to approve this file.', 'warning');
+        return;
+    }
+
+    const confirmed = await showConfirmDialog({
+        title: 'Approve Quarantined File',
+        message: 'Import this quarantined file and skip quarantine checks for this approved pass?',
+        confirmText: 'Approve & Import',
+        cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Approving...';
+    try {
+        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Approved quarantined file. Re-running post-processing.', 'success');
+        } else {
+            showToast(`Approve failed: ${data.error || 'Unknown error'}`, 'error');
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    } catch (error) {
+        showToast(`Approve failed: ${error.message}`, 'error');
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
 function closeCandidatesModal() {
     const overlay = document.getElementById('candidates-modal-overlay');
     if (overlay) {
@@ -3374,6 +3422,7 @@ function processModalStatusUpdate(playlistId, data) {
             const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
 
             let statusText = '';
+            let isQuarantinedTask = false;
             // V2 SYSTEM: Handle UI state override for cancelling tasks
             if (isV2Task && uiState === 'cancelling' && task.status !== 'cancelled') {
                 statusText = '🔄 Cancelling...';
@@ -3390,6 +3439,7 @@ function processModalStatusUpdate(playlistId, data) {
                         // failures — the file is recoverable, not lost.
                         const _em = (task.error_message || '').toLowerCase();
                         if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quarantin')) {
+                            isQuarantinedTask = true;
                             statusText = '🛡️ Quarantined';
                         } else {
                             statusText = '❌ Failed';
@@ -3436,6 +3486,13 @@ function processModalStatusUpdate(playlistId, data) {
                     // Create V2 cancel button for all active tasks
                     const onclickHandler = isV2Task ? 'cancelTrackDownloadV2' : 'cancelTrackDownload';
                     actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="${onclickHandler}('${playlistId}', ${task.track_index})">×</button>`;
+                }
+            } else if (actionsEl && task.status === 'failed' && isQuarantinedTask && task.quarantine_entry_id) {
+                const entryId = escapeHtml(task.quarantine_entry_id);
+                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" title="Approve quarantined file">Approve</button>`;
+                const approveBtn = actionsEl.querySelector('.approve-quarantine-inline-btn');
+                if (approveBtn) {
+                    approveBtn.addEventListener('click', () => approveQuarantineFromDownloadRow(approveBtn));
                 }
             } else if (actionsEl && ['completed', 'failed', 'cancelled', 'not_found', 'post_processing'].includes(task.status)) {
                 actionsEl.innerHTML = '-'; // No actions available for terminal or processing states
@@ -3535,12 +3592,9 @@ function processModalStatusUpdate(playlistId, data) {
                 setTimeout(() => loadServerPlaylists(), 2000);
             }
 
-            // Auto-close wishlist modal when completed (for auto-processing)
+            // Keep visible wishlist results open so failed tracks can be reviewed.
             if (playlistId === 'wishlist') {
-                console.log('🔄 [Auto-Wishlist] Auto-closing completed wishlist modal to enable next cycle');
-                setTimeout(() => {
-                    closeDownloadMissingModal(playlistId);
-                }, 3000); // 3-second delay to show completion message
+                console.log('[Wishlist] Leaving completed wishlist modal open for failed-track review');
             }
 
             // Check if any other processes still need polling
