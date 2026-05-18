@@ -79,6 +79,32 @@ def test_get_returns_none_when_absent(db):
     assert db.get_manual_library_match(1, "spotify", "nonexistent") is None
 
 
+def test_add_to_wishlist_skips_manual_matched_track(db):
+    db.save_manual_library_match(1, "spotify", "track-abc", 42)
+
+    ok = db.add_to_wishlist(
+        track_data={
+            "id": "track-abc",
+            "name": "HUMBLE.",
+            "artists": [{"name": "Kendrick Lamar"}],
+            "album": {"name": "DAMN."},
+            "provider": "spotify",
+        },
+        failure_reason="Download failed",
+        profile_id=1,
+    )
+
+    assert ok is True
+    assert db.get_wishlist_tracks(profile_id=1) == []
+
+
+def test_get_match_returns_none_when_db_lacks_manual_match_method():
+    class _MinimalDB:
+        pass
+
+    assert mlm.get_match(_MinimalDB(), 1, "spotify", "track-abc") is None
+
+
 # ---------------------------------------------------------------------------
 # Service-layer tests
 # ---------------------------------------------------------------------------

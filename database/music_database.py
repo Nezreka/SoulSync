@@ -7217,6 +7217,16 @@ class MusicDatabase:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return False
 
+                track_source = spotify_track_data.get('provider') or spotify_track_data.get('source') or 'spotify'
+                if self.get_manual_library_match(profile_id, track_source, track_id):
+                    logger.info(
+                        "Skipping wishlist add for manually matched track: '%s' (%s:%s)",
+                        spotify_track_data.get('name', 'Unknown Track'),
+                        track_source,
+                        track_id,
+                    )
+                    return True
+
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
                 if artists:

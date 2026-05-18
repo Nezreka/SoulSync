@@ -36,7 +36,10 @@ def get_match(
     server_source: str = "",
 ) -> Optional[dict]:
     """Return match row dict or None if not found."""
-    return db.get_manual_library_match(profile_id, source, source_track_id, server_source)
+    getter = getattr(db, "get_manual_library_match", None)
+    if getter is None:
+        return None
+    return getter(profile_id, source, source_track_id, server_source)
 
 
 def delete_match(db, match_id: int, profile_id: int) -> bool:
