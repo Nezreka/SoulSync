@@ -915,7 +915,10 @@
                             <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media
                                 server</p>
                         </div>
-                        <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button class="sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
+                            <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                        </div>
                     </div>
                 </div>
 
@@ -6567,6 +6570,26 @@
                             </div>
                             <div class="tool-card-controls">
                                 <button onclick="openDiscoveryPoolModal()">Open Discovery Pool</button>
+                            </div>
+                        </div>
+
+                        <div class="tool-card" id="manual-library-match-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Manual Library Match</h4>
+                            </div>
+                            <p class="tool-card-info">Map wishlist and playlist source tracks to library tracks you already own</p>
+                            <div class="tool-card-stats manual-library-match-stats">
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Source:</span>
+                                    <span class="stat-item-value">Wishlist / Sync</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Result:</span>
+                                    <span class="stat-item-value">Found</span>
+                                </div>
+                            </div>
+                            <div class="tool-card-controls">
+                                <button onclick="openManualLibraryMatchTool()">Open Library Match</button>
                             </div>
                         </div>
 

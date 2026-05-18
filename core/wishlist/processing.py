@@ -232,13 +232,18 @@ def remove_tracks_already_in_library(
     log_prefix: str = "[Auto-Wishlist]",
 ) -> int:
     """Remove wishlist entries that are already present in the library."""
+    from core.library import manual_library_match as _mlm
+
     all_profiles = profiles_database.get_all_profiles()
-    cleanup_tracks = []
+    # Carry (profile_id, track) so the match check can be profile-scoped.
+    cleanup_tracks: list[tuple[int, dict]] = []
     for profile in all_profiles:
-        cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile["id"]))
+        pid = profile["id"]
+        for t in wishlist_service.get_wishlist_tracks_for_download(profile_id=pid):
+            cleanup_tracks.append((pid, t))
 
     cleanup_removed = 0
-    for track in cleanup_tracks:
+    for profile_id, track in cleanup_tracks:
         if skip_track_fn and skip_track_fn(track):
             continue
 
@@ -248,6 +253,18 @@ def remove_tracks_already_in_library(
         track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
 
         if not track_name or not artists or not spotify_track_id:
+            continue
+
+        # Manual match check — skip fuzzy search if user already linked this track.
+        _track_source = track.get('provider') or 'spotify'
+        if _mlm.get_match(music_database, profile_id, _track_source, spotify_track_id):
+            try:
+                removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+                if removed:
+                    cleanup_removed += 1
+                    logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
+            except Exception as _mlm_err:
+                logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
             continue
 
         found_in_db = False
@@ -679,52 +696,14 @@ def automatic_wishlist_cleanup_after_db_update(
 
         logger.info(f"[Auto Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
 
-        removed_count = 0
-        for track in wishlist_tracks:
-            track_name = track.get('name', '')
-            artists = track.get('artists', [])
-            spotify_track_id = track.get('spotify_track_id') or track.get('id')
-            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
-
-            if not track_name or not artists or not spotify_track_id:
-                continue
-
-            found_in_db = False
-            for artist in artists:
-                if isinstance(artist, str):
-                    artist_name = artist
-                elif isinstance(artist, dict) and 'name' in artist:
-                    artist_name = artist['name']
-                else:
-                    artist_name = str(artist)
-
-                try:
-                    db_track, confidence = music_database.check_track_exists(
-                        track_name,
-                        artist_name,
-                        confidence_threshold=0.7,
-                        server_source=active_server,
-                        album=track_album,
-                    )
-
-                    if db_track and confidence >= 0.7:
-                        found_in_db = True
-                        logger.info(
-                            f"[Auto Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})"
-                        )
-                        break
-                except Exception as db_error:
-                    logger.error(f"[Auto Cleanup] Error checking database for track '{track_name}': {db_error}")
-                    continue
-
-            if found_in_db:
-                try:
-                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
-                    if removed:
-                        removed_count += 1
-                        logger.info(f"[Auto Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
-                except Exception as remove_error:
-                    logger.error(f"[Auto Cleanup] Error removing track from wishlist: {remove_error}")
+        removed_count = remove_tracks_already_in_library(
+            wishlist_service,
+            profiles_database,
+            music_database,
+            active_server,
+            logger=logger,
+            log_prefix="[Auto Cleanup]",
+        )
 
         logger.info(f"[Auto Cleanup] Completed automatic cleanup: {removed_count} tracks removed from wishlist")
         return removed_count
