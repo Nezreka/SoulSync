@@ -73,6 +73,7 @@
 .select {
   width: auto;
   min-width: 130px;
+  box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   background:
@@ -95,7 +96,6 @@
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
-  padding: 8px 32px 8px 12px;
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -105,6 +105,24 @@
   -webkit-appearance: none;
   color-scheme: dark;
   cursor: pointer;
+}
+
+.selectSizeSm {
+  min-height: 32px;
+  padding: 6px 30px 6px 10px;
+  background-position:
+    0 0,
+    0 0,
+    right 10px center;
+}
+
+.selectSizeMd {
+  min-height: 36px;
+  padding: 8px 32px 8px 12px;
+  background-position:
+    0 0,
+    0 0,
+    right 12px center;
 }
 
 .select:hover {

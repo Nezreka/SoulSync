@@ -138,6 +138,7 @@ describe('form primitives', () => {
     expect(screen.getByText('Short summary')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Validation failed');
     expect(screen.getByLabelText('Status')).toHaveValue('open');
+    expect(screen.getByLabelText('Status')).toHaveAttribute('data-size', 'md');
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'resolved' } });
     expect(screen.getByLabelText('Status')).toHaveValue('resolved');
 
@@ -175,5 +176,16 @@ describe('form primitives', () => {
       'data-variant',
       'primary',
     );
+  });
+
+  it('supports compact select sizing', () => {
+    render(
+      <Select aria-label="Compact" defaultValue="one" size="sm">
+        <option value="one">One</option>
+        <option value="two">Two</option>
+      </Select>,
+    );
+
+    expect(screen.getByLabelText('Compact')).toHaveAttribute('data-size', 'sm');
   });
 });

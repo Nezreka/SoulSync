@@ -214,6 +214,7 @@ export function AutoImportPanel({
               <span>Interval:</span>
               <Select
                 id="auto-import-interval"
+                size="sm"
                 value={interval}
                 onChange={(event) => setInterval(Number(event.target.value))}
               >
