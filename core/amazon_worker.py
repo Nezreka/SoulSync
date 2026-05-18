@@ -19,6 +19,7 @@ class AmazonWorker:
     def __init__(self, database: MusicDatabase):
         self.db = database
         self.client = AmazonClient()
+        self._amazon_schema_checked = False
 
         self.running = False
         self.paused = False
@@ -39,6 +40,38 @@ class AmazonWorker:
         self.name_similarity_threshold = 0.80
 
         logger.info("Amazon background worker initialized")
+
+    def _ensure_amazon_schema(self, cursor) -> None:
+        """Ensure upgraded installs have the Amazon enrichment columns.
+
+        MusicDatabase normally runs this migration during startup, but the
+        worker should still be defensive because it is the code path that
+        repeatedly queries these columns in the background.
+        """
+        if self._amazon_schema_checked:
+            return
+
+        table_columns = {
+            'artists': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
+            'albums': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
+            'tracks': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
+        }
+        for table, columns in table_columns.items():
+            cursor.execute(f"PRAGMA table_info({table})")
+            existing = {row[1] for row in cursor.fetchall()}
+            for column in columns:
+                if column not in existing:
+                    column_type = 'TIMESTAMP' if column == 'amazon_last_attempted' else 'TEXT'
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
+        cursor.connection.commit()
+        self._amazon_schema_checked = True
 
     def start(self):
         if self.running:
@@ -131,6 +164,7 @@ class AmazonWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            self._ensure_amazon_schema(cursor)
 
             # Priority 1: Unattempted artists
             cursor.execute("""
@@ -517,6 +551,7 @@ class AmazonWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            self._ensure_amazon_schema(cursor)
             cursor.execute("""
                 SELECT
                     (SELECT COUNT(*) FROM artists WHERE amazon_match_status IS NULL AND id IS NOT NULL) +
@@ -538,6 +573,7 @@ class AmazonWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            self._ensure_amazon_schema(cursor)
             progress = {}
 
             for table in ('artists', 'albums', 'tracks'):
