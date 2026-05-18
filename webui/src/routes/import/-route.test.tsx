@@ -3,19 +3,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
+import { HttpResponse, http, server } from '@/test/msw';
 
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 
 import type { ImportStagingFile } from './-import.types';
 import { resetImportWorkflowStore } from './-import.store';
-
-function createResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
   return {
@@ -83,80 +77,35 @@ describe('import route', () => {
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showToast = vi.fn();
     window.showConfirmDialog = vi.fn(async () => true);
+    vi.spyOn(globalThis, 'fetch');
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = input instanceof Request ? input.url : String(input);
-
-        if (url.includes('/api/import/staging/files')) {
-          return createResponse({
-            success: true,
-            staging_path: '/music/Staging',
-            files: stagingFilesPayload,
-          });
-        }
-
-        if (url.includes('/api/import/staging/groups')) {
-          return createResponse({
-            success: true,
-            groups: [
-              {
-                album: 'Album A',
-                artist: 'Artist A',
-                file_count: 2,
-                file_paths: ['/music/Staging/Album/01-track.flac'],
-              },
-            ],
-          });
-        }
-
-        if (url.includes('/api/import/staging/suggestions')) {
-          return createResponse({
-            success: true,
-            ready: true,
-            suggestions: [
-              {
-                id: 'album-1',
-                name: 'Album A',
-                artist: 'Artist A',
-                source: 'deezer',
-                total_tracks: 1,
-                release_date: '2026-01-01',
-              },
-            ],
-          });
-        }
-
-        if (url.includes('/api/import/search/albums')) {
-          return createResponse({
-            success: true,
-            albums: [
-              {
-                id: 'album-1',
-                name: 'Album A',
-                artist: 'Artist A',
-                source: 'deezer',
-                total_tracks: 1,
-                release_date: '2026-01-01',
-              },
-            ],
-          });
-        }
-
-        if (url.includes('/api/import/album/match')) {
-          const body =
-            input instanceof Request
-              ? ((await input.clone().json()) as Record<string, unknown>)
-              : (JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<
-                  string,
-                  unknown
-                >);
-          albumMatchBodies.push(body);
-          return createResponse({
-            success: true,
-            received: body,
-            album: {
+    server.use(
+      http.get('/api/import/staging/files', () => {
+        return HttpResponse.json({
+          success: true,
+          staging_path: '/music/Staging',
+          files: stagingFilesPayload,
+        });
+      }),
+      http.get('/api/import/staging/groups', () => {
+        return HttpResponse.json({
+          success: true,
+          groups: [
+            {
+              album: 'Album A',
+              artist: 'Artist A',
+              file_count: 2,
+              file_paths: ['/music/Staging/Album/01-track.flac'],
+            },
+          ],
+        });
+      }),
+      http.get('/api/import/staging/suggestions', () => {
+        return HttpResponse.json({
+          success: true,
+          ready: true,
+          suggestions: [
+            {
               id: 'album-1',
               name: 'Album A',
               artist: 'Artist A',
@@ -164,56 +113,94 @@ describe('import route', () => {
               total_tracks: 1,
               release_date: '2026-01-01',
             },
-            matches: [
-              {
-                track: { name: 'Track One', track_number: 1 },
-                staging_file: {
-                  filename: '01-track.flac',
-                  full_path: '/music/Staging/Album/01-track.flac',
-                },
-                confidence: 0.95,
+          ],
+        });
+      }),
+      http.get('/api/import/search/albums', () => {
+        return HttpResponse.json({
+          success: true,
+          albums: [
+            {
+              id: 'album-1',
+              name: 'Album A',
+              artist: 'Artist A',
+              source: 'deezer',
+              total_tracks: 1,
+              release_date: '2026-01-01',
+            },
+          ],
+        });
+      }),
+      http.post('/api/import/album/match', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        albumMatchBodies.push(body);
+        return HttpResponse.json({
+          success: true,
+          received: body,
+          album: {
+            id: 'album-1',
+            name: 'Album A',
+            artist: 'Artist A',
+            source: 'deezer',
+            total_tracks: 1,
+            release_date: '2026-01-01',
+          },
+          matches: [
+            {
+              track: { name: 'Track One', track_number: 1 },
+              staging_file: {
+                filename: '01-track.flac',
+                full_path: '/music/Staging/Album/01-track.flac',
               },
-            ],
-          });
-        }
-
-        if (url.includes('/api/auto-import/status')) {
-          return createResponse({
-            success: true,
-            running: true,
-            current_status: 'idle',
-            active_imports: [],
-          });
-        }
-
-        if (url.includes('/api/auto-import/settings')) {
-          return createResponse({
-            success: true,
-            scan_interval: 60,
-            confidence_threshold: 0.9,
-          });
-        }
-
-        if (url.includes('/api/auto-import/results')) {
-          return createResponse({
-            success: true,
-            results: [
-              {
-                id: 4,
-                status: 'pending_review',
-                folder_hash: 'hash-1',
-                folder_name: 'Album A',
-                album_name: 'Album A',
-                artist_name: 'Artist A',
-                confidence: 0.82,
-                total_files: 2,
-              },
-            ],
-          });
-        }
-
-        return createResponse({ success: true });
-      }) as unknown as typeof fetch,
+              confidence: 0.95,
+            },
+          ],
+        });
+      }),
+      http.get('/api/auto-import/status', () => {
+        return HttpResponse.json({
+          success: true,
+          running: true,
+          current_status: 'idle',
+          active_imports: [],
+        });
+      }),
+      http.get('/api/auto-import/settings', () => {
+        return HttpResponse.json({
+          success: true,
+          scan_interval: 60,
+          confidence_threshold: 0.9,
+        });
+      }),
+      http.get('/api/auto-import/results', () => {
+        return HttpResponse.json({
+          success: true,
+          results: [
+            {
+              id: 4,
+              status: 'pending_review',
+              folder_hash: 'hash-1',
+              folder_name: 'Album A',
+              album_name: 'Album A',
+              artist_name: 'Artist A',
+              confidence: 0.82,
+              total_files: 2,
+            },
+          ],
+        });
+      }),
+      http.get('/api/issues/counts', () => {
+        return HttpResponse.json({
+          success: true,
+          counts: {
+            open: 0,
+            in_progress: 0,
+            resolved: 0,
+            dismissed: 0,
+            total: 0,
+          },
+        });
+      }),
     );
   });
 
@@ -227,9 +214,7 @@ describe('import route', () => {
     await waitFor(() =>
       expect(getFetchUrls().some((url) => url.includes('/api/import/staging/groups'))).toBe(true),
     );
-    expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(
-      true,
-    );
+    expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(true);
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('import');
     expect(window.SoulSyncWebShellBridge?.setActivePageChrome).toHaveBeenCalledWith('import');
   });
