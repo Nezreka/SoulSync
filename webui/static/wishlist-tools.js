@@ -3137,21 +3137,17 @@ function renderQuarantineEntry(entry) {
     const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
     const triggerColor = triggerColors[entry.trigger] || '#888';
 
-    // Issue #608 (AfonsoG6): the prior code injected `entry.id` raw
-    // into single-quoted JS string literals inside HTML onclick
-    // attributes. Filenames containing an apostrophe broke JS
-    // parsing — Approve and Delete buttons silently no-op'd.
-    // JSON.stringify wraps the value in valid JS literal syntax
-    // (handles ', \, " and unicode); escapeHtml then guards the HTML
-    // attribute boundary so the JS string round-trips intact.
-    const idJs = escapeHtml(JSON.stringify(entry.id));
+    // Keep dynamic filenames/ids out of inline JS. Quarantine ids are derived
+    // from filenames, so quotes in the filename can break onclick attributes
+    // if they are interpolated as JS string literals.
+    const entryIdAttr = escapeHtml(String(entry.id || ''));
     const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
     const approveTitle = entry.has_full_context
         ? 'Re-run post-processing with only the failing check skipped'
         : 'Legacy entry — move to Staging, finish via Import flow';
     const approveCall = entry.has_full_context
-        ? `approveQuarantineEntry(${idJs})`
-        : `recoverQuarantineEntry(${idJs})`;
+        ? 'approveQuarantineEntryFromButton(this)'
+        : 'recoverQuarantineEntryFromButton(this)';
 
     const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
     const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
@@ -3179,8 +3175,8 @@ function renderQuarantineEntry(entry) {
                 </div>
                 <div class="library-history-entry-badges">${triggerBadge}</div>
                 <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
-                <button class="lh-audit-btn" title="${approveTitle}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
-                <button class="lh-audit-btn" title="Delete permanently" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntry(${idJs})">Delete</button>
+                <button class="lh-audit-btn" title="${approveTitle}" data-entry-id="${entryIdAttr}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
+                <button class="lh-audit-btn" title="Delete permanently" data-entry-id="${entryIdAttr}" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntryFromButton(this)">Delete</button>
                 <span class="lh-expand-btn">&#x25BE;</span>
             </div>
             <div class="library-history-entry-details">
@@ -3189,6 +3185,22 @@ function renderQuarantineEntry(entry) {
             </div>
         </div>
     </div>`;
+}
+
+function getQuarantineEntryIdFromButton(button) {
+    return button?.dataset?.entryId || '';
+}
+
+function approveQuarantineEntryFromButton(button) {
+    return approveQuarantineEntry(getQuarantineEntryIdFromButton(button));
+}
+
+function recoverQuarantineEntryFromButton(button) {
+    return recoverQuarantineEntry(getQuarantineEntryIdFromButton(button));
+}
+
+function deleteQuarantineEntryFromButton(button) {
+    return deleteQuarantineEntry(getQuarantineEntryIdFromButton(button));
 }
 
 async function approveQuarantineEntry(entryId) {

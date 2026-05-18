@@ -132,6 +132,7 @@ def check_album_completion(
                 confidence_threshold=0.7,
                 server_source=active_server,
                 candidate_albums=candidate_albums,
+                strict_discography_match=True,
             )
         except Exception as db_error:
             logger.error(f"Database error for album '{album_name}': {db_error}")
@@ -239,6 +240,7 @@ def check_single_completion(
                     confidence_threshold=0.7,
                     server_source=active_server,
                     candidate_albums=candidate_albums,
+                    strict_discography_match=True,
                 )
             except Exception as db_error:
                 logger.error(f"Database error for EP '{single_name}': {db_error}")

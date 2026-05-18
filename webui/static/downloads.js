@@ -2478,6 +2478,7 @@ async function startMissingTracksProcess(playlistId) {
         const requestBody = {
             tracks: selectedTracks,
             force_download_all: forceDownloadAll || isWingIt,
+            ignore_manual_matches: forceDownloadAll,
             wing_it: isWingIt,
         };
 

@@ -63,8 +63,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
     Attempts to download with fallback candidate logic (matches GUI's retry_parallel_download_with_fallback).
     Returns True if successful, False if all candidates fail.
     """
-    # Sort candidates by confidence (best first)
-    candidates.sort(key=lambda r: r.confidence, reverse=True)
+    # Sort candidates by match confidence first, then peer quality. Upstream
+    # Soulseek validation already considers peer speed/slots/queue when scores
+    # are close; preserve that signal here instead of flattening ties back to
+    # arbitrary slskd response order.
+    candidates.sort(
+        key=lambda r: (
+            getattr(r, 'confidence', 0) or 0,
+            getattr(r, 'quality_score', 0) or 0,
+            getattr(r, 'upload_speed', 0) or 0,
+            -(getattr(r, 'queue_length', 0) or 0),
+            getattr(r, 'free_upload_slots', 0) or 0,
+            getattr(r, 'size', 0) or 0,
+        ),
+        reverse=True,
+    )
     
     with tasks_lock:
         task = download_tasks.get(task_id)

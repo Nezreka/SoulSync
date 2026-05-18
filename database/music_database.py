@@ -770,6 +770,8 @@ class MusicDatabase:
             logger.error(f"Error initializing database: {e}")
             raise
 
+        self._init_manual_library_match_table()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
@@ -862,6 +864,9 @@ class MusicDatabase:
             if 'server_source' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN server_source TEXT DEFAULT 'plex'")
                 logger.info("Added server_source column to tracks table")
+            if 'disc_number' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
+                logger.info("Added disc_number column to tracks table")
                 
             # Create indexes for server_source columns for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_server_source ON artists (server_source)")
@@ -4134,6 +4139,114 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error creating repair worker v2 tables: {e}")
 
+    def _init_manual_library_match_table(self):
+        """Create manual_library_track_matches table and indexes."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS manual_library_track_matches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        profile_id INTEGER DEFAULT 1,
+                        source TEXT NOT NULL,
+                        source_track_id TEXT NOT NULL,
+                        source_title TEXT,
+                        source_artist TEXT,
+                        source_album TEXT,
+                        source_context_json TEXT,
+                        server_source TEXT DEFAULT '',
+                        library_track_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(profile_id, source, source_track_id, server_source)
+                    )
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mltm_lookup
+                    ON manual_library_track_matches (profile_id, source, source_track_id, server_source)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mltm_lib_track
+                    ON manual_library_track_matches (library_track_id)
+                """)
+        except Exception as e:
+            logger.error(f"Error creating manual_library_track_matches table: {e}")
+
+    def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
+                                   library_track_id: int, **meta) -> bool:
+        """Insert or replace a manual match. meta keys: source_title, source_artist,
+        source_album, source_context_json, server_source."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO manual_library_track_matches
+                        (profile_id, source, source_track_id, library_track_id,
+                         source_title, source_artist, source_album,
+                         source_context_json, server_source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(profile_id, source, source_track_id, server_source)
+                    DO UPDATE SET
+                        library_track_id = excluded.library_track_id,
+                        source_title = excluded.source_title,
+                        source_artist = excluded.source_artist,
+                        source_album = excluded.source_album,
+                        source_context_json = excluded.source_context_json,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    profile_id, source, source_track_id, library_track_id,
+                    meta.get('source_title'), meta.get('source_artist'),
+                    meta.get('source_album'), meta.get('source_context_json'),
+                    meta.get('server_source', ''),
+                ))
+                return True
+        except Exception as e:
+            logger.error(f"save_manual_library_match error: {e}")
+            return False
+
+    def get_manual_library_match(self, profile_id: int, source: str,
+                                  source_track_id: str, server_source: str = '') -> Optional[Dict[str, Any]]:
+        """Return match row dict or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ? AND source = ? AND source_track_id = ? AND server_source = ?
+                """, (profile_id, source, source_track_id, server_source))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_manual_library_match error: {e}")
+            return None
+
+    def delete_manual_library_match(self, match_id: int, profile_id: int) -> bool:
+        """Delete match by PK id, scoped to profile_id."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    DELETE FROM manual_library_track_matches WHERE id = ? AND profile_id = ?
+                """, (match_id, profile_id))
+                return True
+        except Exception as e:
+            logger.error(f"delete_manual_library_match error: {e}")
+            return False
+
+    def list_manual_library_matches(self, profile_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return matches for profile ordered by updated_at DESC."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                """, (profile_id, limit))
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"list_manual_library_matches error: {e}")
+            return []
+
     # ── Profile CRUD ──────────────────────────────────────────────────
 
     def get_all_profiles(self) -> List[Dict[str, Any]]:
@@ -6144,7 +6257,7 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
             return []
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -6156,7 +6269,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -6170,7 +6283,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -6193,7 +6306,7 @@ class MusicDatabase:
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -6226,7 +6339,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -6262,7 +6375,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -6281,7 +6394,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -6398,7 +6511,7 @@ class MusicDatabase:
         
         return unique_variations
     
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None) -> float:
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -6417,6 +6530,18 @@ class MusicDatabase:
 
             # Use the best title similarity
             best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
+
+            if strict_discography_match and not self._passes_strict_discography_album_match(
+                search_title,
+                db_album.title,
+                title_similarity,
+                clean_title_similarity,
+                normalized_title_similarity,
+                expected_track_count,
+                db_album.track_count,
+            ):
+                logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
+                return 0.0
 
             # Log when normalized matching helps (only if it's the best score and better than others)
             if normalized_title_similarity == best_title_similarity and normalized_title_similarity > max(title_similarity, clean_title_similarity):
@@ -6454,6 +6579,92 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error calculating album confidence: {e}")
             return 0.0
+
+    def _passes_strict_discography_album_match(
+        self,
+        search_title: str,
+        db_title: str,
+        title_similarity: float,
+        clean_title_similarity: float,
+        normalized_title_similarity: float,
+        expected_track_count: Optional[int],
+        db_track_count: Optional[int],
+    ) -> bool:
+        """Guard artist-page owned status against generic soundtrack false positives."""
+        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
+            return True
+
+        normalized_search_title = self._normalize_for_comparison(search_title)
+        normalized_db_title = self._normalize_for_comparison(db_title)
+        if normalized_search_title == normalized_db_title:
+            return True
+
+        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
+        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
+        if clean_search_title and clean_search_title == clean_db_title:
+            return True
+
+        best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
+        search_tokens = self._distinctive_soundtrack_title_tokens(search_title)
+        db_tokens = self._distinctive_soundtrack_title_tokens(db_title)
+        if not search_tokens or not db_tokens:
+            return False
+
+        shared_tokens = search_tokens & db_tokens
+        smaller_overlap = len(shared_tokens) / min(len(search_tokens), len(db_tokens))
+        jaccard_overlap = len(shared_tokens) / len(search_tokens | db_tokens)
+        if smaller_overlap < 0.75 or jaccard_overlap < 0.55:
+            return False
+
+        if expected_track_count and db_track_count and best_title_similarity < 0.9:
+            track_ratio = min(expected_track_count, db_track_count) / max(expected_track_count, db_track_count)
+            if track_ratio < 0.5:
+                return False
+
+        return True
+
+    def _is_soundtrack_like_album_title(self, title: str) -> bool:
+        title = (title or "").lower()
+        patterns = [
+            r"\bsoundtrack\b",
+            r"\bscore\b",
+            r"\bost\b",
+            r"original\s+motion\s+picture",
+            r"music\s+from\s+(?:the\s+)?(?:motion\s+picture|film|movie|series|anime|tv|television)",
+            r"complete\s+recordings?",
+        ]
+        return any(re.search(pattern, title) for pattern in patterns)
+
+    def _distinctive_soundtrack_title_tokens(self, title: str) -> set[str]:
+        normalized = self._normalize_for_comparison(title)
+        tokens = set(re.findall(r"[a-z0-9]+", normalized))
+        noise = {
+            "album",
+            "anime",
+            "complete",
+            "deluxe",
+            "edition",
+            "film",
+            "from",
+            "motion",
+            "movie",
+            "music",
+            "official",
+            "original",
+            "ost",
+            "picture",
+            "recording",
+            "recordings",
+            "score",
+            "series",
+            "soundtrack",
+            "special",
+            "television",
+            "the",
+            "tv",
+            "version",
+        }
+        return {token for token in tokens if token not in noise and len(token) > 1}
     
     def _generate_track_title_variations(self, title: str) -> List[str]:
         """Generate variations of track title for better matching"""
@@ -7103,6 +7314,16 @@ class MusicDatabase:
                 if not track_id:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return False
+
+                track_source = spotify_track_data.get('provider') or spotify_track_data.get('source') or 'spotify'
+                if self.get_manual_library_match(profile_id, track_source, track_id):
+                    logger.info(
+                        "Skipping wishlist add for manually matched track: '%s' (%s:%s)",
+                        spotify_track_data.get('name', 'Unknown Track'),
+                        track_source,
+                        track_id,
+                    )
+                    return True
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])

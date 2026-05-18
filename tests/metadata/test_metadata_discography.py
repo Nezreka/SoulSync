@@ -322,6 +322,7 @@ def test_iter_artist_discography_completion_uses_primary_source_first(monkeypatc
     assert spotify.album_calls == []
     assert itunes.album_calls == []
     assert db.album_calls and db.album_calls[0]["expected_track_count"] == 2
+    assert db.album_calls[0]["strict_discography_match"] is True
 
 
 def test_iter_artist_discography_completion_respects_source_override(monkeypatch):
@@ -358,6 +359,106 @@ def test_iter_artist_discography_completion_respects_source_override(monkeypatch
     assert itunes.album_calls == [("release-2", {})]
     assert deezer.album_calls == []
     assert spotify.album_calls == []
+
+
+def test_artist_discography_completion_uses_strict_matching_for_eps(monkeypatch):
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source_name, **kwargs: None)
+
+    db = _CompletionFakeDB(owned_tracks=1, expected_tracks=2)
+    events = list(metadata_completion.iter_artist_discography_completion_events(
+        {
+            "albums": [],
+            "singles": [{
+                "id": "ep-1",
+                "name": "Original Motion Picture Soundtrack EP",
+                "album_type": "ep",
+                "total_tracks": 2,
+            }],
+        },
+        artist_name="Composer One",
+        db=db,
+    ))
+
+    assert events[1]["type"] == "single_completion"
+    assert db.album_calls[0]["strict_discography_match"] is True
+
+
+def test_strict_discography_matching_rejects_distinct_soundtrack_siblings():
+    db = object.__new__(MusicDatabase)
+    album = types.SimpleNamespace(
+        title="Star Wars: Episode I - The Phantom Menace (Original Motion Picture Soundtrack)",
+        artist_name="John Williams",
+        track_count=17,
+    )
+
+    confidence = db._calculate_album_confidence(
+        "Star Wars: Episode II - Attack of the Clones (Original Motion Picture Soundtrack)",
+        "John Williams",
+        album,
+        expected_track_count=13,
+        strict_discography_match=True,
+    )
+
+    assert confidence == 0.0
+
+
+def test_strict_discography_matching_allows_same_soundtrack_title():
+    db = object.__new__(MusicDatabase)
+    album = types.SimpleNamespace(
+        title="Star Wars: Episode I - The Phantom Menace (Original Motion Picture Soundtrack)",
+        artist_name="John Williams",
+        track_count=17,
+    )
+
+    confidence = db._calculate_album_confidence(
+        "Star Wars: Episode I - The Phantom Menace (Original Motion Picture Soundtrack)",
+        "John Williams",
+        album,
+        expected_track_count=17,
+        strict_discography_match=True,
+    )
+
+    assert confidence >= 0.9
+
+
+def test_non_strict_album_matching_keeps_edition_behavior():
+    db = object.__new__(MusicDatabase)
+    album = types.SimpleNamespace(
+        title="DAMN. (Deluxe Edition)",
+        artist_name="Kendrick Lamar",
+        track_count=14,
+    )
+
+    confidence = db._calculate_album_confidence(
+        "DAMN.",
+        "Kendrick Lamar",
+        album,
+        expected_track_count=14,
+        strict_discography_match=False,
+    )
+
+    assert confidence >= 0.9
+
+
+def test_strict_discography_matching_does_not_change_normal_albums():
+    db = object.__new__(MusicDatabase)
+    album = types.SimpleNamespace(
+        title="DAMN. (Deluxe Edition)",
+        artist_name="Kendrick Lamar",
+        track_count=14,
+    )
+
+    confidence = db._calculate_album_confidence(
+        "DAMN.",
+        "Kendrick Lamar",
+        album,
+        expected_track_count=14,
+        strict_discography_match=True,
+    )
+
+    assert confidence >= 0.9
 
 
 def test_iter_artist_discography_completion_uses_release_artist_metadata(monkeypatch):
