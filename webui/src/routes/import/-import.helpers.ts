@@ -160,13 +160,14 @@ export function getAutoImportStatusText(status: ImportAutoImportStatusPayload | 
   return 'Watching';
 }
 
-export function getAutoImportStatusClass(
+export type AutoImportStatusTone = 'neutral' | 'info' | 'success';
+
+export function getAutoImportStatusTone(
   status: ImportAutoImportStatusPayload | undefined,
-): string {
-  if (!status?.running) return 'disabled';
-  if (status.current_status === 'scanning') return 'scanning';
-  if (status.current_status === 'processing') return 'processing';
-  return 'active';
+): AutoImportStatusTone {
+  if (!status?.running || status.paused) return 'neutral';
+  if (status.current_status === 'scanning' || status.current_status === 'processing') return 'info';
+  return 'success';
 }
 
 export function getActiveImportLines(status: ImportAutoImportStatusPayload | undefined): string[] {

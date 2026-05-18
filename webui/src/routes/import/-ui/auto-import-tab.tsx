@@ -34,9 +34,9 @@ import {
   filterAutoImportResults,
   getActiveImportLines,
   getAutoImportCounts,
-  getAutoImportStatusClass,
   getAutoImportStatusMeta,
   getAutoImportStatusText,
+  getAutoImportStatusTone,
   getAutoImportTimeAgo,
   getConfidenceClass,
   parseAutoImportMatchData,
@@ -149,7 +149,7 @@ export function AutoImportPanel({
   const results = filterAutoImportResults(allResults, autoFilter);
   const counts = getAutoImportCounts(allResults);
   const activeLines = getActiveImportLines(statusQuery.data);
-  const statusClassName = getAutoImportStatusClass(statusQuery.data);
+  const statusTone = getAutoImportStatusTone(statusQuery.data);
 
   if (statusQuery.error) {
     return (
@@ -173,12 +173,9 @@ export function AutoImportPanel({
             />
             <span id="auto-import-toggle-label">Auto-Import</span>
           </div>
-          <span
-            className={`${styles.autoImportStatus} ${styles[statusClassName]}`}
-            id="auto-import-status-text"
-          >
+          <Badge id="auto-import-status-text" tone={statusTone}>
             {getAutoImportStatusText(statusQuery.data)}
-          </span>
+          </Badge>
           <div className={styles.importPageFlexSpacer} />
           {statusQuery.data?.running ? (
             <Button
