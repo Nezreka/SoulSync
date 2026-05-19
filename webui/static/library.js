@@ -815,7 +815,7 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
             navigateToPage('artist-detail', {
                 artistId,
                 artistSource: normalizedSource,
-                skipRouteChange: true
+                skipRouteChange: options.skipRouteChange === true
             });
             _updateArtistDetailBackButtonLabel();
         }

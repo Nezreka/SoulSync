@@ -22,6 +22,7 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
     setActivePageChrome: vi.fn(),
     activateLegacyPath: vi.fn(),
+    navigateToArtistDetail: vi.fn(),
     showReactHost: vi.fn(),
     ...overrides,
   };
