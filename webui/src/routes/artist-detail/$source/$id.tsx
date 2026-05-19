@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect } from 'react';
+import { useLayoutEffect } from 'react';
 
 import { useShellBridge } from '@/platform/shell/route-controllers';
 
@@ -17,15 +17,10 @@ function ArtistDetailPage() {
   useLayoutEffect(() => {
     if (!bridge) return;
 
-    bridge.cancelSimilarArtistsLoad();
     const normalizedSource = source.toLowerCase() === 'library' ? null : source.toLowerCase();
     bridge.navigateToArtistDetail(id, '', normalizedSource, {
       skipRouteChange: true,
     });
-  }, [bridge, id, source]);
-
-  useEffect(() => {
-    if (!bridge) return;
 
     return () => {
       bridge.cancelSimilarArtistsLoad();
