@@ -2316,6 +2316,25 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
         if (artist.mood) metaTags.push(`<span class="watchlist-detail-genre-tag">${escapeHtml(artist.mood)}</span>`);
         if (artist.label) metaTags.push(`<span class="watchlist-detail-genre-tag">${escapeHtml(artist.label)}</span>`);
 
+        let discogId = null;
+        let discogSource = null;
+        const activeSrc = (currentMusicSourceName || '').toLowerCase();
+        if (activeSrc.includes('spotify') && spotify_artist_id) {
+            discogId = spotify_artist_id; discogSource = 'spotify';
+        } else if (activeSrc.includes('discogs') && discogs_artist_id) {
+            discogId = discogs_artist_id; discogSource = 'discogs';
+        } else if (activeSrc.includes('deezer') && deezer_artist_id) {
+            discogId = deezer_artist_id; discogSource = 'deezer';
+        } else if (activeSrc.includes('musicbrainz') && musicbrainz_artist_id) {
+            discogId = musicbrainz_artist_id; discogSource = 'musicbrainz';
+        } else if (itunes_artist_id) {
+            discogId = itunes_artist_id; discogSource = 'itunes';
+        } else {
+            discogId = spotify_artist_id || discogs_artist_id || deezer_artist_id || musicbrainz_artist_id || itunes_artist_id;
+            discogSource = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : musicbrainz_artist_id ? 'musicbrainz' : 'itunes';
+        }
+        const discogHref = discogId ? buildArtistDetailPath(discogId, discogSource) : '#';
+
         overlay.innerHTML = `
             ${artist.banner_url ? `
                 <div class="watchlist-detail-banner">
@@ -2398,7 +2417,7 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
                 </div>
 
                 <div class="watchlist-detail-actions">
-                    <button class="watchlist-detail-discog-btn watchlist-detail-discog-action">View Discography</button>
+                    <a class="watchlist-detail-discog-btn watchlist-detail-discog-action" href="${discogHref}" ${discogId ? 'onclick="closeWatchlistArtistDetailView()"' : 'aria-disabled="true" tabindex="-1" style="pointer-events:none;opacity:0.5;text-decoration:none;color:inherit;"'}>View Discography</a>
                     <button class="watchlist-detail-settings-btn watchlist-detail-settings-action">Settings</button>
                     <button class="watchlist-detail-remove-btn watchlist-detail-remove-action">Remove from Watchlist</button>
                 </div>
@@ -2408,30 +2427,6 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
         // Wire up event listeners (avoids inline onclick escaping issues)
         overlay.querySelector('.watchlist-detail-back-btn').addEventListener('click', () => {
             closeWatchlistArtistDetailView();
-        });
-
-        overlay.querySelector('.watchlist-detail-discog-action').addEventListener('click', () => {
-            // Use the ID matching the active metadata source
-            let discogId, source;
-            const activeSrc = (currentMusicSourceName || '').toLowerCase();
-            if (activeSrc.includes('spotify') && spotify_artist_id) {
-                discogId = spotify_artist_id; source = 'spotify';
-            } else if (activeSrc.includes('discogs') && discogs_artist_id) {
-                discogId = discogs_artist_id; source = 'discogs';
-            } else if (activeSrc.includes('deezer') && deezer_artist_id) {
-                discogId = deezer_artist_id; source = 'deezer';
-            } else if (activeSrc.includes('musicbrainz') && musicbrainz_artist_id) {
-                discogId = musicbrainz_artist_id; source = 'musicbrainz';
-            } else if (itunes_artist_id) {
-                discogId = itunes_artist_id; source = 'itunes';
-            } else {
-                discogId = spotify_artist_id || discogs_artist_id || deezer_artist_id || musicbrainz_artist_id || itunes_artist_id;
-                source = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : musicbrainz_artist_id ? 'musicbrainz' : 'itunes';
-            }
-            if (discogId) {
-                closeWatchlistArtistDetailView();
-                navigateToArtistDetail(discogId, artistName, source);
-            }
         });
 
         overlay.querySelector('.watchlist-detail-settings-action').addEventListener('click', () => {

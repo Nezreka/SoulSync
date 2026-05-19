@@ -201,6 +201,13 @@ let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
 let similarArtistsController = null; // Track ongoing similar artists stream to cancel when navigating away
 
+function cancelSimilarArtistsLoad() {
+    if (similarArtistsController) {
+        similarArtistsController.abort();
+        similarArtistsController = null;
+    }
+}
+
 // --- Lazy Background Image Observer ---
 // Watches elements with data-bg-src, applies background-image when visible, unobserves after.
 const lazyBgObserver = new IntersectionObserver((entries) => {
