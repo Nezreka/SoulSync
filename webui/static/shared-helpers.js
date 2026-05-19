@@ -3862,7 +3862,7 @@ function createSimilarArtistBubble(artist) {
     // library and source artists thanks to the source-aware backend endpoint.
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        navigateToArtistDetail(artist.id, artist.name, artist.source || null);
+        navigateToArtistDetailPage(artist.id, artist.name, artist.source || null);
     });
 
     return bubble;

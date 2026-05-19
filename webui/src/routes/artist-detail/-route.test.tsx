@@ -51,7 +51,6 @@ describe('artist-detail route', () => {
         '',
         'spotify',
         {
-          skipOriginPush: true,
           skipRouteChange: true,
         },
       );
@@ -67,7 +66,6 @@ describe('artist-detail route', () => {
         '',
         null,
         {
-          skipOriginPush: true,
           skipRouteChange: true,
         },
       );

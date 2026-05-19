@@ -18,7 +18,6 @@ function ArtistDetailPage() {
 
     const normalizedSource = source.toLowerCase() === 'library' ? null : source.toLowerCase();
     bridge.navigateToArtistDetail(id, '', normalizedSource, {
-      skipOriginPush: true,
       skipRouteChange: true,
     });
   }, [bridge, id, source]);

@@ -2430,7 +2430,7 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
             }
             if (discogId) {
                 closeWatchlistArtistDetailView();
-                navigateToArtistDetail(discogId, artistName, source);
+                navigateToArtistDetailPage(discogId, artistName, source);
             }
         });
 

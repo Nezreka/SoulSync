@@ -672,7 +672,7 @@ function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, play
         showToast(`Artist details are not available for ${artistName}`, 'warning');
         return;
     }
-    navigateToArtistDetail(resolvedArtistId, artistName, resolvedSource);
+    navigateToArtistDetailPage(resolvedArtistId, artistName, resolvedSource);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -5782,7 +5782,7 @@ function _gsClickArtist(id, name, isLibrary) {
     _gsDeactivate();
     const activeSource = _gsController && _gsController.state.activeSource;
     const source = isLibrary ? null : (activeSource || null);
-    navigateToArtistDetail(id, name, source);
+    navigateToArtistDetailPage(id, name, source);
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
@@ -6400,4 +6400,3 @@ const additionalStyles = `
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
 // ============================================================================
-

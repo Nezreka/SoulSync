@@ -165,6 +165,7 @@ window.SoulSyncWebShellBridge = {
     activateLegacyPath(pathname) {
         activateLegacyPath(pathname);
     },
+    navigateToArtistDetailPage,
     navigateToArtistDetail,
     showReactHost(pageId) {
         showReactHost(pageId);
