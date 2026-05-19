@@ -3832,14 +3832,23 @@ function displaySimilarArtists(artists) {
  * Create a similar artist bubble card element
  */
 function createSimilarArtistBubble(artist) {
+    const artistId = artist.id ? String(artist.id).trim() : '';
+    const hasArtistDetail = !!artistId;
+
     // Create bubble container
-    const bubble = document.createElement('a');
+    const bubble = document.createElement(hasArtistDetail ? 'a' : 'div');
     bubble.className = 'similar-artist-bubble';
-    bubble.href = buildArtistDetailPath(artist.id, artist.source || null);
+    if (hasArtistDetail) {
+        bubble.href = buildArtistDetailPath(artistId, artist.source || null);
+    } else {
+        bubble.setAttribute('aria-disabled', 'true');
+        bubble.style.cursor = 'default';
+        bubble.style.pointerEvents = 'none';
+    }
     bubble.style.color = 'inherit';
     bubble.style.textDecoration = 'none';
     bubble.setAttribute('aria-label', artist.name);
-    bubble.setAttribute('data-artist-id', artist.id);
+    bubble.setAttribute('data-artist-id', artistId);
     bubble.setAttribute('data-artist-source', artist.source || '');
     if (artist.plugin) {
         bubble.setAttribute('data-artist-plugin', artist.plugin);
