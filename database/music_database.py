@@ -118,6 +118,7 @@ class SimilarArtist:
     genres: Optional[List[str]] = None  # Cached genres
     popularity: int = 0  # Cached popularity score
     similar_artist_deezer_id: Optional[str] = None  # Deezer artist ID
+    similar_artist_musicbrainz_id: Optional[str] = None  # MusicBrainz artist ID
 
 @dataclass
 class DiscoveryTrack:
@@ -1174,6 +1175,10 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_deezer_id TEXT")
                 logger.info("Added similar_artist_deezer_id column to similar_artists table")
 
+            if 'similar_artist_musicbrainz_id' not in similar_artists_columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_musicbrainz_id TEXT")
+                logger.info("Added similar_artist_musicbrainz_id column to similar_artists table")
+
             # Migration: Add iTunes columns to recent_releases for dual-source discovery
             cursor.execute("PRAGMA table_info(recent_releases)")
             recent_releases_columns = [column[1] for column in cursor.fetchall()]
@@ -1288,6 +1293,8 @@ class MusicDatabase:
                                 source_artist_id TEXT NOT NULL,
                                 similar_artist_spotify_id TEXT,
                                 similar_artist_itunes_id TEXT,
+                                similar_artist_deezer_id TEXT,
+                                similar_artist_musicbrainz_id TEXT,
                                 similar_artist_name TEXT NOT NULL,
                                 similarity_rank INTEGER DEFAULT 1,
                                 occurrence_count INTEGER DEFAULT 1,
@@ -1298,8 +1305,10 @@ class MusicDatabase:
                         migration_cursor.execute("""
                             INSERT OR IGNORE INTO similar_artists_new
                             (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                             similar_artist_deezer_id, similar_artist_musicbrainz_id,
                              similar_artist_name, similarity_rank, occurrence_count, last_updated)
                             SELECT source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                                   similar_artist_deezer_id, similar_artist_musicbrainz_id,
                                    similar_artist_name, similarity_rank, occurrence_count, last_updated
                             FROM similar_artists
                         """)
@@ -1312,6 +1321,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_itunes ON similar_artists (similar_artist_itunes_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_musicbrainz ON similar_artists (similar_artist_musicbrainz_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_occurrence ON similar_artists (occurrence_count)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_name ON similar_artists (similar_artist_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
@@ -2958,6 +2968,7 @@ class MusicDatabase:
                             similar_artist_spotify_id TEXT,
                             similar_artist_itunes_id TEXT,
                             similar_artist_deezer_id TEXT,
+                            similar_artist_musicbrainz_id TEXT,
                             similar_artist_name TEXT NOT NULL,
                             similarity_rank INTEGER DEFAULT 1,
                             occurrence_count INTEGER DEFAULT 1,
@@ -2974,7 +2985,8 @@ class MusicDatabase:
 
                     new_cols = ['id', 'source_artist_id', 'similar_artist_spotify_id',
                                 'similar_artist_itunes_id', 'similar_artist_deezer_id',
-                                'similar_artist_name', 'similarity_rank', 'occurrence_count',
+                                'similar_artist_musicbrainz_id', 'similar_artist_name',
+                                'similarity_rank', 'occurrence_count',
                                 'last_updated', 'image_url', 'genres', 'popularity',
                                 'metadata_updated_at', 'last_featured', 'profile_id']
                     shared_cols = [c for c in new_cols if c in old_cols]
@@ -8260,25 +8272,27 @@ class MusicDatabase:
                                       image_url: Optional[str] = None,
                                       genres: Optional[list] = None,
                                       popularity: int = 0,
-                                      similar_artist_deezer_id: Optional[str] = None) -> bool:
-        """Add or update a similar artist recommendation (supports Spotify, iTunes, and Deezer IDs)"""
+                                      similar_artist_deezer_id: Optional[str] = None,
+                                      similar_artist_musicbrainz_id: Optional[str] = None) -> bool:
+        """Add or update a similar artist recommendation."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 genres_json = json.dumps(genres) if genres else None
 
-                # Use artist name as the unique key (allows storing both IDs for same artist)
                 cursor.execute("""
                     INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_name,
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                     similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
                      similarity_rank, occurrence_count, last_updated, profile_id,
                      image_url, genres, popularity, metadata_updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source_artist_id, similar_artist_name)
                     DO UPDATE SET
                         similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
                         similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
                         similar_artist_deezer_id = COALESCE(excluded.similar_artist_deezer_id, similar_artist_deezer_id),
+                        similar_artist_musicbrainz_id = COALESCE(excluded.similar_artist_musicbrainz_id, similar_artist_musicbrainz_id),
                         similarity_rank = excluded.similarity_rank,
                         occurrence_count = occurrence_count + 1,
                         last_updated = CURRENT_TIMESTAMP,
@@ -8286,7 +8300,8 @@ class MusicDatabase:
                         genres = COALESCE(excluded.genres, genres),
                         popularity = CASE WHEN excluded.popularity > 0 THEN excluded.popularity ELSE popularity END,
                         metadata_updated_at = CASE WHEN excluded.image_url IS NOT NULL THEN CURRENT_TIMESTAMP ELSE metadata_updated_at END
-                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_name,
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                      similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
                       similarity_rank, profile_id, image_url, genres_json, popularity))
 
                 conn.commit()
@@ -8319,6 +8334,7 @@ class MusicDatabase:
                     occurrence_count=row['occurrence_count'],
                     last_updated=datetime.fromisoformat(row['last_updated']),
                     similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
+                    similar_artist_musicbrainz_id=row['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in row.keys() else None,
                 ) for row in rows]
 
         except Exception as e:
@@ -8328,11 +8344,14 @@ class MusicDatabase:
     def get_similar_artists_missing_fallback_ids(self, source_artist_id: str, fallback_source: str = 'itunes', profile_id: int = 1) -> List[SimilarArtist]:
         """Get similar artists missing fallback-provider IDs for backfill."""
         try:
-            if fallback_source not in {'itunes', 'deezer'}:
+            if fallback_source not in {'itunes', 'deezer', 'musicbrainz'}:
                 logger.error("Unsupported similar-artist fallback source: %s", fallback_source)
                 return []
 
-            col = 'similar_artist_deezer_id' if fallback_source == 'deezer' else 'similar_artist_itunes_id'
+            col = {
+                'deezer': 'similar_artist_deezer_id',
+                'musicbrainz': 'similar_artist_musicbrainz_id',
+            }.get(fallback_source, 'similar_artist_itunes_id')
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -8355,6 +8374,7 @@ class MusicDatabase:
                     occurrence_count=row['occurrence_count'],
                     last_updated=datetime.fromisoformat(row['last_updated']),
                     similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
+                    similar_artist_musicbrainz_id=row['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in row.keys() else None,
                 ) for row in rows]
 
         except Exception as e:
@@ -8399,6 +8419,25 @@ class MusicDatabase:
             logger.error(f"Error updating similar artist Deezer ID: {e}")
             return False
 
+    def update_similar_artist_musicbrainz_id(self, similar_artist_id: int, musicbrainz_id: str) -> bool:
+        """Update a similar artist's MusicBrainz ID (for backfill)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE similar_artists
+                    SET similar_artist_musicbrainz_id = ?
+                    WHERE id = ?
+                """, (musicbrainz_id, similar_artist_id))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating similar artist MusicBrainz ID: {e}")
+            return False
+
     def update_similar_artist_metadata(self, similar_artist_id: int, image_url: str = None,
                                         genres: list = None, popularity: int = None) -> bool:
         """Cache artist metadata (image, genres, popularity) to avoid repeated API calls"""
@@ -8420,7 +8459,7 @@ class MusicDatabase:
     def update_similar_artist_metadata_by_external_id(self, external_id: str, source: str = 'spotify',
                                                        image_url: str = None, genres: list = None,
                                                        popularity: int = None) -> bool:
-        """Cache artist metadata by Spotify or iTunes ID (updates all rows for that artist)"""
+        """Cache artist metadata by external source ID (updates all rows for that artist)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -8429,6 +8468,8 @@ class MusicDatabase:
                     where_clause = "similar_artist_spotify_id = ?"
                 elif source == 'deezer':
                     where_clause = "similar_artist_deezer_id = ?"
+                elif source == 'musicbrainz':
+                    where_clause = "similar_artist_musicbrainz_id = ?"
                 else:
                     where_clause = "similar_artist_itunes_id = ?"
                 cursor.execute(f"""
@@ -8490,7 +8531,7 @@ class MusicDatabase:
         exclude_library_server: str = None,
     ) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support.
-        require_source: if set ('spotify','itunes','deezer'), only returns artists with that source ID.
+        require_source: if set, only returns artists with that source ID.
         exclude_library_server: if set, also excludes artists already present in that media server."""
         try:
             with self._get_connection() as conn:
@@ -8504,12 +8545,14 @@ class MusicDatabase:
                     source_filter = "AND sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id != ''"
                 elif require_source == 'deezer':
                     source_filter = "AND sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id != ''"
+                elif require_source == 'musicbrainz':
+                    source_filter = "AND sa.similar_artist_musicbrainz_id IS NOT NULL AND sa.similar_artist_musicbrainz_id != ''"
 
                 library_artist_keys = None
                 sql_limit = limit
                 if exclude_library_server:
                     cursor.execute("""
-                        SELECT name, spotify_artist_id, itunes_artist_id, deezer_id
+                        SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, musicbrainz_id
                         FROM artists
                         WHERE server_source = ?
                     """, (exclude_library_server,))
@@ -8518,6 +8561,7 @@ class MusicDatabase:
                         'spotify': {r['spotify_artist_id'] for r in library_rows if r['spotify_artist_id']},
                         'itunes': {r['itunes_artist_id'] for r in library_rows if r['itunes_artist_id']},
                         'deezer': {r['deezer_id'] for r in library_rows if r['deezer_id']},
+                        'musicbrainz': {r['musicbrainz_id'] for r in library_rows if r['musicbrainz_id']},
                         'names': {
                             self._normalize_for_comparison(r['name'])
                             for r in library_rows
@@ -8533,6 +8577,7 @@ class MusicDatabase:
                         MAX(sa.similar_artist_spotify_id) as similar_artist_spotify_id,
                         MAX(sa.similar_artist_itunes_id) as similar_artist_itunes_id,
                         MAX(sa.similar_artist_deezer_id) as similar_artist_deezer_id,
+                        MAX(sa.similar_artist_musicbrainz_id) as similar_artist_musicbrainz_id,
                         sa.similar_artist_name,
                         AVG(sa.similarity_rank) as similarity_rank,
                         SUM(sa.occurrence_count) as occurrence_count,
@@ -8564,11 +8609,13 @@ class MusicDatabase:
                         spotify_id = row['similar_artist_spotify_id']
                         itunes_id = row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None
                         deezer_id = row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None
+                        musicbrainz_id = row['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in row.keys() else None
                         normalized_name = self._normalize_for_comparison(row['similar_artist_name'])
                         if (
                             (spotify_id and spotify_id in library_artist_keys['spotify'])
                             or (itunes_id and itunes_id in library_artist_keys['itunes'])
                             or (deezer_id and deezer_id in library_artist_keys['deezer'])
+                            or (musicbrainz_id and musicbrainz_id in library_artist_keys['musicbrainz'])
                             or (normalized_name and normalized_name in library_artist_keys['names'])
                         ):
                             continue
@@ -8584,6 +8631,7 @@ class MusicDatabase:
                         similar_artist_spotify_id=row['similar_artist_spotify_id'],
                         similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
                         similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
+                        similar_artist_musicbrainz_id=row['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in row.keys() else None,
                         similar_artist_name=row['similar_artist_name'],
                         similarity_rank=int(row['similarity_rank']),
                         occurrence_count=row['occurrence_count'],
