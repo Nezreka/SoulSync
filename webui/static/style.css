@@ -16445,6 +16445,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #D4A574;
 }
 
+.watchlist-source-musicbrainz {
+    background: rgba(186, 71, 143, 0.15);
+    color: #BA478F;
+}
+
 .watchlist-source-amazon {
     background: rgba(255, 153, 0, 0.15);
     color: #FF9900;
