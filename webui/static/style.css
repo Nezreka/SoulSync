@@ -449,6 +449,36 @@ body {
     color: rgba(var(--accent-rgb), 0.7);
 }
 
+.nav-button.nav-watchlist-scanning .nav-icon {
+    animation: watchlist-scan-glow 1.6s ease-in-out infinite;
+}
+
+.nav-button.nav-watchlist-scanning .nav-svg {
+    animation: watchlist-scan-svg 1.6s ease-in-out infinite;
+}
+
+@keyframes watchlist-scan-glow {
+    0%, 100% {
+        box-shadow:
+            0 2px 4px rgba(0, 0, 0, 0.15),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06),
+            0 0 6px rgba(var(--accent-rgb), 0.25);
+        border-color: rgba(var(--accent-rgb), 0.2);
+    }
+    50% {
+        box-shadow:
+            0 2px 8px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            0 0 14px rgba(var(--accent-rgb), 0.55);
+        border-color: rgba(var(--accent-rgb), 0.5);
+    }
+}
+
+@keyframes watchlist-scan-svg {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.8)); }
+}
+
 .nav-button:hover .nav-icon {
     color: rgba(255, 255, 255, 0.95);
     background: linear-gradient(135deg,
