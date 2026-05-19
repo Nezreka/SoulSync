@@ -531,6 +531,7 @@ class WatchlistScanner:
             'itunes': 'itunes_artist_id',
             'deezer': 'deezer_artist_id',
             'discogs': 'discogs_artist_id',
+            'musicbrainz': 'musicbrainz_artist_id',
         }.get(source)
 
     @staticmethod
@@ -571,6 +572,9 @@ class WatchlistScanner:
         elif source == 'discogs':
             self.database.update_watchlist_discogs_id(watchlist_artist.id, source_id)
             watchlist_artist.discogs_artist_id = source_id
+        elif source == 'musicbrainz':
+            self.database.update_watchlist_musicbrainz_id(watchlist_artist.id, source_id)
+            watchlist_artist.musicbrainz_artist_id = source_id
 
     def _resolve_watchlist_artist_source_id(self, watchlist_artist: WatchlistArtist, source: str, client: Any) -> Optional[str]:
         """Resolve the artist ID for an exact source, searching by name if needed."""
@@ -901,7 +905,7 @@ class WatchlistScanner:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
-                       deezer_artist_id, discogs_artist_id
+                       deezer_artist_id, discogs_artist_id, musicbrainz_artist_id
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (image_url IS NULL OR image_url = '' OR image_url = 'None'
                       OR image_url NOT LIKE 'http%')
@@ -956,7 +960,8 @@ class WatchlistScanner:
 
                 if img:
                     aid = (row['spotify_artist_id'] or row['itunes_artist_id']
-                           or row['deezer_artist_id'] or row['discogs_artist_id'])
+                           or row['deezer_artist_id'] or row['discogs_artist_id']
+                           or row['musicbrainz_artist_id'])
                     if aid:
                         self.database.update_watchlist_artist_image(aid, img)
                     else:
@@ -989,7 +994,7 @@ class WatchlistScanner:
         """
         # Per-artist metadata source override — if set, use that source first with fallback
         preferred = getattr(watchlist_artist, 'preferred_metadata_source', None)
-        if preferred and preferred in ('spotify', 'deezer', 'itunes', 'discogs'):
+        if preferred and preferred in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
             source_priority = list(get_source_priority(preferred))
         else:
             source_priority = self._watchlist_source_priority()
@@ -1161,7 +1166,7 @@ class WatchlistScanner:
         # Keep this as a plain source list; resolve the client right before each use.
         providers_to_backfill = [
             source for source in self._watchlist_source_priority()
-            if source in {'spotify', 'itunes', 'deezer', 'discogs'}
+            if source in {'spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz'}
         ]
 
         for provider in providers_to_backfill:
@@ -1218,6 +1223,7 @@ class WatchlistScanner:
                 or artist.itunes_artist_id
                 or artist.deezer_artist_id
                 or artist.discogs_artist_id
+                or getattr(artist, 'musicbrainz_artist_id', None)
                 or str(artist.id)
             )
 
@@ -1592,6 +1598,7 @@ class WatchlistScanner:
             'itunes': 'itunes_artist_id',
             'deezer': 'deezer_artist_id',
             'discogs': 'discogs_artist_id',
+            'musicbrainz': 'musicbrainz_artist_id',
         }.get(provider)
 
         if not id_attr:
@@ -1611,6 +1618,7 @@ class WatchlistScanner:
             'itunes': self._match_to_itunes,
             'deezer': self._match_to_deezer,
             'discogs': self._match_to_discogs,
+            'musicbrainz': self._match_to_musicbrainz,
         }.get(provider)
 
         update_fn = {
@@ -1618,6 +1626,7 @@ class WatchlistScanner:
             'itunes': self.database.update_watchlist_itunes_id,
             'deezer': self.database.update_watchlist_deezer_id,
             'discogs': self.database.update_watchlist_discogs_id,
+            'musicbrainz': self.database.update_watchlist_musicbrainz_id,
         }.get(provider)
 
         if not match_fn or not update_fn:
@@ -1775,6 +1784,17 @@ class WatchlistScanner:
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to Discogs: {e}")
+        return None
+
+    def _match_to_musicbrainz(self, artist_name: str) -> Optional[str]:
+        """Match artist name to MusicBrainz ID using fuzzy name comparison."""
+        try:
+            from core.metadata.registry import get_musicbrainz_client
+            client = get_musicbrainz_client()
+            results = client.search_artists(artist_name, limit=5)
+            return self._best_artist_match(results, artist_name)
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to MusicBrainz: {e}")
         return None
 
     def _get_lookback_period_setting(self) -> str:

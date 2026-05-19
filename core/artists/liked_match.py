@@ -12,6 +12,7 @@ from core.metadata.registry import (
     get_deezer_client,
     get_discogs_client,
     get_itunes_client,
+    get_musicbrainz_client,
     get_spotify_client,
 )
 
@@ -31,6 +32,11 @@ def _get_deezer_client():
 def _get_discogs_client(token=None):
     """Mirror of web_server._get_discogs_client — delegates to registry."""
     return get_discogs_client(token)
+
+
+def _get_musicbrainz_client():
+    """Mirror of web_server._get_musicbrainz_client — delegates to registry."""
+    return get_musicbrainz_client()
 
 
 class _SpotifyClientProxy:
@@ -65,6 +71,7 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
         'itunes': 'itunes_artist_id',
         'deezer': 'deezer_artist_id',
         'discogs': 'discogs_artist_id',
+        'musicbrainz': 'musicbrainz_artist_id',
     }
     id_cols = list(source_cols.values())
 
@@ -103,6 +110,10 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
             search_clients['discogs'] = dc
     except Exception as e:
         logger.debug("discogs client init failed: %s", e)
+    try:
+        search_clients['musicbrainz'] = _get_musicbrainz_client()
+    except Exception as e:
+        logger.debug("musicbrainz client init failed: %s", e)
 
     # Reuse watchlist scanner's fuzzy matching logic
     from core.watchlist_scanner import WatchlistScanner
@@ -234,7 +245,7 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
             # Determine best active source/ID — prefer Spotify, then iTunes, Deezer, Discogs
             resolved_source = None
             resolved_id = None
-            for src in ('spotify', 'itunes', 'deezer', 'discogs'):
+            for src in ('spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz'):
                 col = source_cols[src]
                 if col in harvested_ids:
                     resolved_source = src

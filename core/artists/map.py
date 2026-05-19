@@ -263,7 +263,7 @@ def get_artist_map_data():
                                 break
                     # Backfill genres if missing
                     if not n.get('genres') or len(n.get('genres', [])) == 0:
-                        for source in ('spotify', 'deezer', 'itunes', 'discogs'):
+                        for source in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
                             if source in cached and cached[source].get('genres'):
                                 n['genres'] = cached[source]['genres'][:5]
                                 break
@@ -632,7 +632,7 @@ def get_artist_map_explore():
         # Find the center artist
         center_name = artist_name
         center_image = ''
-        center_ids = {'spotify_id': '', 'itunes_id': '', 'deezer_id': '', 'discogs_id': ''}
+        center_ids = {'spotify_id': '', 'itunes_id': '', 'deezer_id': '', 'discogs_id': '', 'musicbrainz_id': ''}
         center_genres = []
 
         # Search metadata cache for the center artist
@@ -665,14 +665,14 @@ def get_artist_map_explore():
 
         # Check watchlist + library if not in cache
         if not artist_found and not artist_id:
-            cursor.execute("SELECT artist_name, image_url, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id FROM watchlist_artists WHERE artist_name = ? COLLATE NOCASE LIMIT 1", (artist_name,))
+            cursor.execute("SELECT artist_name, image_url, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, musicbrainz_artist_id FROM watchlist_artists WHERE artist_name = ? COLLATE NOCASE LIMIT 1", (artist_name,))
             wr = cursor.fetchone()
             if wr:
                 artist_found = True
                 center_name = wr['artist_name']
                 if wr['image_url'] and str(wr['image_url']).startswith('http'):
                     center_image = wr['image_url']
-                for k, col in [('spotify_id', 'spotify_artist_id'), ('itunes_id', 'itunes_artist_id'), ('deezer_id', 'deezer_artist_id'), ('discogs_id', 'discogs_artist_id')]:
+                for k, col in [('spotify_id', 'spotify_artist_id'), ('itunes_id', 'itunes_artist_id'), ('deezer_id', 'deezer_artist_id'), ('discogs_id', 'discogs_artist_id'), ('musicbrainz_id', 'musicbrainz_artist_id')]:
                     if wr[col]:
                         center_ids[k] = str(wr[col])
             else:
