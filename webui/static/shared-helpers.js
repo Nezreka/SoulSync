@@ -3244,7 +3244,9 @@ function syncPrimaryMetadataSourceAvailability(statusData) {
 function getMetadataSourceLabel(source) {
     if (source === 'deezer') return 'Deezer';
     if (source === 'discogs') return 'Discogs';
+    if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
+    if (source === 'musicbrainz') return 'MusicBrainz';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
 }
