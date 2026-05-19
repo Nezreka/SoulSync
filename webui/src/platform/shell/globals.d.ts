@@ -43,14 +43,6 @@ declare global {
           skipRouteChange?: boolean;
         },
       ) => void;
-      navigateToArtistDetailPage: (
-        artistId: string | number,
-        artistName: string,
-        sourceOverride?: string | null,
-        options?: {
-          replace?: boolean;
-        },
-      ) => void;
       cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
     };
