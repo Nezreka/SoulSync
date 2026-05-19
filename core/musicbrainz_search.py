@@ -856,8 +856,13 @@ class MusicBrainzSearchClient:
         shape the download modal expects. `rg_fallback` supplies release-group
         metadata (type, artist credits) when resolving from a release-group
         whose releases may be lightly populated."""
+        # NOTE: `cover-art-archive` is NOT a valid `inc` param for the
+        # /release resource — MB returns 400 if you pass it. The CAA flags
+        # (`{'front': True, 'back': True, ...}`) come back on every release
+        # response by default, so we read them below without requesting an
+        # include.
         release = self._client.get_release(
-            release_mbid, includes=['recordings', 'artist-credits', 'release-groups', 'cover-art-archive']
+            release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
         )
         if not release:
             return None

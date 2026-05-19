@@ -100,12 +100,14 @@ def _search_service(service, entity_type, query):
         if not mb_worker or not mb_worker.mb_service:
             raise ValueError("MusicBrainz worker not initialized")
         mb_client = mb_worker.mb_service.mb_client
+        # User-facing manual search — prefer recall (fuzzy / alias / diacritic-
+        # folded) over strict phrase precision. User picks correct hit from list.
         if entity_type == 'artist':
-            items = mb_client.search_artist(query, limit=8)
+            items = mb_client.search_artist(query, limit=8, strict=False)
             return [{'id': a['id'], 'name': a.get('name', ''), 'image': None,
                       'extra': f"Score: {a.get('score', '')} · {a.get('disambiguation', '') or a.get('country', '')}"} for a in items]
         elif entity_type == 'album':
-            items = mb_client.search_release(query, limit=8)
+            items = mb_client.search_release(query, limit=8, strict=False)
             results = []
             for r in items:
                 artists = ', '.join(ac.get('name', '') for ac in r.get('artist-credit', []) if isinstance(ac, dict))
@@ -115,7 +117,7 @@ def _search_service(service, entity_type, query):
                                 'extra': f"{artists} · {r.get('date', '')} · Score: {r.get('score', '')}"})
             return results
         elif entity_type == 'track':
-            items = mb_client.search_recording(query, limit=8)
+            items = mb_client.search_recording(query, limit=8, strict=False)
             results = []
             for r in items:
                 artists = ', '.join(ac.get('name', '') for ac in r.get('artist-credit', []) if isinstance(ac, dict))

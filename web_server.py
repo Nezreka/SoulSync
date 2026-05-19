@@ -15734,8 +15734,14 @@ def musicbrainz_search_api():
         mb_client = mb_svc.mb_client
         results = []
 
+        # Manual Fix popup is user-facing fuzzy search — recall matters more
+        # than precision because the user picks the right hit from the list.
+        # Use bare-query mode so diacritics, aliases, and bracketed suffixes
+        # like "(Live)" don't kill matches the way strict field-scoped
+        # phrase queries do. Enrichment workers stay on strict mode (the
+        # default) since they auto-accept the top hit and need precision.
         if entity_type == 'artist':
-            raw = mb_client.search_artist(query, limit=limit)
+            raw = mb_client.search_artist(query, limit=limit, strict=False)
             for r in raw:
                 results.append({
                     'mbid': r.get('id', ''),
@@ -15746,7 +15752,7 @@ def musicbrainz_search_api():
                     'country': r.get('country', ''),
                 })
         elif entity_type == 'release':
-            raw = mb_client.search_release(query, artist_name=artist or None, limit=limit)
+            raw = mb_client.search_release(query, artist_name=artist or None, limit=limit, strict=False)
             for r in raw:
                 artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
                 results.append({
@@ -15760,7 +15766,7 @@ def musicbrainz_search_api():
                     'track_count': r.get('track-count', 0),
                 })
         elif entity_type == 'recording':
-            raw = mb_client.search_recording(query, artist_name=artist or None, limit=limit)
+            raw = mb_client.search_recording(query, artist_name=artist or None, limit=limit, strict=False)
             for r in raw:
                 artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
                 releases = r.get('releases', [])
