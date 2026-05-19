@@ -1016,6 +1016,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         type: 'artist_album',
         artist: artist,
         album: album,
+        source: artist?.source || album?.source || artistsPageState.artistDiscography?.source || null,
         trackCount: spotifyTracks.length,
         playlistId: virtualPlaylistId
     };
@@ -3243,7 +3244,9 @@ function syncPrimaryMetadataSourceAvailability(statusData) {
 function getMetadataSourceLabel(source) {
     if (source === 'deezer') return 'Deezer';
     if (source === 'discogs') return 'Discogs';
+    if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
+    if (source === 'musicbrainz') return 'MusicBrainz';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
 }

@@ -140,6 +140,7 @@ def test_task_status_includes_v2_state_fields():
         'cancel_requested': True, 'cancel_timestamp': 12345,
         'ui_state': 'cancelling', 'playlist_id': 'pl1',
         'error_message': 'oh no', 'cached_candidates': [{'x': 1}],
+        'quarantine_entry_id': '20260514_120000_song',
     }
     batch = {'phase': 'downloading', 'queue': ['t1']}
     out = st.build_batch_status_data('b1', batch, {}, deps)
@@ -149,6 +150,7 @@ def test_task_status_includes_v2_state_fields():
     assert t['ui_state'] == 'cancelling'
     assert t['playlist_id'] == 'pl1'
     assert t['error_message'] == 'oh no'
+    assert t['quarantine_entry_id'] == '20260514_120000_song'
     assert t['has_candidates'] is True
 
 

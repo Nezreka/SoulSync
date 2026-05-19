@@ -465,7 +465,13 @@ function initializeWebSocket() {
     // Phase 5 event listeners (sync/discovery progress + scans)
     socket.on('sync:progress', (data) => updateSyncProgressFromData(data));
     socket.on('discovery:progress', (data) => updateDiscoveryProgressFromData(data));
-    socket.on('scan:watchlist', (data) => updateWatchlistScanFromData(data));
+    socket.on('scan:watchlist', (data) => {
+        updateWatchlistScanFromData(data);
+        const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
+        if (watchlistBtn) {
+            watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
+        }
+    });
     socket.on('scan:media', (data) => updateMediaScanFromData(data));
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress

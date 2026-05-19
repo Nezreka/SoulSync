@@ -449,6 +449,49 @@ body {
     color: rgba(var(--accent-rgb), 0.7);
 }
 
+.nav-button.nav-downloads-active .nav-icon {
+    animation: watchlist-scan-glow 1.2s ease-in-out infinite;
+}
+
+.nav-button.nav-downloads-active .nav-svg {
+    animation: nav-downloads-svg 1.2s ease-in-out infinite;
+}
+
+@keyframes nav-downloads-svg {
+    0%, 100% { opacity: 0.7; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(1px); filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.8)); }
+}
+
+.nav-button.nav-watchlist-scanning .nav-icon {
+    animation: watchlist-scan-glow 1.6s ease-in-out infinite;
+}
+
+.nav-button.nav-watchlist-scanning .nav-svg {
+    animation: watchlist-scan-svg 1.6s ease-in-out infinite;
+}
+
+@keyframes watchlist-scan-glow {
+    0%, 100% {
+        box-shadow:
+            0 2px 4px rgba(0, 0, 0, 0.15),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06),
+            0 0 6px rgba(var(--accent-rgb), 0.25);
+        border-color: rgba(var(--accent-rgb), 0.2);
+    }
+    50% {
+        box-shadow:
+            0 2px 8px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            0 0 14px rgba(var(--accent-rgb), 0.55);
+        border-color: rgba(var(--accent-rgb), 0.5);
+    }
+}
+
+@keyframes watchlist-scan-svg {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.8)); }
+}
+
 .nav-button:hover .nav-icon {
     color: rgba(255, 255, 255, 0.95);
     background: linear-gradient(135deg,
@@ -16445,6 +16488,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #D4A574;
 }
 
+.watchlist-source-musicbrainz {
+    background: rgba(186, 71, 143, 0.15);
+    color: #BA478F;
+}
+
 .watchlist-source-amazon {
     background: rgba(255, 153, 0, 0.15);
     color: #FF9900;
@@ -19902,6 +19950,28 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .cancel-track-btn:hover {
     background: #d32f2f;
     transform: scale(1.05);
+}
+
+.approve-quarantine-inline-btn {
+    background: var(--accent-color, #1db954);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.approve-quarantine-inline-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+    transform: scale(1.04);
+}
+
+.approve-quarantine-inline-btn:disabled {
+    cursor: default;
+    opacity: 0.65;
 }
 
 /* Modal Footer */

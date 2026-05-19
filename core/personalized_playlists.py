@@ -902,7 +902,9 @@ class PersonalizedPlaylistsService:
                     with self.database._get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute("""
-                            SELECT similar_artist_spotify_id, similar_artist_name
+                            SELECT similar_artist_spotify_id, similar_artist_itunes_id,
+                                   similar_artist_deezer_id, similar_artist_musicbrainz_id,
+                                   similar_artist_name
                             FROM similar_artists
                             WHERE source_artist_id = ?
                             ORDER BY similarity_rank ASC
@@ -911,9 +913,16 @@ class PersonalizedPlaylistsService:
                         db_results = cursor.fetchall()
 
                     if db_results:
+                        source_id_col = {
+                            'spotify': 'similar_artist_spotify_id',
+                            'itunes': 'similar_artist_itunes_id',
+                            'deezer': 'similar_artist_deezer_id',
+                            'musicbrainz': 'similar_artist_musicbrainz_id',
+                        }.get(active_source, 'similar_artist_itunes_id')
                         for row in db_results:
-                            artist_id = row['similar_artist_spotify_id']
-                            artist_name = row['similar_artist_name']
+                            r = dict(row)
+                            artist_id = r.get(source_id_col) or r.get('similar_artist_spotify_id') or r.get('similar_artist_itunes_id')
+                            artist_name = r['similar_artist_name']
                             if artist_id and artist_id not in seen_artist_ids:
                                 all_similar_artists.append({'id': artist_id, 'name': artist_name})
                                 seen_artist_ids.add(artist_id)

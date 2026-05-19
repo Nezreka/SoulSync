@@ -71,8 +71,7 @@ function _isMetadataSourceSelectable(source) {
 
 function _metadataSourceFallback(source) {
     if (source === 'spotify') return 'deezer';
-    if (source === 'discogs') return 'itunes';
-    return 'itunes';
+    return 'deezer';
 }
 
 function focusServiceSettingsSection(service, message) {
@@ -100,7 +99,7 @@ function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
     const select = document.getElementById('metadata-fallback-source');
     if (!select) return false;
 
-    const selectedSource = select.value || 'itunes';
+    const selectedSource = select.value || 'deezer';
     if (_isMetadataSourceSelectable(selectedSource)) {
         select.dataset.lastValidSource = selectedSource;
         return false;
@@ -893,7 +892,7 @@ async function loadSettingsData() {
         document.getElementById('discogs-token').value = settings.discogs?.token || '';
 
         // Populate Metadata source setting
-        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'itunes';
+        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'deezer';
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -2563,16 +2562,16 @@ async function saveSettings(quiet = false) {
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
     const discogsTokenInput = document.getElementById('discogs-token');
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
-    let metadataSource = metadataSourceSelect?.value || 'itunes';
+    let metadataSource = metadataSourceSelect?.value || 'deezer';
     const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
-        metadataSource = 'deezer';
+        metadataSource = _metadataSourceFallback('spotify');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
-            showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+            showToast('Spotify is disconnected, so the primary metadata source was switched.', 'warning');
         }
     } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
-        metadataSource = 'itunes';
+        metadataSource = _metadataSourceFallback('discogs');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');

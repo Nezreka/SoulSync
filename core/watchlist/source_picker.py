@@ -28,6 +28,7 @@ SOURCE_ID_COLUMNS = (
     ('itunes', 'itunes_artist_id'),
     ('deezer', 'deezer_id'),
     ('discogs', 'discogs_id'),
+    ('musicbrainz', 'musicbrainz_id'),
 )
 
 

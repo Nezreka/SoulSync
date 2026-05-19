@@ -387,6 +387,7 @@ async function watchAllHeroArtists(btn) {
 
 // Cache for recommended artists data so reopening is instant
 let _recommendedArtistsCache = null;
+let _recommendedArtistsSource = null;
 
 async function openRecommendedArtistsModal() {
     let modal = document.getElementById('recommended-artists-modal');
@@ -404,7 +405,7 @@ async function openRecommendedArtistsModal() {
     // If cached, render instantly and refresh watchlist statuses
     if (_recommendedArtistsCache) {
         modal.style.display = 'flex';
-        renderRecommendedArtistsModal(modal, _recommendedArtistsCache);
+        renderRecommendedArtistsModal(modal, _recommendedArtistsCache, _recommendedArtistsSource);
         checkRecommendedWatchlistStatuses(_recommendedArtistsCache);
         return;
     }
@@ -444,13 +445,14 @@ async function openRecommendedArtistsModal() {
             return;
         }
 
-        // Render cards immediately with fallback images
-        _recommendedArtistsCache = data.artists;
-        renderRecommendedArtistsModal(modal, data.artists);
-
         // Phase 2: Enrich with images/genres progressively in batches of 50
         // Skip artists that already have cached metadata from the initial response
         const source = data.source || 'spotify';
+        // Render cards immediately with fallback images
+        _recommendedArtistsCache = data.artists;
+        _recommendedArtistsSource = source;
+        renderRecommendedArtistsModal(modal, data.artists, source);
+
         const idKey = source === 'spotify' ? 'spotify_artist_id' : source === 'deezer' ? 'deezer_artist_id' : 'itunes_artist_id';
         const allIds = data.artists
             .filter(a => !a.image_url)  // Only enrich artists without cached images
@@ -521,7 +523,7 @@ async function openRecommendedArtistsModal() {
     }
 }
 
-function renderRecommendedArtistsModal(modal, artists) {
+function renderRecommendedArtistsModal(modal, artists, source = null) {
     modal.innerHTML = `
         <div class="modal-container playlist-modal recommended-modal">
             <div class="playlist-modal-header">
@@ -555,10 +557,12 @@ function renderRecommendedArtistsModal(modal, artists) {
         const similarText = artist.occurrence_count > 1
             ? `Similar to ${artist.occurrence_count} in your watchlist`
             : 'Similar to an artist in your watchlist';
+        const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
                                  data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
-                                 data-artist-id="${artist.artist_id}">
+                                 data-artist-id="${artist.artist_id}"
+                                 data-artist-source="${escapeHtml(artistSource)}">
                                 <button class="recommended-card-watchlist-btn"
                                         data-artist-id="${artist.artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}">
@@ -601,9 +605,10 @@ function renderRecommendedArtistsModal(modal, artists) {
             const card = e.target.closest('.recommended-artist-card');
             if (card) {
                 const artistId = card.getAttribute('data-artist-id');
+                const artistSource = card.getAttribute('data-artist-source') || _recommendedArtistsSource || null;
                 const nameEl = card.querySelector('.recommended-card-name');
                 const artistName = nameEl ? nameEl.textContent : '';
-                viewRecommendedArtistDiscography(artistId, artistName);
+                viewRecommendedArtistDiscography(artistId, artistName, artistSource);
             }
         });
     }
@@ -734,9 +739,9 @@ async function checkRecommendedWatchlistStatuses(artists) {
     }
 }
 
-async function viewRecommendedArtistDiscography(artistId, artistName) {
+async function viewRecommendedArtistDiscography(artistId, artistName, source = null) {
     closeRecommendedArtistsModal();
-    navigateToArtistDetail(artistId, artistName);
+    navigateToArtistDetail(artistId, artistName, source || null);
 }
 
 async function checkAllHeroWatchlistStatus() {
@@ -3940,6 +3945,35 @@ function hideSeasonalSections() {
     }
 }
 
+function _buildDiscoverArtistContext(source, artistName, sourceData = {}, albumData = {}) {
+    const normalizedSource = (source || '').toString().toLowerCase();
+    const albumArtist = Array.isArray(albumData.artists) ? albumData.artists[0] : null;
+    const activeSource = (source || sourceData.active_source || sourceData.source || '').toString().toLowerCase();
+    const context = {
+        ...sourceData,
+        id: sourceData.active_source_id || sourceData.artist_id || albumArtist?.id || '',
+        name: artistName || sourceData.artist_name || sourceData.name || albumArtist?.name || '',
+        source: normalizedSource || activeSource || '',
+        spotify_artist_id: sourceData.spotify_artist_id || sourceData.artist_spotify_id || ((normalizedSource || activeSource) === 'spotify' ? albumArtist?.id : '') || '',
+        itunes_artist_id: sourceData.itunes_artist_id || sourceData.artist_itunes_id || ((normalizedSource || activeSource) === 'itunes' ? albumArtist?.id : '') || '',
+        deezer_artist_id: sourceData.deezer_artist_id || sourceData.artist_deezer_id || sourceData.deezer_id || ((normalizedSource || activeSource) === 'deezer' ? albumArtist?.id : '') || '',
+        discogs_artist_id: sourceData.discogs_artist_id || sourceData.artist_discogs_id || sourceData.discogs_id || '',
+        amazon_artist_id: sourceData.amazon_artist_id || sourceData.artist_amazon_id || sourceData.amazon_id || '',
+        soul_id: sourceData.soul_id || sourceData.hydrabase_artist_id || '',
+    };
+
+    const sourceIdBySource = {
+        spotify: context.spotify_artist_id,
+        itunes: context.itunes_artist_id,
+        deezer: context.deezer_artist_id,
+        discogs: context.discogs_artist_id,
+        amazon: context.amazon_artist_id,
+        hydrabase: context.soul_id,
+    };
+    context.id = sourceIdBySource[normalizedSource || activeSource] || context.id;
+    return context;
+}
+
 async function openDownloadModalForSeasonalAlbum(albumIndex) {
     const album = discoverSeasonalAlbums[albumIndex];
     if (!album) {
@@ -3999,14 +4033,12 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
         const virtualPlaylistId = `seasonal_album_${albumId}`;
 
         // Pass proper artist/album context for album download (1 worker + source reuse)
-        const artistContext = {
-            name: album.artist_name,
-            source: source
-        };
+        const artistContext = _buildDiscoverArtistContext(source, album.artist_name, album, albumData);
 
         const albumContext = {
             id: albumData.id,
             name: albumData.name,
+            source: source,
             album_type: albumData.album_type || 'album',
             total_tracks: albumData.total_tracks || 0,
             release_date: albumData.release_date || '',
@@ -4354,6 +4386,31 @@ async function unblockDiscoveryArtist(id, name) {
 
 let _yourArtistsCtrl = null;
 
+function _pickArtistDetailSource(artist) {
+    if (!artist) return { id: '', source: '' };
+    const sourceFields = {
+        spotify: 'spotify_artist_id',
+        deezer: 'deezer_artist_id',
+        itunes: 'itunes_artist_id',
+        discogs: 'discogs_artist_id',
+        amazon: 'amazon_artist_id',
+        musicbrainz: 'musicbrainz_artist_id',
+        hydrabase: 'soul_id',
+    };
+    const active = String(artist.active_source || artist.source || '').toLowerCase();
+    const activeField = sourceFields[active];
+    if (activeField && artist[activeField]) {
+        return { id: String(artist[activeField]), source: active };
+    }
+    for (const [source, field] of Object.entries(sourceFields)) {
+        if (artist[field]) return { id: String(artist[field]), source };
+    }
+    if (artist.active_source_id && activeField) {
+        return { id: String(artist.active_source_id), source: active };
+    }
+    return { id: '', source: '' };
+}
+
 async function loadYourArtists() {
     if (!_yourArtistsCtrl) {
         _yourArtistsCtrl = createDiscoverSectionController({
@@ -4454,11 +4511,12 @@ function _renderYourArtistCard(artist) {
     ).join('');
 
     const watchlistClass = artist.on_watchlist ? 'active' : '';
-    const hasId = artist.active_source_id && artist.active_source_id !== '';
+    const detailSource = _pickArtistDetailSource(artist);
+    const hasId = detailSource.id && detailSource.id !== '';
 
     // Navigate to Artists page (name click) — source artist id, needs inline view
     const navAction = hasId
-        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(artist.active_source_id)}', '${escapeForInlineJs(artist.artist_name)}')`
+        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(detailSource.id)}', '${escapeForInlineJs(artist.artist_name)}', '${escapeForInlineJs(detailSource.source)}' || null)`
         : '';
 
     // Open info modal (card body click) — pass pool ID so we can look up all data
@@ -6724,11 +6782,12 @@ async function openYourArtistInfoModal_direct(node) {
     let bestId = '', bestSource = '';
     // Check what the active source is
     const activeSource = window._yaActiveSource || 'spotify';
-    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
-        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id']
-            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id']
-                : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id'];
-    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs' };
+    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id', 'musicbrainz_id']
+                : activeSource === 'musicbrainz' ? ['musicbrainz_id', 'spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
+                    : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id'];
+    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs', musicbrainz_id: 'musicbrainz' };
     for (const key of sourceOrder) {
         if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
     }
@@ -6955,7 +7014,7 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
                     duration_ms: track.duration_ms || 0, track_number: track.track_number || 0,
                 };
             });
-            const artistContext = { id: albumData.artists?.[0]?.id || '', name: artistName, source: resolvedSource };
+            const artistContext = _buildDiscoverArtistContext(resolvedSource, artistName, item, albumData);
             const albumContext = { id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album', total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '', images: albumData.images || [] };
             await openDownloadMissingModalForYouTube(`discover_cache_${resolvedId}`, albumData.name, spotifyTracks, artistContext, albumContext);
             hideLoadingOverlay();
@@ -7015,11 +7074,7 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
             };
         });
 
-        const artistContext = {
-            id: albumData.artists?.[0]?.id || '',
-            name: item.artist_name || albumData.artists?.[0]?.name || '',
-            source: source,
-        };
+        const artistContext = _buildDiscoverArtistContext(source, item.artist_name || albumData.artists?.[0]?.name || '', item, albumData);
         const albumContext = {
             id: albumData.id,
             name: albumData.name,
@@ -7939,11 +7994,7 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
         const virtualPlaylistId = `discover_album_${albumId}`;
 
         // CRITICAL FIX: Pass proper artist/album context for modal display
-        const artistContext = {
-            id: source === 'spotify' ? album.artist_spotify_id : source === 'deezer' ? album.artist_deezer_id : album.artist_itunes_id,
-            name: album.artist_name,
-            source: source
-        };
+        const artistContext = _buildDiscoverArtistContext(source, album.artist_name, album, albumData);
 
         const albumContext = {
             id: albumData.id,

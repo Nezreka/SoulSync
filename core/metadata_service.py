@@ -45,6 +45,7 @@ from core.metadata.registry import (
     get_amazon_client,
     get_client_for_source,
     get_deezer_client,
+    get_musicbrainz_client,
     get_discogs_client,
     get_hydrabase_client,
     get_itunes_client,
@@ -77,6 +78,7 @@ except Exception:  # pragma: no cover - optional dependency fallback
 __all__ = [
     "METADATA_SOURCE_PRIORITY",
     "get_amazon_client",
+    "get_musicbrainz_client",
     "MetadataCache",
     "MetadataLookupOptions",
     "MetadataProvider",

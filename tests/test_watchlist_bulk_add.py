@@ -69,6 +69,23 @@ def test_falls_back_to_discogs_as_last_resort() -> None:
     assert pick(artist) == ('dg-999', 'discogs')
 
 
+def test_falls_back_to_musicbrainz_after_other_sources() -> None:
+    pick = _make_picker('spotify')
+    artist = {
+        'musicbrainz_id': 'mb-999',
+    }
+    assert pick(artist) == ('mb-999', 'musicbrainz')
+
+
+def test_active_source_musicbrainz_picks_musicbrainz_first() -> None:
+    pick = _make_picker('musicbrainz')
+    artist = {
+        'spotify_artist_id': 'sp-123',
+        'musicbrainz_id': 'mb-999',
+    }
+    assert pick(artist) == ('mb-999', 'musicbrainz')
+
+
 def test_returns_none_when_artist_has_zero_source_ids() -> None:
     """Drop only when the artist has no source IDs at all — that's
     the only legitimate skip reason now."""

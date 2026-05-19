@@ -382,8 +382,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
-            _stid = track_data.get('spotify_track_id') or track_data.get('id', '')
-            if not ignore_manual_matches and _stid and _mlm.get_match(db, batch_profile_id, batch_source, _stid):
+            _stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
+            if not ignore_manual_matches and _stid and _mlm.get_match_for_track(
+                db, batch_profile_id, track_data, default_source=batch_source
+            ):
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:
                     deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
