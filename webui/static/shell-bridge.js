@@ -165,7 +165,6 @@ window.SoulSyncWebShellBridge = {
     activateLegacyPath(pathname) {
         activateLegacyPath(pathname);
     },
-    navigateToArtistDetailPage,
     navigateToArtistDetail,
     cancelSimilarArtistsLoad() {
         if (typeof cancelSimilarArtistsLoad === 'function') {
@@ -177,5 +176,47 @@ window.SoulSyncWebShellBridge = {
     },
 };
 
+function _handleShellLinkClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || _isModifiedLinkClick(event)) return;
+
+    const anchor = event.target?.closest?.('a[href]');
+    if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+
+    const href = anchor.getAttribute('href');
+    if (!href || href === '#' || href.startsWith('javascript:')) return;
+
+    const router = getWebRouter();
+    if (!router?.navigateToPage) return;
+
+    const pathname = anchor.pathname || new URL(anchor.href, window.location.href).pathname;
+
+    if (pathname.startsWith('/artist-detail/')) {
+        _handleArtistDetailLinkClick(event, pathname, router);
+        return;
+    }
+}
+
+function _handleArtistDetailLinkClick(event, pathname, router) {
+    const parts = pathname.split('/').filter(Boolean);
+    if (parts.length < 3) return;
+
+    // Keep the semantic link, but hand the click back to TanStack so artist
+    // detail navigations stay in the SPA when the router is available.
+    const source = decodeURIComponent(parts[1] || '');
+    const artistId = decodeURIComponent(parts.slice(2).join('/'));
+    if (!source || !artistId) return;
+
+    event.preventDefault();
+    void router.navigateToPage('artist-detail', {
+        artistId,
+        artistSource: source,
+    });
+}
+
+function _isModifiedLinkClick(event) {
+    return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+}
+
 window.addEventListener('popstate', syncActivePageFromLocation);
+document.addEventListener('click', _handleShellLinkClick, true);
 window.dispatchEvent(new CustomEvent(SHELL_BRIDGE_READY_EVENT));

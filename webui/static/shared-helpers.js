@@ -545,7 +545,8 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
 
     items.forEach(item => {
         const config = mapItem(item);
-        const elem = document.createElement('div');
+        const isLink = isArtist && !!config.href;
+        const elem = document.createElement(isLink ? 'a' : 'div');
 
         // Add appropriate card class
         if (isArtist) {
@@ -564,6 +565,13 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             elem.className = 'enh-compact-item album-card';
         } else if (isTrack) {
             elem.className = 'enh-compact-item track-item';
+        }
+
+        if (isLink) {
+            elem.href = config.href;
+            elem.style.color = 'inherit';
+            elem.style.textDecoration = 'none';
+            elem.setAttribute('aria-label', config.name || 'Artist');
         }
 
         // Build image HTML with type-specific classes
@@ -612,7 +620,9 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             ${badgeHtml}
         `;
 
-        elem.addEventListener('click', config.onClick);
+        if (config.onClick) {
+            elem.addEventListener('click', config.onClick);
+        }
 
         // Add play button handler for tracks
         if (isTrack && config.onPlay) {
@@ -3823,8 +3833,12 @@ function displaySimilarArtists(artists) {
  */
 function createSimilarArtistBubble(artist) {
     // Create bubble container
-    const bubble = document.createElement('div');
+    const bubble = document.createElement('a');
     bubble.className = 'similar-artist-bubble';
+    bubble.href = buildArtistDetailPath(artist.id, artist.source || null);
+    bubble.style.color = 'inherit';
+    bubble.style.textDecoration = 'none';
+    bubble.setAttribute('aria-label', artist.name);
     bubble.setAttribute('data-artist-id', artist.id);
     bubble.setAttribute('data-artist-source', artist.source || '');
     if (artist.plugin) {
@@ -3876,13 +3890,6 @@ function createSimilarArtistBubble(artist) {
     if (artist.genres && artist.genres.length > 0) {
         bubble.appendChild(genres);
     }
-
-    // Click → navigate to the standalone artist-detail page. Works for both
-    // library and source artists thanks to the source-aware backend endpoint.
-    bubble.addEventListener('click', () => {
-        console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        navigateToArtistDetailPage(artist.id, artist.name, artist.source || null);
-    });
 
     return bubble;
 }

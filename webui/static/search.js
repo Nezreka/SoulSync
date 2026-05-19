@@ -317,11 +317,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
-                onClick: () => {
-                    console.log(`🎵 Opening library artist detail: ${artist.name} (ID: ${artist.id})`);
-                    hideDropdown();
-                    navigateToArtistDetailPage(artist.id, artist.name);
-                }
+                href: buildArtistDetailPath(artist.id),
             })
         );
 
@@ -337,12 +333,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                onClick: () => {
-                    const sourceOverride = searchController.state.activeSource;
-                    console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
-                    hideDropdown();
-                    navigateToArtistDetailPage(artist.id, artist.name, sourceOverride || null);
-                }
+                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null),
             })
         );
 

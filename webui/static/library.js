@@ -218,6 +218,7 @@ function displayLibraryArtists(artists) {
         // Ignore clicks on badge icons (they open external links / toggle watchlist)
         const badge = e.target.closest('.source-card-icon');
         if (badge) {
+            e.preventDefault();
             e.stopPropagation();
             const url = badge.dataset.url;
             if (url) { window.open(url, '_blank'); return; }
@@ -232,10 +233,6 @@ function displayLibraryArtists(artists) {
                 }
             }
             return;
-        }
-        const card = e.target.closest('.library-artist-card');
-        if (card) {
-            navigateToArtistDetailPage(card.dataset.artistId, card.dataset.artistName);
         }
     };
 }
@@ -299,14 +296,14 @@ function buildLibraryArtistCardHTML(artist, index) {
     // Track stats
     const trackStat = artist.track_count > 0 ? `<span class="library-artist-stat">${artist.track_count} track${artist.track_count !== 1 ? 's' : ''}</span>` : '';
 
-    return `<div class="library-artist-card" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both">
+    return `<a class="library-artist-card" href="${buildArtistDetailPath(artist.id)}" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;display:block;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both;text-decoration:none;color:inherit;">
         ${badgeContainerHTML}
         ${imageHTML}
         <div class="library-artist-info">
             <h3 class="library-artist-name" title="${_esc(artist.name)}">${_esc(artist.name)}</h3>
             <div class="library-artist-stats">${trackStat}</div>
         </div>
-    </div>`;
+    </a>`;
 }
 
 function updateLibraryPagination(pagination) {
@@ -779,27 +776,6 @@ if (typeof window !== 'undefined') {
     window._updateSidebarLibraryBreadcrumb = _updateSidebarLibraryBreadcrumb;
 }
 
-
-// Public navigation entrypoint for artist detail. Callers should use this so
-// artist-detail navigations stay URL-driven, while the renderer handoff below
-// remains the legacy implementation detail.
-function navigateToArtistDetailPage(artistId, artistName, sourceOverride = null, options = {}) {
-    const normalizedSource = sourceOverride || null;
-
-    if (!artistId) return false;
-    if (currentPage === 'artist-detail' &&
-            String(artistId) === String(artistDetailPageState.currentArtistId) &&
-            String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
-        return true;
-    }
-
-    return navigateToPage('artist-detail', {
-        artistId,
-        artistSource: normalizedSource,
-        forceReload: true,
-        replace: options.replace === true,
-    });
-}
 
 function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
     const normalizedSource = sourceOverride || null;

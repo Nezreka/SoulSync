@@ -107,6 +107,21 @@ function setTrackInfo(track) {
     document.getElementById('no-track-message').classList.add('hidden');
     document.getElementById('media-player').classList.remove('idle');
 
+    const gotoArtistBtn = document.getElementById('np-goto-artist');
+    if (gotoArtistBtn) {
+        if (track.artist_id) {
+            gotoArtistBtn.href = buildArtistDetailPath(track.artist_id, track.artist_source || null);
+            gotoArtistBtn.style.pointerEvents = '';
+            gotoArtistBtn.setAttribute('aria-disabled', 'false');
+            gotoArtistBtn.tabIndex = 0;
+        } else {
+            gotoArtistBtn.href = '#';
+            gotoArtistBtn.style.pointerEvents = 'none';
+            gotoArtistBtn.setAttribute('aria-disabled', 'true');
+            gotoArtistBtn.tabIndex = -1;
+        }
+    }
+
     // Sync expanded player and media session
     updateNpTrackInfo();
     updateMediaSessionMetadata();
@@ -183,6 +198,14 @@ function clearTrack() {
     // Show no track message and collapse player
     document.getElementById('no-track-message').classList.remove('hidden');
     document.getElementById('media-player').classList.add('idle');
+
+    const gotoArtistBtn = document.getElementById('np-goto-artist');
+    if (gotoArtistBtn) {
+        gotoArtistBtn.href = '#';
+        gotoArtistBtn.style.pointerEvents = 'none';
+        gotoArtistBtn.setAttribute('aria-disabled', 'true');
+        gotoArtistBtn.tabIndex = -1;
+    }
 
     // Reset queue state
     npQueue = [];
@@ -1231,15 +1254,11 @@ function initExpandedPlayer() {
         });
     }
 
-    // Action button (Go to Artist)
+    // Action link (Go to Artist)
     const gotoArtistBtn = document.getElementById('np-goto-artist');
     if (gotoArtistBtn) {
-        gotoArtistBtn.addEventListener('click', () => {
-            if (currentTrack && currentTrack.artist_id) {
-                closeNowPlayingModal();
-                navigateToArtistDetailPage(currentTrack.artist_id, currentTrack.artist || '');
-            }
-        });
+        gotoArtistBtn.style.textDecoration = 'none';
+        gotoArtistBtn.style.color = 'inherit';
     }
     // Buffering state listeners on audioPlayer
     if (audioPlayer) {
