@@ -269,10 +269,9 @@ function displayDiscoverHeroArtist(artist) {
     if (discographyBtn && artistId) {
         discographyBtn.setAttribute('data-artist-id', artistId);
         discographyBtn.setAttribute('data-artist-name', artist.artist_name);
-        // Source the click handler will pass to navigateToArtistDetail. Without
-        // this, source-only hero artists (which is the typical case — they
-        // come from discover similar-artists, not the library) get looked up
-        // as library IDs and 404. Backend always includes artist.source.
+        discographyBtn.href = buildArtistDetailPath(artistId, artist.source || null);
+        // Keep the source on the link so source-only hero artists resolve to
+        // the correct artist-detail URL instead of being treated as library IDs.
         if (artist.source) discographyBtn.setAttribute('data-source', artist.source);
         else discographyBtn.removeAttribute('data-source');
         // Also store both IDs for cross-source operations
@@ -557,7 +556,7 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
         const similarText = artist.occurrence_count > 1
             ? `Similar to ${artist.occurrence_count} in your watchlist`
             : 'Similar to an artist in your watchlist';
-        const artistSource = artist.source || source || _recommendedArtistsSource || '';
+                const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
                                  data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
@@ -568,21 +567,25 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
                                         data-artist-name="${escapeHtml(artist.artist_name)}">
                                     Add to Watchlist
                                 </button>
-                                <div class="recommended-card-image">
-                                    ${artist.image_url ? `
-                                        <img src="${artist.image_url}"
-                                             alt="${escapeHtml(artist.artist_name)}"
-                                             loading="lazy"
-                                             onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">
-                                    ` : `
-                                        <div class="recommended-card-image-fallback">🎤</div>
-                                    `}
-                                </div>
-                                <div class="recommended-card-info">
-                                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                                    <span class="recommended-card-similarity">${similarText}</span>
-                                    <div class="recommended-card-genres">${genreTags}</div>
-                                </div>
+                                <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+                                   onclick="closeRecommendedArtistsModal()"
+                                   style="display:block;text-decoration:none;color:inherit;">
+                                    <div class="recommended-card-image">
+                                        ${artist.image_url ? `
+                                            <img src="${artist.image_url}"
+                                                 alt="${escapeHtml(artist.artist_name)}"
+                                                 loading="lazy"
+                                                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">
+                                        ` : `
+                                            <div class="recommended-card-image-fallback">🎤</div>
+                                        `}
+                                    </div>
+                                    <div class="recommended-card-info">
+                                        <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
+                                        <span class="recommended-card-similarity">${similarText}</span>
+                                        <div class="recommended-card-genres">${genreTags}</div>
+                                    </div>
+                                </a>
                             </div>
                         `;
     }).join('')}
@@ -599,16 +602,6 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
             if (watchlistBtn) {
                 e.stopPropagation();
                 toggleRecommendedWatchlist(watchlistBtn);
-                return;
-            }
-
-            const card = e.target.closest('.recommended-artist-card');
-            if (card) {
-                const artistId = card.getAttribute('data-artist-id');
-                const artistSource = card.getAttribute('data-artist-source') || _recommendedArtistsSource || null;
-                const nameEl = card.querySelector('.recommended-card-name');
-                const artistName = nameEl ? nameEl.textContent : '';
-                viewRecommendedArtistDiscography(artistId, artistName, artistSource);
             }
         });
     }
@@ -739,11 +732,6 @@ async function checkRecommendedWatchlistStatuses(artists) {
     }
 }
 
-async function viewRecommendedArtistDiscography(artistId, artistName, source = null) {
-    closeRecommendedArtistsModal();
-    navigateToArtistDetail(artistId, artistName, source || null);
-}
-
 async function checkAllHeroWatchlistStatus() {
     const btn = document.getElementById('discover-hero-watch-all');
     if (!btn || !discoverHeroArtists || discoverHeroArtists.length === 0) return;
@@ -809,26 +797,6 @@ function jumpToDiscoverHeroSlide(index) {
     discoverHeroIndex = index;
     displayDiscoverHeroArtist(discoverHeroArtists[discoverHeroIndex]);
     updateDiscoverHeroIndicators();
-}
-
-async function viewDiscoverHeroDiscography() {
-    const button = document.getElementById('discover-hero-discography');
-    if (!button) return;
-
-    const artistId = button.getAttribute('data-artist-id');
-    const artistName = button.getAttribute('data-artist-name');
-    // Pass the source so /api/artist-detail knows to synthesize from that
-    // metadata provider instead of doing a local DB lookup. Hero similar
-    // artists are almost always source-only (not in the library).
-    const source = button.getAttribute('data-source') || null;
-
-    if (!artistId || !artistName) {
-        console.error('No artist data found for discography view');
-        return;
-    }
-
-    console.log(`🎵 Navigating to artist detail for: ${artistName} (source: ${source || 'library'})`);
-    navigateToArtistDetail(artistId, artistName, source);
 }
 
 function showDiscoverHeroEmpty() {
@@ -4514,10 +4482,7 @@ function _renderYourArtistCard(artist) {
     const detailSource = _pickArtistDetailSource(artist);
     const hasId = detailSource.id && detailSource.id !== '';
 
-    // Navigate to Artists page (name click) — source artist id, needs inline view
-    const navAction = hasId
-        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(detailSource.id)}', '${escapeForInlineJs(artist.artist_name)}', '${escapeForInlineJs(detailSource.source)}' || null)`
-        : '';
+    const detailHref = hasId ? buildArtistDetailPath(detailSource.id, detailSource.source) : '';
 
     // Open info modal (card body click) — pass pool ID so we can look up all data
     const infoAction = hasId
@@ -4545,7 +4510,9 @@ function _renderYourArtistCard(artist) {
                 <div class="ya-card-info-row">
                     <div class="ya-origin-dots">${originDots}</div>
                 </div>
-                <div class="ya-card-name" ${navAction ? `onclick="${navAction}"` : ''}>${_esc(artist.artist_name)}</div>
+                ${hasId
+            ? `<a class="ya-card-name" href="${detailHref}" onclick="event.stopPropagation(); document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="display:block;text-decoration:none;color:inherit;">${_esc(artist.artist_name)}</a>`
+            : `<div class="ya-card-name">${_esc(artist.artist_name)}</div>`}
             </div>
         </div>
     `;
@@ -4695,10 +4662,10 @@ async function openYourArtistInfoModal(poolId) {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span>Explore</span>
                 </button>
-                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToArtistDetail('${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(pool.active_source || '')}' || null)">
+                <a class="ya-header-btn ya-viewall-btn" href="${buildArtistDetailPath(artistId, pool.active_source || null)}" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="text-decoration:none;color:inherit;">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-                </button>
+                </a>
             `;
         }
     } catch (err) {
@@ -6595,9 +6562,9 @@ function _artMapSetupInteraction(canvas) {
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); ${hasId ? `openYourArtistInfoModal_direct(${JSON.stringify(node).replace(/"/g, '&quot;')})` : ''}">
                 <span>&#9432;</span> Artist Info
             </div>
-            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); navigateToArtistDetail('${escapeForInlineJs(bestId)}', '${escapeForInlineJs(node.name)}', '${bestSource}' || null)">
+            <a class="artmap-ctx-item" href="${bestId ? buildArtistDetailPath(bestId, bestSource) : '#'}" onclick="_artMapHideContextMenu()" ${bestId ? '' : 'aria-disabled="true" style="pointer-events:none;opacity:0.5;text-decoration:none;color:inherit;"'}>
                 <span>&#128191;</span> View Discography
-            </div>
+            </a>
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(bestId)}','${bestSource}',null)">
                 <span>&#128065;</span> ${node.type === 'watchlist' ? 'On Watchlist' : 'Add to Watchlist'}
             </div>
@@ -7275,9 +7242,9 @@ async function openGenreDeepDive(genre) {
                 // Always open on Artists page with discography — pass source for correct routing
                 const imgUrl = _esc(a.image_url || '');
                 const artSource = _esc(a.source || '');
-                const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToArtistDetail('${_esc(a.entity_id)}','${_esc(a.name)}','${artSource}' || null)"`;
+                const detailHref = a.entity_id ? buildArtistDetailPath(a.entity_id, a.source || null) : '#';
                 const srcClass = (a.source || '').toLowerCase();
-                return `<div class="genre-dive-artist" ${clickAction}>
+                return `<a class="genre-dive-artist" href="${detailHref}" onclick="document.getElementById('genre-deep-dive-modal').remove()" style="text-decoration:none;color:inherit;">
                             <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">
                                 ${!a.image_url ? '<span>🎤</span>' : ''}
                             </div>
@@ -7285,7 +7252,7 @@ async function openGenreDeepDive(genre) {
                             <div class="genre-dive-artist-name">${_esc(a.name)}</div>
                             ${a.followers ? `<div class="genre-dive-artist-meta">${_fmtNum(a.followers)} followers</div>` : ''}
                             ${a.library_id ? '<div class="genre-dive-artist-badge">In Library</div>' : ''}
-                        </div>`;
+                        </a>`;
             }).join('')}
                 </div>
             </div>`;
@@ -8768,4 +8735,3 @@ if (document.readyState === 'loading') {
 }
 
 // ============================================================================
-

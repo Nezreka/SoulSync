@@ -16,7 +16,7 @@ describe('shellRouteManifest', () => {
     expect(resolveShellPageFromPath('/discover')).toBe('discover');
     expect(resolveShellPageFromPath('/watchlist')).toBe('watchlist');
     expect(resolveShellPageFromPath('/active-downloads')).toBe('active-downloads');
-    expect(resolveShellPageFromPath('/artist-detail')).toBe('artist-detail');
+    expect(resolveShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveShellPageFromPath('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')).toBe('artist-detail');
     expect(resolveShellPageFromPath('/artists')).toBeNull();
   });
@@ -50,6 +50,7 @@ describe('shellRouteManifest', () => {
     expect(resolveLegacyShellPageFromPath('/search')).toBe('search');
     expect(resolveLegacyShellPageFromPath('/active-downloads')).toBe('active-downloads');
     expect(resolveLegacyShellPageFromPath('/tools')).toBe('tools');
+    expect(resolveLegacyShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/does-not-exist')).toBeNull();

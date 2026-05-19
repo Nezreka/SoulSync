@@ -16876,7 +16876,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-top: 32px;
 }
 
-.watchlist-detail-actions button {
+.watchlist-detail-actions > * {
     flex: 1;
     padding: 12px 20px;
     border-radius: 8px;
@@ -16885,9 +16885,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s ease, transform 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    box-sizing: border-box;
 }
 
-.watchlist-detail-actions button:active {
+.watchlist-detail-actions > *:active {
     transform: scale(0.98);
 }
 

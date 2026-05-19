@@ -72,7 +72,10 @@ export function getShellRouteByPath(pathname: string): ShellRouteDefinition | un
 
 export function resolveShellPageFromPath(pathname: string): ShellPageId | null {
   const normalized = normalizeShellPath(pathname);
-  if (normalized === '/artist-detail' || normalized.startsWith('/artist-detail/')) {
+  if (normalized === '/artist-detail') {
+    return null;
+  }
+  if (normalized.startsWith('/artist-detail/')) {
     return 'artist-detail';
   }
   return getShellRouteByPath(pathname)?.pageId ?? null;
@@ -80,7 +83,10 @@ export function resolveShellPageFromPath(pathname: string): ShellPageId | null {
 
 export function resolveLegacyShellPageFromPath(pathname: string): ShellPageId | null {
   const normalized = normalizeShellPath(pathname);
-  if (normalized === '/artist-detail' || normalized.startsWith('/artist-detail/')) {
+  if (normalized === '/artist-detail') {
+    return null;
+  }
+  if (normalized.startsWith('/artist-detail/')) {
     return 'artist-detail';
   }
   const route = getShellRouteByPath(pathname);
