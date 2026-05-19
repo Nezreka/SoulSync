@@ -6782,11 +6782,12 @@ async function openYourArtistInfoModal_direct(node) {
     let bestId = '', bestSource = '';
     // Check what the active source is
     const activeSource = window._yaActiveSource || 'spotify';
-    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
-        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id']
-            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id']
-                : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id'];
-    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs' };
+    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id', 'musicbrainz_id']
+                : activeSource === 'musicbrainz' ? ['musicbrainz_id', 'spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
+                    : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id'];
+    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs', musicbrainz_id: 'musicbrainz' };
     for (const key of sourceOrder) {
         if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
     }
