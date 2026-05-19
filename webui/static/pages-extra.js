@@ -2248,6 +2248,10 @@ function _updateDlNavBadge(count) {
             badge.classList.add('hidden');
         }
     }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
 }
 
 function _adlRender() {

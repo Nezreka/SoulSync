@@ -449,6 +449,19 @@ body {
     color: rgba(var(--accent-rgb), 0.7);
 }
 
+.nav-button.nav-downloads-active .nav-icon {
+    animation: watchlist-scan-glow 1.2s ease-in-out infinite;
+}
+
+.nav-button.nav-downloads-active .nav-svg {
+    animation: nav-downloads-svg 1.2s ease-in-out infinite;
+}
+
+@keyframes nav-downloads-svg {
+    0%, 100% { opacity: 0.7; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(1px); filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.8)); }
+}
+
 .nav-button.nav-watchlist-scanning .nav-icon {
     animation: watchlist-scan-glow 1.6s ease-in-out infinite;
 }

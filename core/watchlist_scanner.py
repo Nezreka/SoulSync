@@ -2233,6 +2233,8 @@ class WatchlistScanner:
                 album_id = album.id
                 album_release_date = album.release_date
                 album_images = album.images if hasattr(album, 'images') else []
+                if not album_images and hasattr(album, 'image_url') and album.image_url:
+                    album_images = [{'url': album.image_url}]
                 album_type = album.album_type if hasattr(album, 'album_type') else 'album'
                 total_tracks = album.total_tracks if hasattr(album, 'total_tracks') else 0
                 album_artists = album.artists if hasattr(album, 'artists') else []
