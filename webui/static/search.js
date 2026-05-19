@@ -320,7 +320,7 @@ function initializeSearchModeToggle() {
                 onClick: () => {
                     console.log(`🎵 Opening library artist detail: ${artist.name} (ID: ${artist.id})`);
                     hideDropdown();
-                    navigateToArtistDetail(artist.id, artist.name);
+                    navigateToArtistDetailPage(artist.id, artist.name);
                 }
             })
         );
@@ -341,7 +341,7 @@ function initializeSearchModeToggle() {
                     const sourceOverride = searchController.state.activeSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
-                    navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
+                    navigateToArtistDetailPage(artist.id, artist.name, sourceOverride || null);
                 }
             })
         );

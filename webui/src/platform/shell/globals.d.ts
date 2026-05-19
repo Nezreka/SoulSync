@@ -40,8 +40,15 @@ declare global {
         artistName: string,
         sourceOverride?: string | null,
         options?: {
-          skipOriginPush?: boolean;
           skipRouteChange?: boolean;
+        },
+      ) => void;
+      navigateToArtistDetailPage: (
+        artistId: string | number,
+        artistName: string,
+        sourceOverride?: string | null,
+        options?: {
+          replace?: boolean;
         },
       ) => void;
       showReactHost: (pageId: ShellPageId) => void;

@@ -1237,7 +1237,7 @@ function initExpandedPlayer() {
         gotoArtistBtn.addEventListener('click', () => {
             if (currentTrack && currentTrack.artist_id) {
                 closeNowPlayingModal();
-                navigateToArtistDetail(currentTrack.artist_id, currentTrack.artist || '');
+                navigateToArtistDetailPage(currentTrack.artist_id, currentTrack.artist || '');
             }
         });
     }
@@ -2396,4 +2396,3 @@ function updateMediaSessionPlaybackState() {
 }
 
 // ===============================
-
