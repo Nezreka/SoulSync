@@ -327,7 +327,7 @@ class AmazonClient:
 
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
         _rate_limit()
-        items = self.search_raw(query, types="track,album")
+        items = self.search_raw(query, types="track")
         track_pairs: List[tuple] = []   # (Track, album_asin)
         seen_album_asins: List[str] = []
         for item in items:
@@ -360,7 +360,7 @@ class AmazonClient:
 
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
         _rate_limit()
-        items = self.search_raw(query, types="track,album")
+        items = self.search_raw(query, types="track")
         seen: Dict[str, Artist] = {}
         artist_album_asin: Dict[str, str] = {}  # artist name → first album ASIN seen
         for item in items:
@@ -384,14 +384,14 @@ class AmazonClient:
 
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
         _rate_limit()
-        items = self.search_raw(query, types="track,album")
+        items = self.search_raw(query, types="track")
         album_candidates: List[tuple] = []  # (Album, asin)
         seen_keys: set = set()
         for item in items:
-            if not item.is_album:
+            album_asin = item.album_asin
+            raw_name = item.album_name
+            if not raw_name:
                 continue
-            album_asin = item.album_asin or item.asin
-            raw_name = item.album_name or item.title
             display_name = _strip_edition(raw_name)
             artist = _primary_artist(item.artist_name)
             # Collapse Explicit/Clean variants: same normalised name + artist = same album
@@ -519,7 +519,7 @@ class AmazonClient:
             artist_name = _primary_artist(streams[0].artist)
             try:
                 search_items = self.search_raw(
-                    f"{album_name} {artist_name}", types="track,album"
+                    f"{album_name} {artist_name}", types="track"
                 )
                 for item in search_items:
                     if item.album_asin == asin and item.duration_seconds:
@@ -533,12 +533,12 @@ class AmazonClient:
                 "name": _strip_edition(s.title),
                 "artists": [{"name": _primary_artist(s.artist), "id": ""}],
                 "duration_ms": duration_map.get(s.asin, 0),
-                "track_number": s.track_number,
+                "track_number": s.track_number if s.track_number is not None else idx + 1,
                 "disc_number": s.disc_number,
                 "release_date": s.date or "",
                 "isrc": s.isrc,
             }
-            for s in streams
+            for idx, s in enumerate(streams)
         ]
         return {"items": items, "total": len(items), "limit": 50, "next": None}
 
@@ -547,7 +547,7 @@ class AmazonClient:
         _rate_limit()
         search_name = _unslugify(artist_name)
         try:
-            items = self.search_raw(search_name, types="track,album")
+            items = self.search_raw(search_name, types="track")
         except AmazonClientError:
             return None
         name_lower = search_name.lower()
@@ -577,7 +577,7 @@ class AmazonClient:
         _rate_limit()
         search_name = _unslugify(artist_name)
         try:
-            items = self.search_raw(f"{search_name} album", types="track,album")
+            items = self.search_raw(f"{search_name} album", types="track")
         except AmazonClientError:
             return []
         album_candidates: List[tuple] = []  # (Album, asin)
@@ -630,7 +630,7 @@ class AmazonClient:
         """Return an album cover as artist image stand-in (T2Tunes has no artist images)."""
         search_name = _unslugify(artist_id)
         try:
-            items = self.search_raw(search_name, types="track,album")
+            items = self.search_raw(search_name, types="track")
         except AmazonClientError:
             return None
         name_lower = search_name.lower()
@@ -686,20 +686,33 @@ class AmazonClient:
 
     def _get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = urljoin(f"{self.base_url}/", path.lstrip("/"))
-        try:
-            resp = self.session.get(url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-        except requests.HTTPError as exc:
-            raise AmazonClientError(
-                f"HTTP {exc.response.status_code} for {url}"
-            ) from exc
-        except requests.RequestException as exc:
-            raise AmazonClientError(f"Request failed for {url}: {exc}") from exc
-        try:
-            return resp.json()
-        except ValueError as exc:
-            preview = resp.text[:200].replace("\n", " ")
-            raise AmazonClientError(f"Response not JSON for {url}: {preview!r}") from exc
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            if attempt:
+                time.sleep(1.0 * attempt)
+            try:
+                resp = self.session.get(url, params=params, timeout=self.timeout)
+                resp.raise_for_status()
+            except requests.HTTPError as exc:
+                body = exc.response.text[:500].replace("\n", " ")
+                # T2Tunes returns 400 for transient Amazon-side failures — retry those.
+                if exc.response.status_code == 400 and "Failed to search" in exc.response.text:
+                    logger.debug("T2Tunes transient 400 on attempt %d, retrying: %s", attempt + 1, url)
+                    last_exc = AmazonClientError(
+                        f"HTTP {exc.response.status_code} for {url} — body: {body!r}"
+                    )
+                    continue
+                raise AmazonClientError(
+                    f"HTTP {exc.response.status_code} for {url} — body: {body!r}"
+                ) from exc
+            except requests.RequestException as exc:
+                raise AmazonClientError(f"Request failed for {url}: {exc}") from exc
+            try:
+                return resp.json()
+            except ValueError as exc:
+                preview = resp.text[:200].replace("\n", " ")
+                raise AmazonClientError(f"Response not JSON for {url}: {preview!r}") from exc
+        raise last_exc  # type: ignore[misc]
 
     @staticmethod
     def _iter_search_items(response: Any) -> Iterator[T2TunesSearchItem]:
