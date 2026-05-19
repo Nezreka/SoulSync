@@ -3417,6 +3417,7 @@ const WHATS_NEW = {
         { date: 'May 18, 2026 — 2.5.6 release' },
         { title: 'MusicBrainz as Primary Metadata Source', desc: 'MusicBrainz is now a full primary metadata source on equal footing with Deezer, iTunes, Spotify, and Discogs. switch to it in Settings → Metadata Source — always available, no account or API key needed, rate-limited to 1 req/sec. covers all primary source flows: search, album/track/artist lookup, watchlist scans, discover hero, similar artist backfill, artist map.', page: 'settings' },
         { title: 'Fix: MusicBrainz artist detail showing MBID as name', desc: 'clicking a MusicBrainz artist from search results was showing the raw MBID as the artist name on the detail page. URL-driven routing (PR #644) no longer passes the display name to the backend, so the source detail endpoint now looks it up directly from MusicBrainz by MBID.' },
+        { title: 'Fix: artist detail back button always showing "← Back"', desc: 'PR #644 removed the back-button label logic along with the origin stack. restored: a label stack (separate from browser history, which handles actual navigation) tracks where you came from across the full similar-artist chain — "← Back to Search", "← Back to Artist A", "← Back to Artist B", etc. API response backfills the current artist name so the stack has real names when clicking similar artists.' },
     ],
     '2.5.5': [
         { date: 'May 17, 2026 — 2.5.5 release' },
