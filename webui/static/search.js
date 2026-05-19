@@ -1197,16 +1197,7 @@ async function loadInitialData() {
             return;
         }
 
-        if (targetPage === 'artist-detail') {
-            const deepArtist = _getDeepLinkArtistDetail();
-            if (deepArtist?.artistId && typeof navigateToArtistDetail === 'function') {
-                navigateToArtistDetail(deepArtist.artistId, '', deepArtist.source === 'library' ? null : deepArtist.source);
-            } else {
-                navigateToPage('library', { skipRouteChange: true, forceReload: true });
-            }
-        } else {
-            navigateToPage(targetPage, { skipRouteChange: true, forceReload: true });
-        }
+        navigateToPage(targetPage, { forceReload: true });
     } catch (error) {
         console.error('Error loading initial data:', error);
     }

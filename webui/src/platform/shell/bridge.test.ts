@@ -88,4 +88,13 @@ describe('bindWindowWebRouter', () => {
       replace: true,
     });
   });
+
+  it('refuses artist detail navigation without an artist id', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await expect(window.SoulSyncWebRouter?.navigateToPage('artist-detail', {} as never)).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
 });

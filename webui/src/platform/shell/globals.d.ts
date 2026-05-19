@@ -35,6 +35,15 @@ declare global {
       resolveLegacyPath: (pathname: string) => ShellPageId | null;
       setActivePageChrome: (pageId: ShellPageId) => void;
       activateLegacyPath: (pathname: string) => void;
+      navigateToArtistDetail: (
+        artistId: string | number,
+        artistName: string,
+        sourceOverride?: string | null,
+        options?: {
+          skipOriginPush?: boolean;
+          skipRouteChange?: boolean;
+        },
+      ) => void;
       showReactHost: (pageId: ShellPageId) => void;
     };
   }
