@@ -541,7 +541,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
         'rg-damn', includes=['releases', 'artist-credits']
     )
     client._client.get_release.assert_called_once_with(
-        'rel-official', includes=['recordings', 'artist-credits', 'release-groups']
+        'rel-official', includes=['recordings', 'artist-credits', 'release-groups', 'cover-art-archive']
     )
     assert album is not None
     assert album['id'] == 'rg-damn'  # Canonical ID stays the release-group MBID.

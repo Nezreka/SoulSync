@@ -379,6 +379,16 @@ def run_service_test(service, test_config):
                 return False, "Hydrabase not connected. Configure URL + API key and click Connect."
             except Exception as e:
                 return False, f"Hydrabase connection error: {str(e)}"
+        elif service == "musicbrainz":
+            try:
+                from core.metadata.registry import get_musicbrainz_client
+                mb = get_musicbrainz_client()
+                results = mb.search_artists("radiohead", limit=1)
+                if results:
+                    return True, "MusicBrainz reachable"
+                return False, "MusicBrainz returned no results — may be rate-limited or unreachable."
+            except Exception as e:
+                return False, f"MusicBrainz connection error: {str(e)}"
         elif service == "soundcloud":
             # Anonymous SoundCloud has no auth, so "test" really means
             # "is yt-dlp installed and can it reach SoundCloud right now."

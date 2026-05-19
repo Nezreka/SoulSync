@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.5"
+_SOULSYNC_BASE_VERSION = "2.5.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1859,6 +1859,7 @@ SERVICE_CONFIG_REGISTRY = {
     'spotify':      {'required': ['client_id', 'client_secret']},
     'itunes':       {'always': True},   # default storefront works anon
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
+    'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
@@ -6836,8 +6837,7 @@ def delete_quarantine_item(entry_id):
 @app.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
-    matching per-check bypass flag set so the original quarantine trigger
-    is skipped. Other checks still run."""
+    quarantine gates skipped for this explicit user-approved pass."""
     try:
         from core.imports.quarantine import approve_quarantine_entry
         # Restore inside the soulseek download dir so existing path-resolution
@@ -6854,8 +6854,10 @@ def approve_quarantine_item(entry_id):
                 "error": "Cannot one-click approve — entry has thin sidecar (no embedded context). Use 'Recover to Staging' instead.",
             }), 400
         restored_path, context, trigger = result
-        # Mark the bypass so the pipeline skips the trigger that fired.
-        context['_skip_quarantine_check'] = trigger
+        # User approval means "import this file"; skip all quarantine gates
+        # for this one restored pass so multi-reason failures do not loop.
+        context['_skip_quarantine_check'] = 'all'
+        context['_approved_quarantine_trigger'] = trigger
         # Re-dispatch through the same pipeline. Run async so the HTTP
         # request returns quickly — UI polls /list to see the entry vanish.
         context_key = f"approve_{entry_id}_{int(time.time())}"
@@ -6863,8 +6865,8 @@ def approve_quarantine_item(entry_id):
             target=lambda: _post_process_matched_download(context_key, context, restored_path),
             daemon=True,
         ).start()
-        logger.info(f"[Quarantine] Approved {entry_id} (bypass={trigger}) → re-running pipeline")
-        return jsonify({"success": True, "trigger_bypassed": trigger})
+        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all) → re-running pipeline")
+        return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -18846,8 +18848,12 @@ def get_spotify_album_tracks(album_id):
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
-        # Extract tracks from album data (Spotify format)
-        tracks = album_data.get('tracks', {}).get('items', [])
+        # Extract tracks — handle Spotify {items, total} or flat-list formats
+        tracks_container = album_data.get('tracks', {})
+        if isinstance(tracks_container, list):
+            tracks = tracks_container
+        else:
+            tracks = tracks_container.get('items', [])
 
         # If no tracks in album data (iTunes format), fetch them separately
         if not tracks:
@@ -24506,6 +24512,7 @@ def get_watchlist_artists():
     """Get all artists in the watchlist with cached images"""
     try:
         database = get_database()
+        database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
         watchlist_artists = database.get_watchlist_artists(profile_id=get_current_profile_id())
 
         # Convert to JSON serializable format (images are cached from watchlist scans)
@@ -24523,6 +24530,7 @@ def get_watchlist_artists():
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
                 "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
                 "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),
+                "musicbrainz_artist_id": getattr(artist, 'musicbrainz_artist_id', None),
                 "amazon_artist_id": getattr(artist, 'amazon_artist_id', None),
                 "include_albums": artist.include_albums,
                 "include_eps": artist.include_eps,
@@ -24560,7 +24568,7 @@ def add_to_watchlist():
                 conn = database._get_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id, deezer_id, discogs_id
+                    SELECT spotify_artist_id, itunes_artist_id, deezer_id, discogs_id, musicbrainz_id
                     FROM artists WHERE id = ? LIMIT 1
                 """, (artist_id,))
                 row = cursor.fetchone()
@@ -24571,6 +24579,9 @@ def add_to_watchlist():
                     if fallback == 'discogs' and row['discogs_id']:
                         artist_id = row['discogs_id']
                         source = 'discogs'
+                    elif fallback == 'musicbrainz' and row['musicbrainz_id']:
+                        artist_id = row['musicbrainz_id']
+                        source = 'musicbrainz'
                     elif fallback == 'deezer' and row['deezer_id']:
                         artist_id = row['deezer_id']
                         source = 'deezer'
@@ -24586,12 +24597,17 @@ def add_to_watchlist():
                     elif row['discogs_id']:
                         artist_id = row['discogs_id']
                         source = 'discogs'
+                    elif row['musicbrainz_id']:
+                        artist_id = row['musicbrainz_id']
+                        source = 'musicbrainz'
             except Exception as e:
                 logger.debug("watchlist artist source lookup failed: %s", e)
         if not source:
             fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
         success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
+        if success:
+            database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
 
         if success:
 
@@ -25009,7 +25025,7 @@ def start_watchlist_scan():
                 
                 # PROACTIVE ID BACKFILLING (cross-provider support)
                 # Before scanning, ensure all artists have IDs for ALL available sources
-                providers_to_backfill = ['itunes', 'deezer']
+                providers_to_backfill = ['itunes', 'deezer', 'musicbrainz']
                 if spotify_client and spotify_client.is_spotify_authenticated():
                     providers_to_backfill.append('spotify')
                 try:
@@ -25315,6 +25331,7 @@ def watchlist_artist_config(artist_id):
         database = get_database()
 
         if request.method == 'GET':
+            database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
             # Get current config from database
             conn = sqlite3.connect(str(database.database_path))
             cursor = conn.cursor()
@@ -25323,10 +25340,12 @@ def watchlist_artist_config(artist_id):
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
-                       lookback_days, discogs_artist_id, preferred_metadata_source, amazon_artist_id
+                       lookback_days, discogs_artist_id, preferred_metadata_source,
+                       amazon_artist_id, musicbrainz_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -25340,6 +25359,7 @@ def watchlist_artist_config(artist_id):
             deezer_id = result[14]  # deezer_artist_id from query
             discogs_id = result[16]  # discogs_artist_id from query
             amazon_id = result[18] if len(result) > 18 else None  # amazon_artist_id from query
+            musicbrainz_id = result[19] if len(result) > 19 else None  # musicbrainz_artist_id from query
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
@@ -25382,9 +25402,16 @@ def watchlist_artist_config(artist_id):
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ? OR discogs_id = ?
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ?
+                          OR discogs_id = ? OR musicbrainz_id = ?
                     LIMIT 1
-                """, (artist_id, artist_id, artist_id, artist_id))
+                """, (
+                    spotify_id or artist_id,
+                    itunes_id or artist_id,
+                    deezer_id or artist_id,
+                    discogs_id or artist_id,
+                    musicbrainz_id or artist_id,
+                ))
                 lib_row = cur2.fetchone()
                 if lib_row:
                     artist_info['banner_url'] = lib_row[0]
@@ -25405,9 +25432,17 @@ def watchlist_artist_config(artist_id):
                     FROM recent_releases rr
                     JOIN watchlist_artists wa ON rr.watchlist_artist_id = wa.id
                     WHERE wa.spotify_artist_id = ? OR wa.itunes_artist_id = ? OR wa.deezer_artist_id = ?
+                          OR wa.discogs_artist_id = ? OR wa.amazon_artist_id = ? OR wa.musicbrainz_artist_id = ?
                     ORDER BY rr.release_date DESC
                     LIMIT 6
-                """, (artist_id, artist_id, artist_id))
+                """, (
+                    spotify_id or artist_id,
+                    itunes_id or artist_id,
+                    deezer_id or artist_id,
+                    discogs_id or artist_id,
+                    amazon_id or artist_id,
+                    musicbrainz_id or artist_id,
+                ))
                 releases = [
                     {
                         'album_name': r[0],
@@ -25448,6 +25483,7 @@ def watchlist_artist_config(artist_id):
                 "deezer_artist_id": deezer_id,
                 "discogs_artist_id": discogs_id,
                 "amazon_artist_id": amazon_id,
+                "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
             })
@@ -25471,7 +25507,7 @@ def watchlist_artist_config(artist_id):
                 lookback_days = int(lookback_days) if lookback_days != '' else None
             preferred_metadata_source = data.get('preferred_metadata_source', None)
             # Validate — only accept known sources, empty string means clear override
-            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs'):
+            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
                 preferred_metadata_source = None
 
             # Validate at least one release type is selected
@@ -25485,8 +25521,9 @@ def watchlist_artist_config(artist_id):
             # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
             cursor.execute("""
                 SELECT lookback_days FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
-            """, (artist_id, artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             old_row = cursor.fetchone()
             old_lookback = old_row[0] if old_row else None
             lookback_changed = old_lookback != lookback_days
@@ -25498,11 +25535,12 @@ def watchlist_artist_config(artist_id):
                     include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                      OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals), lookback_days, preferred_metadata_source, lookback_changed,
-                  artist_id, artist_id, artist_id, artist_id))
+                  artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -25548,7 +25586,7 @@ def watchlist_artist_link_provider(artist_id):
         new_provider_id = data.get('provider_id', '').strip()
         provider = data.get('provider', '').strip()
 
-        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs', 'amazon')
+        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs', 'amazon', 'musicbrainz')
         if provider not in valid_providers:
             return jsonify({"success": False, "error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"}), 400
 
@@ -25562,8 +25600,9 @@ def watchlist_artist_link_provider(artist_id):
         cursor.execute("""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id
             FROM watchlist_artists
-            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR amazon_artist_id = ?
-        """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                  OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
+        """, (artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
         row = cursor.fetchone()
 
         if not row:
@@ -25574,7 +25613,14 @@ def watchlist_artist_link_provider(artist_id):
         artist_name = row[1]
 
         # Check for duplicate — another watchlist artist already has this provider ID
-        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id', 'amazon': 'amazon_artist_id'}
+        col_map = {
+            'spotify': 'spotify_artist_id',
+            'itunes': 'itunes_artist_id',
+            'deezer': 'deezer_artist_id',
+            'discogs': 'discogs_artist_id',
+            'amazon': 'amazon_artist_id',
+            'musicbrainz': 'musicbrainz_artist_id',
+        }
         col = col_map[provider]
 
         if not is_clear:
@@ -25879,8 +25925,15 @@ def get_discover_similar_artists():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
+        from config.settings import config_manager
+        active_server = config_manager.get_active_media_server()
 
-        similar_artists = database.get_top_similar_artists(limit=200, profile_id=get_current_profile_id(), require_source=active_source)
+        similar_artists = database.get_top_similar_artists(
+            limit=200,
+            profile_id=get_current_profile_id(),
+            require_source=active_source,
+            exclude_library_server=active_server,
+        )
 
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
@@ -25893,6 +25946,8 @@ def get_discover_similar_artists():
                 artist_id = artist.similar_artist_spotify_id
             elif active_source == 'deezer':
                 artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+            elif active_source == 'musicbrainz':
+                artist_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist.similar_artist_itunes_id
             else:
                 artist_id = artist.similar_artist_itunes_id
 
@@ -25900,6 +25955,7 @@ def get_discover_similar_artists():
                 "artist_id": artist_id,
                 "spotify_artist_id": artist.similar_artist_spotify_id,
                 "itunes_artist_id": artist.similar_artist_itunes_id,
+                "musicbrainz_artist_id": getattr(artist, 'similar_artist_musicbrainz_id', None),
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
                 "similarity_rank": artist.similarity_rank,
@@ -25914,7 +25970,10 @@ def get_discover_similar_artists():
                 artist_data["popularity"] = artist.popularity
             result_artists.append(artist_data)
 
-        logger.info(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
+        logger.info(
+            f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
+            f"{active_source} after excluding {active_server} library artists"
+        )
 
         return jsonify({
             "success": True,
@@ -25953,6 +26012,8 @@ def enrich_similar_artists():
                 ext_id = artist.similar_artist_spotify_id
             elif source == 'deezer':
                 ext_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+            elif source == 'musicbrainz':
+                ext_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist.similar_artist_itunes_id
             else:
                 ext_id = artist.similar_artist_itunes_id
             if ext_id and ext_id not in cache_map:

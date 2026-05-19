@@ -43,6 +43,7 @@ class _FakeDB:
         self.album_confidence = album_confidence
         self.sync_history_calls = []
         self.track_results_calls = []
+        self.manual_matches = []
 
     def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None):
         key = (title.lower().strip(), artist.lower().strip())
@@ -70,6 +71,23 @@ class _FakeDB:
 
     def update_sync_history_track_results(self, batch_id, results_json):
         self.track_results_calls.append((batch_id, results_json))
+
+    def get_manual_library_match(self, profile_id, source, source_track_id, server_source=''):
+        for match in self.manual_matches:
+            if (
+                match["profile_id"] == profile_id
+                and match["source"] == source
+                and match["source_track_id"] == source_track_id
+                and match.get("server_source", "") == server_source
+            ):
+                return match
+        return None
+
+    def find_manual_library_match_by_source_track_id(self, profile_id, source_track_id, server_source=''):
+        for match in self.manual_matches:
+            if match["profile_id"] == profile_id and match["source_track_id"] == source_track_id:
+                return match
+        return None
 
 
 class _DBTrack:
@@ -301,7 +319,7 @@ def test_manual_match_overrides_internal_force_download(monkeypatch):
     db = _FakeDB()
     monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
     monkeypatch.setattr(
-        'core.library.manual_library_match.get_match',
+        'core.library.manual_library_match.get_match_for_track',
         lambda *_args, **_kwargs: {'id': 1, 'library_track_id': 42},
     )
 
@@ -324,6 +342,38 @@ def test_manual_match_overrides_internal_force_download(monkeypatch):
     assert removed == ['T1']
 
 
+def test_manual_match_saved_under_mirrored_source_overrides_wishlist_batch(monkeypatch):
+    """Wishlist batches honor matches saved from mirrored sync history."""
+    db = _FakeDB()
+    db.manual_matches.append({
+        "id": 1,
+        "profile_id": 1,
+        "source": "mirrored",
+        "source_track_id": "track-abc",
+        "server_source": "",
+        "library_track_id": 42,
+    })
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    removed = []
+    _seed_batch(
+        'B2m',
+        force_download_all=True,
+        ignore_manual_matches=False,
+        profile_id=1,
+        batch_source='wishlist',
+    )
+    deps = _build_deps(wishlist_remove=lambda td: removed.append(td.get('name')))
+    tracks = [{'id': 'track-abc', 'name': 'Coffee Break', 'artists': [{'name': 'Zeds Dead'}], 'provider': 'wishlist'}]
+
+    mw.run_full_missing_tracks_process('B2m', 'wishlist', tracks, deps)
+
+    assert download_batches['B2m']['queue'] == []
+    assert download_batches['B2m']['analysis_results'][0]['found'] is True
+    assert download_batches['B2m']['analysis_results'][0]['match_reason'] == 'manual_library_match'
+    assert removed == ['Coffee Break']
+
+
 def test_explicit_force_download_ignores_manual_match(monkeypatch):
     """User-facing Force Download All can intentionally bypass manual matches."""
     db = _FakeDB()
@@ -331,7 +381,7 @@ def test_explicit_force_download_ignores_manual_match(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        'core.library.manual_library_match.get_match',
+        'core.library.manual_library_match.get_match_for_track',
         lambda *_args, **_kwargs: calls.append(True) or {'id': 1, 'library_track_id': 42},
     )
 

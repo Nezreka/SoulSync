@@ -88,6 +88,11 @@ def _entry_id_from_filename(quarantined_filename: str) -> str:
     return Path(base).stem
 
 
+def entry_id_from_quarantined_filename(quarantined_filename: str) -> str:
+    """Derive a quarantine entry id from a quarantined filename or path."""
+    return _entry_id_from_filename(os.path.basename(quarantined_filename))
+
+
 def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
     """Enumerate quarantined files paired with their sidecars.
 

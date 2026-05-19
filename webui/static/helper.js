@@ -3413,6 +3413,10 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.5.6': [
+        { date: 'May 18, 2026 — 2.5.6 release' },
+        { title: 'MusicBrainz as Primary Metadata Source', desc: 'MusicBrainz is now a full primary metadata source on equal footing with Deezer, iTunes, Spotify, and Discogs. switch to it in Settings → Metadata Source — always available, no account or API key needed, rate-limited to 1 req/sec. covers all primary source flows: search, album/track/artist lookup, watchlist scans, discover hero, similar artist backfill, artist map.', page: 'settings' },
+    ],
     '2.5.5': [
         { date: 'May 17, 2026 — 2.5.5 release' },
         { title: 'Manual Library Match', desc: 'stop SoulSync from re-downloading tracks it already has. new centralized tool (Tools page → Manual Library Match, or Sync page → Library Match button) lets you search your wishlist / sync history on the left and your library on the right, then link them. once matched, that source track is permanently skipped in wishlist cleanup and the download analysis loop — even when force download is on. manage all your matches in one place with remove support.', page: 'tools' },
@@ -3445,6 +3449,20 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "MusicBrainz Is Now a First-Class Metadata Source",
+        description: "MusicBrainz was already available as an optional search tab, but it wasn't selectable as your primary metadata source. now it is — switch to it in Settings → Metadata Source and the whole app routes through it.",
+        features: [
+            "• always available — no account, no API key, no token needed",
+            "• rate-limited to 1 req/sec at the client layer, consistent with MusicBrainz's terms",
+            "• covers the full primary-source interface: search, album/track/artist lookup, top tracks, artist albums, discography",
+            "• watchlist scanner now backfills MusicBrainz artist IDs alongside Spotify / iTunes / Deezer in the similar artists table",
+            "• discover hero, artist map, and personalized playlists all source from MusicBrainz IDs when it's the active primary",
+            "• cover art served via Cover Art Archive — no extra API calls, browser fetches the URL directly",
+            "• fallback source logic in Settings and the registry now reads from source priority order instead of hardcoding 'deezer'",
+        ],
+        usage_note: "Settings → Metadata → Primary Source → MusicBrainz",
+    },
     {
         title: "Live Recordings Stop False-Quarantining",
         description: "github issue #607: live recordings were quarantining as 'Version mismatch: expected ... (live) but file is ... (original)' because MusicBrainz often stores live recordings with bare titles — venue annotations live on the release entity, not the recording entity itself. AcoustID's fingerprint correctly identified the live recording, but the title-text comparison flagged it as wrong.",
@@ -3714,278 +3732,19 @@ const VERSION_MODAL_SECTIONS = [
         ],
     },
     {
-        title: "Earlier in v2.4 — Reorganize, Search, Sync polish",
-        description: "highlights from the 2.4.0 cycle that landed before this patch.",
+        title: "Earlier in v2.4",
+        description: "highlights from the 2.4 cycle.",
         features: [
-            "• reorganize is now a queue with a live status panel — spam-click all you want, items run one at a time and you can keep browsing",
-            "• search page got a row of source icons above the bar — typing only searches the active source instead of fanning out to all of them",
-            "• per-query source cache + cache dots — switching back to a source you already searched is instant",
-            "• fix: \"maduk — leave a light on\" on tidal was downloading tom walker\'s song of the same name with maduk\'s metadata embedded — tightened the candidate artist gate and acoustid verification",
-            "• tidal: rejects silent quality downgrades (320kbps when you asked for hires)",
-            "• spotify: bumped post-ban cooldown from 5 to 30 minutes — first call after a ban was getting re-banned within seconds",
-        ],
-    },
-    {
-        title: "Reorganize Queue Polish",
-        description: "cleaned up some race conditions in the queue. behavior is solid now.",
-        features: [
-            "• worker pick + status flip is atomic now — cancel can\'t land between them and let a cancelled item still run",
-            "• swapped lock + wakeup-event for a single threading.Condition — newly-queued items don\'t sleep up to 60s anymore",
-            "• bulk enqueue dedupes within a single batch (was only deduping against pre-existing items)",
-            "• reorganize-preview Apply button no longer gets stuck disabled on errors",
-            "• db helpers let exceptions bubble instead of swallowing them as \"album not found\"",
-        ],
-    },
-    {
-        title: "Reorganize Queue with Live Status Panel",
-        description: "reorganize is now a queue with a live status panel. spam-click all you want — items run one at a time and you can keep browsing.",
-        features: [
-            "• per-album reorganize and reorganize all both enqueue into a single backend queue",
-            "• buttons stay clickable — clicking the same album twice silently dedupes",
-            "• status panel shows active progress, queued count, and recent finishes",
-            "• expand the panel for the full queue + per-item cancel buttons (running items can\'t be cancelled mid-flight)",
-            "• cross-artist items get tagged so you know what\'s queued from where",
-            "• continue-on-failure: one bad album never stalls the queue",
-            "• reorganize all is now one backend call instead of N js-driven calls — way faster",
-        ],
-    },
-    {
-        title: "Fix Wrong-Artist Tracks Silently Downloading",
-        description: "searching for a track could silently download a completely different artist\'s song with the same name. fixed at two layers.",
-        features: [
-            "• example: \"maduk — leave a light on\" on tidal was downloading tom walker\'s song of the same name with maduk\'s metadata embedded",
-            "• tightened the candidate artist gate (was letting through 0.4 similarity, now blocks at 0.5)",
-            "• acoustid verification now FAILs (quarantines) clear artist mismatches instead of accepting them",
-            "• ambiguous matches (covers, collabs) still get the benefit of the doubt — only obvious mismatches get blocked",
-        ],
-    },
-    {
-        title: "Tidal Search Falls Back on Long Queries",
-        description: "tidal\'s search chokes on long remix-credit queries. now retries with shorter variants when the original returns 0 results.",
-        features: [
-            "• example: \"maduk transformations remixed fire away fred v remix\" returned 0 — falls back to shorter queries until tidal finds the track",
-            "• up to 4 shortened variants tried, capped at 5 total requests",
-            "• qualifier-safe: live/remix/acoustic searches only accept fallback results that keep the qualifier",
-            "• returns empty if no variant preserves the qualifiers — same as before",
-        ],
-    },
-    {
-        title: "Manual Discovery Fixes Persist Across Restart",
-        description: "manual discovery fixes are now saved under your active metadata source instead of always \"spotify\" — so deezer / itunes / discogs / hydrabase users\' fixes survive restart.",
-        features: [
-            "• affects tidal, deezer, spotify public, youtube, and discovery pool manual fixes",
-            "• matches how the auto-discovery worker already saved",
-            "• spotify-primary users unaffected (hardcoded value matched their source)",
-        ],
-    },
-    {
-        title: "Watchlist Content Filters Fixed",
-        description: "global override and live-version detection now behave the way the ui implies.",
-        features: [
-            "• scheduled auto-watchlist honors watchlist → global override (was bypassing it)",
-            "• live detection tightened — no more false positives on titles like \"what we live for\"",
-            "• same fix applies to the library maintenance live/commentary cleaner",
-            "• still catches (live), - live, live at/from/in/on, unplugged, in concert",
-        ],
-    },
-    {
-        title: "Discography Backfill",
-        description: "new maintenance job that scans each artist\'s full discography and finds what you\'re missing.",
-        features: [
-            "• scans each library artist against your metadata source",
-            "• creates findings for missing tracks — review and add to wishlist",
-            "• respects all content filters (live, remix, acoustic, etc.) and release type filters",
-            "• optional auto-add-to-wishlist setting for hands-off operation",
-            "• opt-in, runs weekly, processes up to 50 artists per run",
-        ],
-    },
-    {
-        title: "Repair 'Run Now' Honored While Paused",
-        description: "force-running a repair job no longer stalls forever when the master worker is paused.",
-        features: [
-            "• jobs queued via run now complete even if the master worker is paused",
-            "• fixes silent stalls where the job logged \"scanning 50 artists\" then did nothing",
-            "• master-pause still blocks scheduled runs — only affects user-triggered runs",
-        ],
-    },
-    {
-        title: "Multi-Artist Tagging",
-        description: "more control over how multiple artists are written to audio file tags.",
-        features: [
-            "• configurable separator: comma, semicolon, or slash",
-            "• multi-value ARTISTS tag for navidrome / jellyfin multi-artist linking",
-            "• \"move featured artists to title\" mode — primary in ARTIST tag, others as (feat. ...) in title",
-            "• opt-in, defaults match current behavior",
-        ],
-    },
-    {
-        title: "Enriched Downloads Page",
-        description: "download cards now show rich metadata instead of just filenames.",
-        features: [
-            "• album artwork thumbnail on each card",
-            "• artist name, album name, source badge",
-            "• quality badge appears after post-processing",
-            "• falls back gracefully for transfers without metadata context",
-        ],
-    },
-    {
-        title: "Template Variable Delimiters",
-        description: "use ${var} syntax to append literal text to template variables.",
-        features: [
-            "• ${albumtype}s produces \"Albums\", \"Singles\", \"EPs\"",
-            "• both $var and ${var} syntaxes work everywhere",
-            "• validation updated to accept delimited variables",
-        ],
-    },
-    {
-        title: "Reorganize All Albums",
-        description: "bulk reorganize all albums for an artist from the enhanced library view.",
-        features: [
-            "• new reorganize all button in the artist header",
-            "• processes sequentially with progress toasts",
-            "• continues on error — one failed album doesn\'t block the rest",
-            "• uses the same template + endpoint as per-album reorganize",
-        ],
-    },
-    {
-        title: "SoulSync Standalone Library",
-        description: "use soulsync without plex, jellyfin, or navidrome — manage your library directly.",
-        features: [
-            "• new standalone server option in settings → connections",
-            "• downloads and imports write to the library db immediately",
-            "• pre-populated enrichment ids — workers skip re-discovery",
-            "• deep scan finds untracked files and removes stale db records",
-            "• sync page hidden automatically in standalone mode",
-            "• full library / artist detail / discography all work standalone",
-        ],
-        usage_note: "settings → connections → standalone. no media server needed.",
-    },
-    {
-        title: "Auto-Import",
-        description: "background folder watcher that automatically identifies and imports music into your library.",
-        features: [
-            "• recursive scan — any folder depth (artist/album/tracks, loose files, whatever)",
-            "• tag-based identification preferred, acoustid fingerprinting as fallback",
-            "• stats bar, filter pills, scan now, approve all, clear history",
-            "• expandable per-track match details with confidence scores",
-            "• race condition fix prevents duplicate processing on multi-track albums",
-        ],
-        usage_note: "import page → auto tab. set your import folder in settings.",
-    },
-    {
-        title: "Wishlist Nebula",
-        description: "wishlist redesigned as an interactive artist orb visualization.",
-        features: [
-            "• each artist is a glowing orb — albums and singles orbit around it",
-            "• click orbs to expand and download directly from the nebula",
-            "• live progress with spinning ring animation while processing",
-            "• stats strip up top: total artists, albums, singles, tracks",
-        ],
-        usage_note: "click wishlist in the sidebar.",
-    },
-    {
-        title: "Automation Group Management",
-        description: "organize and manage automation groups properly.",
-        features: [
-            "• rename, delete, and bulk-toggle groups from the group header",
-            "• drag-and-drop automations between groups",
-            "• delete confirmation shows group name and automation count",
-        ],
-        usage_note: "use the action buttons on group headers in the automations page.",
-    },
-    {
-        title: "Bidirectional Artist Sync & Server Playlists",
-        description: "artist sync now goes both ways, and server playlists show full coverage.",
-        features: [
-            "• artist sync pulls new content from your media server AND removes stale library entries",
-            "• deep scan mode fetches full metadata for newly-discovered tracks",
-            "• server playlist view shows all playlists with synced vs unsynced visual separation",
-        ],
-    },
-    {
-        title: "Provider-Agnostic Discovery",
-        description: "discovery features work with any configured metadata source instead of requiring spotify.",
-        features: [
-            "• similar artist matching, discovery pool, and incremental updates use source priority",
-            "• falls back through spotify, itunes, deezer in configured order",
-            "• musicmap url encoding fixed for artists with special characters",
-            "• freshness check simplified to age-based",
-        ],
-    },
-    {
-        title: "Dashboard & Navigation",
-        description: "dashboard improvements and sidebar navigation enhancements.",
-        features: [
-            "• library status card on dashboard — server state, track counts, scan buttons",
-            "• tools page in sidebar — maintenance tools moved out of the dashboard modal",
-            "• watchlist and wishlist promoted to full sidebar pages with live count badges",
-            "• acoustid scanner scans full library with retag / redownload / delete fix options",
-        ],
-    },
-    {
-        title: "MusicBrainz & Metadata Fixes",
-        description: "critical tag embedding fix and picard-style album consistency.",
-        features: [
-            "• source id tags (spotify, musicbrainz, deezer, audiodb) were silently skipped on every download — now embed correctly",
-            "• picard-style release preference scoring prevents navidrome album splits",
-            "• source tags wiped when metadata enhancement is skipped or fails",
-            "• spotify api no longer called when deezer/itunes is your primary source",
-        ],
-    },
-    {
-        title: "Downloads & Soulseek Improvements",
-        description: "better download management, search accuracy, and queue control.",
-        features: [
-            "• downloads batch panel — color-coded cards with progress, cancel, expand, 7-day history",
-            "• soulseek queries include album name now — fewer wrong-artist downloads",
-            "• reject results from various artists / unknown artist folders",
-            "• clearing wishlist cancels the active wishlist download batch",
-            "• album delete with \"delete files too\" option on enhanced library",
-            "• fix download modal freezing mid-download (m3u auto-save was exhausting server threads)",
-            "• fix unknown artist when adding playlist tracks to wishlist",
-        ],
-    },
-    {
-        title: "Recent Fixes",
-        description: "smaller bug fixes from recent releases and community reports.",
-        features: [
-            "• fix watchlist scan false failures — empty discography no longer reported as error",
-            "• fix deezer_artist_id column error on enhanced library sync",
-            "• fix wishlist button intermittently not navigating",
-            "• fix worker orb tooltips rendering behind dashboard content",
-            "• fix oauth callback port hardcoding — custom ports respected now",
-            "• fix allow duplicates and replace-lower-quality settings not saving",
-            "• fix wishlist dropping cross-album tracks when duplicates enabled",
-            "• fix spotify enrichment worker infinite loop on pre-matched artists",
-            "• reject qobuz 30-second sample/preview downloads",
-            "• auto wing-it fallback for failed discovery",
-            "• fix album track lookup hardcoded to spotify — uses configured primary now",
-            "• fix m3u showing all tracks as missing after post-processing",
-            "• fix acoustid retag not writing corrected tags to file",
-            "• fix downloads badge dropping to 300 after opening downloads page",
-            "• unmatch discovery tracks (red ✕ button)",
-            "• customizable music video naming with $artist, $title, $year",
-            "• fix soulseek log spam when not configured as download source",
-        ],
-    },
-    {
-        title: "Earlier in v2.3",
-        description: "major features from earlier in this release cycle.",
-        features: [
-            "• centralized downloads page with live-updating list and filter pills",
-            "• first-run setup wizard — 7-step guided configuration",
-            "• music videos — search and download from youtube",
-            "• inbound music request api for external tools (discord bots, home assistant)",
-            "• lidarr download source (in development) for usenet / torrent",
-            "• graceful shutdown — all workers respond to shutdown signals immediately",
-            "• unknown artist prevention with 3-tier metadata fallback",
-            "• deezer multi-artist tagging via contributors field",
-            "• artist map — watchlist constellation, genre map, artist explorer",
-            "• discogs integration — enrichment worker, fallback source, search tab",
-            "• wing it mode, global search bar, redesigned notifications",
-            "• server playlist manager, sync history dashboard, playlist explorer",
-            "• enhanced library manager with inline tag editing and write-to-file",
-            "• automation signals, multi-source search tabs, rich artist profiles",
+            "• reorganize queue with live status panel — bulk reorganize all, atomic status flips, race conditions fixed",
+            "• discography backfill maintenance job — finds what's missing across your library",
+            "• standalone library mode — use SoulSync without Plex, Jellyfin, or Navidrome",
+            "• auto-import background folder watcher — tag-based + acoustid fingerprint identification",
+            "• wishlist nebula — interactive artist orb visualization with inline download",
+            "• bidirectional artist sync + server playlist view",
+            "• provider-agnostic discovery — similar artists, discovery pool, and incremental updates use source priority",
+            "• multi-artist tagging: configurable separator, multi-value ARTISTS tag, move-to-title mode",
+            "• search page source icons — per-source cache with cache dots, instant source switching",
+            "• tidal: rejects silent quality downgrades; spotify: post-ban cooldown bumped to 30 minutes",
         ],
     },
 ];
@@ -4021,7 +3780,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.4';
+    return versions[0] || '2.5.6';
 }
 
 function openWhatsNew() {

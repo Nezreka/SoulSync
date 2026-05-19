@@ -4,10 +4,12 @@ import os
 from core.imports.quarantine import (
     approve_quarantine_entry,
     delete_quarantine_entry,
+    entry_id_from_quarantined_filename,
     list_quarantine_entries,
     recover_to_staging,
     serialize_quarantine_context,
 )
+from core.imports.pipeline import _should_skip_quarantine_check
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -144,6 +146,18 @@ def test_list_swallows_corrupt_sidecar_gracefully(tmp_path):
     entries = list_quarantine_entries(str(tmp_path))
     assert len(entries) == 1
     assert entries[0]["reason"] == "Unknown reason"
+
+
+def test_entry_id_helper_handles_paths_and_quarantine_suffix():
+    path = "/music/ss_quarantine/20260514_120000_song.flac.quarantined"
+    assert entry_id_from_quarantined_filename(path) == "20260514_120000_song"
+
+
+def test_quarantine_bypass_all_skips_every_gate():
+    context = {"_skip_quarantine_check": "all"}
+    assert _should_skip_quarantine_check(context, "integrity") is True
+    assert _should_skip_quarantine_check(context, "acoustid") is True
+    assert _should_skip_quarantine_check(context, "bit_depth") is True
 
 
 # ──────────────────────────────────────────────────────────────────────
