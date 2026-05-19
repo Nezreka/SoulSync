@@ -857,7 +857,7 @@ class MusicBrainzSearchClient:
         metadata (type, artist credits) when resolving from a release-group
         whose releases may be lightly populated."""
         release = self._client.get_release(
-            release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
+            release_mbid, includes=['recordings', 'artist-credits', 'release-groups', 'cover-art-archive']
         )
         if not release:
             return None
@@ -876,7 +876,18 @@ class MusicBrainzSearchClient:
         album_type = _map_release_type(primary_type, secondary_types)
 
         rg_mbid = rg.get('id', '')
-        image_url = self._cached_art(release_mbid, rg_mbid)
+        # Use cover-art-archive metadata to pick the right CAA scope.
+        # release-group scope is preferred (covers all editions), but only
+        # if the release itself actually has front art — otherwise that URL
+        # will 404. `cover-art-archive.front` is authoritative with no
+        # extra network call (returned as part of the release fetch above).
+        caa = release.get('cover-art-archive') or {}
+        if caa.get('front'):
+            image_url = _cover_art_url(release_mbid, scope='release')
+        elif rg_mbid:
+            image_url = _cover_art_url(rg_mbid, scope='release-group')
+        else:
+            image_url = None
 
         tracks = []
         total_tracks = 0
