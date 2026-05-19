@@ -162,7 +162,7 @@ async function loadStatsData() {
             <span class="stats-ranked-num">${i + 1}</span>
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
-                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.id, item.source || null)}">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !String(item.soul_id).startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
+                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.id)}">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !String(item.soul_id).startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
                 <div class="stats-ranked-meta">${item.global_listeners ? _fmt(item.global_listeners) + ' global listeners' : ''}</div>
             </div>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
@@ -176,7 +176,7 @@ async function loadStatsData() {
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
                 <div class="stats-ranked-name">${_esc(item.name)}</div>
-                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.artist_id, item.artist_source || null)}">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.artist_id)}">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}</div>
             </div>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
         </div>
@@ -189,7 +189,7 @@ async function loadStatsData() {
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
                 <div class="stats-ranked-name">${_esc(item.name)}</div>
-                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.artist_id, item.artist_source || null)}">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" href="${buildArtistDetailPath(item.artist_id)}">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
             </div>
             <button class="stats-play-btn" onclick="event.stopPropagation();playStatsTrack('${_esc(item.name).replace(/'/g, "\\'")}','${_esc(item.artist || '').replace(/'/g, "\\'")}','${_esc(item.album || '').replace(/'/g, "\\'")}')" title="Play">▶</button>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
