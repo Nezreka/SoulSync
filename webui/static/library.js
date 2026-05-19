@@ -1192,6 +1192,9 @@ function populateArtistDetailPage(data) {
     // MusicMap name lookup). Fire-and-forget — the function handles its own
     // loading state and errors.
     if (artist && artist.name && typeof loadSimilarArtists === 'function') {
+        if (typeof cancelSimilarArtistsLoad === 'function') {
+            cancelSimilarArtistsLoad();
+        }
         loadSimilarArtists(artist.name);
     }
 }
