@@ -818,10 +818,13 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
     // Maintain the label stack. Back navigations pop; forward navigations push.
-    if (_artistDetailGoingBack) {
+    // Only treat the flag as a back-nav signal when we're still on artist-detail —
+    // if history.back() landed on a non-artist page first, the flag is stale.
+    if (_artistDetailGoingBack && currentPage === 'artist-detail') {
         _artistDetailLabelStack.pop();
         _artistDetailGoingBack = false;
     } else {
+        _artistDetailGoingBack = false; // clear any stale flag
         if (currentPage !== 'artist-detail') {
             _artistDetailLabelStack = []; // fresh chain from a non-artist page
         }
