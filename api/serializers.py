@@ -368,6 +368,7 @@ def serialize_similar_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "source_artist_id": d.get("source_artist_id"),
         "similar_artist_spotify_id": d.get("similar_artist_spotify_id"),
         "similar_artist_itunes_id": d.get("similar_artist_itunes_id"),
+        "similar_artist_musicbrainz_id": d.get("similar_artist_musicbrainz_id"),
         "similar_artist_name": d.get("similar_artist_name"),
         "similarity_rank": d.get("similarity_rank"),
         "occurrence_count": d.get("occurrence_count"),

@@ -18847,8 +18847,12 @@ def get_spotify_album_tracks(album_id):
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
-        # Extract tracks from album data (Spotify format)
-        tracks = album_data.get('tracks', {}).get('items', [])
+        # Extract tracks — handle Spotify {items, total} or flat-list formats
+        tracks_container = album_data.get('tracks', {})
+        if isinstance(tracks_container, list):
+            tracks = tracks_container
+        else:
+            tracks = tracks_container.get('items', [])
 
         # If no tracks in album data (iTunes format), fetch them separately
         if not tracks:
@@ -25901,6 +25905,8 @@ def get_discover_similar_artists():
                 artist_id = artist.similar_artist_spotify_id
             elif active_source == 'deezer':
                 artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+            elif active_source == 'musicbrainz':
+                artist_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist.similar_artist_itunes_id
             else:
                 artist_id = artist.similar_artist_itunes_id
 
@@ -25908,6 +25914,7 @@ def get_discover_similar_artists():
                 "artist_id": artist_id,
                 "spotify_artist_id": artist.similar_artist_spotify_id,
                 "itunes_artist_id": artist.similar_artist_itunes_id,
+                "musicbrainz_artist_id": getattr(artist, 'similar_artist_musicbrainz_id', None),
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
                 "similarity_rank": artist.similarity_rank,
@@ -25964,6 +25971,8 @@ def enrich_similar_artists():
                 ext_id = artist.similar_artist_spotify_id
             elif source == 'deezer':
                 ext_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+            elif source == 'musicbrainz':
+                ext_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist.similar_artist_itunes_id
             else:
                 ext_id = artist.similar_artist_itunes_id
             if ext_id and ext_id not in cache_map:

@@ -140,7 +140,7 @@ def get_artist_map_data():
             placeholders = ','.join(['?'] * len(watchlist_ids))
             cursor.execute(f"""
                 SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id,
-                       similar_artist_itunes_id, similar_artist_deezer_id,
+                       similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_musicbrainz_id,
                        similarity_rank, occurrence_count, image_url, genres, popularity
                 FROM similar_artists
                 WHERE profile_id = ? AND source_artist_id IN ({placeholders})
@@ -173,6 +173,7 @@ def get_artist_map_data():
                         'spotify_id': r.get('similar_artist_spotify_id') or '',
                         'itunes_id': r.get('similar_artist_itunes_id') or '',
                         'deezer_id': r.get('similar_artist_deezer_id') or '',
+                        'musicbrainz_id': r.get('similar_artist_musicbrainz_id') or '',
                         'rank': r.get('similarity_rank', 5),
                         'occurrence': r.get('occurrence_count', 1),
                         'popularity': r.get('popularity', 0),
@@ -245,7 +246,7 @@ def get_artist_map_data():
                     }
 
                 # Apply cache data to nodes
-                source_id_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+                source_id_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id', 'musicbrainz': 'musicbrainz_id'}
                 for n in nodes:
                     nn = _norm(n['name'])
                     cached = cache_by_name.get(nn)
@@ -369,14 +370,14 @@ def get_artist_map_genres():
         def _norm(n):
             return (n or '').lower().strip()
 
-        def _add(name, image_url=None, genres=None, spotify_id=None, itunes_id=None, deezer_id=None, discogs_id=None, source='unknown', popularity=0):
+        def _add(name, image_url=None, genres=None, spotify_id=None, itunes_id=None, deezer_id=None, discogs_id=None, musicbrainz_id=None, source='unknown', popularity=0):
             n = _norm(name)
             if not n or len(n) < 2:
                 return
             if n not in artists_by_name:
                 artists_by_name[n] = {
                     'name': name, 'image_url': '', 'genres': set(),
-                    'spotify_id': '', 'itunes_id': '', 'deezer_id': '', 'discogs_id': '',
+                    'spotify_id': '', 'itunes_id': '', 'deezer_id': '', 'discogs_id': '', 'musicbrainz_id': '',
                     'sources': set(), 'popularity': 0
                 }
             a = artists_by_name[n]
@@ -394,6 +395,8 @@ def get_artist_map_genres():
                 a['deezer_id'] = str(deezer_id)
             if discogs_id and not a['discogs_id']:
                 a['discogs_id'] = str(discogs_id)
+            if musicbrainz_id and not a['musicbrainz_id']:
+                a['musicbrainz_id'] = str(musicbrainz_id)
             if popularity > a['popularity']:
                 a['popularity'] = popularity
             a['sources'].add(source)
@@ -410,14 +413,14 @@ def get_artist_map_genres():
                     genres = json.loads(r['genres']) if isinstance(r['genres'], str) else []
                 except Exception as e:
                     logger.debug("cache artist genres parse failed: %s", e)
-            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id', 'musicbrainz': 'musicbrainz_id'}
             kwargs = {src_map.get(r['source'], 'spotify_id'): r['entity_id']}
             _add(r['name'], image_url=r['image_url'], genres=genres, source='cache', popularity=r['popularity'] or 0, **kwargs)
 
         # 2. Similar artists
         cursor.execute("""
             SELECT similar_artist_name, similar_artist_spotify_id, similar_artist_itunes_id,
-                   similar_artist_deezer_id, image_url, genres, popularity
+                   similar_artist_deezer_id, similar_artist_musicbrainz_id, image_url, genres, popularity
             FROM similar_artists WHERE profile_id = ?
         """, (profile_id,))
         for r in cursor.fetchall():
@@ -429,7 +432,9 @@ def get_artist_map_genres():
                     logger.debug("similar artist genres parse failed: %s", e)
             _add(r['similar_artist_name'], image_url=r['image_url'], genres=genres,
                  spotify_id=r['similar_artist_spotify_id'], itunes_id=r['similar_artist_itunes_id'],
-                 deezer_id=r['similar_artist_deezer_id'], source='similar', popularity=r['popularity'] or 0)
+                 deezer_id=r['similar_artist_deezer_id'],
+                 musicbrainz_id=r['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in r.keys() else None,
+                 source='similar', popularity=r['popularity'] or 0)
 
         # 3. Watchlist artists
         cursor.execute("""
@@ -483,6 +488,7 @@ def get_artist_map_genres():
                 'itunes_id': a['itunes_id'],
                 'deezer_id': a['deezer_id'],
                 'discogs_id': a['discogs_id'],
+                'musicbrainz_id': a['musicbrainz_id'],
                 'popularity': a['popularity'],
                 'type': 'watchlist' if 'watchlist' in a['sources'] else 'similar',
             })
@@ -648,7 +654,7 @@ def get_artist_map_explore():
             center_name = row['name']
             if row['image_url'] and row['image_url'].startswith('http'):
                 center_image = row['image_url']
-            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id', 'musicbrainz': 'musicbrainz_id'}
             k = src_map.get(row['source'], 'spotify_id')
             center_ids[k] = row['entity_id']
             if row['genres']:
@@ -717,7 +723,7 @@ def get_artist_map_explore():
             WHERE entity_type = 'artist' AND name = ? COLLATE NOCASE
         """, (center_name,))
         for r in cursor.fetchall():
-            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+            src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id', 'musicbrainz': 'musicbrainz_id'}
             k = src_map.get(r['source'], 'spotify_id')
             if not center_ids.get(k):
                 center_ids[k] = r['entity_id']
@@ -746,7 +752,7 @@ def get_artist_map_explore():
             placeholders = ','.join(['?'] * len(id_values))
             cursor.execute(f"""
                 SELECT DISTINCT similar_artist_name, similar_artist_spotify_id,
-                       similar_artist_itunes_id, similar_artist_deezer_id,
+                       similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_musicbrainz_id,
                        image_url, genres, popularity, similarity_rank
                 FROM similar_artists
                 WHERE source_artist_id IN ({placeholders}) AND profile_id = ?
@@ -757,7 +763,7 @@ def get_artist_map_explore():
         # Also search by name (the center artist might be a watchlist source)
         cursor.execute("""
             SELECT DISTINCT sa.similar_artist_name, sa.similar_artist_spotify_id,
-                   sa.similar_artist_itunes_id, sa.similar_artist_deezer_id,
+                   sa.similar_artist_itunes_id, sa.similar_artist_deezer_id, sa.similar_artist_musicbrainz_id,
                    sa.image_url, sa.genres, sa.popularity, sa.similarity_rank
             FROM similar_artists sa
             JOIN watchlist_artists wa ON sa.source_artist_id = COALESCE(wa.spotify_artist_id, wa.itunes_artist_id, CAST(wa.id AS TEXT))
@@ -789,7 +795,8 @@ def get_artist_map_explore():
                                     image_url=sa.get('image_url'),
                                     genres=sa.get('genres'),
                                     popularity=sa.get('popularity', 0),
-                                    similar_artist_deezer_id=sa.get('deezer_id')
+                                    similar_artist_deezer_id=sa.get('deezer_id'),
+                                    similar_artist_musicbrainz_id=sa.get('musicbrainz_id'),
                                 )
                             except Exception as e:
                                 logger.debug("similar artist insert failed: %s", e)
@@ -798,7 +805,7 @@ def get_artist_map_explore():
                             placeholders = ','.join(['?'] * len(id_values))
                             cursor.execute(f"""
                                 SELECT DISTINCT similar_artist_name, similar_artist_spotify_id,
-                                       similar_artist_itunes_id, similar_artist_deezer_id,
+                                       similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_musicbrainz_id,
                                        image_url, genres, popularity, similarity_rank
                                 FROM similar_artists
                                 WHERE source_artist_id IN ({placeholders}) AND profile_id = ?
@@ -809,7 +816,7 @@ def get_artist_map_explore():
                             # Fallback: query by name-based source ID
                             cursor.execute("""
                                 SELECT DISTINCT similar_artist_name, similar_artist_spotify_id,
-                                       similar_artist_itunes_id, similar_artist_deezer_id,
+                                       similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_musicbrainz_id,
                                        image_url, genres, popularity, similarity_rank
                                 FROM similar_artists
                                 WHERE source_artist_id = ? AND profile_id = ?
@@ -841,6 +848,7 @@ def get_artist_map_explore():
                 'spotify_id': r['similar_artist_spotify_id'] or '',
                 'itunes_id': r['similar_artist_itunes_id'] or '',
                 'deezer_id': r['similar_artist_deezer_id'] or '',
+                'musicbrainz_id': r['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in r.keys() else '',
                 'discogs_id': '',
                 'popularity': r['popularity'] or 0,
                 'rank': r['similarity_rank'] or 5,
@@ -861,7 +869,8 @@ def get_artist_map_explore():
             cursor.execute(f"""
                 SELECT DISTINCT source_artist_id, similar_artist_name,
                        similar_artist_spotify_id, similar_artist_itunes_id,
-                       similar_artist_deezer_id, image_url, genres, popularity, similarity_rank
+                       similar_artist_deezer_id, similar_artist_musicbrainz_id,
+                       image_url, genres, popularity, similarity_rank
                 FROM similar_artists
                 WHERE source_artist_id IN ({placeholders}) AND profile_id = ?
                 ORDER BY similarity_rank ASC
@@ -902,6 +911,7 @@ def get_artist_map_explore():
                     'spotify_id': r['similar_artist_spotify_id'] or '',
                     'itunes_id': r['similar_artist_itunes_id'] or '',
                     'deezer_id': r['similar_artist_deezer_id'] or '',
+                    'musicbrainz_id': r['similar_artist_musicbrainz_id'] if 'similar_artist_musicbrainz_id' in r.keys() else '',
                     'discogs_id': '',
                     'popularity': r['popularity'] or 0,
                     'rank': r['similarity_rank'] or 5,
@@ -935,7 +945,7 @@ def get_artist_map_explore():
                     except Exception as e:
                         logger.debug("explorer node genres parse failed: %s", e)
                 # Harvest missing IDs from cache
-                src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+                src_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id', 'musicbrainz': 'musicbrainz_id'}
                 k = src_map.get(cr['source'])
                 if k and not n.get(k):
                     n[k] = cr['entity_id']

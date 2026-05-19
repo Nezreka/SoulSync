@@ -63,9 +63,17 @@ def diagnose_itunes_discover():
             """)
             with_both = cursor.fetchone()['count']
 
+            with_musicbrainz = 0
+            try:
+                cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_musicbrainz_id IS NOT NULL")
+                with_musicbrainz = cursor.fetchone()['count']
+            except Exception:
+                pass
+
             logger.info(f"  Total similar artists: {total}")
             logger.info(f"  With iTunes ID: {with_itunes} ({100 * with_itunes / total:.1f}%)" if total > 0 else "  With iTunes ID: 0")
             logger.info(f"  With Spotify ID: {with_spotify} ({100 * with_spotify / total:.1f}%)" if total > 0 else "  With Spotify ID: 0")
+            logger.info(f"  With MusicBrainz ID: {with_musicbrainz} ({100 * with_musicbrainz / total:.1f}%)" if total > 0 else "  With MusicBrainz ID: 0")
             logger.info(f"  With BOTH IDs: {with_both} ({100 * with_both / total:.1f}%)" if total > 0 else "  With BOTH IDs: 0")
 
             if with_itunes == 0 and total > 0:
