@@ -67,8 +67,8 @@ def diagnose_itunes_discover():
             try:
                 cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_musicbrainz_id IS NOT NULL")
                 with_musicbrainz = cursor.fetchone()['count']
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("similar_artist_musicbrainz_id column is unavailable: %s", exc)
 
             logger.info(f"  Total similar artists: {total}")
             logger.info(f"  With iTunes ID: {with_itunes} ({100 * with_itunes / total:.1f}%)" if total > 0 else "  With iTunes ID: 0")
