@@ -61,6 +61,7 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     setActivePageChrome: vi.fn(),
     activateLegacyPath: vi.fn(),
     navigateToArtistDetail: vi.fn(),
+    cancelSimilarArtistsLoad: vi.fn(),
     showReactHost: vi.fn(),
     ...overrides,
   };

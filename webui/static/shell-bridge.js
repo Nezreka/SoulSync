@@ -167,6 +167,11 @@ window.SoulSyncWebShellBridge = {
     },
     navigateToArtistDetailPage,
     navigateToArtistDetail,
+    cancelSimilarArtistsLoad() {
+        if (typeof cancelSimilarArtistsLoad === 'function') {
+            cancelSimilarArtistsLoad();
+        }
+    },
     showReactHost(pageId) {
         showReactHost(pageId);
     },

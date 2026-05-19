@@ -16,6 +16,7 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     setActivePageChrome: vi.fn(),
     activateLegacyPath: vi.fn(),
     navigateToArtistDetail: vi.fn(),
+    cancelSimilarArtistsLoad: vi.fn(),
     showReactHost: vi.fn(),
     ...overrides,
   };
@@ -69,6 +70,30 @@ describe('artist-detail route', () => {
           skipRouteChange: true,
         },
       );
+    });
+  });
+
+  it('cancels the similar artists stream when the route unmounts', async () => {
+    const { unmount } = renderArtistDetailRoute(['/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg']);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+        '2YZyLoL8N0Wb9xBt1NhZWg',
+        '',
+        'spotify',
+        {
+          skipRouteChange: true,
+        },
+      );
+    });
+
+    const cancelSimilarArtistsLoad = window.SoulSyncWebShellBridge?.cancelSimilarArtistsLoad as ReturnType<typeof vi.fn>;
+    cancelSimilarArtistsLoad.mockClear();
+
+    unmount();
+
+    await waitFor(() => {
+      expect(cancelSimilarArtistsLoad).toHaveBeenCalledTimes(1);
     });
   });
 });

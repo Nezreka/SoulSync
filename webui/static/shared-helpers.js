@@ -695,7 +695,7 @@ async function checkDiscographyCompletion(artistId, discography) {
     } catch (error) {
         // Don't show error if it was aborted (user navigated away)
         if (error.name === 'AbortError') {
-            console.log('⏹️ Completion check aborted (user navigated to new artist)');
+            console.log('⏹️ Completion check aborted (user navigated away)');
             return;
         }
 
@@ -3574,16 +3574,21 @@ async function loadSimilarArtists(artistName) {
     container.innerHTML = '';
     section.style.display = 'block';
 
+    let controller = null;
+    let signal = null;
+
     try {
         // Create new abort controller for this similar artists stream
-        similarArtistsController = new AbortController();
+        controller = new AbortController();
+        similarArtistsController = controller;
+        signal = controller.signal;
 
         // Use streaming endpoint for real-time bubble creation
         const url = `/api/artist/similar/${encodeURIComponent(artistName)}/stream`;
         console.log(`📡 Streaming from: ${url}`);
 
         const response = await fetch(url, {
-            signal: similarArtistsController.signal
+            signal
         });
 
         if (!response.ok) {
@@ -3612,6 +3617,7 @@ async function loadSimilarArtists(artistName) {
             buffer = messages.pop() || ''; // Keep incomplete message in buffer
 
             for (const message of messages) {
+                if (signal?.aborted) return;
                 if (!message.trim() || !message.startsWith('data: ')) continue;
 
                 try {
@@ -3622,6 +3628,7 @@ async function loadSimilarArtists(artistName) {
                     }
 
                     if (jsonData.artist) {
+                        if (signal?.aborted) return;
                         // Hide loading on first artist
                         if (artistCount === 0) {
                             loadingEl.classList.add('hidden');
@@ -3636,6 +3643,7 @@ async function loadSimilarArtists(artistName) {
                     }
 
                     if (jsonData.complete) {
+                        if (signal?.aborted) return;
                         console.log(`🎉 Streaming complete: ${jsonData.total} artists`);
 
                         if (artistCount === 0) {
@@ -3648,7 +3656,7 @@ async function loadSimilarArtists(artistName) {
                             `;
                         } else {
                             // Lazy load images for similar artists that don't have them
-                            lazyLoadSimilarArtistImages(container);
+                            await lazyLoadSimilarArtistImages(container, signal);
                         }
                     }
                 } catch (parseError) {
@@ -3658,13 +3666,14 @@ async function loadSimilarArtists(artistName) {
         }
 
         // Clear the controller when done
-        similarArtistsController = null;
+        if (similarArtistsController === controller) {
+            similarArtistsController = null;
+        }
 
     } catch (error) {
         // Don't show error if it was aborted (user navigated away)
-        if (error.name === 'AbortError') {
-            console.log('⏹️ Similar artists stream aborted (user navigated to new artist)');
-            loadingEl.classList.add('hidden');
+        if (error.name === 'AbortError' || signal?.aborted) {
+            console.log('⏹️ Similar artists stream aborted (user navigated away)');
             return;
         }
 
@@ -3683,15 +3692,18 @@ async function loadSimilarArtists(artistName) {
         `;
     } finally {
         // Always clear the controller
-        similarArtistsController = null;
+        if (similarArtistsController === controller) {
+            similarArtistsController = null;
+        }
     }
 }
 
 /**
  * Lazy load images for similar artist bubbles that don't have images
  */
-async function lazyLoadSimilarArtistImages(container) {
+async function lazyLoadSimilarArtistImages(container, signal) {
     if (!container) return;
+    if (signal?.aborted) return;
 
     const bubblesNeedingImages = container.querySelectorAll('.similar-artist-bubble[data-needs-image="true"]');
 
@@ -3707,9 +3719,11 @@ async function lazyLoadSimilarArtistImages(container) {
     const bubbles = Array.from(bubblesNeedingImages);
 
     for (let i = 0; i < bubbles.length; i += batchSize) {
+        if (signal?.aborted) return;
         const batch = bubbles.slice(i, i + batchSize);
 
         await Promise.all(batch.map(async (bubble) => {
+            if (signal?.aborted) return;
             const artistId = bubble.getAttribute('data-artist-id');
             const artistSource = bubble.getAttribute('data-artist-source') || '';
             const artistPlugin = bubble.getAttribute('data-artist-plugin') || '';
@@ -3724,8 +3738,10 @@ async function lazyLoadSimilarArtistImages(container) {
                     ? `/api/artist/${encodeURIComponent(artistId)}/image?${params.toString()}`
                     : `/api/artist/${encodeURIComponent(artistId)}/image`;
 
-                const response = await fetch(imageUrl);
+                const response = await fetch(imageUrl, { signal });
                 const data = await response.json();
+
+                if (signal?.aborted) return;
 
                 if (data.success && data.image_url) {
                     const imageContainer = bubble.querySelector('.similar-artist-bubble-image');
@@ -3737,6 +3753,9 @@ async function lazyLoadSimilarArtistImages(container) {
                     }
                 }
             } catch (error) {
+                if (error?.name === 'AbortError' || signal?.aborted) {
+                    return;
+                }
                 console.warn(`⚠️ Failed to load image for similar artist ${artistId}:`, error);
             }
         }));

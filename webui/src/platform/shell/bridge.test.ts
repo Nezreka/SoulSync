@@ -17,6 +17,7 @@ describe('waitForShellContext', () => {
       getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
+      cancelSimilarArtistsLoad: vi.fn(),
       showReactHost: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 
@@ -38,6 +39,7 @@ describe('waitForShellContext', () => {
       getCurrentProfileContext,
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
+      cancelSimilarArtistsLoad: vi.fn(),
       showReactHost: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 

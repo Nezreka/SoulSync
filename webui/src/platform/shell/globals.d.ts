@@ -51,6 +51,7 @@ declare global {
           replace?: boolean;
         },
       ) => void;
+      cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
     };
   }
