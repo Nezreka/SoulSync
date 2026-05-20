@@ -3413,6 +3413,13 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.5.8': [
+        { date: 'May 20, 2026 — 2.5.8 release' },
+        { title: 'Fix: blank artist pages on Python / git-pull installs', desc: 'PR #644 moved the artist detail page behind a TanStack React route. installs that pull from git but never run `npm install && npm run build` ship without the Vite bundle, so the legacy shell saw `/artist-detail/<source>/<id>` URLs and bailed — every click left a blank pane. the legacy startup path now parses the URL itself and hands off to the existing artist detail loader, so Python users get artist pages back without needing to build the webui. Docker / built installs still take the React route as before.' },
+        { title: 'Fix: downloads marked complete before post-processing finished', desc: 'monitored Soulseek transfers were getting flipped to "successful" the moment slskd reported the file done — before SoulSync had actually run the post-processing worker (find on disk, fingerprint-verify, import to library). a failed import after that point left a phantom "completed" row that never made it into the library. completion now waits for the real post-processing result; if the worker can\'t even be scheduled, the task is marked failed and the batch slot is released so the queue keeps moving.' },
+        { title: 'Disk-backed artwork cache', desc: 'image fetches now route through a disk + SQLite cache with hashed URLs, size / mime validation, stale fallback when the upstream is down, and per-image fetch locking so 12 simultaneous requests for the same album cover share one network round-trip. cuts repeat-load latency and survives metadata source rate limits. served from new `/api/image-cache`; `/api/image-proxy` stays as a compatibility shim.' },
+        { title: 'Strict-source downloads check duration before pulling', desc: 'Tidal / Qobuz / HiFi / Deezer-DL / Amazon candidates now get a duration-tolerance check before the download starts, using the same tolerance logic post-processing would apply after. tracks whose duration is far enough off the metadata reference to fail the integrity check are skipped at pick time instead of after wasting the download. Soulseek and YouTube unchanged (they don\'t expose reliable pre-download duration).' },
+    ],
     '2.5.7': [
         { date: 'May 19, 2026 — 2.5.7 release' },
         { title: 'Fix: MusicBrainz manual search missing results', desc: 'the Fix popup and manual library service search were using strict Lucene phrase-match queries against the `recording` / `release` / `artist` fields — diacritics ("Bjork" vs canonical "Björk"), bracketed suffixes like "(Live)", and any AND-clause mismatch all killed recall. switched user-facing manual lookups to bare queries that hit MB\'s alias / sortname indexes with diacritic folding. enrichment workers stay strict for precision.' },
@@ -3795,7 +3802,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.7';
+    return versions[0] || '2.5.8';
 }
 
 function openWhatsNew() {
