@@ -239,3 +239,61 @@ def test_unknown_artist_fixer_supports_hydrabase_title_search(monkeypatch):
     assert result["source"] == "hydrabase_title_search"
     assert hydrabase_client.search_calls == [("Hydra Match", 5)]
     assert spotify_client.search_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #646 — deferred imports inside scan() must resolve at runtime
+# ---------------------------------------------------------------------------
+
+
+def test_deferred_path_imports_resolve():
+    """Issue #646 regression guard. The Unknown Artist Fixer's scan()
+    defers `get_file_path_from_template_raw` + `get_audio_quality_string`
+    imports to keep web_server's heavy boot off the test harness — but
+    that means a stale import target only surfaces at *runtime*, mid-
+    scan, with an ImportError. The fixer crashed with exactly that:
+
+        ImportError: cannot import name '_build_path_from_template' from
+        'core.repair_jobs.library_reorganize'
+
+    after commit ca5c9316 rewrote `library_reorganize` and moved the
+    helpers into the import pipeline.
+
+    This test runs the same import statements scan() runs, so the next
+    refactor that moves these helpers fails CI rather than reaching the
+    user."""
+    from core.imports.paths import get_file_path_from_template_raw  # noqa: F401
+    from core.imports.file_ops import get_audio_quality_string  # noqa: F401
+
+
+def test_deferred_path_helper_shape_matches_fixer_usage():
+    """Pin the shape contract the fixer relies on: pass a template
+    string + a context dict with the same keys scan() builds, expect a
+    `(folder, filename_base)` tuple back. If either of those moves, the
+    fixer's `folder, fname_base = ...` unpack would fail loudly here
+    instead of producing a malformed expected_rel path."""
+    from core.imports.paths import get_file_path_from_template_raw
+
+    template = "$albumartist/$albumartist - $album/$track - $title"
+    tmpl_ctx = {
+        "artist": "Test Artist",
+        "albumartist": "Test Artist",
+        "album": "Test Album",
+        "title": "Test Track",
+        "track_number": 1,
+        "disc_number": 1,
+        "year": "2026",
+        "quality": "FLAC 16bit",
+        "albumtype": "Album",
+    }
+
+    result = get_file_path_from_template_raw(template, tmpl_ctx)
+
+    assert isinstance(result, tuple) and len(result) == 2, \
+        "Must return a 2-tuple — fixer does `folder, fname_base = result`"
+    folder, fname_base = result
+    assert isinstance(folder, str) and isinstance(fname_base, str)
+    # Folder path must include the album-artist segment from the template.
+    assert "Test Artist" in folder
+    # Filename base must include the title from the template.
+    assert "Test Track" in fname_base
