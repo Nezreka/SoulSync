@@ -2,32 +2,14 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
 import { HttpResponse, http, server } from '@/test/msw';
+import { createShellBridge } from '@/test/shell-bridge';
 
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 
 import type { ImportStagingFile } from './-import.types';
 import { resetImportWorkflowStore } from './-import.store';
-
-function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
-  return {
-    getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
-    isPageAllowed: vi.fn(() => true),
-    getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
-    setActivePageChrome: vi.fn(),
-    activateLegacyPath: vi.fn(),
-    showReactHost: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    playLibraryTrack: vi.fn(),
-    startStream: vi.fn(),
-    showLoadingOverlay: vi.fn(),
-    hideLoadingOverlay: vi.fn(),
-    ...overrides,
-  };
-}
 
 function renderImportRoute(initialEntries = ['/import']) {
   const queryClient = createAppQueryClient();
