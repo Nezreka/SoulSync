@@ -2,36 +2,15 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
-
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
+import { createShellBridge } from '@/test/shell-bridge';
 
 function createResponse(body: unknown, ok = true, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
-  return {
-    getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
-    isPageAllowed: vi.fn(() => true),
-    getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
-    setActivePageChrome: vi.fn(),
-    activateLegacyPath: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    cancelSimilarArtistsLoad: vi.fn(),
-    showReactHost: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    playLibraryTrack: vi.fn(),
-    startStream: vi.fn(),
-    showLoadingOverlay: vi.fn(),
-    hideLoadingOverlay: vi.fn(),
-    ...overrides,
-  };
 }
 
 function renderIssuesRoute(initialEntries = ['/issues']) {
