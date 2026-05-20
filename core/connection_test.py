@@ -305,6 +305,61 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "usenet_client":
+            client_type = (config_manager.get('usenet_client.type', '') or '').strip().lower()
+            url = config_manager.get('usenet_client.url', '')
+            if not url:
+                return False, "Usenet client URL is required."
+            if not client_type:
+                return False, "Pick a usenet client (SABnzbd or NZBGet)."
+            try:
+                from core.usenet_clients import adapter_for_type as _usenet_adapter_for_type
+                adapter = _usenet_adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown usenet client type: {client_type}"
+                if not adapter.is_configured():
+                    if client_type == "sabnzbd":
+                        return False, "SABnzbd needs both URL and API key."
+                    return False, "NZBGet needs URL, username, and password."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Usenet client connection error: {str(e)}"
+        elif service == "torrent_client":
+            client_type = (config_manager.get('torrent_client.type', '') or '').strip().lower()
+            url = config_manager.get('torrent_client.url', '')
+            if not url:
+                return False, "Torrent client URL is required."
+            if not client_type:
+                return False, "Pick a torrent client (qBittorrent, Transmission, or Deluge)."
+            try:
+                from core.torrent_clients import adapter_for_type
+                adapter = adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown torrent client type: {client_type}"
+                if not adapter.is_configured():
+                    return False, "Torrent client missing required credentials."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Torrent client connection error: {str(e)}"
+        elif service == "prowlarr":
+            url = config_manager.get('prowlarr.url', '')
+            api_key = config_manager.get('prowlarr.api_key', '')
+            if not url or not api_key:
+                return False, "Prowlarr URL and API key are required."
+            try:
+                import requests as _req
+                resp = _req.get(f"{url.rstrip('/')}/api/v1/system/status",
+                                headers={'X-Api-Key': api_key}, timeout=10)
+                if resp.ok:
+                    version = resp.json().get('version', '?')
+                    return True, f"Connected to Prowlarr v{version}"
+                return False, f"Prowlarr returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Prowlarr connection error: {str(e)}"
         elif service == "lidarr" or service == "lidarr_download":
             url = config_manager.get('lidarr_download.url', '')
             api_key = config_manager.get('lidarr_download.api_key', '')

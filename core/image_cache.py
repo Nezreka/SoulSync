@@ -198,8 +198,8 @@ class ImageCache:
             except Exception:
                 try:
                     tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                except Exception as cleanup_exc:
+                    logger.debug("image_cache tmp cleanup failed: %s", cleanup_exc)
                 raise
 
             if total <= 0:

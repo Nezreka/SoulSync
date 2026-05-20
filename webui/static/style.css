@@ -3243,6 +3243,178 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #eb743b;
 }
 
+/* Indexers & Downloaders tab — service title colors */
+.prowlarr-title {
+    color: #e07712;          /* Prowlarr brand orange */
+}
+
+.torrent-title {
+    color: #5dade2;          /* Torrent — sky blue (qBit family) */
+}
+
+.usenet-title {
+    color: #a78bfa;          /* Usenet — violet */
+}
+
+/* Lidarr-style intro hero card on Indexers & Downloaders tab */
+.ind-hero {
+    padding: 18px 22px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(35, 35, 35, 0.6));
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+}
+
+.ind-hero-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgb(var(--accent-rgb));
+    margin-bottom: 12px;
+}
+
+.ind-hero-flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.ind-hero-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+}
+
+.ind-hero-step-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-rgb));
+    font-weight: 700;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ind-hero-arrow {
+    color: rgba(var(--accent-rgb), 0.55);
+    font-weight: 700;
+}
+
+.ind-hero-sub {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.55;
+}
+
+/* Section-header status dots — Lidarr-style green/red/grey indicator */
+.ind-status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-left: 8px;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+.ind-status-dot-unknown {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.ind-status-dot-connected {
+    background: #2ecc71;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.6), 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+.ind-status-dot-error {
+    background: #e74c3c;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.5), 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Indexer list — card-per-indexer, Lidarr-style */
+.ind-indexer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.ind-indexer-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+
+.ind-indexer-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.ind-indexer-card-id {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.ind-indexer-card-name {
+    flex: 1;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.ind-indexer-card-proto {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ind-indexer-card-proto-torrent {
+    background: rgba(93, 173, 226, 0.15);
+    color: #5dade2;
+    border: 1px solid rgba(93, 173, 226, 0.3);
+}
+
+.ind-indexer-card-proto-usenet {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.ind-indexer-card-privacy {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+    flex-shrink: 0;
+}
+
+.ind-indexer-card-disabled {
+    opacity: 0.45;
+}
+
 .acoustid-title {
     color: #ba55d3;
 }

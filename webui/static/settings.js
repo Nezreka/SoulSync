@@ -946,6 +946,37 @@ async function loadSettingsData() {
         document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
+        const _prowUrl = document.getElementById('prowlarr-url');
+        const _prowKey = document.getElementById('prowlarr-api-key');
+        const _prowIds = document.getElementById('prowlarr-indexer-ids');
+        if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
+        if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
+        if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
+        const _tcType = document.getElementById('torrent-client-type');
+        const _tcUrl = document.getElementById('torrent-client-url');
+        const _tcUser = document.getElementById('torrent-client-username');
+        const _tcPass = document.getElementById('torrent-client-password');
+        const _tcCat = document.getElementById('torrent-client-category');
+        const _tcPath = document.getElementById('torrent-client-save-path');
+        if (_tcType) _tcType.value = settings.torrent_client?.type || 'qbittorrent';
+        if (_tcUrl) _tcUrl.value = settings.torrent_client?.url || '';
+        if (_tcUser) _tcUser.value = settings.torrent_client?.username || '';
+        if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
+        if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
+        if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        const _ucType = document.getElementById('usenet-client-type');
+        const _ucUrl = document.getElementById('usenet-client-url');
+        const _ucKey = document.getElementById('usenet-client-api-key');
+        const _ucUser = document.getElementById('usenet-client-username');
+        const _ucPass = document.getElementById('usenet-client-password');
+        const _ucCat = document.getElementById('usenet-client-category');
+        if (_ucType) _ucType.value = settings.usenet_client?.type || 'sabnzbd';
+        if (_ucUrl) _ucUrl.value = settings.usenet_client?.url || '';
+        if (_ucKey) _ucKey.value = settings.usenet_client?.api_key || '';
+        if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
+        if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
+        if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -2691,6 +2722,27 @@ async function saveSettings(quiet = false) {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
         },
+        prowlarr: {
+            url: document.getElementById('prowlarr-url')?.value || '',
+            api_key: document.getElementById('prowlarr-api-key')?.value || '',
+            indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
+        },
+        torrent_client: {
+            type: document.getElementById('torrent-client-type')?.value || 'qbittorrent',
+            url: document.getElementById('torrent-client-url')?.value || '',
+            username: document.getElementById('torrent-client-username')?.value || '',
+            password: document.getElementById('torrent-client-password')?.value || '',
+            category: document.getElementById('torrent-client-category')?.value || 'soulsync',
+            save_path: document.getElementById('torrent-client-save-path')?.value || '',
+        },
+        usenet_client: {
+            type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
+            url: document.getElementById('usenet-client-url')?.value || '',
+            api_key: document.getElementById('usenet-client-api-key')?.value || '',
+            username: document.getElementById('usenet-client-username')?.value || '',
+            password: document.getElementById('usenet-client-password')?.value || '',
+            category: document.getElementById('usenet-client-category')?.value || 'soulsync',
+        },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
@@ -3527,6 +3579,160 @@ async function testLidarrConnection() {
     } catch (e) {
         statusEl.textContent = 'Connection error';
         statusEl.style.color = '#f44336';
+    }
+}
+
+function _setIndStatusDot(dotId, state) {
+    const dot = document.getElementById(dotId);
+    if (!dot) return;
+    dot.classList.remove('ind-status-dot-unknown', 'ind-status-dot-connected', 'ind-status-dot-error');
+    if (state === 'connected') {
+        dot.classList.add('ind-status-dot-connected');
+        dot.title = 'Connected';
+    } else if (state === 'error') {
+        dot.classList.add('ind-status-dot-error');
+        dot.title = 'Connection failed';
+    } else {
+        dot.classList.add('ind-status-dot-unknown');
+        dot.title = 'Not tested';
+    }
+}
+
+async function testProwlarrConnection() {
+    const statusEl = document.getElementById('prowlarr-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'prowlarr' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('prowlarr-status-dot', 'connected');
+            loadProwlarrIndexers();
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('prowlarr-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('prowlarr-status-dot', 'error');
+    }
+}
+
+function updateUsenetClientUI() {
+    const type = document.getElementById('usenet-client-type')?.value || 'sabnzbd';
+    const apikeyGroup = document.getElementById('usenet-apikey-group');
+    const userGroup = document.getElementById('usenet-username-group');
+    const passGroup = document.getElementById('usenet-password-group');
+    if (type === 'sabnzbd') {
+        if (apikeyGroup) apikeyGroup.style.display = '';
+        if (userGroup) userGroup.style.display = 'none';
+        if (passGroup) passGroup.style.display = 'none';
+    } else {
+        if (apikeyGroup) apikeyGroup.style.display = 'none';
+        if (userGroup) userGroup.style.display = '';
+        if (passGroup) passGroup.style.display = '';
+    }
+}
+
+async function testUsenetClientConnection() {
+    const statusEl = document.getElementById('usenet-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'usenet_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('usenet-client-status-dot', 'connected');
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('usenet-client-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('usenet-client-status-dot', 'error');
+    }
+}
+
+async function testTorrentClientConnection() {
+    const statusEl = document.getElementById('torrent-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'torrent_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('torrent-client-status-dot', 'connected');
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('torrent-client-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('torrent-client-status-dot', 'error');
+    }
+}
+
+async function loadProwlarrIndexers() {
+    const listEl = document.getElementById('prowlarr-indexer-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<em>Loading…</em>';
+    try {
+        const resp = await fetch('/api/prowlarr/indexers');
+        const data = await resp.json();
+        if (!data.success) {
+            listEl.innerHTML = `<em style="color:#f44336;">${data.error || 'Prowlarr not configured.'}</em>`;
+            return;
+        }
+        if (!data.indexers || data.indexers.length === 0) {
+            listEl.innerHTML = '<em>No indexers configured in Prowlarr yet. Add some in Prowlarr → Indexers.</em>';
+            return;
+        }
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const rows = data.indexers.map(idx => {
+            const protoClass = idx.protocol === 'usenet' ? 'ind-indexer-card-proto-usenet' : 'ind-indexer-card-proto-torrent';
+            const protoLabel = idx.protocol === 'usenet' ? 'Usenet' : 'Torrent';
+            const privacyHTML = idx.privacy ? `<span class="ind-indexer-card-privacy">${esc(idx.privacy)}</span>` : '';
+            const disabledClass = idx.enable ? '' : ' ind-indexer-card-disabled';
+            return `<div class="ind-indexer-card${disabledClass}">
+                <span class="ind-indexer-card-id">#${esc(idx.id)}</span>
+                <span class="ind-indexer-card-name">${esc(idx.name)}</span>
+                ${privacyHTML}
+                <span class="ind-indexer-card-proto ${protoClass}">${protoLabel}</span>
+            </div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (e) {
+        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${e.message}</em>`;
     }
 }
 
