@@ -3415,6 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.6.0': [
         { unreleased: true },
+        { title: 'Torrent client adapters (qBittorrent, Transmission, Deluge)', desc: 'second commit in the torrent + usenet rollout. SoulSync can now talk to any of the three big torrent clients through a single adapter contract — pick which one you use in Settings → Indexers & Downloaders, paste your WebUI URL and credentials, and Test Connection confirms the link. each adapter handles its own auth quirk (qBit cookies, Transmission session-id, Deluge JSON-RPC) and maps native state strings onto a uniform set so the rest of the app stays client-agnostic. no download wiring yet — that gets layered on once the usenet client adapters land in the next commit.' },
         { title: 'Prowlarr integration', desc: 'new Indexers & Downloaders tab in Settings. point SoulSync at your Prowlarr instance with a URL and API key, and you can browse the indexers Prowlarr exposes from inside the app. this is the search half of the upcoming torrent and usenet download sources — wires up the indexer list now so later commits can plug the download flow on top. Lidarr already pulls from its own indexers; Prowlarr unlocks the same search surface to the rest of the download pipeline.' },
     ],
     '2.5.8': [
@@ -3475,6 +3476,20 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Torrent Client Adapters (qBit, Transmission, Deluge)",
+        description: "second phase of the torrent + usenet rollout. SoulSync now speaks the three big torrent client APIs through one uniform adapter — pick which client you use and SoulSync handles the auth and protocol quirks for you.",
+        features: [
+            "• supports qBittorrent (WebUI v2), Transmission (RPC), Deluge 2.x (JSON-RPC)",
+            "• new Torrent Client section on the Indexers & Downloaders tab",
+            "• single client type picker — switching between clients is a dropdown change, no code path divergence",
+            "• per-client credential fields with hints (qBit / Transmission use username + password, Deluge uses password only)",
+            "• optional category/label and save-path overrides so SoulSync's torrents are easy to spot in your client",
+            "• Test Connection probes the live WebUI and confirms auth works",
+            "• no downloads triggered yet — the wire-up to Prowlarr search results lands once usenet client adapters ship",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Torrent Client",
+    },
     {
         title: "Prowlarr Integration (Phase 1 of Torrent + Usenet)",
         description: "first commit toward torrent and usenet download sources. SoulSync can now talk to your Prowlarr instance and pull the list of configured indexers, setting up the search surface that the torrent and usenet clients will plug into next.",

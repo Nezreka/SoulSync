@@ -88,6 +88,7 @@ class ConfigManager:
         'deezer_download.arl',
         'lidarr_download.api_key',
         'prowlarr.api_key',
+        'torrent_client.password',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -528,6 +529,17 @@ class ConfigManager:
                 # Comma-separated list of indexer IDs to limit searches to.
                 # Empty = search all enabled indexers.
                 "indexer_ids": "",
+            },
+            # Torrent client — receives .torrent / magnet URIs from the
+            # torrent download plugin. ``type`` picks which adapter to
+            # instantiate (qbittorrent | transmission | deluge).
+            "torrent_client": {
+                "type": "qbittorrent",
+                "url": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
+                "save_path": "",
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be

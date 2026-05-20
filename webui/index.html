@@ -4995,6 +4995,63 @@
                                 </div>
                             </div>
 
+                            <!-- ═══ TORRENT CLIENT ═══ -->
+                            <div class="settings-group" data-stg="indexers">
+                                <h3>🧲 Torrent Client</h3>
+                                <div class="setting-help-text" style="margin-bottom: 10px;">
+                                    Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use — only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for credentials, and hit Test Connection.
+                                </div>
+                                <div class="form-group">
+                                    <label>Client Type:</label>
+                                    <select id="torrent-client-type" class="form-select">
+                                        <option value="qbittorrent">qBittorrent</option>
+                                        <option value="transmission">Transmission</option>
+                                        <option value="deluge">Deluge 2.x</option>
+                                    </select>
+                                    <div class="setting-help-text" id="torrent-client-help">
+                                        qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge: WebUI port (default 8112).
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>WebUI URL:</label>
+                                    <input type="text" id="torrent-client-url" placeholder="http://localhost:8080">
+                                </div>
+                                <div class="form-group" id="torrent-client-username-group">
+                                    <label>Username:</label>
+                                    <input type="text" id="torrent-client-username" placeholder="leave blank if WebUI doesn't require auth">
+                                    <div class="setting-help-text">
+                                        qBittorrent and Transmission use username + password. Deluge uses password only — paste it in the password field below.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Password:</label>
+                                    <input type="password" id="torrent-client-password" placeholder="WebUI password">
+                                </div>
+                                <div class="form-group">
+                                    <label>Category / Label:</label>
+                                    <input type="text" id="torrent-client-category" placeholder="soulsync" value="soulsync">
+                                    <div class="setting-help-text">
+                                        SoulSync tags every torrent it adds with this label so it's easy to spot in your client. Deluge needs the Label plugin installed for this to stick.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Save Path (optional):</label>
+                                    <input type="text" id="torrent-client-save-path" placeholder="leave blank to use the client's default">
+                                    <div class="setting-help-text">
+                                        Override where the torrent client writes downloads. This path is on the <strong>torrent client's</strong> machine, not SoulSync's.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Torrent Client Status:</label>
+                                    <div class="form-actions" style="margin-top: 4px;">
+                                        <button class="test-button" id="torrent-client-test-btn" onclick="testTorrentClientConnection()">
+                                            Test Connection
+                                        </button>
+                                        <span id="torrent-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
