@@ -4947,160 +4947,206 @@
                             </div>
 
                             <!-- ═══ INDEXERS & DOWNLOADERS ═══ -->
-                            <div class="settings-group" data-stg="indexers">
-                                <h3>🔎 Prowlarr (Indexer Aggregator)</h3>
-                                <div class="setting-help-text" style="margin-bottom: 10px;">
-                                    Prowlarr manages your Usenet and torrent indexers and exposes them through one API. SoulSync uses Prowlarr to search across every indexer at once for the Torrent and Usenet download sources.
-                                    <br><br>
-                                    Don't have it? Grab Prowlarr from <code>prowlarr.com</code> (or your *arr stack). You point Prowlarr at your indexers, then point SoulSync at Prowlarr.
+                            <!-- Intro hero — explains the search → fetch flow in one glance -->
+                            <div class="settings-group ind-hero" data-stg="indexers">
+                                <div class="ind-hero-title">Indexers &amp; Downloaders</div>
+                                <div class="ind-hero-flow">
+                                    <span class="ind-hero-step"><span class="ind-hero-step-num">1</span> Indexers find releases</span>
+                                    <span class="ind-hero-arrow">→</span>
+                                    <span class="ind-hero-step"><span class="ind-hero-step-num">2</span> Downloader fetches them</span>
+                                    <span class="ind-hero-arrow">→</span>
+                                    <span class="ind-hero-step"><span class="ind-hero-step-num">3</span> SoulSync imports to library</span>
                                 </div>
-                                <div class="form-group">
-                                    <label>Prowlarr URL:</label>
-                                    <input type="text" id="prowlarr-url" placeholder="http://localhost:9696">
-                                    <div class="setting-help-text">
-                                        Full URL to your Prowlarr instance (e.g. <code>http://192.168.1.100:9696</code>).
-                                    </div>
+                                <div class="ind-hero-sub">
+                                    Configure your Prowlarr instance to feed search results, and pick a torrent client and/or usenet client to handle the actual downloads. You only need to set up the protocols you actually use.
                                 </div>
-                                <div class="form-group">
-                                    <label>API Key:</label>
-                                    <input type="password" id="prowlarr-api-key" placeholder="Your Prowlarr API key">
-                                    <div class="setting-help-text">
-                                        Found in Prowlarr → Settings → General → Security → API Key.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Prowlarr Status:</label>
-                                    <div class="form-actions" style="margin-top: 4px;">
-                                        <button class="test-button" id="prowlarr-test-btn" onclick="testProwlarrConnection()">
-                                            Test Connection
-                                        </button>
-                                        <button class="test-button" id="prowlarr-refresh-indexers-btn" onclick="loadProwlarrIndexers()" style="margin-left: 6px;">
-                                            Refresh Indexer List
-                                        </button>
-                                        <span id="prowlarr-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Configured Indexers:</label>
-                                    <div id="prowlarr-indexer-list" class="setting-help-text" style="margin-top: 4px;">
-                                        Connect to Prowlarr and click <strong>Refresh Indexer List</strong> to see the indexers SoulSync can search.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Restrict to indexer IDs (optional):</label>
-                                    <input type="text" id="prowlarr-indexer-ids" placeholder="e.g. 1,3,7 (blank = all enabled indexers)">
-                                    <div class="setting-help-text">
-                                        Comma-separated Prowlarr indexer IDs. Leave blank to search every enabled indexer. Restrict when you have a private tracker you want to prioritise or a noisy public one to exclude.
+                            </div>
+
+                            <!-- ─── INDEXERS section ─── -->
+                            <div class="settings-section-header" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>🔎 Indexers</h3>
+                                <span class="settings-section-hint">Prowlarr — search aggregator</span>
+                                <span class="ind-status-dot ind-status-dot-unknown" id="prowlarr-status-dot" title="Not tested"></span>
+                            </div>
+                            <div class="settings-section-body" data-stg="indexers">
+                                <div class="settings-group" data-stg="indexers">
+                                    <div class="api-service-frame">
+                                        <h4 class="service-title prowlarr-title">⬢ Prowlarr</h4>
+                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                            Prowlarr manages your Usenet and torrent indexers and exposes them through one API. SoulSync uses Prowlarr to search across every indexer at once for the Torrent and Usenet download sources.
+                                            <br><br>
+                                            Don't have it? Grab Prowlarr from <code>prowlarr.com</code> (or your *arr stack). You point Prowlarr at your indexers, then point SoulSync at Prowlarr.
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Prowlarr URL:</label>
+                                            <input type="text" id="prowlarr-url" placeholder="http://localhost:9696">
+                                            <div class="setting-help-text">
+                                                Full URL to your Prowlarr instance (e.g. <code>http://192.168.1.100:9696</code>).
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="prowlarr-api-key" placeholder="Your Prowlarr API key">
+                                            <div class="setting-help-text">
+                                                Found in Prowlarr → Settings → General → Security → API Key.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Restrict to indexer IDs (optional):</label>
+                                            <input type="text" id="prowlarr-indexer-ids" placeholder="e.g. 1,3,7 (blank = all enabled indexers)">
+                                            <div class="setting-help-text">
+                                                Comma-separated Prowlarr indexer IDs. Leave blank to search every enabled indexer. Restrict when you have a private tracker you want to prioritise or a noisy public one to exclude.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Status:</label>
+                                            <div class="form-actions" style="margin-top: 4px;">
+                                                <button class="test-button" id="prowlarr-test-btn" onclick="testProwlarrConnection()">
+                                                    Test Connection
+                                                </button>
+                                                <button class="test-button" id="prowlarr-refresh-indexers-btn" onclick="loadProwlarrIndexers()" style="margin-left: 6px;">
+                                                    Refresh Indexer List
+                                                </button>
+                                                <span id="prowlarr-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Configured Indexers:</label>
+                                            <div id="prowlarr-indexer-list" class="ind-indexer-list">
+                                                Connect to Prowlarr and click <strong>Refresh Indexer List</strong> to see the indexers SoulSync can search.
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- ═══ TORRENT CLIENT ═══ -->
-                            <div class="settings-group" data-stg="indexers">
+                            <!-- ─── TORRENT CLIENT section ─── -->
+                            <div class="settings-section-header collapsed" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>🧲 Torrent Client</h3>
-                                <div class="setting-help-text" style="margin-bottom: 10px;">
-                                    Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use — only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for credentials, and hit Test Connection.
-                                </div>
-                                <div class="form-group">
-                                    <label>Client Type:</label>
-                                    <select id="torrent-client-type" class="form-select">
-                                        <option value="qbittorrent">qBittorrent</option>
-                                        <option value="transmission">Transmission</option>
-                                        <option value="deluge">Deluge 2.x</option>
-                                    </select>
-                                    <div class="setting-help-text" id="torrent-client-help">
-                                        qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge: WebUI port (default 8112).
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>WebUI URL:</label>
-                                    <input type="text" id="torrent-client-url" placeholder="http://localhost:8080">
-                                </div>
-                                <div class="form-group" id="torrent-client-username-group">
-                                    <label>Username:</label>
-                                    <input type="text" id="torrent-client-username" placeholder="leave blank if WebUI doesn't require auth">
-                                    <div class="setting-help-text">
-                                        qBittorrent and Transmission use username + password. Deluge uses password only — paste it in the password field below.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Password:</label>
-                                    <input type="password" id="torrent-client-password" placeholder="WebUI password">
-                                </div>
-                                <div class="form-group">
-                                    <label>Category / Label:</label>
-                                    <input type="text" id="torrent-client-category" placeholder="soulsync" value="soulsync">
-                                    <div class="setting-help-text">
-                                        SoulSync tags every torrent it adds with this label so it's easy to spot in your client. Deluge needs the Label plugin installed for this to stick.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Save Path (optional):</label>
-                                    <input type="text" id="torrent-client-save-path" placeholder="leave blank to use the client's default">
-                                    <div class="setting-help-text">
-                                        Override where the torrent client writes downloads. This path is on the <strong>torrent client's</strong> machine, not SoulSync's.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Torrent Client Status:</label>
-                                    <div class="form-actions" style="margin-top: 4px;">
-                                        <button class="test-button" id="torrent-client-test-btn" onclick="testTorrentClientConnection()">
-                                            Test Connection
-                                        </button>
-                                        <span id="torrent-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                <span class="settings-section-hint">qBittorrent · Transmission · Deluge</span>
+                                <span class="ind-status-dot ind-status-dot-unknown" id="torrent-client-status-dot" title="Not tested"></span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="indexers">
+                                <div class="settings-group" data-stg="indexers">
+                                    <div class="api-service-frame">
+                                        <h4 class="service-title torrent-title">⬢ Torrent Downloader</h4>
+                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                            Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use — only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for credentials, and hit Test Connection.
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Client Type:</label>
+                                            <select id="torrent-client-type" class="form-select">
+                                                <option value="qbittorrent">qBittorrent</option>
+                                                <option value="transmission">Transmission</option>
+                                                <option value="deluge">Deluge 2.x</option>
+                                            </select>
+                                            <div class="setting-help-text" id="torrent-client-help">
+                                                qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge: WebUI port (default 8112).
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>WebUI URL:</label>
+                                            <input type="text" id="torrent-client-url" placeholder="http://localhost:8080">
+                                        </div>
+                                        <div class="form-group" id="torrent-client-username-group">
+                                            <label>Username:</label>
+                                            <input type="text" id="torrent-client-username" placeholder="leave blank if WebUI doesn't require auth">
+                                            <div class="setting-help-text">
+                                                qBittorrent and Transmission use username + password. Deluge uses password only — paste it in the password field below.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Password:</label>
+                                            <input type="password" id="torrent-client-password" placeholder="WebUI password">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Category / Label:</label>
+                                            <input type="text" id="torrent-client-category" placeholder="soulsync" value="soulsync">
+                                            <div class="setting-help-text">
+                                                SoulSync tags every torrent it adds with this label so it's easy to spot in your client. Deluge needs the Label plugin installed for this to stick.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Save Path (optional):</label>
+                                            <input type="text" id="torrent-client-save-path" placeholder="leave blank to use the client's default">
+                                            <div class="setting-help-text">
+                                                Override where the torrent client writes downloads. This path is on the <strong>torrent client's</strong> machine, not SoulSync's.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Status:</label>
+                                            <div class="form-actions" style="margin-top: 4px;">
+                                                <button class="test-button" id="torrent-client-test-btn" onclick="testTorrentClientConnection()">
+                                                    Test Connection
+                                                </button>
+                                                <span id="torrent-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- ═══ USENET CLIENT ═══ -->
-                            <div class="settings-group" data-stg="indexers">
+                            <!-- ─── USENET CLIENT section ─── -->
+                            <div class="settings-section-header collapsed" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>📰 Usenet Client</h3>
-                                <div class="setting-help-text" style="margin-bottom: 10px;">
-                                    Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses an API key for auth; NZBGet uses a username + password.
-                                </div>
-                                <div class="form-group">
-                                    <label>Client Type:</label>
-                                    <select id="usenet-client-type" class="form-select" onchange="updateUsenetClientUI()">
-                                        <option value="sabnzbd">SABnzbd</option>
-                                        <option value="nzbget">NZBGet</option>
-                                    </select>
-                                    <div class="setting-help-text">
-                                        SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>WebUI URL:</label>
-                                    <input type="text" id="usenet-client-url" placeholder="http://localhost:8080">
-                                </div>
-                                <div class="form-group" id="usenet-apikey-group">
-                                    <label>API Key:</label>
-                                    <input type="password" id="usenet-client-api-key" placeholder="SABnzbd API key">
-                                    <div class="setting-help-text">
-                                        SABnzbd → Config → General → API Key. Used by SABnzbd only.
-                                    </div>
-                                </div>
-                                <div class="form-group" id="usenet-username-group" style="display: none;">
-                                    <label>Username:</label>
-                                    <input type="text" id="usenet-client-username" placeholder="NZBGet WebUI username">
-                                </div>
-                                <div class="form-group" id="usenet-password-group" style="display: none;">
-                                    <label>Password:</label>
-                                    <input type="password" id="usenet-client-password" placeholder="NZBGet WebUI password">
-                                </div>
-                                <div class="form-group">
-                                    <label>Category / Label:</label>
-                                    <input type="text" id="usenet-client-category" placeholder="soulsync" value="soulsync">
-                                    <div class="setting-help-text">
-                                        SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder.
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Usenet Client Status:</label>
-                                    <div class="form-actions" style="margin-top: 4px;">
-                                        <button class="test-button" id="usenet-client-test-btn" onclick="testUsenetClientConnection()">
-                                            Test Connection
-                                        </button>
-                                        <span id="usenet-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                <span class="settings-section-hint">SABnzbd · NZBGet</span>
+                                <span class="ind-status-dot ind-status-dot-unknown" id="usenet-client-status-dot" title="Not tested"></span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="indexers">
+                                <div class="settings-group" data-stg="indexers">
+                                    <div class="api-service-frame">
+                                        <h4 class="service-title usenet-title">⬢ Usenet Downloader</h4>
+                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                            Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses an API key for auth; NZBGet uses a username + password.
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Client Type:</label>
+                                            <select id="usenet-client-type" class="form-select" onchange="updateUsenetClientUI()">
+                                                <option value="sabnzbd">SABnzbd</option>
+                                                <option value="nzbget">NZBGet</option>
+                                            </select>
+                                            <div class="setting-help-text">
+                                                SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>WebUI URL:</label>
+                                            <input type="text" id="usenet-client-url" placeholder="http://localhost:8080">
+                                        </div>
+                                        <div class="form-group" id="usenet-apikey-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="usenet-client-api-key" placeholder="SABnzbd API key">
+                                            <div class="setting-help-text">
+                                                SABnzbd → Config → General → API Key. Used by SABnzbd only.
+                                            </div>
+                                        </div>
+                                        <div class="form-group" id="usenet-username-group" style="display: none;">
+                                            <label>Username:</label>
+                                            <input type="text" id="usenet-client-username" placeholder="NZBGet WebUI username">
+                                        </div>
+                                        <div class="form-group" id="usenet-password-group" style="display: none;">
+                                            <label>Password:</label>
+                                            <input type="password" id="usenet-client-password" placeholder="NZBGet WebUI password">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Category / Label:</label>
+                                            <input type="text" id="usenet-client-category" placeholder="soulsync" value="soulsync">
+                                            <div class="setting-help-text">
+                                                SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Status:</label>
+                                            <div class="form-actions" style="margin-top: 4px;">
+                                                <button class="test-button" id="usenet-client-test-btn" onclick="testUsenetClientConnection()">
+                                                    Test Connection
+                                                </button>
+                                                <span id="usenet-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
