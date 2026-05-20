@@ -250,6 +250,7 @@ class SoulseekClient(DownloadSourcePlugin):
 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     self._last_401_logged = False  # Reset on success
+                    self._last_unreachable_logged = False  # Same reset for unreachable-host suppression
                     try:
                         if response_text.strip():  # Only parse if there's content
                             return await response.json()
@@ -290,6 +291,25 @@ class SoulseekClient(DownloadSourcePlugin):
                 f"slskd request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
                 f"{method} {url} — slskd may be overloaded or unreachable"
             )
+            return None
+        except aiohttp.ClientConnectorError as e:
+            # Issue #649: slskd_url is configured but the host is unreachable
+            # (slskd not running, wrong port, DNS / Docker bridge issue).
+            # Status polling at /api/downloads/status fans out to every plugin
+            # including soulseek even when the user has soulseek toggled out
+            # of their active download sources, so each frontend poll
+            # produced an ERROR log line — visible spam during any
+            # non-soulseek download. Suppress repeats to debug; emit one
+            # WARNING with actionable context, then reset on any successful
+            # response (slskd came back up).
+            if not getattr(self, '_last_unreachable_logged', False):
+                logger.warning(
+                    f"slskd unreachable at {self.base_url}: {e}. "
+                    f"Either start slskd or clear `soulseek.slskd_url` in settings "
+                    f"if you don't use Soulseek. Suppressing further connection errors."
+                )
+                self._last_unreachable_logged = True
+            logger.debug(f"slskd connection failed: {method} {url}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error making API request: {e}")
@@ -347,6 +367,19 @@ class SoulseekClient(DownloadSourcePlugin):
                 f"slskd direct request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
                 f"{method} {url} — slskd may be overloaded or unreachable"
             )
+            return None
+        except aiohttp.ClientConnectorError as e:
+            # Issue #649 — same suppression as _make_request. Direct
+            # request is a less common path but uses the same base_url,
+            # so the same unreachable-host condition fires here.
+            if not getattr(self, '_last_unreachable_logged', False):
+                logger.warning(
+                    f"slskd unreachable at {self.base_url}: {e}. "
+                    f"Either start slskd or clear `soulseek.slskd_url` in settings "
+                    f"if you don't use Soulseek. Suppressing further connection errors."
+                )
+                self._last_unreachable_logged = True
+            logger.debug(f"slskd direct connection failed: {method} {url}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error making direct API request: {e}")
