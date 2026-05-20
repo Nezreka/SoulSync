@@ -9,6 +9,7 @@ import logging
 import re
 
 from config.settings import config_manager
+from core.imports.file_integrity import resolve_duration_tolerance
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,24 @@ def filter_soundcloud_previews(results, expected_track):
     return [r for r in results if not _is_preview(r)]
 
 
+def _duration_tolerance_seconds(expected_duration_ms):
+    override = resolve_duration_tolerance(
+        config_manager.get('post_processing.duration_tolerance_seconds', 0)
+    )
+    if override is not None:
+        return override
+    expected_seconds = expected_duration_ms / 1000.0
+    return 5.0 if expected_seconds > 600.0 else 3.0
+
+
+def _duration_mismatch_exceeds_integrity_tolerance(expected_duration_ms, candidate_duration_ms):
+    if not expected_duration_ms or not candidate_duration_ms:
+        return False
+    tolerance = _duration_tolerance_seconds(expected_duration_ms)
+    drift = abs((candidate_duration_ms / 1000.0) - (expected_duration_ms / 1000.0))
+    return drift > tolerance
+
+
 def get_valid_candidates(results, spotify_track, query):
     """
     This function is a direct port from sync.py. It scores and filters
@@ -98,7 +117,21 @@ def get_valid_candidates(results, spotify_track, query):
         expected_is_version = any(kw in expected_title_lower for kw in _version_keywords)
 
         scored = []
+        _strict_duration_sources = {'tidal', 'qobuz', 'hifi', 'deezer_dl', 'amazon'}
         for r in results:
+            if (
+                r.username in _strict_duration_sources
+                and _duration_mismatch_exceeds_integrity_tolerance(expected_duration, r.duration or 0)
+            ):
+                logger.info(
+                    "[%s] Rejecting candidate due to duration mismatch before download: "
+                    "expected %.1fs, candidate %.1fs",
+                    source_label,
+                    expected_duration / 1000.0,
+                    (r.duration or 0) / 1000.0,
+                )
+                continue
+
             # Score using matching engine's generic scorer (same weights as Soulseek)
             confidence, match_type = matching_engine.score_track_match(
                 source_title=expected_title,
