@@ -12,6 +12,9 @@ let currentDiscoveryFix = {
 
 // Store event handler reference to allow proper removal
 let discoveryFixEnterHandler = null;
+// Separate handler for the MBID-paste input — targets lookup-by-MBID
+// instead of fuzzy search so Enter does the obvious right thing per field.
+let discoveryFixMbidEnterHandler = null;
 
 /**
  * Open discovery fix modal for a specific track
@@ -113,10 +116,19 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         artist: artistInput.value
     });
 
+    // MBID input — separate ref because its Enter binding targets a
+    // different function (direct lookup vs fuzzy search). Optional: older
+    // modal markup that doesn't have the MBID row will get null here.
+    const mbidInput = fixModalOverlay.querySelector('#fix-modal-mbid-input');
+    if (mbidInput) mbidInput.value = '';
+
     // Remove old enter key handler if exists
     if (discoveryFixEnterHandler) {
         trackInput.removeEventListener('keypress', discoveryFixEnterHandler);
         artistInput.removeEventListener('keypress', discoveryFixEnterHandler);
+    }
+    if (discoveryFixMbidEnterHandler && mbidInput) {
+        mbidInput.removeEventListener('keypress', discoveryFixMbidEnterHandler);
     }
 
     // Add new enter key handler
@@ -125,6 +137,13 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     };
     trackInput.addEventListener('keypress', discoveryFixEnterHandler);
     artistInput.addEventListener('keypress', discoveryFixEnterHandler);
+
+    if (mbidInput) {
+        discoveryFixMbidEnterHandler = function (e) {
+            if (e.key === 'Enter') lookupDiscoveryFixByMbid();
+        };
+        mbidInput.addEventListener('keypress', discoveryFixMbidEnterHandler);
+    }
 
     // Show modal BEFORE auto-search so elements are visible
     fixModalOverlay.classList.remove('hidden');
@@ -235,6 +254,71 @@ async function searchDiscoveryFix() {
     } catch (error) {
         console.error('Search error:', error);
         resultsContainer.innerHTML = '<div class="error-message">❌ Search failed. Try again.</div>';
+    }
+}
+
+/**
+ * Look up a track directly by MusicBrainz recording MBID — bypasses fuzzy
+ * search entirely. Escape hatch for cases where the user knows the exact
+ * record (e.g. there are 10 same-title recordings from different sessions
+ * and auto-search keeps ranking the wrong one). Accepts full URLs
+ * (`https://musicbrainz.org/recording/<uuid>`) or bare UUIDs.
+ */
+async function lookupDiscoveryFixByMbid() {
+    if (!currentDiscoveryFix.identifier) {
+        console.error('No active fix modal context');
+        return;
+    }
+
+    const discoveryModal = document.getElementById(`youtube-discovery-modal-${currentDiscoveryFix.identifier}`);
+    if (!discoveryModal) return;
+    const fixModalOverlay = discoveryModal.querySelector('.discovery-fix-modal-overlay');
+    if (!fixModalOverlay) return;
+
+    const mbidInput = fixModalOverlay.querySelector('#fix-modal-mbid-input');
+    if (!mbidInput) return;
+
+    const mbid = parseMusicBrainzMbid(mbidInput.value);
+    const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
+
+    if (!mbid) {
+        if (resultsContainer) {
+            resultsContainer.innerHTML = '<div class="error-message">❌ Not a valid MusicBrainz recording URL or MBID. Paste a URL like https://musicbrainz.org/recording/&lt;uuid&gt; or the bare UUID.</div>';
+        }
+        showToast('Invalid MusicBrainz MBID', 'error');
+        return;
+    }
+
+    if (resultsContainer) {
+        resultsContainer.innerHTML = '<div class="loading">🔗 Looking up MusicBrainz recording...</div>';
+    }
+
+    try {
+        const response = await fetch(`/api/musicbrainz/recording/${encodeURIComponent(mbid)}`);
+        if (response.status === 404) {
+            if (resultsContainer) {
+                resultsContainer.innerHTML = '<div class="no-results">Recording not found on MusicBrainz. Double-check the MBID.</div>';
+            }
+            return;
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const track = await response.json();
+        if (!track || !track.id) {
+            if (resultsContainer) {
+                resultsContainer.innerHTML = '<div class="no-results">Recording not found on MusicBrainz.</div>';
+            }
+            return;
+        }
+        // Render as a single-result list — user still clicks to confirm,
+        // matching the existing search-result flow exactly.
+        renderDiscoveryFixResults([track], fixModalOverlay);
+    } catch (error) {
+        console.error('MBID lookup error:', error);
+        if (resultsContainer) {
+            resultsContainer.innerHTML = '<div class="error-message">❌ MBID lookup failed. Try again.</div>';
+        }
     }
 }
 
