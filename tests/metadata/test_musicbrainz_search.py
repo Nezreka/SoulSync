@@ -680,6 +680,61 @@ def test_search_albums_bare_artist_no_hint_no_filter():
     assert 'Revolver' in titles
 
 
+# ---------------------------------------------------------------------------
+# Issue #650 — 'Other' primary-type release-groups must surface
+# ---------------------------------------------------------------------------
+
+
+def test_search_albums_browse_filter_requests_other_primary_type():
+    """Issue #650: pre-fix the MB browse filter requested only
+    `album|ep|single`, dropping every primary-type=`Other` release-group
+    at the API layer. For artists like Vocaloid producers and JP indie
+    acts whose music videos / one-off web releases are tagged Other,
+    that hid legitimate tracks. Pin that the filter now includes
+    'other' so those release-groups round-trip into the discography."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Inabakumori', 'mb-i', score=100)]
+    client._client.browse_artist_release_groups.return_value = []
+
+    client.search_albums('inabakumori', limit=10)
+
+    # Inspect the actual call args — the API filter is the lever that
+    # decides whether MB returns Other-typed groups at all.
+    args, kwargs = client._client.browse_artist_release_groups.call_args
+    requested_types = kwargs.get('release_types') or (args[1] if len(args) > 1 else None)
+    assert requested_types is not None, \
+        "browse_artist_release_groups must receive an explicit release_types filter"
+    assert 'other' in requested_types, \
+        f"'other' must be in the requested types so #650 Other-typed releases surface; got {requested_types}"
+
+
+def test_search_albums_other_type_release_groups_appear_as_singles():
+    """When MB returns an Other-typed release-group (music video,
+    one-off web release), it must arrive in the discography as an
+    Album dataclass with album_type='single' — so the downstream
+    binner in `core/metadata/discography.py` routes it to the Singles
+    section rather than burying it among LPs."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Inabakumori', 'mb-i', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-mv', 'title': 'ロストアンブレラ', 'primary-type': 'Other',
+         'first-release-date': '2018-02-27', 'secondary-types': []},
+        {'id': 'rg-single', 'title': 'ラグトレイン', 'primary-type': 'Single',
+         'first-release-date': '2020-01-01', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('inabakumori', limit=10)
+
+    by_id = {a.id: a for a in albums}
+    assert 'rg-mv' in by_id, "Other-typed release-group must survive the filter and arrive in the result"
+    assert by_id['rg-mv'].album_type == 'single', \
+        "Other-typed release-group must map to album_type='single' so it lands in the Singles section"
+    # Pre-existing single behaviour unchanged.
+    assert by_id['rg-single'].album_type == 'single'
+
+
 def test_recording_to_track_total_tracks_matches_media_count():
     """Regression: total_tracks was initialized at 1 and summed with media
     track-counts, producing an off-by-one. An 11-track album reported 12."""
