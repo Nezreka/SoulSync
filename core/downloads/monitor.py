@@ -227,18 +227,28 @@ class WebUIDownloadMonitor:
             except Exception as e:
                 logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
-        # Handle completed downloads outside the lock to prevent deadlock
-        # (_on_download_completed acquires tasks_lock internally)
+        # Handle completed transfers outside the lock. The transfer engine's
+        # "complete" state only means the remote download finished; the
+        # post-processing worker still has to find, verify, tag, and move the
+        # file before it can report real batch success or failure.
         for batch_id, task_id in completed_tasks:
             try:
                 # Submit post-processing worker (file move, tagging, AcoustID verification)
                 # This makes batch downloads fully independent of browser polling.
                 logger.info(f"[Monitor] Submitting post-processing worker for task {task_id}")
                 missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
-                # Chain to next download in the batch queue
-                _on_download_completed(batch_id, task_id, success=True)
             except Exception as e:
                 logger.error(f"[Monitor] Error handling completed task {task_id}: {e}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = f'Post-processing could not be scheduled: {e}'
+                try:
+                    _on_download_completed(batch_id, task_id, success=False)
+                except Exception as completion_error:
+                    logger.error(
+                        f"[Monitor] Error marking failed post-processing submit for task {task_id}: {completion_error}"
+                    )
         # Handle exhausted retry tasks outside the lock to prevent deadlock
         for batch_id, task_id in exhausted_tasks:
             try:

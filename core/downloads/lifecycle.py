@@ -173,7 +173,7 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
 
         # Guard against double-calling: track which tasks have already been completed
         # This prevents active_count from being decremented multiple times for the same task
-        # (e.g. monitor detects completion AND post-processing calls this again)
+        # (e.g. status polling and post-processing both observe the same terminal task)
         # NOTE: On duplicate calls, we skip decrement/tracking but STILL check batch completion.
         # This is critical because the first call may see the task in 'post_processing' (not finished),
         # and the second call (from post-processing worker) arrives after the task is truly 'completed'.
