@@ -214,12 +214,20 @@ async function searchDiscoveryFix() {
     }
     params.set('limit', '50');
 
-    // Use the user's active metadata source first, then fall back to others
+    // Use the user's active metadata source first, then fall back to others.
+    // MusicBrainz is included so users on MB-as-primary get MB queried first,
+    // and so MB is available as a fallback for fuzzy / niche / non-mainstream
+    // recordings that Spotify / Deezer / iTunes miss (different catalogues,
+    // different cover coverage). MB sits last by default because it's
+    // rate-limited to 1 req/sec — when it's the active primary the activeIdx
+    // reorder below moves it to the front. Discogs is intentionally absent —
+    // Discogs has no track-level search API (releases only).
     const activeSource = (currentMusicSourceName || 'Spotify').toLowerCase();
     const allSources = [
         { key: 'spotify', endpoint: '/api/spotify/search_tracks', label: 'Spotify' },
         { key: 'deezer', endpoint: '/api/deezer/search_tracks', label: 'Deezer' },
         { key: 'itunes', endpoint: '/api/itunes/search_tracks', label: 'iTunes' },
+        { key: 'musicbrainz', endpoint: '/api/musicbrainz/search_tracks', label: 'MusicBrainz' },
     ];
     // Put the active source first, keep others as fallbacks
     const activeIdx = allSources.findIndex(s => activeSource.includes(s.key));

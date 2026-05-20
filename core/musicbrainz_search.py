@@ -638,13 +638,34 @@ class MusicBrainzSearchClient:
             logger.warning(f"MusicBrainz track search failed: {e}")
             return []
 
-    def _search_tracks_text(self, track_name: str, artist_name: Optional[str], limit: int) -> List[Track]:
-        """Fallback text-search path for structured/fuzzy track queries."""
+    def _search_tracks_text(self, track_name: str, artist_name: Optional[str], limit: int,
+                            strict: bool = True, min_score: Optional[int] = None) -> List[Track]:
+        """Fallback text-search path for structured/fuzzy track queries.
+
+        `strict=True` (default) keeps the field-scoped Lucene phrase match —
+        precise enough for enrichment-style flows where the inputs are
+        already known-clean. `strict=False` switches to a bare-query
+        MB lookup that hits alias/sortname indexes with diacritic folding —
+        needed for user-facing fuzzy surfaces (Fix popup cascade) where
+        recall beats precision because the user picks from the result list.
+        Mirrors the same toggle already on `search_recording` in
+        `core/musicbrainz_client.py`.
+
+        `min_score` defaults to `self._MIN_SCORE` (80) — sized for the
+        enhanced search tab where unfiltered MB results are noisy. Pass
+        a lower value (or 0) when a downstream stage like
+        `core.metadata.relevance.rerank_tracks` will re-sort by artist
+        match — MB's free-text score heavily favours title-text matches
+        ("Army of Me (Bjork)" cover by HIRS Collective scores 100,
+        Björk's canonical "Army of Me" scores 28) so a high floor drops
+        the right answer.
+        """
         try:
-            results = self._client.search_recording(track_name, artist_name=artist_name, limit=limit)
-            # Score filter matches the artist/album logic — cuts garbage
-            # title collisions from unrelated recordings.
-            results = [r for r in results if (r.get('score', 0) or 0) >= self._MIN_SCORE]
+            results = self._client.search_recording(
+                track_name, artist_name=artist_name, limit=limit, strict=strict
+            )
+            threshold = self._MIN_SCORE if min_score is None else min_score
+            results = [r for r in results if (r.get('score', 0) or 0) >= threshold]
 
             tracks = []
             for r in results:
@@ -655,6 +676,30 @@ class MusicBrainzSearchClient:
         except Exception as e:
             logger.warning(f"MusicBrainz track search failed: {e}")
             return []
+
+    def search_tracks_with_artist(self, track: str, artist: str,
+                                  limit: int = 10) -> List[Track]:
+        """Search MB tracks with track + artist passed as separate fields.
+
+        Powers the Fix-popup metadata cascade (`GET /api/musicbrainz/search_tracks`)
+        and any future surface where the caller already has the title/artist
+        split and wants the fuzzy-recall MB lookup without going through
+        `search_tracks`'s structured-query dispatch (`Artist - Track`
+        splitting, bare-name artist-first browse).
+
+        Uses bare-query mode (`strict=False`) — diacritic-folded, hits
+        alias/sortname indexes, no `AND`-clause that kills recall when
+        either side mis-matches. Score floor lowered to 20 (vs the search
+        tab's 80) so MB recordings whose title doesn't literally contain
+        the artist name still enter the candidate pool — the endpoint's
+        `rerank_tracks` pass then sorts by artist-match relevance. Without
+        this, queries like `Army of Me` + `Bjork` only surface covers
+        (score 73-100) and miss Björk's canonical recording (score 28).
+        """
+        if not track and not artist:
+            return []
+        return self._search_tracks_text(track, artist or None, limit,
+                                        strict=False, min_score=20)
 
     def _pick_representative_release(self, releases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Pick the best release out of a release-group's editions.
