@@ -765,3 +765,125 @@ def test_search_tracks_text_path_filters_by_score():
     titles = [t.name for t in tracks]
     assert 'Good' in titles
     assert 'Bad' not in titles
+
+
+# ---------------------------------------------------------------------------
+# get_recording_flat — Fix-popup MBID paste adapter
+# ---------------------------------------------------------------------------
+
+def test_get_recording_flat_happy_path():
+    """Recording with a release returns flat shape with album + image."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-abc',
+        'title': 'Army of Me',
+        'length': 234000,
+        'artist-credit': [{'artist': {'name': 'Björk'}}],
+        'releases': [{
+            'id': 'rel-xyz',
+            'title': 'Post',
+            'date': '1995-06-13',
+            'status': 'Official',
+            'media': [{'track-count': 11}],
+            'release-group': {'id': 'rg-post', 'primary-type': 'Album', 'secondary-types': []},
+        }],
+    }
+
+    track = client.get_recording_flat('rec-abc')
+
+    assert track is not None
+    assert track['id'] == 'rec-abc'
+    assert track['name'] == 'Army of Me'
+    assert track['artists'] == ['Björk']  # flat list of strings, not Spotify-shaped objects
+    assert track['album'] == 'Post'        # flat string, not nested dict
+    assert track['duration_ms'] == 234000
+    assert track['image_url']  # CAA URL present
+    assert 'musicbrainz.org/recording/rec-abc' in track['external_urls']['musicbrainz']
+
+
+def test_get_recording_flat_missing_mbid_returns_none():
+    """No MBID → no API call, returns None."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    assert client.get_recording_flat('') is None
+    assert client.get_recording_flat(None) is None
+    client._client.get_recording.assert_not_called()
+
+
+def test_get_recording_flat_mb_returns_no_recording():
+    """MB returns None (404 / missing) → adapter returns None."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = None
+
+    assert client.get_recording_flat('rec-missing') is None
+
+
+def test_get_recording_flat_recording_without_release():
+    """Standalone recording (no releases) — album stays empty,
+    image_url empty, but the rest of the shape is intact."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-standalone',
+        'title': 'Untitled Demo',
+        'length': 120000,
+        'artist-credit': [{'artist': {'name': 'Unknown'}}],
+        'releases': [],
+    }
+
+    track = client.get_recording_flat('rec-standalone')
+
+    assert track is not None
+    assert track['name'] == 'Untitled Demo'
+    assert track['album'] == ''
+    assert track['image_url'] == ''
+    assert track['artists'] == ['Unknown']
+    assert track['duration_ms'] == 120000
+
+
+def test_get_recording_flat_multi_artist_credit():
+    """Recording with multiple credited artists — all flatten to list of strings."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-collab',
+        'title': 'Collab Track',
+        'length': 180000,
+        'artist-credit': [
+            {'artist': {'name': 'Artist A'}},
+            {'artist': {'name': 'Artist B'}},
+        ],
+        'releases': [],
+    }
+
+    track = client.get_recording_flat('rec-collab')
+
+    assert track['artists'] == ['Artist A', 'Artist B']
+
+
+def test_get_recording_flat_includes_match_get_track_details():
+    """Sanity: passes the same includes list so the API call is cacheable
+    against the same key as get_track_details (one network request can
+    serve both surfaces if MB ever adds response caching upstream)."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = None
+
+    client.get_recording_flat('rec-x')
+
+    client._client.get_recording.assert_called_once_with(
+        'rec-x', includes=['releases', 'artist-credits', 'release-groups']
+    )
+
+
+def test_get_recording_flat_swallows_client_errors():
+    """MB client raising must not propagate to the route handler — return
+    None so the endpoint can render a friendly 404 instead of 500."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.side_effect = RuntimeError('boom')
+
+    assert client.get_recording_flat('rec-err') is None
