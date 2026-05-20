@@ -946,6 +946,12 @@ async function loadSettingsData() {
         document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
+        const _prowUrl = document.getElementById('prowlarr-url');
+        const _prowKey = document.getElementById('prowlarr-api-key');
+        const _prowIds = document.getElementById('prowlarr-indexer-ids');
+        if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
+        if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
+        if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -2691,6 +2697,11 @@ async function saveSettings(quiet = false) {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
         },
+        prowlarr: {
+            url: document.getElementById('prowlarr-url')?.value || '',
+            api_key: document.getElementById('prowlarr-api-key')?.value || '',
+            indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
+        },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
@@ -3527,6 +3538,61 @@ async function testLidarrConnection() {
     } catch (e) {
         statusEl.textContent = 'Connection error';
         statusEl.style.color = '#f44336';
+    }
+}
+
+async function testProwlarrConnection() {
+    const statusEl = document.getElementById('prowlarr-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'prowlarr' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            loadProwlarrIndexers();
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function loadProwlarrIndexers() {
+    const listEl = document.getElementById('prowlarr-indexer-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<em>Loading…</em>';
+    try {
+        const resp = await fetch('/api/prowlarr/indexers');
+        const data = await resp.json();
+        if (!data.success) {
+            listEl.innerHTML = `<em style="color:#f44336;">${data.error || 'Prowlarr not configured.'}</em>`;
+            return;
+        }
+        if (!data.indexers || data.indexers.length === 0) {
+            listEl.innerHTML = '<em>No indexers configured in Prowlarr yet. Add some in Prowlarr → Indexers.</em>';
+            return;
+        }
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const rows = data.indexers.map(idx => {
+            const proto = idx.protocol === 'usenet' ? '📰 Usenet' : '🧲 Torrent';
+            const enabled = idx.enable ? '✅' : '⛔';
+            const privacy = idx.privacy ? `<span style="opacity:0.6;">(${esc(idx.privacy)})</span>` : '';
+            return `<div style="padding:3px 0;">${enabled} <strong>#${esc(idx.id)}</strong> ${esc(idx.name)} — ${proto} ${privacy}</div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (e) {
+        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${e.message}</em>`;
     }
 }
 

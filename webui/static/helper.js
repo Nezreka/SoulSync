@@ -3413,6 +3413,10 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.0': [
+        { unreleased: true },
+        { title: 'Prowlarr integration', desc: 'new Indexers & Downloaders tab in Settings. point SoulSync at your Prowlarr instance with a URL and API key, and you can browse the indexers Prowlarr exposes from inside the app. this is the search half of the upcoming torrent and usenet download sources — wires up the indexer list now so later commits can plug the download flow on top. Lidarr already pulls from its own indexers; Prowlarr unlocks the same search surface to the rest of the download pipeline.' },
+    ],
     '2.5.8': [
         { date: 'May 20, 2026 — 2.5.8 release' },
         { title: 'Fix: blank artist pages on Python / git-pull installs', desc: 'PR #644 moved the artist detail page behind a TanStack React route. installs that pull from git but never run `npm install && npm run build` ship without the Vite bundle, so the legacy shell saw `/artist-detail/<source>/<id>` URLs and bailed — every click left a blank pane. the legacy startup path now parses the URL itself and hands off to the existing artist detail loader, so Python users get artist pages back without needing to build the webui. Docker / built installs still take the React route as before.' },
@@ -3471,6 +3475,19 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Prowlarr Integration (Phase 1 of Torrent + Usenet)",
+        description: "first commit toward torrent and usenet download sources. SoulSync can now talk to your Prowlarr instance and pull the list of configured indexers, setting up the search surface that the torrent and usenet clients will plug into next.",
+        features: [
+            "• new Indexers & Downloaders tab on the Settings page",
+            "• point SoulSync at Prowlarr with a URL and API key — same kind of setup as Lidarr",
+            "• Test Connection button confirms Prowlarr is reachable and authenticated",
+            "• Refresh Indexer List pulls the full list of indexers Prowlarr is currently managing (torrent + usenet, enabled state, privacy level)",
+            "• optional indexer-ID allowlist if you want SoulSync to only search a subset",
+            "• no downloads yet — torrent and usenet client adapters land in the next commits",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Prowlarr",
+    },
     {
         title: "MusicBrainz Is Now a First-Class Metadata Source",
         description: "MusicBrainz was already available as an optional search tab, but it wasn't selectable as your primary metadata source. now it is — switch to it in Settings → Metadata Source and the whole app routes through it.",
