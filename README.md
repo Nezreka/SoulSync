@@ -304,7 +304,9 @@ If `webui/static/dist/.vite/manifest.json` is missing or stale, React-owned rout
 
 ### Local Development
 
-Use two terminals so the backend and Vite stay independent:
+This is only for contributors working on the WebUI with hot reload. Normal Python/no-Docker installs should build once with `npm run build` as shown above, then run only Gunicorn.
+
+For active frontend development, use two terminals so the backend and Vite stay independent:
 
 1. Backend
    ```bash
