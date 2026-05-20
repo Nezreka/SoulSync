@@ -552,6 +552,13 @@ class ConfigManager:
                 "path": os.environ.get('DATABASE_PATH', 'database/music_library.db'),
                 "max_workers": 5
             },
+            "image_cache": {
+                "enabled": True,
+                "path": "storage/image_cache",
+                "ttl_seconds": 2592000,
+                "failed_ttl_seconds": 21600,
+                "max_download_mb": 15
+            },
             "metadata_enhancement": {
                 "enabled": True,
                 "embed_album_art": True,
