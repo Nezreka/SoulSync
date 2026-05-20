@@ -343,6 +343,10 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                             logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
+                                logger.info(
+                                    f"[CancelTrigger:candidates.worker_cancelled_during_download] "
+                                    f"download_id={download_id} username={username} task_id={task_id}"
+                                )
                                 deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
                                 logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:

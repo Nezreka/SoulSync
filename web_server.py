@@ -6068,6 +6068,10 @@ def get_download_status():
                                                 transfer_id = file_info.get('id')
                                                 if transfer_id:
                                                     try:
+                                                        logger.info(
+                                                            f"[CancelTrigger:web.orphan_cleanup] "
+                                                            f"download_id={transfer_id} username={username}"
+                                                        )
                                                         run_async(download_orchestrator.cancel_download(str(transfer_id), username, remove=True))
                                                     except Exception as e:
                                                         logger.debug("orphan transfer cancel failed: %s", e)
@@ -16980,6 +16984,10 @@ def cancel_download_task():
         # Optionally try to cancel the Soulseek download (don't block worker progression)
         if download_id and username:
             try:
+                logger.info(
+                    f"[CancelTrigger:web.cancel_download_task] "
+                    f"download_id={download_id} username={username} task_id={task_id}"
+                )
                 # This is an async call, so we run it and wait
                 run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                 logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
@@ -17232,6 +17240,10 @@ def cancel_task_v2():
                 # and silently left streaming downloads running in background.
                 try:
                     logger.info(f"[Atomic Cancel] Dispatching cancel to orchestrator: username={username} download_id={download_id}")
+                    logger.info(
+                        f"[CancelTrigger:web.atomic_cancel_v2] "
+                        f"download_id={download_id} username={username}"
+                    )
                     cancel_success = run_async(
                         download_orchestrator.cancel_download(download_id, username, remove=True)
                     )
