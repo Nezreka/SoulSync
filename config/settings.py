@@ -89,6 +89,8 @@ class ConfigManager:
         'lidarr_download.api_key',
         'prowlarr.api_key',
         'torrent_client.password',
+        'usenet_client.api_key',
+        'usenet_client.password',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -540,6 +542,17 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+            },
+            # Usenet client — receives .nzb URLs / payloads. ``type``
+            # picks the adapter (sabnzbd | nzbget). SABnzbd uses an
+            # API key; NZBGet uses username + password.
+            "usenet_client": {
+                "type": "sabnzbd",
+                "url": "",
+                "api_key": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be

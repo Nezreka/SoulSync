@@ -305,6 +305,27 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "usenet_client":
+            client_type = (config_manager.get('usenet_client.type', '') or '').strip().lower()
+            url = config_manager.get('usenet_client.url', '')
+            if not url:
+                return False, "Usenet client URL is required."
+            if not client_type:
+                return False, "Pick a usenet client (SABnzbd or NZBGet)."
+            try:
+                from core.usenet_clients import adapter_for_type as _usenet_adapter_for_type
+                adapter = _usenet_adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown usenet client type: {client_type}"
+                if not adapter.is_configured():
+                    if client_type == "sabnzbd":
+                        return False, "SABnzbd needs both URL and API key."
+                    return False, "NZBGet needs URL, username, and password."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Usenet client connection error: {str(e)}"
         elif service == "torrent_client":
             client_type = (config_manager.get('torrent_client.type', '') or '').strip().lower()
             url = config_manager.get('torrent_client.url', '')

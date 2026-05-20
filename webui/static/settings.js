@@ -964,6 +964,19 @@ async function loadSettingsData() {
         if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
         if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
         if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        const _ucType = document.getElementById('usenet-client-type');
+        const _ucUrl = document.getElementById('usenet-client-url');
+        const _ucKey = document.getElementById('usenet-client-api-key');
+        const _ucUser = document.getElementById('usenet-client-username');
+        const _ucPass = document.getElementById('usenet-client-password');
+        const _ucCat = document.getElementById('usenet-client-category');
+        if (_ucType) _ucType.value = settings.usenet_client?.type || 'sabnzbd';
+        if (_ucUrl) _ucUrl.value = settings.usenet_client?.url || '';
+        if (_ucKey) _ucKey.value = settings.usenet_client?.api_key || '';
+        if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
+        if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
+        if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -2722,6 +2735,14 @@ async function saveSettings(quiet = false) {
             category: document.getElementById('torrent-client-category')?.value || 'soulsync',
             save_path: document.getElementById('torrent-client-save-path')?.value || '',
         },
+        usenet_client: {
+            type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
+            url: document.getElementById('usenet-client-url')?.value || '',
+            api_key: document.getElementById('usenet-client-api-key')?.value || '',
+            username: document.getElementById('usenet-client-username')?.value || '',
+            password: document.getElementById('usenet-client-password')?.value || '',
+            category: document.getElementById('usenet-client-category')?.value || 'soulsync',
+        },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
@@ -3578,6 +3599,48 @@ async function testProwlarrConnection() {
             statusEl.textContent = data.message || 'Connected';
             statusEl.style.color = '#4caf50';
             loadProwlarrIndexers();
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+function updateUsenetClientUI() {
+    const type = document.getElementById('usenet-client-type')?.value || 'sabnzbd';
+    const apikeyGroup = document.getElementById('usenet-apikey-group');
+    const userGroup = document.getElementById('usenet-username-group');
+    const passGroup = document.getElementById('usenet-password-group');
+    if (type === 'sabnzbd') {
+        if (apikeyGroup) apikeyGroup.style.display = '';
+        if (userGroup) userGroup.style.display = 'none';
+        if (passGroup) passGroup.style.display = 'none';
+    } else {
+        if (apikeyGroup) apikeyGroup.style.display = 'none';
+        if (userGroup) userGroup.style.display = '';
+        if (passGroup) passGroup.style.display = '';
+    }
+}
+
+async function testUsenetClientConnection() {
+    const statusEl = document.getElementById('usenet-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'usenet_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
         } else {
             statusEl.textContent = data.error || 'Connection failed';
             statusEl.style.color = '#f44336';

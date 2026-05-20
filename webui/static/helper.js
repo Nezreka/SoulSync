@@ -3415,6 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.6.0': [
         { unreleased: true },
+        { title: 'Usenet client adapters (SABnzbd, NZBGet)', desc: 'third commit in the torrent + usenet rollout. SoulSync now talks to SABnzbd and NZBGet through a sibling adapter contract that mirrors the torrent adapter set — pick one downloader in Settings → Indexers & Downloaders, fill in its API key (SABnzbd) or username + password (NZBGet), and Test Connection confirms the link. all three layers are now stood up: Prowlarr finds releases, the torrent adapter and the usenet adapter each know how to ship work to the underlying client. next commit wires Prowlarr search → adapter dispatch → archive extraction so the new sources actually download. job state mapping covers SABnzbd queue + history and NZBGet groups + history, including the verify/repair/unpack phases that are unique to usenet.' },
         { title: 'Torrent client adapters (qBittorrent, Transmission, Deluge)', desc: 'second commit in the torrent + usenet rollout. SoulSync can now talk to any of the three big torrent clients through a single adapter contract — pick which one you use in Settings → Indexers & Downloaders, paste your WebUI URL and credentials, and Test Connection confirms the link. each adapter handles its own auth quirk (qBit cookies, Transmission session-id, Deluge JSON-RPC) and maps native state strings onto a uniform set so the rest of the app stays client-agnostic. no download wiring yet — that gets layered on once the usenet client adapters land in the next commit.' },
         { title: 'Prowlarr integration', desc: 'new Indexers & Downloaders tab in Settings. point SoulSync at your Prowlarr instance with a URL and API key, and you can browse the indexers Prowlarr exposes from inside the app. this is the search half of the upcoming torrent and usenet download sources — wires up the indexer list now so later commits can plug the download flow on top. Lidarr already pulls from its own indexers; Prowlarr unlocks the same search surface to the rest of the download pipeline.' },
     ],
@@ -3476,6 +3477,19 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Usenet Client Adapters (SABnzbd, NZBGet)",
+        description: "third phase of the torrent + usenet rollout. SoulSync now also talks to the two big usenet downloaders through a sibling adapter contract. Prowlarr + torrent + usenet are all stood up — next commit wires them together into actual download sources.",
+        features: [
+            "• supports SABnzbd (API-key auth) and NZBGet (JSON-RPC basic auth)",
+            "• new Usenet Client section on the Indexers & Downloaders tab; client picker swaps the credential fields automatically (API key vs username + password)",
+            "• state mapping covers the verify / repair / unpack phases unique to usenet",
+            "• category override so SoulSync's NZBs land in a predictable post-processing folder",
+            "• Test Connection probes the live API",
+            "• next commit wires Prowlarr → adapter → archive extraction → match so the new sources fully download",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Usenet Client",
+    },
     {
         title: "Torrent Client Adapters (qBit, Transmission, Deluge)",
         description: "second phase of the torrent + usenet rollout. SoulSync now speaks the three big torrent client APIs through one uniform adapter — pick which client you use and SoulSync handles the auth and protocol quirks for you.",
