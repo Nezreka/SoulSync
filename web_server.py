@@ -28015,43 +28015,50 @@ def get_your_artist_info(artist_id):
 
 @app.route('/api/image-proxy', methods=['GET'])
 def image_proxy():
-    """Proxy external images to avoid CORS issues for canvas rendering."""
+    """Proxy external images to avoid CORS issues for canvas rendering.
+
+    Kept for backwards compatibility; new normalized artwork URLs use
+    /api/image-cache/<key>, but older browser sessions may still hold this
+    query-string form.
+    """
     url = request.args.get('url', '')
     if not url or not url.startswith('http'):
         return '', 400
 
-    host = urlparse(url).hostname or ''
-    allowed_hosts = [
-        'i.scdn.co', 'mosaic.scdn.co',  # Spotify
-        'lastfm.freetls.fastly.net', 'lastfm-img2.akamaized.net',  # Last.fm
-        'e-cdns-images.dzcdn.net', 'cdns-images.dzcdn.net', 'api.deezer.com',  # Deezer
-        'is1-ssl.mzstatic.com', 'is2-ssl.mzstatic.com', 'is3-ssl.mzstatic.com',
-        'is4-ssl.mzstatic.com', 'is5-ssl.mzstatic.com',  # iTunes/Apple
-        'img.discogs.com', 'i.discogs.com',  # Discogs
-        'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
-    ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not is_internal_image_host(url):
-        return '', 403
     try:
-        resp = requests.get(url, timeout=10, stream=True, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://www.deezer.com/',
-        })
-        if resp.status_code != 200:
-            return '', resp.status_code
-        content_type = resp.headers.get('Content-Type', 'image/jpeg')
-        if not content_type.startswith('image/'):
-            return '', 400
-        return Response(
-            resp.content,
-            content_type=content_type,
-            headers={
-                'Cache-Control': 'public, max-age=86400',
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
-    except Exception:
+        from core.image_cache import get_image_cache
+
+        cached = get_image_cache().get_url(url)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['X-SoulSync-Image-Cache'] = cached.status
+        return response
+    except Exception as exc:
+        logger.debug("image proxy failed: %s", exc)
         return '', 502
+
+
+@app.route('/api/image-cache/<cache_key>', methods=['GET'])
+def serve_cached_image(cache_key):
+    """Serve a registered image URL from SoulSync's disk cache."""
+    if not re.fullmatch(r'[a-f0-9]{64}', cache_key or ''):
+        return '', 404
+
+    try:
+        from core.image_cache import get_image_cache
+
+        cached = get_image_cache().get(cache_key)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['X-SoulSync-Image-Cache'] = cached.status
+        return response
+    except Exception as exc:
+        logger.debug("cached image serve failed for %s: %s", cache_key, exc)
+        return '', 404
 
 
 from core.artists.map import (
