@@ -3968,3 +3968,31 @@ function showCompletionError() {
         overlay.title = 'Failed to check completion status';
     });
 }
+
+
+// ----------------------------------------------------------------------------
+// MusicBrainz MBID parsing — accept full URLs or bare UUIDs.
+// Used by the Discovery Fix popup's MBID-paste lookup; reusable anywhere the
+// user can paste a MusicBrainz identifier (failed-MB cache, manual match,
+// future surfaces). Returns the bare lowercase UUID when valid, or null.
+// ----------------------------------------------------------------------------
+
+const _MB_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseMusicBrainzMbid(input) {
+    if (!input || typeof input !== 'string') return null;
+    let candidate = input.trim();
+    if (!candidate) return null;
+
+    // Strip a musicbrainz.org URL down to the final UUID segment. Accepts
+    // /recording/, /release/, /release-group/, /artist/ — the caller decides
+    // which entity type is appropriate for its endpoint.
+    const urlMatch = candidate.match(/musicbrainz\.org\/[a-z-]+\/([0-9a-f-]+)/i);
+    if (urlMatch) candidate = urlMatch[1];
+
+    // Strip trailing query / fragment that survived a copy-paste from a URL
+    // (e.g. "?utm=...", "#tab").
+    candidate = candidate.split(/[?#]/)[0].trim().toLowerCase();
+
+    return _MB_UUID_RE.test(candidate) ? candidate : null;
+}

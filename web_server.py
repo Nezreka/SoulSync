@@ -15789,6 +15789,33 @@ def musicbrainz_search_api():
         return jsonify({"error": str(e)}), 500
 
 
+# Recording MBID format: standard UUID, 8-4-4-4-12 hex.
+_MB_RECORDING_MBID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE
+)
+
+
+@app.route('/api/musicbrainz/recording/<mbid>', methods=['GET'])
+def musicbrainz_recording_lookup_api(mbid):
+    """Look up a single MusicBrainz recording by MBID and return it in the
+    Fix-popup-compatible flat track shape. Powers the MBID-paste field —
+    user-facing escape hatch when fuzzy auto-search ranks the wrong
+    recording among many same-title versions."""
+    mbid = (mbid or '').strip().lower()
+    if not _MB_RECORDING_MBID_RE.match(mbid):
+        return jsonify({"error": "Invalid MusicBrainz recording MBID"}), 400
+    try:
+        from core.musicbrainz_search import MusicBrainzSearchClient
+        mb_search = MusicBrainzSearchClient()
+        track = mb_search.get_recording_flat(mbid)
+        if not track:
+            return jsonify({"error": "Recording not found on MusicBrainz"}), 404
+        return jsonify(track)
+    except Exception as e:
+        logger.error(f"Error looking up MB recording {mbid}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/metadata-cache/mb-match', methods=['POST'])
 def metadata_cache_save_mb_match():
     """Save a manual MusicBrainz match for a failed lookup."""
