@@ -98,7 +98,7 @@ class TransmissionAdapter:
             return None
         auth = (self._username, self._password) if self._username else None
         payload = {'method': method, 'arguments': arguments}
-        for attempt in range(2):
+        for _attempt in range(2):
             try:
                 with self._session_id_lock:
                     sid = self._session_id
