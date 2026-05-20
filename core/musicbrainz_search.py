@@ -725,6 +725,57 @@ class MusicBrainzSearchClient:
             logger.error(f'get_track_details({track_id}) error: {e}')
             return None
 
+    def get_recording_flat(self, mbid: str) -> Optional[Dict[str, Any]]:
+        """Return a Fix-popup-compatible flat track dict by recording MBID.
+
+        Distinct from `get_track_details` which returns a Spotify-shaped
+        nested dict (artists as objects, album as nested object with
+        images array). The Discovery Fix popup expects the flat shape that
+        the spotify/deezer/itunes search endpoints produce — artists as a
+        list of strings, album as a string, single image_url field.
+
+        Used by `GET /api/musicbrainz/recording/<mbid>` to support the
+        MBID-paste lookup field — power-user escape hatch when fuzzy auto-
+        search ranks the wrong recording among many same-title versions.
+
+        Returns None when the MBID is missing or MB returns no recording.
+        Recording-without-release is valid (album = '', image_url = '').
+        """
+        if not mbid:
+            return None
+        try:
+            rec = self._client.get_recording(
+                mbid, includes=['releases', 'artist-credits', 'release-groups']
+            )
+            if not rec:
+                return None
+
+            releases = rec.get('releases', []) or []
+            releases.sort(key=self._release_preference_key)
+            first_rel = releases[0] if releases else {}
+            rg = first_rel.get('release-group', {}) or {}
+            release_id = first_rel.get('id', '')
+            rg_id = rg.get('id', '')
+
+            artists = _extract_artist_credit(rec.get('artist-credit', []))
+            album_name = first_rel.get('title', '') or ''
+            image_url = self._cached_art(release_id, rg_id) if (release_id or rg_id) else None
+
+            return {
+                'id': rec.get('id', '') or mbid,
+                'name': rec.get('title', '') or '',
+                'artists': artists if artists else [],
+                'album': album_name,
+                'duration_ms': rec.get('length') or 0,
+                'image_url': image_url or '',
+                'external_urls': {
+                    'musicbrainz': f'https://musicbrainz.org/recording/{mbid}'
+                },
+            }
+        except Exception as e:
+            logger.error(f'get_recording_flat({mbid}) error: {e}')
+            return None
+
     def get_album_tracks(self, album_mbid: str) -> Optional[Dict[str, Any]]:
         """Return {items: [...], total: N} track listing for a release/release-group MBID."""
         album = self.get_album(album_mbid, include_tracks=True)
