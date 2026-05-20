@@ -88,6 +88,9 @@ export function bindWindowWebRouter(router: AnyRouter) {
     async navigateToPage(pageId, options) {
       const route = getShellRouteByPageId(pageId);
       if (!route) return false;
+      if (pageId === 'artist-detail' && !options?.artistId) {
+        return false;
+      }
 
       let href: `/${string}` = route.path;
       if (pageId === 'artist-detail' && options?.artistId) {

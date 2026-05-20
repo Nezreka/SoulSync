@@ -633,48 +633,6 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     hideLoadingOverlay();
 }
 
-function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, playlistId) {
-    if (!artistName) return;
-    // Close the download modal
-    const process = playlistId ? activeDownloadProcesses[playlistId] : null;
-    const artistContext = process?.artist || {};
-    const inferredSource = artistContext.spotify_artist_id ? 'spotify'
-        : artistContext.itunes_artist_id ? 'itunes'
-        : (artistContext.deezer_artist_id || artistContext.deezer_id) ? 'deezer'
-        : (artistContext.discogs_artist_id || artistContext.discogs_id) ? 'discogs'
-        : (artistContext.amazon_artist_id || artistContext.amazon_id) ? 'amazon'
-        : (artistContext.soul_id || artistContext.hydrabase_artist_id) ? 'hydrabase'
-        : null;
-    const resolvedSource = source || process?.artist?.source || process?.album?.source || process?.source || inferredSource;
-    const sourceKey = (resolvedSource || '').toString().toLowerCase();
-    const sourceIdFields = {
-        spotify: ['spotify_artist_id', 'id', 'artist_id'],
-        itunes: ['itunes_artist_id', 'artist_id', 'id'],
-        deezer: ['deezer_artist_id', 'deezer_id', 'artist_id', 'id'],
-        discogs: ['discogs_artist_id', 'discogs_id', 'artist_id', 'id'],
-        amazon: ['amazon_artist_id', 'amazon_id', 'artist_id', 'id'],
-        hydrabase: ['soul_id', 'hydrabase_artist_id', 'artist_id', 'id'],
-        musicbrainz: ['musicbrainz_id', 'artist_id', 'id'],
-    };
-    let resolvedArtistId = artistId;
-    for (const field of (sourceIdFields[sourceKey] || ['artist_id', 'id'])) {
-        const candidate = artistContext?.[field];
-        if (candidate) {
-            resolvedArtistId = candidate;
-            break;
-        }
-    }
-    if (resolvedArtistId && String(resolvedArtistId).toLowerCase() === String(artistName).toLowerCase()) {
-        resolvedArtistId = null;
-    }
-    if (playlistId) closeDownloadMissingModal(playlistId);
-    if (!resolvedArtistId || !resolvedSource) {
-        showToast(`Artist details are not available for ${artistName}`, 'warning');
-        return;
-    }
-    navigateToArtistDetail(resolvedArtistId, artistName, resolvedSource);
-}
-
 async function closeDownloadMissingModal(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) {
@@ -5698,13 +5656,13 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', true)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></div>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 
     if (artists.length) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
-        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true" data-artist-name="${_escAttr(a.name)}"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += artists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, activeSrc || null) : '#'}" onclick="_gsDeactivate()" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true" data-artist-name="${_escAttr(a.name)}"` : ''} style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></a>`).join('');
         h += '</div>';
     }
 
@@ -5776,13 +5734,6 @@ async function _gsLazyLoadArtistImages() {
             }
         } catch (e) { /* ignore */ }
     }
-}
-
-function _gsClickArtist(id, name, isLibrary) {
-    _gsDeactivate();
-    const activeSource = _gsController && _gsController.state.activeSource;
-    const source = isLibrary ? null : (activeSource || null);
-    navigateToArtistDetail(id, name, source);
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
@@ -6400,4 +6351,3 @@ const additionalStyles = `
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
 // ============================================================================
-

@@ -114,18 +114,12 @@ def _extract_title_hint(query: str, artist_name: str) -> Optional[str]:
     return None
 
 
-def _map_release_type(primary_type: str, secondary_types: List[str] = None) -> str:
-    """Map MusicBrainz release group type to standard album_type."""
-    pt = (primary_type or '').lower()
-    if pt == 'album':
-        return 'album'
-    elif pt == 'single':
-        return 'single'
-    elif pt == 'ep':
-        return 'ep'
-    elif pt == 'compilation' or 'compilation' in (secondary_types or []):
-        return 'compilation'
-    return 'album'
+# Thin module-level alias retained so callers inside this file keep
+# working without touching every call site. The canonical implementation
+# (including the 'other' / 'broadcast' handling that fixes issue #650)
+# lives in `core/metadata/release_type.py` so every provider's `raw →
+# Album` projection shares one mapper.
+from core.metadata.release_type import map_release_group_type as _map_release_type
 
 
 class MusicBrainzSearchClient:
@@ -365,7 +359,15 @@ class MusicBrainzSearchClient:
                     # the filter silently breaks. Actual compilations
                     # (primary-type=Album with secondary-types=[Compilation])
                     # are handled by the studio-preference filter below.
-                    release_types=['album', 'ep', 'single'],
+                    # 'other' added per issue #650 — MB tags music videos
+                    # and one-off web/broadcast releases with primary=Other,
+                    # and many artists (Vocaloid producers, indie acts, JP
+                    # solo artists) have legitimate singles classified
+                    # there. Pre-fix this filter dropped them at the API
+                    # layer, hiding tracks the user had downloaded.
+                    # `map_release_group_type` routes 'other' into the
+                    # singles bucket so they appear in the right UI section.
+                    release_types=['album', 'ep', 'single', 'other'],
                     limit=100,
                 )
 
@@ -638,13 +640,34 @@ class MusicBrainzSearchClient:
             logger.warning(f"MusicBrainz track search failed: {e}")
             return []
 
-    def _search_tracks_text(self, track_name: str, artist_name: Optional[str], limit: int) -> List[Track]:
-        """Fallback text-search path for structured/fuzzy track queries."""
+    def _search_tracks_text(self, track_name: str, artist_name: Optional[str], limit: int,
+                            strict: bool = True, min_score: Optional[int] = None) -> List[Track]:
+        """Fallback text-search path for structured/fuzzy track queries.
+
+        `strict=True` (default) keeps the field-scoped Lucene phrase match —
+        precise enough for enrichment-style flows where the inputs are
+        already known-clean. `strict=False` switches to a bare-query
+        MB lookup that hits alias/sortname indexes with diacritic folding —
+        needed for user-facing fuzzy surfaces (Fix popup cascade) where
+        recall beats precision because the user picks from the result list.
+        Mirrors the same toggle already on `search_recording` in
+        `core/musicbrainz_client.py`.
+
+        `min_score` defaults to `self._MIN_SCORE` (80) — sized for the
+        enhanced search tab where unfiltered MB results are noisy. Pass
+        a lower value (or 0) when a downstream stage like
+        `core.metadata.relevance.rerank_tracks` will re-sort by artist
+        match — MB's free-text score heavily favours title-text matches
+        ("Army of Me (Bjork)" cover by HIRS Collective scores 100,
+        Björk's canonical "Army of Me" scores 28) so a high floor drops
+        the right answer.
+        """
         try:
-            results = self._client.search_recording(track_name, artist_name=artist_name, limit=limit)
-            # Score filter matches the artist/album logic — cuts garbage
-            # title collisions from unrelated recordings.
-            results = [r for r in results if (r.get('score', 0) or 0) >= self._MIN_SCORE]
+            results = self._client.search_recording(
+                track_name, artist_name=artist_name, limit=limit, strict=strict
+            )
+            threshold = self._MIN_SCORE if min_score is None else min_score
+            results = [r for r in results if (r.get('score', 0) or 0) >= threshold]
 
             tracks = []
             for r in results:
@@ -655,6 +678,30 @@ class MusicBrainzSearchClient:
         except Exception as e:
             logger.warning(f"MusicBrainz track search failed: {e}")
             return []
+
+    def search_tracks_with_artist(self, track: str, artist: str,
+                                  limit: int = 10) -> List[Track]:
+        """Search MB tracks with track + artist passed as separate fields.
+
+        Powers the Fix-popup metadata cascade (`GET /api/musicbrainz/search_tracks`)
+        and any future surface where the caller already has the title/artist
+        split and wants the fuzzy-recall MB lookup without going through
+        `search_tracks`'s structured-query dispatch (`Artist - Track`
+        splitting, bare-name artist-first browse).
+
+        Uses bare-query mode (`strict=False`) — diacritic-folded, hits
+        alias/sortname indexes, no `AND`-clause that kills recall when
+        either side mis-matches. Score floor lowered to 20 (vs the search
+        tab's 80) so MB recordings whose title doesn't literally contain
+        the artist name still enter the candidate pool — the endpoint's
+        `rerank_tracks` pass then sorts by artist-match relevance. Without
+        this, queries like `Army of Me` + `Bjork` only surface covers
+        (score 73-100) and miss Björk's canonical recording (score 28).
+        """
+        if not track and not artist:
+            return []
+        return self._search_tracks_text(track, artist or None, limit,
+                                        strict=False, min_score=20)
 
     def _pick_representative_release(self, releases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Pick the best release out of a release-group's editions.
@@ -723,6 +770,57 @@ class MusicBrainzSearchClient:
             }
         except Exception as e:
             logger.error(f'get_track_details({track_id}) error: {e}')
+            return None
+
+    def get_recording_flat(self, mbid: str) -> Optional[Dict[str, Any]]:
+        """Return a Fix-popup-compatible flat track dict by recording MBID.
+
+        Distinct from `get_track_details` which returns a Spotify-shaped
+        nested dict (artists as objects, album as nested object with
+        images array). The Discovery Fix popup expects the flat shape that
+        the spotify/deezer/itunes search endpoints produce — artists as a
+        list of strings, album as a string, single image_url field.
+
+        Used by `GET /api/musicbrainz/recording/<mbid>` to support the
+        MBID-paste lookup field — power-user escape hatch when fuzzy auto-
+        search ranks the wrong recording among many same-title versions.
+
+        Returns None when the MBID is missing or MB returns no recording.
+        Recording-without-release is valid (album = '', image_url = '').
+        """
+        if not mbid:
+            return None
+        try:
+            rec = self._client.get_recording(
+                mbid, includes=['releases', 'artist-credits', 'release-groups']
+            )
+            if not rec:
+                return None
+
+            releases = rec.get('releases', []) or []
+            releases.sort(key=self._release_preference_key)
+            first_rel = releases[0] if releases else {}
+            rg = first_rel.get('release-group', {}) or {}
+            release_id = first_rel.get('id', '')
+            rg_id = rg.get('id', '')
+
+            artists = _extract_artist_credit(rec.get('artist-credit', []))
+            album_name = first_rel.get('title', '') or ''
+            image_url = self._cached_art(release_id, rg_id) if (release_id or rg_id) else None
+
+            return {
+                'id': rec.get('id', '') or mbid,
+                'name': rec.get('title', '') or '',
+                'artists': artists if artists else [],
+                'album': album_name,
+                'duration_ms': rec.get('length') or 0,
+                'image_url': image_url or '',
+                'external_urls': {
+                    'musicbrainz': f'https://musicbrainz.org/recording/{mbid}'
+                },
+            }
+        except Exception as e:
+            logger.error(f'get_recording_flat({mbid}) error: {e}')
             return None
 
     def get_album_tracks(self, album_mbid: str) -> Optional[Dict[str, Any]]:
@@ -856,8 +954,13 @@ class MusicBrainzSearchClient:
         shape the download modal expects. `rg_fallback` supplies release-group
         metadata (type, artist credits) when resolving from a release-group
         whose releases may be lightly populated."""
+        # NOTE: `cover-art-archive` is NOT a valid `inc` param for the
+        # /release resource — MB returns 400 if you pass it. The CAA flags
+        # (`{'front': True, 'back': True, ...}`) come back on every release
+        # response by default, so we read them below without requesting an
+        # include.
         release = self._client.get_release(
-            release_mbid, includes=['recordings', 'artist-credits', 'release-groups', 'cover-art-archive']
+            release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
         )
         if not release:
             return None

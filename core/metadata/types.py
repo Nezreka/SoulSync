@@ -400,10 +400,16 @@ class Album:
         if raw.get('barcode'):
             external_ids['barcode'] = _str(raw['barcode'])
 
-        # MB `release-group` carries the album-level type (album/single/ep)
+        # MB `release-group` carries the album-level type (album/single/ep/
+        # compilation/other/broadcast). Centralized mapper handles the
+        # full vocabulary including 'other' / 'broadcast' (issue #650 —
+        # music videos and one-off releases) so this projection matches
+        # the search-adapter projection in `core/musicbrainz_search.py`.
+        from core.metadata.release_type import map_release_group_type
         rg = raw.get('release-group') or {}
-        primary_type = _str(rg.get('primary-type'), default='Album').lower()
-        album_type = {'single': 'single', 'ep': 'ep'}.get(primary_type, 'album')
+        primary_type = _str(rg.get('primary-type'), default='Album')
+        secondary_types = rg.get('secondary-types') or []
+        album_type = map_release_group_type(primary_type, secondary_types)
         if rg.get('id'):
             external_ids['musicbrainz_release_group'] = _str(rg['id'])
 

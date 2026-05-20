@@ -93,6 +93,65 @@ def entry_id_from_quarantined_filename(quarantined_filename: str) -> str:
     return _entry_id_from_filename(os.path.basename(quarantined_filename))
 
 
+def get_quarantined_source_keys(quarantine_dir: str) -> set:
+    """Return a set of ``(username, filename)`` tuples for every Soulseek
+    source that has been quarantined.
+
+    Used to gate the Soulseek candidate filter against re-picking the
+    exact same upload that already failed post-download verification.
+    Issue #652 — without this gate, the auto-wishlist processor's
+    candidate ranking is deterministic, so the same `(uploader, file)`
+    keeps winning the quality picker, downloading, quarantining, and
+    re-queueing in an infinite loop. Users wake up to hundreds of
+    duplicate `.quarantined` files for the same source URL.
+
+    The keys come from the sidecar JSON's
+    ``context.original_search_result`` field which `move_to_quarantine`
+    persists from the originating SearchResult. Sidecars missing either
+    field (legacy thin sidecars written pre-Feb 2026, or orphaned
+    files) are skipped silently — they can't gate anything anyway.
+
+    Returns an empty set when the directory doesn't exist or has no
+    parseable sidecars. Never raises; filesystem / JSON errors are
+    swallowed at debug level so a corrupt sidecar can't block the
+    download pipeline.
+    """
+    keys: set = set()
+    if not quarantine_dir or not os.path.isdir(quarantine_dir):
+        return keys
+
+    try:
+        names = os.listdir(quarantine_dir)
+    except OSError as exc:
+        logger.debug("get_quarantined_source_keys: listdir failed: %s", exc)
+        return keys
+
+    for name in names:
+        if not name.endswith('.json'):
+            continue
+        sidecar_path = os.path.join(quarantine_dir, name)
+        try:
+            with open(sidecar_path, encoding='utf-8') as f:
+                sidecar = json.load(f)
+        except Exception as exc:
+            logger.debug("get_quarantined_source_keys: sidecar read failed for %s: %s", name, exc)
+            continue
+        if not isinstance(sidecar, dict):
+            continue
+        ctx = sidecar.get('context')
+        if not isinstance(ctx, dict):
+            continue
+        osr = ctx.get('original_search_result')
+        if not isinstance(osr, dict):
+            continue
+        username = osr.get('username') or ''
+        filename = osr.get('filename') or ''
+        if username and filename:
+            keys.add((str(username), str(filename)))
+
+    return keys
+
+
 def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
     """Enumerate quarantined files paired with their sidecars.
 

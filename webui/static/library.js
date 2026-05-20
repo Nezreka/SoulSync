@@ -218,6 +218,7 @@ function displayLibraryArtists(artists) {
         // Ignore clicks on badge icons (they open external links / toggle watchlist)
         const badge = e.target.closest('.source-card-icon');
         if (badge) {
+            e.preventDefault();
             e.stopPropagation();
             const url = badge.dataset.url;
             if (url) { window.open(url, '_blank'); return; }
@@ -232,10 +233,6 @@ function displayLibraryArtists(artists) {
                 }
             }
             return;
-        }
-        const card = e.target.closest('.library-artist-card');
-        if (card) {
-            navigateToArtistDetail(card.dataset.artistId, card.dataset.artistName);
         }
     };
 }
@@ -299,14 +296,14 @@ function buildLibraryArtistCardHTML(artist, index) {
     // Track stats
     const trackStat = artist.track_count > 0 ? `<span class="library-artist-stat">${artist.track_count} track${artist.track_count !== 1 ? 's' : ''}</span>` : '';
 
-    return `<div class="library-artist-card" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both">
+    return `<a class="library-artist-card" href="${buildArtistDetailPath(artist.id)}" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;display:block;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both;text-decoration:none;color:inherit;">
         ${badgeContainerHTML}
         ${imageHTML}
         <div class="library-artist-info">
             <h3 class="library-artist-name" title="${_esc(artist.name)}">${_esc(artist.name)}</h3>
             <div class="library-artist-stats">${trackStat}</div>
         </div>
-    </div>`;
+    </a>`;
 }
 
 function updateLibraryPagination(pagination) {
@@ -683,16 +680,31 @@ async function toggleLibraryCardWatchlist(btn, artist) {
 // ===============================================
 
 // Artist detail page state
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
+// Stack of origins for the back-button label. Each entry: {type:'page', pageId}
+// or {type:'artist', name}. Pushed on forward navigation, popped on back.
+// Separate from browser history — only used for the label display.
+let _artistDetailLabelStack = [];
+let _artistDetailGoingBack = false;
+
 let artistDetailPageState = {
     isInitialized: false,
     currentArtistId: null,
     currentArtistName: null,
     currentArtistSource: null,
-    // Stack of origins captured by navigateToArtistDetail for the back button.
-    // Each entry is either {type:'page', pageId} or {type:'artist', id, name, source}
-    // so chained navigation (Search → A → similar B → similar C) walks back one
-    // step at a time instead of jumping straight to Search.
-    originStack: [],
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -710,7 +722,6 @@ function clearArtistDetailPageState() {
     artistDetailPageState.currentArtistId = null;
     artistDetailPageState.currentArtistName = null;
     artistDetailPageState.currentArtistSource = null;
-    artistDetailPageState.originStack = [];
 }
 
 if (typeof window !== 'undefined') {
@@ -786,22 +797,6 @@ if (typeof window !== 'undefined') {
 }
 
 
-// Friendly labels for the dynamic "← Back to X" button on the artist-detail page.
-// Page id (the value of currentPage) -> button label.
-const _ARTIST_DETAIL_BACK_LABELS = {
-    library: 'Back to Library',
-    search: 'Back to Search',
-    discover: 'Back to Discover',
-    watchlist: 'Back to Watchlist',
-    wishlist: 'Back to Wishlist',
-    stats: 'Back to Stats',
-    'playlist-explorer': 'Back to Explorer',
-    automations: 'Back to Automations',
-    dashboard: 'Back to Dashboard',
-    sync: 'Back to Sync',
-    'active-downloads': 'Back to Downloads',
-};
-
 function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
     const normalizedSource = sourceOverride || null;
 
@@ -815,48 +810,30 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
             navigateToPage('artist-detail', {
                 artistId,
                 artistSource: normalizedSource,
-                skipRouteChange: true
+                skipRouteChange: options.skipRouteChange === true
             });
-            _updateArtistDetailBackButtonLabel();
         }
         return;
     }
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
-    // Capture the current location on the origin stack BEFORE navigateToPage
-    // flips currentPage. The back button walks this stack one step at a time,
-    // so a chain like Search → A → similar B → similar C steps back through
-    // C → B → A → Search instead of jumping straight home. `skipOriginPush`
-    // lets the back button re-enter a prior artist without re-pushing.
-    if (!options.skipOriginPush) {
-        // Fresh entry (from a non-artist page) starts a new chain; any stale
-        // entries from a prior artist-detail visit are dropped.
+    // Maintain the label stack. Back navigations pop; forward navigations push.
+    // Only treat the flag as a back-nav signal when we're still on artist-detail —
+    // if history.back() landed on a non-artist page first, the flag is stale.
+    if (_artistDetailGoingBack && currentPage === 'artist-detail') {
+        _artistDetailLabelStack.pop();
+        _artistDetailGoingBack = false;
+    } else {
+        _artistDetailGoingBack = false; // clear any stale flag
         if (currentPage !== 'artist-detail') {
-            artistDetailPageState.originStack = [];
+            _artistDetailLabelStack = []; // fresh chain from a non-artist page
         }
-
-        let entry;
-        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistId) {
-            entry = {
-                type: 'artist',
-                id: artistDetailPageState.currentArtistId,
-                name: artistDetailPageState.currentArtistName,
-                source: artistDetailPageState.currentArtistSource,
-            };
+        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
+            _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });
         } else {
             const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
                 ? currentPage : 'library';
-            entry = { type: 'page', pageId };
-        }
-
-        // Avoid pushing a duplicate top entry on repeated clicks of the same target.
-        const top = artistDetailPageState.originStack[artistDetailPageState.originStack.length - 1];
-        const isDuplicate = top && top.type === entry.type && (
-            (entry.type === 'page' && top.pageId === entry.pageId) ||
-            (entry.type === 'artist' && String(top.id) === String(entry.id))
-        );
-        if (!isDuplicate) {
-            artistDetailPageState.originStack.push(entry);
+            _artistDetailLabelStack.push({ type: 'page', pageId });
         }
     }
 
@@ -909,13 +886,12 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
         skipRouteChange: options.skipRouteChange === true
     });
 
-    // Update back-button label to reflect where the next pop will land.
-    _updateArtistDetailBackButtonLabel();
-
     // Initialize if needed and load data
     if (!artistDetailPageState.isInitialized) {
         initializeArtistDetailPage();
     }
+
+    _updateArtistDetailBackButtonLabel();
 
     // Load artist data
     loadArtistDetailData(artistId, artistName);
@@ -924,11 +900,12 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
 function _updateArtistDetailBackButtonLabel() {
     const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
     if (!backBtnLabel) return;
-    const stack = artistDetailPageState.originStack || [];
-    const top = stack[stack.length - 1];
+    const top = _artistDetailLabelStack[_artistDetailLabelStack.length - 1];
     if (!top) {
-        backBtnLabel.textContent = `← ${_ARTIST_DETAIL_BACK_LABELS.library}`;
-    } else if (top.type === 'artist') {
+        backBtnLabel.textContent = '← Back';
+        return;
+    }
+    if (top.type === 'artist') {
         backBtnLabel.textContent = `← Back to ${top.name}`;
     } else {
         const friendly = _ARTIST_DETAIL_BACK_LABELS[top.pageId] || _ARTIST_DETAIL_BACK_LABELS.library;
@@ -939,9 +916,8 @@ function _updateArtistDetailBackButtonLabel() {
 function initializeArtistDetailPage() {
     console.log("🔧 Initializing Artist Detail page...");
 
-    // Initialize back button — pops the origin stack one step at a time so a
-    // chain like Search → A → B → C walks back through C → B → A → Search
-    // instead of jumping straight to the original entry page.
+    // Initialize back button — use browser history when possible, with a
+    // simple library fallback if the user lands here without in-app history.
     const backBtn = document.getElementById("artist-detail-back-btn");
     if (backBtn) {
         backBtn.addEventListener("click", () => {
@@ -951,28 +927,16 @@ function initializeArtistDetailPage() {
                 artistDetailPageState.completionController = null;
             }
 
-            const stack = artistDetailPageState.originStack || [];
-            if (stack.length > 0) {
-                const target = stack.pop();
-                if (target.type === 'artist') {
-                    // Re-enter a prior artist in the chain without re-pushing,
-                    // so the stack keeps shrinking as the user steps back.
-                    navigateToArtistDetail(target.id, target.name, target.source, { skipOriginPush: true });
-                    return;
-                }
-                // target.type === 'page' — fully exit the artist-detail chain
-                artistDetailPageState.currentArtistId = null;
-                artistDetailPageState.currentArtistName = null;
-                artistDetailPageState.originStack = [];
-                navigateToPage(target.pageId);
+            if (window.history.length > 1) {
+                _artistDetailGoingBack = true;
+                window.history.back();
                 return;
             }
 
-            // No history — default to library
-            artistDetailPageState.currentArtistId = null;
-            artistDetailPageState.currentArtistName = null;
-            artistDetailPageState.originStack = [];
-            navigateToPage('library');
+            // No history — fall back to recorded origin page or library
+            const top = _artistDetailLabelStack.pop();
+            _updateArtistDetailBackButtonLabel();
+            navigateToPage(top?.type === 'page' ? (top.pageId || 'library') : 'library');
         });
     }
 
@@ -1076,6 +1040,15 @@ async function loadArtistDetailData(artistId, artistName) {
         if (data.artist && data.artist.id && String(data.artist.id) !== String(artistDetailPageState.currentArtistId)) {
             console.log(`📚 Library upgrade: ${artistDetailPageState.currentArtistId} → ${data.artist.id}`);
             artistDetailPageState.currentArtistId = data.artist.id;
+        }
+
+        // Backfill name from API response — URL-driven navigation passes '' for the
+        // name so the label stack has real names when the user clicks a similar artist.
+        if (data.artist?.name && !artistDetailPageState.currentArtistName) {
+            artistDetailPageState.currentArtistName = data.artist.name;
+            if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
+                _updateSidebarLibraryBreadcrumb();
+            }
         }
 
         // Keep the resolved metadata source for album-track lookups.
@@ -1265,6 +1238,9 @@ function populateArtistDetailPage(data) {
     // MusicMap name lookup). Fire-and-forget — the function handles its own
     // loading state and errors.
     if (artist && artist.name && typeof loadSimilarArtists === 'function') {
+        if (typeof cancelSimilarArtistsLoad === 'function') {
+            cancelSimilarArtistsLoad();
+        }
         loadSimilarArtists(artist.name);
     }
 }

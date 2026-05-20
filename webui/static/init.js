@@ -2154,10 +2154,6 @@ function _getPageFromPath() {
     const basePage = segs[0];
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
-    if (basePage === 'artist-detail') {
-        // /artist-detail/:id deep-link — keep on artist-detail; bare /artist-detail falls back to library
-        return (segs.length >= 2 && segs[1]) ? 'artist-detail' : 'library';
-    }
     if (basePage === 'playlist-explorer') return 'library';
     return basePage;
 }
@@ -2168,33 +2164,11 @@ function _normalizeArtistDetailSource(source) {
 }
 
 function buildArtistDetailPath(artistId, source = null) {
-    if (!artistId) return '/artist-detail';
+    if (!artistId) {
+        throw new Error('artistId is required for artist-detail navigation');
+    }
     const normalizedSource = _normalizeArtistDetailSource(source);
     return '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
-}
-
-/** Extract artist source + ID from /artist-detail/:source/:id or legacy /artist-detail/:id URLs. */
-function _getDeepLinkArtistDetail(pathname = window.location.pathname) {
-    const path = (pathname || '').replace(/^\/+|\/+$/g, '');
-    const segs = path.split('/');
-    if (segs[0] !== 'artist-detail' || !segs[1]) return null;
-
-    if (segs[2]) {
-        return {
-            source: _normalizeArtistDetailSource(decodeURIComponent(segs[1])),
-            artistId: decodeURIComponent(segs.slice(2).join('/')),
-        };
-    }
-
-    return {
-        source: 'library',
-        artistId: decodeURIComponent(segs[1]),
-    };
-}
-
-/** Legacy convenience wrapper for callers that only need the artist ID. */
-function _getDeepLinkArtistId() {
-    return _getDeepLinkArtistDetail()?.artistId || null;
 }
 
 // ===============================
@@ -2310,6 +2284,10 @@ function navigateToPage(pageId, options = {}) {
         return;
     }
 
+    if (pageId === 'artist-detail' && !options.artistId) {
+        return false;
+    }
+
     const router = getWebRouter();
     if (router && !options.skipRouteChange) {
         notifyPageWillChange(pageId);
@@ -2386,7 +2364,10 @@ async function loadPageData(pageId) {
             case 'library':
                 // Check if we should return to artist detail view instead of list
                 if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    navigateToPage('artist-detail');
+                    navigateToPage('artist-detail', {
+                        artistId: artistDetailPageState.currentArtistId,
+                        artistSource: artistDetailPageState.currentArtistSource,
+                    });
                     if (!artistDetailPageState.isInitialized) {
                         initializeArtistDetailPage();
                         loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
@@ -2400,7 +2381,7 @@ async function loadPageData(pageId) {
                 }
                 break;
             case 'artist-detail':
-                // Artist detail page is handled separately by navigateToArtistDetail()
+                // Artist detail page is entered through the route handoff and legacy navigator.
                 break;
             case 'discover':
                 if (!discoverPageInitialized) {

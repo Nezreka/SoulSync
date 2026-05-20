@@ -17,6 +17,7 @@ describe('waitForShellContext', () => {
       getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
+      cancelSimilarArtistsLoad: vi.fn(),
       showReactHost: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 
@@ -38,6 +39,7 @@ describe('waitForShellContext', () => {
       getCurrentProfileContext,
       resolveLegacyPath: vi.fn(() => 'issues'),
       setActivePageChrome: vi.fn(),
+      cancelSimilarArtistsLoad: vi.fn(),
       showReactHost: vi.fn(),
     } as NonNullable<typeof window.SoulSyncWebShellBridge>;
 
@@ -87,5 +89,14 @@ describe('bindWindowWebRouter', () => {
       href: '/artist-detail/library/42',
       replace: true,
     });
+  });
+
+  it('refuses artist detail navigation without an artist id', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await expect(window.SoulSyncWebRouter?.navigateToPage('artist-detail', {} as never)).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

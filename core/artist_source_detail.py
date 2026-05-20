@@ -52,7 +52,7 @@ def build_source_only_artist_detail(
     ``jsonify`` or equivalent. Status is 200 on success, 404 when the
     source's discography lookup returned no releases.
     """
-    resolved_name = (artist_name or artist_id or "").strip()
+    resolved_name = (artist_name or "").strip()
 
     # 1. Image URL via the same helper /api/artist/<id>/image uses.
     image_url: Optional[str] = None
@@ -101,6 +101,17 @@ def build_source_only_artist_detail(
                 source_genres = az_artist.get("genres") or []
                 if not image_url and az_artist.get("images"):
                     image_url = az_artist["images"][0].get("url")
+        elif source == "musicbrainz":
+            try:
+                from core.musicbrainz_search import MusicBrainzSearchClient
+                mb = MusicBrainzSearchClient()
+                mb_artist = mb.get_artist(artist_id)
+                if mb_artist:
+                    if not artist_name and mb_artist.get("name"):
+                        resolved_name = mb_artist["name"]
+                    source_genres = mb_artist.get("genres") or []
+            except Exception as e:
+                logger.debug(f"MusicBrainz artist info lookup failed for {artist_id}: {e}")
     except Exception as e:
         logger.debug(f"Source-side artist info lookup failed for {source}:{artist_id}: {e}")
 

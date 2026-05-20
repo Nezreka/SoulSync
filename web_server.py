@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.6"
+_SOULSYNC_BASE_VERSION = "2.5.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -6068,6 +6068,10 @@ def get_download_status():
                                                 transfer_id = file_info.get('id')
                                                 if transfer_id:
                                                     try:
+                                                        logger.info(
+                                                            f"[CancelTrigger:web.orphan_cleanup] "
+                                                            f"download_id={transfer_id} username={username}"
+                                                        )
                                                         run_async(download_orchestrator.cancel_download(str(transfer_id), username, remove=True))
                                                     except Exception as e:
                                                         logger.debug("orphan transfer cancel failed: %s", e)
@@ -15734,8 +15738,14 @@ def musicbrainz_search_api():
         mb_client = mb_svc.mb_client
         results = []
 
+        # Manual Fix popup is user-facing fuzzy search — recall matters more
+        # than precision because the user picks the right hit from the list.
+        # Use bare-query mode so diacritics, aliases, and bracketed suffixes
+        # like "(Live)" don't kill matches the way strict field-scoped
+        # phrase queries do. Enrichment workers stay on strict mode (the
+        # default) since they auto-accept the top hit and need precision.
         if entity_type == 'artist':
-            raw = mb_client.search_artist(query, limit=limit)
+            raw = mb_client.search_artist(query, limit=limit, strict=False)
             for r in raw:
                 results.append({
                     'mbid': r.get('id', ''),
@@ -15746,7 +15756,7 @@ def musicbrainz_search_api():
                     'country': r.get('country', ''),
                 })
         elif entity_type == 'release':
-            raw = mb_client.search_release(query, artist_name=artist or None, limit=limit)
+            raw = mb_client.search_release(query, artist_name=artist or None, limit=limit, strict=False)
             for r in raw:
                 artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
                 results.append({
@@ -15760,7 +15770,7 @@ def musicbrainz_search_api():
                     'track_count': r.get('track-count', 0),
                 })
         elif entity_type == 'recording':
-            raw = mb_client.search_recording(query, artist_name=artist or None, limit=limit)
+            raw = mb_client.search_recording(query, artist_name=artist or None, limit=limit, strict=False)
             for r in raw:
                 artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
                 releases = r.get('releases', [])
@@ -15780,6 +15790,33 @@ def musicbrainz_search_api():
         return jsonify({"results": results, "total": len(results)})
     except Exception as e:
         logger.error(f"Error searching MusicBrainz: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# Recording MBID format: standard UUID, 8-4-4-4-12 hex.
+_MB_RECORDING_MBID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE
+)
+
+
+@app.route('/api/musicbrainz/recording/<mbid>', methods=['GET'])
+def musicbrainz_recording_lookup_api(mbid):
+    """Look up a single MusicBrainz recording by MBID and return it in the
+    Fix-popup-compatible flat track shape. Powers the MBID-paste field —
+    user-facing escape hatch when fuzzy auto-search ranks the wrong
+    recording among many same-title versions."""
+    mbid = (mbid or '').strip().lower()
+    if not _MB_RECORDING_MBID_RE.match(mbid):
+        return jsonify({"error": "Invalid MusicBrainz recording MBID"}), 400
+    try:
+        from core.musicbrainz_search import MusicBrainzSearchClient
+        mb_search = MusicBrainzSearchClient()
+        track = mb_search.get_recording_flat(mbid)
+        if not track:
+            return jsonify({"error": "Recording not found on MusicBrainz"}), 404
+        return jsonify(track)
+    except Exception as e:
+        logger.error(f"Error looking up MB recording {mbid}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -16947,6 +16984,10 @@ def cancel_download_task():
         # Optionally try to cancel the Soulseek download (don't block worker progression)
         if download_id and username:
             try:
+                logger.info(
+                    f"[CancelTrigger:web.cancel_download_task] "
+                    f"download_id={download_id} username={username} task_id={task_id}"
+                )
                 # This is an async call, so we run it and wait
                 run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                 logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
@@ -17199,6 +17240,10 @@ def cancel_task_v2():
                 # and silently left streaming downloads running in background.
                 try:
                     logger.info(f"[Atomic Cancel] Dispatching cancel to orchestrator: username={username} download_id={download_id}")
+                    logger.info(
+                        f"[CancelTrigger:web.atomic_cancel_v2] "
+                        f"download_id={download_id} username={username}"
+                    )
                     cancel_success = run_async(
                         download_orchestrator.cancel_download(download_id, username, remove=True)
                     )
@@ -19154,6 +19199,69 @@ def search_deezer_tracks():
 
     except Exception as e:
         logger.error(f"Error searching Deezer tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/musicbrainz/search_tracks', methods=['GET'])
+def search_musicbrainz_tracks():
+    """Search for tracks on MusicBrainz — used by the Discovery Fix popup
+    cascade and any future surface that needs track-level MB search in the
+    Fix-popup track shape.
+
+    Mirrors the spotify / itunes / deezer search_tracks endpoints exactly:
+    accepts `track` + `artist` (or legacy `query`) plus `limit`, returns
+    `{tracks: [{id, name, artists, album, duration_ms, image_url, source}]}`.
+
+    Uses MB's bare-query mode for max recall (diacritic-folded,
+    alias/sortname indexed) — same rationale as the manual MBID-paste
+    endpoint shipped earlier. The Fix popup is a user-facing fuzzy search
+    where the user picks from the result list, so recall beats precision.
+    """
+    try:
+        track_q = request.args.get('track', '').strip()
+        artist_q = request.args.get('artist', '').strip()
+        legacy_query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not (track_q or artist_q or legacy_query):
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        from core.musicbrainz_search import MusicBrainzSearchClient
+        mb_search = MusicBrainzSearchClient()
+
+        if track_q or artist_q:
+            tracks = mb_search.search_tracks_with_artist(
+                track_q or legacy_query, artist_q, limit=limit
+            )
+        else:
+            # Legacy single-string query — let MB's structured-query
+            # dispatch decide artist-first browse vs text search.
+            tracks = mb_search.search_tracks(legacy_query, limit=limit)
+
+        # Local rerank — same helper Deezer / iTunes use. Penalises
+        # cover / karaoke / tribute patterns + boosts exact-artist match.
+        if track_q or artist_q:
+            from core.metadata.relevance import rerank_tracks
+            tracks = rerank_tracks(
+                tracks,
+                expected_title=track_q,
+                expected_artist=artist_q,
+            )
+
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'image_url': t.image_url,
+            'source': 'musicbrainz',
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        logger.error(f"Error searching MusicBrainz tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 

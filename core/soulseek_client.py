@@ -250,6 +250,7 @@ class SoulseekClient(DownloadSourcePlugin):
 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
                     self._last_401_logged = False  # Reset on success
+                    self._last_unreachable_logged = False  # Same reset for unreachable-host suppression
                     try:
                         if response_text.strip():  # Only parse if there's content
                             return await response.json()
@@ -290,6 +291,25 @@ class SoulseekClient(DownloadSourcePlugin):
                 f"slskd request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
                 f"{method} {url} — slskd may be overloaded or unreachable"
             )
+            return None
+        except aiohttp.ClientConnectorError as e:
+            # Issue #649: slskd_url is configured but the host is unreachable
+            # (slskd not running, wrong port, DNS / Docker bridge issue).
+            # Status polling at /api/downloads/status fans out to every plugin
+            # including soulseek even when the user has soulseek toggled out
+            # of their active download sources, so each frontend poll
+            # produced an ERROR log line — visible spam during any
+            # non-soulseek download. Suppress repeats to debug; emit one
+            # WARNING with actionable context, then reset on any successful
+            # response (slskd came back up).
+            if not getattr(self, '_last_unreachable_logged', False):
+                logger.warning(
+                    f"slskd unreachable at {self.base_url}: {e}. "
+                    f"Either start slskd or clear `soulseek.slskd_url` in settings "
+                    f"if you don't use Soulseek. Suppressing further connection errors."
+                )
+                self._last_unreachable_logged = True
+            logger.debug(f"slskd connection failed: {method} {url}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error making API request: {e}")
@@ -347,6 +367,19 @@ class SoulseekClient(DownloadSourcePlugin):
                 f"slskd direct request timed out after {_SLSKD_DEFAULT_TIMEOUT.total}s: "
                 f"{method} {url} — slskd may be overloaded or unreachable"
             )
+            return None
+        except aiohttp.ClientConnectorError as e:
+            # Issue #649 — same suppression as _make_request. Direct
+            # request is a less common path but uses the same base_url,
+            # so the same unreachable-host condition fires here.
+            if not getattr(self, '_last_unreachable_logged', False):
+                logger.warning(
+                    f"slskd unreachable at {self.base_url}: {e}. "
+                    f"Either start slskd or clear `soulseek.slskd_url` in settings "
+                    f"if you don't use Soulseek. Suppressing further connection errors."
+                )
+                self._last_unreachable_logged = True
+            logger.debug(f"slskd direct connection failed: {method} {url}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error making direct API request: {e}")
@@ -1464,14 +1497,71 @@ class SoulseekClient(DownloadSourcePlugin):
         'other':   (0, 500),
     }
 
+    def _drop_quarantined_sources(self, results: List[TrackResult]) -> List[TrackResult]:
+        """Filter out candidates whose `(username, filename)` is on the
+        quarantine record. Issue #652.
+
+        Reads quarantine sidecars fresh each call so newly-quarantined
+        sources are honored immediately on the next search — no client
+        state to invalidate. Filesystem cost is bounded (one listdir +
+        N small JSON reads) and dwarfed by the Soulseek search itself.
+
+        Returns the input list unchanged when the quarantine directory
+        is absent, empty, or unreadable — i.e. defaults to today's
+        behaviour if anything goes wrong on the dedup path.
+        """
+        try:
+            from core.imports.quarantine import get_quarantined_source_keys
+            download_path = config_manager.get('soulseek.download_path', './downloads')
+            quarantine_dir = os.path.join(download_path, 'ss_quarantine')
+            blocked = get_quarantined_source_keys(quarantine_dir)
+        except Exception as exc:
+            logger.debug("quarantine dedup: failed to load source keys, skipping filter: %s", exc)
+            return results
+
+        if not blocked:
+            return results
+
+        kept: List[TrackResult] = []
+        skipped = 0
+        for candidate in results:
+            key = (candidate.username or '', candidate.filename or '')
+            if key in blocked:
+                skipped += 1
+                continue
+            kept.append(candidate)
+
+        if skipped:
+            logger.info(
+                f"Quarantine dedup: dropped {skipped} candidate(s) matching previously-quarantined sources; "
+                f"{len(kept)} remain"
+            )
+        return kept
+
     def filter_results_by_quality_preference(self, results: List[TrackResult]) -> List[TrackResult]:
         """
         Filter candidates based on user's quality profile with bitrate density constraints.
         Uses priority waterfall logic: tries highest priority quality first, falls back to lower priorities.
         Returns candidates matching quality profile constraints, sorted by confidence and effective bitrate.
+
+        Issue #652: also drops candidates whose `(username, filename)`
+        matches a previously-quarantined download. Without this pre-filter
+        the auto-wishlist processor's ranking is deterministic — the same
+        `(uploader, file)` keeps winning the quality picker, downloading,
+        failing AcoustID, quarantining, and re-queueing in an infinite
+        loop. Users wake up to hundreds of duplicate `.quarantined` files
+        for the same source URL.
         """
         from database.music_database import MusicDatabase
 
+        if not results:
+            return []
+
+        # Drop sources already quarantined — bypass the quality picker
+        # entirely so the same bad upload doesn't get re-selected on the
+        # next wishlist cycle. Filesystem read is bounded (~few hundred
+        # sidecars in practical use × <1ms each).
+        results = self._drop_quarantined_sources(results)
         if not results:
             return []
 

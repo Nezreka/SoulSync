@@ -7414,6 +7414,19 @@ function openYouTubeDiscoveryModal(urlHash) {
                                             🔍 Search
                                         </button>
                                     </div>
+
+                                    <!-- MBID escape hatch: paste a MusicBrainz recording URL or UUID
+                                         to bypass fuzzy search and resolve directly to that record. -->
+                                    <div class="search-input-group" style="margin-top: 8px;">
+                                        <input type="text"
+                                               id="fix-modal-mbid-input"
+                                               placeholder="Or paste MusicBrainz recording URL / MBID"
+                                               class="fix-modal-input"
+                                               style="flex: 1;">
+                                        <button class="search-btn" onclick="lookupDiscoveryFixByMbid()">
+                                            🔗 Look up
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <!-- Search results -->
