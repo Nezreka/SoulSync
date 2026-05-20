@@ -5052,6 +5052,59 @@
                                 </div>
                             </div>
 
+                            <!-- ═══ USENET CLIENT ═══ -->
+                            <div class="settings-group" data-stg="indexers">
+                                <h3>📰 Usenet Client</h3>
+                                <div class="setting-help-text" style="margin-bottom: 10px;">
+                                    Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses an API key for auth; NZBGet uses a username + password.
+                                </div>
+                                <div class="form-group">
+                                    <label>Client Type:</label>
+                                    <select id="usenet-client-type" class="form-select" onchange="updateUsenetClientUI()">
+                                        <option value="sabnzbd">SABnzbd</option>
+                                        <option value="nzbget">NZBGet</option>
+                                    </select>
+                                    <div class="setting-help-text">
+                                        SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>WebUI URL:</label>
+                                    <input type="text" id="usenet-client-url" placeholder="http://localhost:8080">
+                                </div>
+                                <div class="form-group" id="usenet-apikey-group">
+                                    <label>API Key:</label>
+                                    <input type="password" id="usenet-client-api-key" placeholder="SABnzbd API key">
+                                    <div class="setting-help-text">
+                                        SABnzbd → Config → General → API Key. Used by SABnzbd only.
+                                    </div>
+                                </div>
+                                <div class="form-group" id="usenet-username-group" style="display: none;">
+                                    <label>Username:</label>
+                                    <input type="text" id="usenet-client-username" placeholder="NZBGet WebUI username">
+                                </div>
+                                <div class="form-group" id="usenet-password-group" style="display: none;">
+                                    <label>Password:</label>
+                                    <input type="password" id="usenet-client-password" placeholder="NZBGet WebUI password">
+                                </div>
+                                <div class="form-group">
+                                    <label>Category / Label:</label>
+                                    <input type="text" id="usenet-client-category" placeholder="soulsync" value="soulsync">
+                                    <div class="setting-help-text">
+                                        SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Usenet Client Status:</label>
+                                    <div class="form-actions" style="margin-top: 4px;">
+                                        <button class="test-button" id="usenet-client-test-btn" onclick="testUsenetClientConnection()">
+                                            Test Connection
+                                        </button>
+                                        <span id="usenet-client-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
