@@ -2171,6 +2171,20 @@ function buildArtistDetailPath(artistId, source = null) {
     return '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
 }
 
+function parseArtistDetailPath(pathname = window.location.pathname) {
+    const segs = String(pathname || '').split('/').filter(Boolean);
+    if (segs[0] !== 'artist-detail' || segs.length < 3) return null;
+
+    const source = decodeURIComponent(segs[1] || '');
+    const artistId = decodeURIComponent(segs.slice(2).join('/'));
+    if (!source || !artistId) return null;
+
+    return {
+        artistId,
+        source: source.toLowerCase() === 'library' ? null : source,
+    };
+}
+
 // ===============================
 // MOBILE NAVIGATION
 // ===============================

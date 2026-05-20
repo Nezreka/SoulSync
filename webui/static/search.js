@@ -1175,6 +1175,14 @@ async function loadInitialData() {
             return;
         }
 
+        if (targetPage === 'artist-detail') {
+            const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
+            if (artistRoute && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(artistRoute.artistId, '', artistRoute.source);
+            }
+            return;
+        }
+
         // Always apply the target page to the legacy shell chrome.
         const router = getWebRouter();
         const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
