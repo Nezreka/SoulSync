@@ -87,6 +87,10 @@ class ConfigManager:
         'soulseek.api_key',
         'deezer_download.arl',
         'lidarr_download.api_key',
+        'prowlarr.api_key',
+        'torrent_client.password',
+        'usenet_client.api_key',
+        'usenet_client.password',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -518,6 +522,37 @@ class ConfigManager:
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+            },
+            # Prowlarr — indexer aggregator. Feeds the torrent / usenet
+            # download plugins. Not a standalone source.
+            "prowlarr": {
+                "url": "",
+                "api_key": "",
+                # Comma-separated list of indexer IDs to limit searches to.
+                # Empty = search all enabled indexers.
+                "indexer_ids": "",
+            },
+            # Torrent client — receives .torrent / magnet URIs from the
+            # torrent download plugin. ``type`` picks which adapter to
+            # instantiate (qbittorrent | transmission | deluge).
+            "torrent_client": {
+                "type": "qbittorrent",
+                "url": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
+                "save_path": "",
+            },
+            # Usenet client — receives .nzb URLs / payloads. ``type``
+            # picks the adapter (sabnzbd | nzbget). SABnzbd uses an
+            # API key; NZBGet uses username + password.
+            "usenet_client": {
+                "type": "sabnzbd",
+                "url": "",
+                "api_key": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be

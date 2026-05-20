@@ -2753,7 +2753,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -3042,6 +3042,36 @@ def hydrabase_send():
                 logger.debug("hydrabase send close: %s", _e)
             _hydrabase_ws = None
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/prowlarr/indexers', methods=['GET'])
+def prowlarr_indexers_endpoint():
+    """List indexers Prowlarr currently exposes — name, protocol, enabled state.
+
+    Drives the Indexers panel on Settings → Indexers & Downloaders so
+    the user can see what they're searching against without leaving
+    SoulSync. Returns ``[]`` if Prowlarr isn't configured / reachable.
+    """
+    try:
+        from core.prowlarr_client import ProwlarrClient
+        client = ProwlarrClient()
+        if not client.is_configured():
+            return jsonify({"success": False, "error": "Prowlarr not configured", "indexers": []}), 200
+        indexers = run_async(client.get_indexers())
+        items = [
+            {
+                'id': idx.id,
+                'name': idx.name,
+                'protocol': idx.protocol,
+                'enable': idx.enable,
+                'privacy': idx.privacy,
+            }
+            for idx in indexers
+        ]
+        return jsonify({"success": True, "indexers": items})
+    except Exception as e:
+        logger.error(f"prowlarr indexers fetch error: {e}")
+        return jsonify({"success": False, "error": str(e), "indexers": []}), 500
+
 
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
 @admin_only
