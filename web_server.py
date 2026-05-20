@@ -19190,6 +19190,69 @@ def search_deezer_tracks():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/musicbrainz/search_tracks', methods=['GET'])
+def search_musicbrainz_tracks():
+    """Search for tracks on MusicBrainz — used by the Discovery Fix popup
+    cascade and any future surface that needs track-level MB search in the
+    Fix-popup track shape.
+
+    Mirrors the spotify / itunes / deezer search_tracks endpoints exactly:
+    accepts `track` + `artist` (or legacy `query`) plus `limit`, returns
+    `{tracks: [{id, name, artists, album, duration_ms, image_url, source}]}`.
+
+    Uses MB's bare-query mode for max recall (diacritic-folded,
+    alias/sortname indexed) — same rationale as the manual MBID-paste
+    endpoint shipped earlier. The Fix popup is a user-facing fuzzy search
+    where the user picks from the result list, so recall beats precision.
+    """
+    try:
+        track_q = request.args.get('track', '').strip()
+        artist_q = request.args.get('artist', '').strip()
+        legacy_query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not (track_q or artist_q or legacy_query):
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        from core.musicbrainz_search import MusicBrainzSearchClient
+        mb_search = MusicBrainzSearchClient()
+
+        if track_q or artist_q:
+            tracks = mb_search.search_tracks_with_artist(
+                track_q or legacy_query, artist_q, limit=limit
+            )
+        else:
+            # Legacy single-string query — let MB's structured-query
+            # dispatch decide artist-first browse vs text search.
+            tracks = mb_search.search_tracks(legacy_query, limit=limit)
+
+        # Local rerank — same helper Deezer / iTunes use. Penalises
+        # cover / karaoke / tribute patterns + boosts exact-artist match.
+        if track_q or artist_q:
+            from core.metadata.relevance import rerank_tracks
+            tracks = rerank_tracks(
+                tracks,
+                expected_title=track_q,
+                expected_artist=artist_q,
+            )
+
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'image_url': t.image_url,
+            'source': 'musicbrainz',
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        logger.error(f"Error searching MusicBrainz tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/itunes/album/<album_id>', methods=['GET'])
 def get_itunes_album_tracks(album_id):
     """Fetches full track details for a specific iTunes album."""
