@@ -279,9 +279,28 @@ The template points at `boulderbadgedad/soulsync:latest` (stable) by default. To
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
 python -m pip install -r requirements.txt
+
+# Build the React WebUI bundle used by the Python server.
+# Docker does this automatically; Python installs must do it manually.
+cd webui
+npm ci
+npm run build
+cd ..
+
 gunicorn -c gunicorn.conf.py wsgi:application
 # Open http://localhost:8008
 ```
+
+When updating a Python/no-Docker install with `git pull`, rebuild the WebUI before restarting SoulSync:
+
+```bash
+cd webui
+npm ci
+npm run build
+cd ..
+```
+
+If `webui/static/dist/.vite/manifest.json` is missing or stale, React-owned routes and route handoffs may not load correctly.
 
 ### Local Development
 
