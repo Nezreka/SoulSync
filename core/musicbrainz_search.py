@@ -114,18 +114,12 @@ def _extract_title_hint(query: str, artist_name: str) -> Optional[str]:
     return None
 
 
-def _map_release_type(primary_type: str, secondary_types: List[str] = None) -> str:
-    """Map MusicBrainz release group type to standard album_type."""
-    pt = (primary_type or '').lower()
-    if pt == 'album':
-        return 'album'
-    elif pt == 'single':
-        return 'single'
-    elif pt == 'ep':
-        return 'ep'
-    elif pt == 'compilation' or 'compilation' in (secondary_types or []):
-        return 'compilation'
-    return 'album'
+# Thin module-level alias retained so callers inside this file keep
+# working without touching every call site. The canonical implementation
+# (including the 'other' / 'broadcast' handling that fixes issue #650)
+# lives in `core/metadata/release_type.py` so every provider's `raw →
+# Album` projection shares one mapper.
+from core.metadata.release_type import map_release_group_type as _map_release_type
 
 
 class MusicBrainzSearchClient:
@@ -365,7 +359,15 @@ class MusicBrainzSearchClient:
                     # the filter silently breaks. Actual compilations
                     # (primary-type=Album with secondary-types=[Compilation])
                     # are handled by the studio-preference filter below.
-                    release_types=['album', 'ep', 'single'],
+                    # 'other' added per issue #650 — MB tags music videos
+                    # and one-off web/broadcast releases with primary=Other,
+                    # and many artists (Vocaloid producers, indie acts, JP
+                    # solo artists) have legitimate singles classified
+                    # there. Pre-fix this filter dropped them at the API
+                    # layer, hiding tracks the user had downloaded.
+                    # `map_release_group_type` routes 'other' into the
+                    # singles bucket so they appear in the right UI section.
+                    release_types=['album', 'ep', 'single', 'other'],
                     limit=100,
                 )
 
