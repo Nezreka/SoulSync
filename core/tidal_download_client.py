@@ -95,6 +95,16 @@ HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 from core.download_plugins.base import DownloadSourcePlugin
 
 
+def _looks_like_json_decode_error(exc: Exception) -> bool:
+    name = exc.__class__.__name__.lower()
+    message = str(exc).lower()
+    return (
+        "jsondecodeerror" in name
+        or "expecting value" in message
+        or "could not decode json" in message
+    )
+
+
 class TidalDownloadClient(DownloadSourcePlugin):
     """
     Tidal download client using tidalapi.
@@ -230,6 +240,18 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 return {'status': 'error', 'message': 'Auth completed but session invalid'}
 
         except Exception as e:
+            if _looks_like_json_decode_error(e):
+                logger.error(
+                    "Tidal device auth check received a non-JSON response from Tidal's token endpoint: %s",
+                    e,
+                )
+                return {
+                    'status': 'error',
+                    'message': (
+                        "Tidal returned an invalid auth response while SoulSync was finishing login. "
+                        "Try again after disabling VPN/proxy/network filtering, then restart SoulSync if it repeats."
+                    ),
+                }
             logger.error(f"Tidal device auth check error: {e}")
             return {'status': 'error', 'message': str(e)}
 
