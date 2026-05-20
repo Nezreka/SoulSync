@@ -160,8 +160,18 @@ class UnknownArtistFixerJob(RepairJob):
             # Compute expected file path
             expected_rel = None
             if reorganize_files and corrected.get('artist') and corrected.get('album'):
-                from core.repair_jobs.library_reorganize import _build_path_from_template, _get_audio_quality
-                quality = _get_audio_quality(resolved)
+                # Issue #646: `core.repair_jobs.library_reorganize` was
+                # rewritten in commit ca5c9316 ("Rewrite Library
+                # Reorganize job to delegate to per-album planner") and
+                # the private `_build_path_from_template` /
+                # `_get_audio_quality` helpers moved out. They live in
+                # the import pipeline now — same shape, different
+                # module. Without this re-wire the Unknown Artist Fixer
+                # crashes on first scan with `ImportError: cannot
+                # import name '_build_path_from_template'`.
+                from core.imports.paths import get_file_path_from_template_raw
+                from core.imports.file_ops import get_audio_quality_string
+                quality = get_audio_quality_string(resolved)
                 tmpl_ctx = {
                     'artist': corrected['artist'],
                     'albumartist': corrected['artist'],
@@ -173,7 +183,7 @@ class UnknownArtistFixerJob(RepairJob):
                     'quality': quality,
                     'albumtype': 'Album',
                 }
-                folder, fname_base = _build_path_from_template(album_template, tmpl_ctx)
+                folder, fname_base = get_file_path_from_template_raw(album_template, tmpl_ctx)
                 file_ext = os.path.splitext(resolved)[1]
                 if quality and f'[{quality}]' not in fname_base:
                     fname_base = f"{fname_base} [{quality}]"
