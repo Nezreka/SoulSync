@@ -87,6 +87,7 @@ class ConfigManager:
         'soulseek.api_key',
         'deezer_download.arl',
         'lidarr_download.api_key',
+        'prowlarr.api_key',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -518,6 +519,15 @@ class ConfigManager:
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+            },
+            # Prowlarr — indexer aggregator. Feeds the torrent / usenet
+            # download plugins. Not a standalone source.
+            "prowlarr": {
+                "url": "",
+                "api_key": "",
+                # Comma-separated list of indexer IDs to limit searches to.
+                # Empty = search all enabled indexers.
+                "indexer_ids": "",
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be

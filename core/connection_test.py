@@ -305,6 +305,21 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "prowlarr":
+            url = config_manager.get('prowlarr.url', '')
+            api_key = config_manager.get('prowlarr.api_key', '')
+            if not url or not api_key:
+                return False, "Prowlarr URL and API key are required."
+            try:
+                import requests as _req
+                resp = _req.get(f"{url.rstrip('/')}/api/v1/system/status",
+                                headers={'X-Api-Key': api_key}, timeout=10)
+                if resp.ok:
+                    version = resp.json().get('version', '?')
+                    return True, f"Connected to Prowlarr v{version}"
+                return False, f"Prowlarr returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Prowlarr connection error: {str(e)}"
         elif service == "lidarr" or service == "lidarr_download":
             url = config_manager.get('lidarr_download.url', '')
             api_key = config_manager.get('lidarr_download.api_key', '')
