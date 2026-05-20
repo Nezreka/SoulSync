@@ -545,7 +545,8 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
 
     items.forEach(item => {
         const config = mapItem(item);
-        const elem = document.createElement('div');
+        const isLink = isArtist && !!config.href;
+        const elem = document.createElement(isLink ? 'a' : 'div');
 
         // Add appropriate card class
         if (isArtist) {
@@ -564,6 +565,13 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             elem.className = 'enh-compact-item album-card';
         } else if (isTrack) {
             elem.className = 'enh-compact-item track-item';
+        }
+
+        if (isLink) {
+            elem.href = config.href;
+            elem.style.color = 'inherit';
+            elem.style.textDecoration = 'none';
+            elem.setAttribute('aria-label', config.name || 'Artist');
         }
 
         // Build image HTML with type-specific classes
@@ -612,7 +620,9 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             ${badgeHtml}
         `;
 
-        elem.addEventListener('click', config.onClick);
+        if (config.onClick) {
+            elem.addEventListener('click', config.onClick);
+        }
 
         // Add play button handler for tracks
         if (isTrack && config.onPlay) {
@@ -695,7 +705,7 @@ async function checkDiscographyCompletion(artistId, discography) {
     } catch (error) {
         // Don't show error if it was aborted (user navigated away)
         if (error.name === 'AbortError') {
-            console.log('⏹️ Completion check aborted (user navigated to new artist)');
+            console.log('⏹️ Completion check aborted (user navigated away)');
             return;
         }
 
@@ -3574,16 +3584,21 @@ async function loadSimilarArtists(artistName) {
     container.innerHTML = '';
     section.style.display = 'block';
 
+    let controller = null;
+    let signal = null;
+
     try {
         // Create new abort controller for this similar artists stream
-        similarArtistsController = new AbortController();
+        controller = new AbortController();
+        similarArtistsController = controller;
+        signal = controller.signal;
 
         // Use streaming endpoint for real-time bubble creation
         const url = `/api/artist/similar/${encodeURIComponent(artistName)}/stream`;
         console.log(`📡 Streaming from: ${url}`);
 
         const response = await fetch(url, {
-            signal: similarArtistsController.signal
+            signal
         });
 
         if (!response.ok) {
@@ -3612,6 +3627,7 @@ async function loadSimilarArtists(artistName) {
             buffer = messages.pop() || ''; // Keep incomplete message in buffer
 
             for (const message of messages) {
+                if (signal?.aborted) return;
                 if (!message.trim() || !message.startsWith('data: ')) continue;
 
                 try {
@@ -3622,6 +3638,7 @@ async function loadSimilarArtists(artistName) {
                     }
 
                     if (jsonData.artist) {
+                        if (signal?.aborted) return;
                         // Hide loading on first artist
                         if (artistCount === 0) {
                             loadingEl.classList.add('hidden');
@@ -3636,6 +3653,7 @@ async function loadSimilarArtists(artistName) {
                     }
 
                     if (jsonData.complete) {
+                        if (signal?.aborted) return;
                         console.log(`🎉 Streaming complete: ${jsonData.total} artists`);
 
                         if (artistCount === 0) {
@@ -3648,7 +3666,7 @@ async function loadSimilarArtists(artistName) {
                             `;
                         } else {
                             // Lazy load images for similar artists that don't have them
-                            lazyLoadSimilarArtistImages(container);
+                            await lazyLoadSimilarArtistImages(container, signal);
                         }
                     }
                 } catch (parseError) {
@@ -3658,13 +3676,14 @@ async function loadSimilarArtists(artistName) {
         }
 
         // Clear the controller when done
-        similarArtistsController = null;
+        if (similarArtistsController === controller) {
+            similarArtistsController = null;
+        }
 
     } catch (error) {
         // Don't show error if it was aborted (user navigated away)
-        if (error.name === 'AbortError') {
-            console.log('⏹️ Similar artists stream aborted (user navigated to new artist)');
-            loadingEl.classList.add('hidden');
+        if (error.name === 'AbortError' || signal?.aborted) {
+            console.log('⏹️ Similar artists stream aborted (user navigated away)');
             return;
         }
 
@@ -3683,15 +3702,18 @@ async function loadSimilarArtists(artistName) {
         `;
     } finally {
         // Always clear the controller
-        similarArtistsController = null;
+        if (similarArtistsController === controller) {
+            similarArtistsController = null;
+        }
     }
 }
 
 /**
  * Lazy load images for similar artist bubbles that don't have images
  */
-async function lazyLoadSimilarArtistImages(container) {
+async function lazyLoadSimilarArtistImages(container, signal) {
     if (!container) return;
+    if (signal?.aborted) return;
 
     const bubblesNeedingImages = container.querySelectorAll('.similar-artist-bubble[data-needs-image="true"]');
 
@@ -3707,9 +3729,11 @@ async function lazyLoadSimilarArtistImages(container) {
     const bubbles = Array.from(bubblesNeedingImages);
 
     for (let i = 0; i < bubbles.length; i += batchSize) {
+        if (signal?.aborted) return;
         const batch = bubbles.slice(i, i + batchSize);
 
         await Promise.all(batch.map(async (bubble) => {
+            if (signal?.aborted) return;
             const artistId = bubble.getAttribute('data-artist-id');
             const artistSource = bubble.getAttribute('data-artist-source') || '';
             const artistPlugin = bubble.getAttribute('data-artist-plugin') || '';
@@ -3724,8 +3748,10 @@ async function lazyLoadSimilarArtistImages(container) {
                     ? `/api/artist/${encodeURIComponent(artistId)}/image?${params.toString()}`
                     : `/api/artist/${encodeURIComponent(artistId)}/image`;
 
-                const response = await fetch(imageUrl);
+                const response = await fetch(imageUrl, { signal });
                 const data = await response.json();
+
+                if (signal?.aborted) return;
 
                 if (data.success && data.image_url) {
                     const imageContainer = bubble.querySelector('.similar-artist-bubble-image');
@@ -3737,6 +3763,9 @@ async function lazyLoadSimilarArtistImages(container) {
                     }
                 }
             } catch (error) {
+                if (error?.name === 'AbortError' || signal?.aborted) {
+                    return;
+                }
                 console.warn(`⚠️ Failed to load image for similar artist ${artistId}:`, error);
             }
         }));
@@ -3803,10 +3832,23 @@ function displaySimilarArtists(artists) {
  * Create a similar artist bubble card element
  */
 function createSimilarArtistBubble(artist) {
+    const artistId = artist.id ? String(artist.id).trim() : '';
+    const hasArtistDetail = !!artistId;
+
     // Create bubble container
-    const bubble = document.createElement('div');
+    const bubble = document.createElement(hasArtistDetail ? 'a' : 'div');
     bubble.className = 'similar-artist-bubble';
-    bubble.setAttribute('data-artist-id', artist.id);
+    if (hasArtistDetail) {
+        bubble.href = buildArtistDetailPath(artistId, artist.source || null);
+    } else {
+        bubble.setAttribute('aria-disabled', 'true');
+        bubble.style.cursor = 'default';
+        bubble.style.pointerEvents = 'none';
+    }
+    bubble.style.color = 'inherit';
+    bubble.style.textDecoration = 'none';
+    bubble.setAttribute('aria-label', artist.name);
+    bubble.setAttribute('data-artist-id', artistId);
     bubble.setAttribute('data-artist-source', artist.source || '');
     if (artist.plugin) {
         bubble.setAttribute('data-artist-plugin', artist.plugin);
@@ -3857,13 +3899,6 @@ function createSimilarArtistBubble(artist) {
     if (artist.genres && artist.genres.length > 0) {
         bubble.appendChild(genres);
     }
-
-    // Click → navigate to the standalone artist-detail page. Works for both
-    // library and source artists thanks to the source-aware backend endpoint.
-    bubble.addEventListener('click', () => {
-        console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        navigateToArtistDetail(artist.id, artist.name, artist.source || null);
-    });
 
     return bubble;
 }
@@ -3932,4 +3967,32 @@ function showCompletionError() {
         overlay.innerHTML = '<span class="completion-status">Error</span>';
         overlay.title = 'Failed to check completion status';
     });
+}
+
+
+// ----------------------------------------------------------------------------
+// MusicBrainz MBID parsing — accept full URLs or bare UUIDs.
+// Used by the Discovery Fix popup's MBID-paste lookup; reusable anywhere the
+// user can paste a MusicBrainz identifier (failed-MB cache, manual match,
+// future surfaces). Returns the bare lowercase UUID when valid, or null.
+// ----------------------------------------------------------------------------
+
+const _MB_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseMusicBrainzMbid(input) {
+    if (!input || typeof input !== 'string') return null;
+    let candidate = input.trim();
+    if (!candidate) return null;
+
+    // Strip a musicbrainz.org URL down to the final UUID segment. Accepts
+    // /recording/, /release/, /release-group/, /artist/ — the caller decides
+    // which entity type is appropriate for its endpoint.
+    const urlMatch = candidate.match(/musicbrainz\.org\/[a-z-]+\/([0-9a-f-]+)/i);
+    if (urlMatch) candidate = urlMatch[1];
+
+    // Strip trailing query / fragment that survived a copy-paste from a URL
+    // (e.g. "?utm=...", "#tab").
+    candidate = candidate.split(/[?#]/)[0].trim().toLowerCase();
+
+    return _MB_UUID_RE.test(candidate) ? candidate : null;
 }

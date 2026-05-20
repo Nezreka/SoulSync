@@ -197,8 +197,21 @@ class WebUIDownloadMonitor:
         for op in deferred_ops:
             try:
                 if op[0] == 'cancel_download':
-                    _, download_id, username = op
-                    logger.debug(f"[Deferred] Cancelling download: {download_id} from {username}")
+                    # Issue #648 diagnostic — `op` now carries a trigger
+                    # label (4-tuple, was 3-tuple) so the next log dump
+                    # tells us WHICH path in `_should_retry_task` is
+                    # firing for users seeing "Tidal downloads failed to
+                    # start" mass-cancels. Label format pinned in commit
+                    # message for grep-ability.
+                    if len(op) >= 4:
+                        _, download_id, username, trigger = op[0], op[1], op[2], op[3]
+                    else:
+                        _, download_id, username = op
+                        trigger = 'unlabeled'
+                    logger.info(
+                        f"[CancelTrigger:monitor.{trigger}] download_id={download_id} "
+                        f"username={username}"
+                    )
                     run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                     logger.debug(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
@@ -353,7 +366,8 @@ class WebUIDownloadMonitor:
 
                     # Defer slskd cancel to outside the lock
                     if task_username and download_id:
-                        deferred_ops.append(('cancel_download', download_id, task_username))
+                        deferred_ops.append(('cancel_download', download_id, task_username,
+                                             'not_in_live_transfers_90s'))
 
                     # Mark current source as used (full filename to match worker format)
                     if task_username and task_filename:
@@ -424,7 +438,8 @@ class WebUIDownloadMonitor:
 
                 # Defer slskd cancel to outside the lock
                 if username and download_id:
-                    deferred_ops.append(('cancel_download', download_id, username))
+                    deferred_ops.append(('cancel_download', download_id, username,
+                                         'errored_state_retry'))
 
                 # Mark current source as used to prevent retry loops
                 # CRITICAL: Use full filename (not basename) to match worker's source_key format
@@ -527,7 +542,8 @@ class WebUIDownloadMonitor:
 
                         # Defer slskd cancel to outside the lock
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'queued_state_timeout'))
 
                         # UNIFIED RETRY LOGIC: Handle timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
@@ -615,7 +631,8 @@ class WebUIDownloadMonitor:
 
                         # Defer slskd cancel to outside the lock
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'stuck_at_0pct_timeout'))
 
                         # UNIFIED RETRY LOGIC: Handle 0% timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
@@ -704,7 +721,8 @@ class WebUIDownloadMonitor:
                         download_id = task.get('download_id')
 
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'unknown_state_no_progress_timeout'))
 
                         if username and filename:
                             used_sources = task.get('used_sources', set())

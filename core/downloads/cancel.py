@@ -45,6 +45,9 @@ _TERMINAL_STATUSES = {
 def cancel_single_download(download_orchestrator, run_async: Callable,
                             download_id: str, username: str) -> bool:
     """Cancel one specific slskd download (with `remove=True`)."""
+    logger.info(
+        f"[CancelTrigger:api.manual_cancel_single] download_id={download_id} username={username}"
+    )
     return run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
 
 

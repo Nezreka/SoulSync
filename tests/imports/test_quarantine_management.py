@@ -5,6 +5,7 @@ from core.imports.quarantine import (
     approve_quarantine_entry,
     delete_quarantine_entry,
     entry_id_from_quarantined_filename,
+    get_quarantined_source_keys,
     list_quarantine_entries,
     recover_to_staging,
     serialize_quarantine_context,
@@ -285,3 +286,115 @@ def test_recover_removes_sidecar_after_move(tmp_path):
 
     recover_to_staging(str(quarantine), str(staging), "20260514_120000_song")
     assert not sidecar.exists()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# get_quarantined_source_keys — issue #652 dedup primitive
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _write_quarantine_sidecar_with_source(quarantine_dir, entry_id, *,
+                                          username=None, filename=None):
+    """Helper that writes a sidecar matching the shape `move_to_quarantine`
+    produces — `context.original_search_result.{username, filename}` is
+    the path `get_quarantined_source_keys` pulls from."""
+    sidecar = {
+        "original_filename": "song.flac",
+        "quarantine_reason": "boom",
+        "timestamp": "2026-05-14T12:00:00",
+        "trigger": "acoustid",
+    }
+    if username is not None or filename is not None:
+        sidecar["context"] = {
+            "original_search_result": {
+                "username": username or "",
+                "filename": filename or "",
+            }
+        }
+    path = quarantine_dir / f"{entry_id}.json"
+    path.write_text(json.dumps(sidecar))
+    return path
+
+
+def test_source_keys_empty_for_missing_dir(tmp_path):
+    """Defensive: caller may pass a path that doesn't exist (config not
+    initialised, quarantine never used). Don't crash, just return an
+    empty set — Soulseek filter then keeps every candidate."""
+    assert get_quarantined_source_keys(str(tmp_path / "nope")) == set()
+
+
+def test_source_keys_empty_for_empty_dir(tmp_path):
+    """Empty quarantine dir → empty set."""
+    assert get_quarantined_source_keys(str(tmp_path)) == set()
+
+
+def test_source_keys_collects_username_filename_tuples(tmp_path):
+    """Sidecars with `context.original_search_result.username` and
+    `.filename` round-trip into `(username, filename)` tuples — that's
+    the exact shape the Soulseek candidate filter looks up against."""
+    _write_quarantine_sidecar_with_source(
+        tmp_path, "20260514_120000_a",
+        username="badpeer", filename="path/to/bad.flac",
+    )
+    _write_quarantine_sidecar_with_source(
+        tmp_path, "20260514_120100_b",
+        username="otherpeer", filename="other.mp3",
+    )
+
+    keys = get_quarantined_source_keys(str(tmp_path))
+
+    assert ("badpeer", "path/to/bad.flac") in keys
+    assert ("otherpeer", "other.mp3") in keys
+    assert len(keys) == 2
+
+
+def test_source_keys_skip_legacy_sidecars_without_context(tmp_path):
+    """Sidecars written pre-Feb 2026 don't have the `context` field —
+    can't gate against them since the originating source is unknown.
+    Must skip silently rather than crashing the dedup path."""
+    _write_quarantine_sidecar_with_source(tmp_path, "legacy_id")  # no username/filename
+
+    assert get_quarantined_source_keys(str(tmp_path)) == set()
+
+
+def test_source_keys_skip_sidecars_with_empty_source_fields(tmp_path):
+    """Defensive: a sidecar with an empty string for username OR filename
+    can't gate anything meaningfully — dropping every result whose
+    username equals '' would catch unrelated downloads. Skip those
+    entries entirely."""
+    _write_quarantine_sidecar_with_source(tmp_path, "empty_user", username="", filename="x.flac")
+    _write_quarantine_sidecar_with_source(tmp_path, "empty_file", username="u", filename="")
+
+    assert get_quarantined_source_keys(str(tmp_path)) == set()
+
+
+def test_source_keys_skip_corrupt_sidecars(tmp_path):
+    """A corrupt JSON sidecar (truncated write, encoding glitch) must
+    not propagate up and break the dedup path. Filesystem read errors
+    are swallowed at debug level."""
+    bad = tmp_path / "corrupt.json"
+    bad.write_text("{not valid json")
+    _write_quarantine_sidecar_with_source(
+        tmp_path, "good", username="good_peer", filename="good.flac",
+    )
+
+    keys = get_quarantined_source_keys(str(tmp_path))
+
+    assert keys == {("good_peer", "good.flac")}
+
+
+def test_source_keys_dedup_repeated_sources(tmp_path):
+    """If the SAME `(username, filename)` was quarantined twice (which
+    is exactly the #652 bug — but until now wasn't being prevented),
+    the set collapses to one entry. The Soulseek filter still acts as
+    a single-membership check, so a single set entry is enough."""
+    _write_quarantine_sidecar_with_source(
+        tmp_path, "first", username="peer", filename="dupe.flac",
+    )
+    _write_quarantine_sidecar_with_source(
+        tmp_path, "second", username="peer", filename="dupe.flac",
+    )
+
+    keys = get_quarantined_source_keys(str(tmp_path))
+
+    assert keys == {("peer", "dupe.flac")}

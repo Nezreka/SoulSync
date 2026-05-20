@@ -541,7 +541,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
         'rg-damn', includes=['releases', 'artist-credits']
     )
     client._client.get_release.assert_called_once_with(
-        'rel-official', includes=['recordings', 'artist-credits', 'release-groups', 'cover-art-archive']
+        'rel-official', includes=['recordings', 'artist-credits', 'release-groups']
     )
     assert album is not None
     assert album['id'] == 'rg-damn'  # Canonical ID stays the release-group MBID.
@@ -680,6 +680,61 @@ def test_search_albums_bare_artist_no_hint_no_filter():
     assert 'Revolver' in titles
 
 
+# ---------------------------------------------------------------------------
+# Issue #650 — 'Other' primary-type release-groups must surface
+# ---------------------------------------------------------------------------
+
+
+def test_search_albums_browse_filter_requests_other_primary_type():
+    """Issue #650: pre-fix the MB browse filter requested only
+    `album|ep|single`, dropping every primary-type=`Other` release-group
+    at the API layer. For artists like Vocaloid producers and JP indie
+    acts whose music videos / one-off web releases are tagged Other,
+    that hid legitimate tracks. Pin that the filter now includes
+    'other' so those release-groups round-trip into the discography."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Inabakumori', 'mb-i', score=100)]
+    client._client.browse_artist_release_groups.return_value = []
+
+    client.search_albums('inabakumori', limit=10)
+
+    # Inspect the actual call args — the API filter is the lever that
+    # decides whether MB returns Other-typed groups at all.
+    args, kwargs = client._client.browse_artist_release_groups.call_args
+    requested_types = kwargs.get('release_types') or (args[1] if len(args) > 1 else None)
+    assert requested_types is not None, \
+        "browse_artist_release_groups must receive an explicit release_types filter"
+    assert 'other' in requested_types, \
+        f"'other' must be in the requested types so #650 Other-typed releases surface; got {requested_types}"
+
+
+def test_search_albums_other_type_release_groups_appear_as_singles():
+    """When MB returns an Other-typed release-group (music video,
+    one-off web release), it must arrive in the discography as an
+    Album dataclass with album_type='single' — so the downstream
+    binner in `core/metadata/discography.py` routes it to the Singles
+    section rather than burying it among LPs."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Inabakumori', 'mb-i', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-mv', 'title': 'ロストアンブレラ', 'primary-type': 'Other',
+         'first-release-date': '2018-02-27', 'secondary-types': []},
+        {'id': 'rg-single', 'title': 'ラグトレイン', 'primary-type': 'Single',
+         'first-release-date': '2020-01-01', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('inabakumori', limit=10)
+
+    by_id = {a.id: a for a in albums}
+    assert 'rg-mv' in by_id, "Other-typed release-group must survive the filter and arrive in the result"
+    assert by_id['rg-mv'].album_type == 'single', \
+        "Other-typed release-group must map to album_type='single' so it lands in the Singles section"
+    # Pre-existing single behaviour unchanged.
+    assert by_id['rg-single'].album_type == 'single'
+
+
 def test_recording_to_track_total_tracks_matches_media_count():
     """Regression: total_tracks was initialized at 1 and summed with media
     track-counts, producing an off-by-one. An 11-track album reported 12."""
@@ -765,3 +820,257 @@ def test_search_tracks_text_path_filters_by_score():
     titles = [t.name for t in tracks]
     assert 'Good' in titles
     assert 'Bad' not in titles
+
+
+# ---------------------------------------------------------------------------
+# get_recording_flat — Fix-popup MBID paste adapter
+# ---------------------------------------------------------------------------
+
+def test_get_recording_flat_happy_path():
+    """Recording with a release returns flat shape with album + image."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-abc',
+        'title': 'Army of Me',
+        'length': 234000,
+        'artist-credit': [{'artist': {'name': 'Björk'}}],
+        'releases': [{
+            'id': 'rel-xyz',
+            'title': 'Post',
+            'date': '1995-06-13',
+            'status': 'Official',
+            'media': [{'track-count': 11}],
+            'release-group': {'id': 'rg-post', 'primary-type': 'Album', 'secondary-types': []},
+        }],
+    }
+
+    track = client.get_recording_flat('rec-abc')
+
+    assert track is not None
+    assert track['id'] == 'rec-abc'
+    assert track['name'] == 'Army of Me'
+    assert track['artists'] == ['Björk']  # flat list of strings, not Spotify-shaped objects
+    assert track['album'] == 'Post'        # flat string, not nested dict
+    assert track['duration_ms'] == 234000
+    assert track['image_url']  # CAA URL present
+    assert 'musicbrainz.org/recording/rec-abc' in track['external_urls']['musicbrainz']
+
+
+def test_get_recording_flat_missing_mbid_returns_none():
+    """No MBID → no API call, returns None."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    assert client.get_recording_flat('') is None
+    assert client.get_recording_flat(None) is None
+    client._client.get_recording.assert_not_called()
+
+
+def test_get_recording_flat_mb_returns_no_recording():
+    """MB returns None (404 / missing) → adapter returns None."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = None
+
+    assert client.get_recording_flat('rec-missing') is None
+
+
+def test_get_recording_flat_recording_without_release():
+    """Standalone recording (no releases) — album stays empty,
+    image_url empty, but the rest of the shape is intact."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-standalone',
+        'title': 'Untitled Demo',
+        'length': 120000,
+        'artist-credit': [{'artist': {'name': 'Unknown'}}],
+        'releases': [],
+    }
+
+    track = client.get_recording_flat('rec-standalone')
+
+    assert track is not None
+    assert track['name'] == 'Untitled Demo'
+    assert track['album'] == ''
+    assert track['image_url'] == ''
+    assert track['artists'] == ['Unknown']
+    assert track['duration_ms'] == 120000
+
+
+def test_get_recording_flat_multi_artist_credit():
+    """Recording with multiple credited artists — all flatten to list of strings."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = {
+        'id': 'rec-collab',
+        'title': 'Collab Track',
+        'length': 180000,
+        'artist-credit': [
+            {'artist': {'name': 'Artist A'}},
+            {'artist': {'name': 'Artist B'}},
+        ],
+        'releases': [],
+    }
+
+    track = client.get_recording_flat('rec-collab')
+
+    assert track['artists'] == ['Artist A', 'Artist B']
+
+
+def test_get_recording_flat_includes_match_get_track_details():
+    """Sanity: passes the same includes list so the API call is cacheable
+    against the same key as get_track_details (one network request can
+    serve both surfaces if MB ever adds response caching upstream)."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.return_value = None
+
+    client.get_recording_flat('rec-x')
+
+    client._client.get_recording.assert_called_once_with(
+        'rec-x', includes=['releases', 'artist-credits', 'release-groups']
+    )
+
+
+def test_get_recording_flat_swallows_client_errors():
+    """MB client raising must not propagate to the route handler — return
+    None so the endpoint can render a friendly 404 instead of 500."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_recording.side_effect = RuntimeError('boom')
+
+    assert client.get_recording_flat('rec-err') is None
+
+
+# ---------------------------------------------------------------------------
+# search_tracks_with_artist — Fix-popup cascade adapter
+# ---------------------------------------------------------------------------
+
+def test_search_tracks_with_artist_uses_bare_query_mode():
+    """The Fix-popup cascade needs MB's bare-query mode so diacritics and
+    bracketed suffixes don't kill recall. The adapter must pass strict=False
+    through to the underlying search_recording call."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-1', 'title': 'Army of Me', 'score': 95,
+         'releases': [{'id': 'rel-1', 'title': 'Post', 'date': '1995'}],
+         'artist-credit': [{'name': 'Björk'}]},
+    ]
+
+    tracks = client.search_tracks_with_artist('Army of Me', 'Björk', limit=10)
+
+    # strict=False is the critical bit — fuzzy recall, not phrase precision
+    client._client.search_recording.assert_called_once_with(
+        'Army of Me', artist_name='Björk', limit=10, strict=False
+    )
+    assert len(tracks) == 1
+    assert tracks[0].name == 'Army of Me'
+    assert 'Björk' in tracks[0].artists
+
+
+def test_search_tracks_with_artist_handles_missing_artist():
+    """Track-only query (no artist) still works — empty string becomes
+    None, and the underlying client searches recordings without an
+    artist filter."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-1', 'title': 'Some Song', 'score': 90,
+         'releases': [], 'artist-credit': [{'name': 'Unknown'}]},
+    ]
+
+    client.search_tracks_with_artist('Some Song', '', limit=5)
+
+    # Empty artist → None passed to the client so MB drops the AND clause
+    client._client.search_recording.assert_called_once_with(
+        'Some Song', artist_name=None, limit=5, strict=False
+    )
+
+
+def test_search_tracks_with_artist_empty_returns_empty_list():
+    """No track and no artist → return [] without hitting the network."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    assert client.search_tracks_with_artist('', '', limit=10) == []
+    client._client.search_recording.assert_not_called()
+
+
+def test_search_tracks_with_artist_keeps_low_score_for_rerank():
+    """Cascade path uses a low score floor (20) so MB recordings whose
+    title doesn't literally contain the artist name still enter the
+    candidate pool — the endpoint's rerank pass surfaces them by
+    artist-match relevance. Real example: "Army of Me" + "Bjork" — the
+    canonical Björk recording scores 28 in MB (title doesn't contain
+    "Bjork"), while title-collision covers like "Army of Me (Bjork)"
+    score 73-100. Strict 80 floor drops the right answer."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-cover', 'title': 'Army of Me (Bjork)', 'score': 100,
+         'releases': [], 'artist-credit': [{'name': 'HIRS Collective'}]},
+        {'id': 'rec-canonical', 'title': 'Army of Me', 'score': 28,
+         'releases': [], 'artist-credit': [{'name': 'Björk'}]},
+        {'id': 'rec-noise', 'title': 'Bjork', 'score': 5,
+         'releases': [], 'artist-credit': [{'name': 'Random'}]},
+    ]
+
+    tracks = client.search_tracks_with_artist('Army of Me', 'Bjork', limit=50)
+
+    ids = [t.id for t in tracks]
+    # Score=28 canonical Björk recording is kept — the endpoint's rerank
+    # will surface it by artist match.
+    assert 'rec-canonical' in ids
+    assert 'rec-cover' in ids
+    # Score=5 is below the 20 floor — true garbage still filtered out.
+    assert 'rec-noise' not in ids
+
+
+def test_search_tracks_text_keeps_min_score_default_80_for_enhanced_search():
+    """The enhanced search tab path keeps the historical 80 floor because
+    it has no downstream rerank — unfiltered MB results would be noisy
+    for free-text user search."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-good', 'title': 'Good', 'score': 95,
+         'releases': [], 'artist-credit': [{'name': 'A'}]},
+        {'id': 'rec-mid', 'title': 'Mid', 'score': 40,
+         'releases': [], 'artist-credit': [{'name': 'A'}]},
+    ]
+
+    # No min_score → defaults to _MIN_SCORE (80)
+    tracks = client._search_tracks_text('Good', 'A', limit=10)
+
+    titles = [t.name for t in tracks]
+    assert 'Good' in titles
+    assert 'Mid' not in titles
+
+
+def test_search_tracks_text_strict_param_default_true():
+    """Default strict=True preserves the historical behaviour of the
+    structured-query text-search fallback path — important so the
+    enrichment-style `search_tracks('Artist - Track')` flow stays on
+    field-scoped Lucene phrase matching as before."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = []
+
+    client._search_tracks_text('Track', 'Artist', limit=10)
+
+    client._client.search_recording.assert_called_once_with(
+        'Track', artist_name='Artist', limit=10, strict=True
+    )
+
+
+def test_search_tracks_with_artist_swallows_client_errors():
+    """MB client raising must not crash the endpoint — return [] so the
+    Fix-popup cascade falls through to the next source."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.side_effect = RuntimeError('network down')
+
+    assert client.search_tracks_with_artist('Track', 'Artist', limit=10) == []
