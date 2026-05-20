@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.7"
+_SOULSYNC_BASE_VERSION = "2.5.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -2753,7 +2753,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -3042,6 +3042,36 @@ def hydrabase_send():
                 logger.debug("hydrabase send close: %s", _e)
             _hydrabase_ws = None
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/prowlarr/indexers', methods=['GET'])
+def prowlarr_indexers_endpoint():
+    """List indexers Prowlarr currently exposes — name, protocol, enabled state.
+
+    Drives the Indexers panel on Settings → Indexers & Downloaders so
+    the user can see what they're searching against without leaving
+    SoulSync. Returns ``[]`` if Prowlarr isn't configured / reachable.
+    """
+    try:
+        from core.prowlarr_client import ProwlarrClient
+        client = ProwlarrClient()
+        if not client.is_configured():
+            return jsonify({"success": False, "error": "Prowlarr not configured", "indexers": []}), 200
+        indexers = run_async(client.get_indexers())
+        items = [
+            {
+                'id': idx.id,
+                'name': idx.name,
+                'protocol': idx.protocol,
+                'enable': idx.enable,
+                'privacy': idx.privacy,
+            }
+            for idx in indexers
+        ]
+        return jsonify({"success": True, "indexers": items})
+    except Exception as e:
+        logger.error(f"prowlarr indexers fetch error: {e}")
+        return jsonify({"success": False, "error": str(e), "indexers": []}), 500
+
 
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
 @admin_only
@@ -28015,43 +28045,50 @@ def get_your_artist_info(artist_id):
 
 @app.route('/api/image-proxy', methods=['GET'])
 def image_proxy():
-    """Proxy external images to avoid CORS issues for canvas rendering."""
+    """Proxy external images to avoid CORS issues for canvas rendering.
+
+    Kept for backwards compatibility; new normalized artwork URLs use
+    /api/image-cache/<key>, but older browser sessions may still hold this
+    query-string form.
+    """
     url = request.args.get('url', '')
     if not url or not url.startswith('http'):
         return '', 400
 
-    host = urlparse(url).hostname or ''
-    allowed_hosts = [
-        'i.scdn.co', 'mosaic.scdn.co',  # Spotify
-        'lastfm.freetls.fastly.net', 'lastfm-img2.akamaized.net',  # Last.fm
-        'e-cdns-images.dzcdn.net', 'cdns-images.dzcdn.net', 'api.deezer.com',  # Deezer
-        'is1-ssl.mzstatic.com', 'is2-ssl.mzstatic.com', 'is3-ssl.mzstatic.com',
-        'is4-ssl.mzstatic.com', 'is5-ssl.mzstatic.com',  # iTunes/Apple
-        'img.discogs.com', 'i.discogs.com',  # Discogs
-        'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
-    ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not is_internal_image_host(url):
-        return '', 403
     try:
-        resp = requests.get(url, timeout=10, stream=True, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://www.deezer.com/',
-        })
-        if resp.status_code != 200:
-            return '', resp.status_code
-        content_type = resp.headers.get('Content-Type', 'image/jpeg')
-        if not content_type.startswith('image/'):
-            return '', 400
-        return Response(
-            resp.content,
-            content_type=content_type,
-            headers={
-                'Cache-Control': 'public, max-age=86400',
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
-    except Exception:
+        from core.image_cache import get_image_cache
+
+        cached = get_image_cache().get_url(url)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['X-SoulSync-Image-Cache'] = cached.status
+        return response
+    except Exception as exc:
+        logger.debug("image proxy failed: %s", exc)
         return '', 502
+
+
+@app.route('/api/image-cache/<cache_key>', methods=['GET'])
+def serve_cached_image(cache_key):
+    """Serve a registered image URL from SoulSync's disk cache."""
+    if not re.fullmatch(r'[a-f0-9]{64}', cache_key or ''):
+        return '', 404
+
+    try:
+        from core.image_cache import get_image_cache
+
+        cached = get_image_cache().get(cache_key)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['X-SoulSync-Image-Cache'] = cached.status
+        return response
+    except Exception as exc:
+        logger.debug("cached image serve failed for %s: %s", cache_key, exc)
+        return '', 404
 
 
 from core.artists.map import (
