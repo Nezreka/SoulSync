@@ -73,8 +73,14 @@ COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/
 # pre-baked directory would crash the container into a restart loop on
 # rootless Docker/Podman where in-container "root" can't write to /app.
 # Pre-baking the dir here makes the entrypoint mkdir a guaranteed no-op.
-RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/MusicVideos /app/scripts && \
-    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/MusicVideos /app/scripts
+# NOTE: /app/Stream is the transient single-file streaming cache used by
+# the basic-search "Play" flow (cleared per use, never persistent). It's
+# created lazily by `core/streaming/prepare.py` via `os.makedirs`, which
+# fails silently on rootless Docker where the soulsync UID can't write
+# to /app — playback then errors out with no obvious cause. Pre-baking
+# at build time (when the layer is owned by root) avoids that path.
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/MusicVideos /app/scripts && \
+    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/MusicVideos /app/scripts
 
 # Create defaults directory and copy template files
 # These will be used by entrypoint.sh to initialize empty volumes
