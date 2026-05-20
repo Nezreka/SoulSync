@@ -511,3 +511,172 @@ def test_non_connection_exception_still_logs_error(configured_client, caplog):
     error_records = [r for r in caplog.records if r.levelno == logging.ERROR
                      and 'Error making API request' in r.message]
     assert len(error_records) == 1, "Non-connection exceptions must still log ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Issue #652 — quarantined-source dedup in the candidate filter
+# ---------------------------------------------------------------------------
+
+
+def _mk_track_result(username='peer', filename='song.flac', quality='flac',
+                     bitrate=1411, size=10_000_000, duration=180_000):
+    """Build a minimal TrackResult for the candidate filter tests."""
+    from core.download_plugins.types import TrackResult
+    return TrackResult(
+        username=username,
+        filename=filename,
+        size=size,
+        bitrate=bitrate,
+        duration=duration,
+        quality=quality,
+        free_upload_slots=1,
+        upload_speed=1_000_000,
+        queue_length=0,
+    )
+
+
+def test_drop_quarantined_sources_keeps_clean_candidates(configured_client, tmp_path, monkeypatch):
+    """When no candidate matches a quarantined `(username, filename)`,
+    every result passes through. Filter is a no-op for clean searches."""
+    quarantine_dir = tmp_path / 'ss_quarantine'
+    quarantine_dir.mkdir()
+
+    # Patch config_manager to point at our temp download path.
+    import core.soulseek_client as sc
+    monkeypatch.setattr(sc.config_manager, 'get',
+                        lambda key, default=None: str(tmp_path) if key == 'soulseek.download_path' else default)
+
+    results = [
+        _mk_track_result(username='goodpeer1', filename='a.flac'),
+        _mk_track_result(username='goodpeer2', filename='b.flac'),
+    ]
+
+    kept = configured_client._drop_quarantined_sources(results)
+
+    assert len(kept) == 2
+    assert {r.username for r in kept} == {'goodpeer1', 'goodpeer2'}
+
+
+def test_drop_quarantined_sources_drops_known_bad(configured_client, tmp_path, monkeypatch):
+    """Issue #652 core contract: a candidate whose `(username, filename)`
+    matches a quarantined entry is dropped before the quality picker
+    ranks it. Stops the loop where the same source kept winning the
+    quality picker and re-downloading itself."""
+    import json as _json
+    quarantine_dir = tmp_path / 'ss_quarantine'
+    quarantine_dir.mkdir()
+
+    # Write a sidecar matching the bad source.
+    sidecar = {
+        "original_filename": "bad.flac",
+        "quarantine_reason": "AcoustID mismatch",
+        "context": {
+            "original_search_result": {
+                "username": "badpeer", "filename": "albums/bad.flac",
+            },
+        },
+    }
+    (quarantine_dir / "20260518_120000.json").write_text(_json.dumps(sidecar))
+
+    import core.soulseek_client as sc
+    monkeypatch.setattr(sc.config_manager, 'get',
+                        lambda key, default=None: str(tmp_path) if key == 'soulseek.download_path' else default)
+
+    results = [
+        _mk_track_result(username='badpeer', filename='albums/bad.flac'),
+        _mk_track_result(username='goodpeer', filename='albums/good.flac'),
+    ]
+
+    kept = configured_client._drop_quarantined_sources(results)
+
+    assert len(kept) == 1
+    assert kept[0].username == 'goodpeer'
+
+
+def test_drop_quarantined_sources_returns_input_when_quarantine_missing(configured_client, tmp_path, monkeypatch):
+    """No quarantine directory yet (fresh install / never used) —
+    helper returns an empty set; filter returns the input unchanged.
+    Defaults to today's behaviour for users with no quarantine history."""
+    import core.soulseek_client as sc
+    monkeypatch.setattr(sc.config_manager, 'get',
+                        lambda key, default=None: str(tmp_path) if key == 'soulseek.download_path' else default)
+
+    results = [_mk_track_result(username='peer', filename='song.flac')]
+
+    kept = configured_client._drop_quarantined_sources(results)
+
+    assert kept == results
+
+
+def test_drop_quarantined_sources_swallows_filesystem_errors(configured_client, monkeypatch):
+    """If something goes wrong loading the quarantine keys (permissions,
+    OS quirk, etc.), the filter must NOT break the download pipeline.
+    Returns input unchanged so legitimate downloads keep working —
+    same defensive contract as the existing 401/connection handlers."""
+    import core.soulseek_client as sc
+
+    def _broken_get(key, default=None):
+        raise RuntimeError("config explosion")
+
+    monkeypatch.setattr(sc.config_manager, 'get', _broken_get)
+
+    results = [_mk_track_result(username='peer', filename='song.flac')]
+
+    kept = configured_client._drop_quarantined_sources(results)
+
+    assert kept == results
+
+
+def test_filter_results_by_quality_runs_quarantine_dedup_first(configured_client, tmp_path, monkeypatch):
+    """Integration pin: `filter_results_by_quality_preference` calls
+    the quarantine dedup BEFORE the quality picker. If a candidate is
+    on the quarantine record, it can't win the picker by virtue of
+    superior bitrate — that's how the #652 loop manifested."""
+    import json as _json
+    quarantine_dir = tmp_path / 'ss_quarantine'
+    quarantine_dir.mkdir()
+
+    sidecar = {
+        "context": {
+            "original_search_result": {
+                "username": "badpeer", "filename": "high_bitrate_bad.flac",
+            },
+        },
+    }
+    (quarantine_dir / "20260518_120000.json").write_text(_json.dumps(sidecar))
+
+    import core.soulseek_client as sc
+    monkeypatch.setattr(sc.config_manager, 'get',
+                        lambda key, default=None: str(tmp_path) if key == 'soulseek.download_path' else default)
+
+    # Mock the DB call inside filter_results_by_quality_preference so the
+    # test doesn't need a real DB. Quality profile permits FLAC.
+    class _FakeDB:
+        def get_quality_profile(self):
+            return {
+                'preset': 'flac',
+                'qualities': {
+                    'flac':    {'enabled': True, 'min_kbps': 800, 'max_kbps': 99999},
+                    'mp3_320': {'enabled': False, 'min_kbps': 0, 'max_kbps': 0},
+                    'mp3_256': {'enabled': False, 'min_kbps': 0, 'max_kbps': 0},
+                    'mp3_192': {'enabled': False, 'min_kbps': 0, 'max_kbps': 0},
+                },
+                'priority': ['flac'],
+            }
+
+    import database.music_database as md
+    monkeypatch.setattr(md, 'MusicDatabase', lambda: _FakeDB())
+
+    results = [
+        # The "bad" source has the BEST quality on paper — pre-fix would win the picker.
+        _mk_track_result(username='badpeer', filename='high_bitrate_bad.flac',
+                         quality='flac', bitrate=1411, size=20_000_000, duration=180_000),
+        _mk_track_result(username='goodpeer', filename='good.flac',
+                         quality='flac', bitrate=1411, size=20_000_000, duration=180_000),
+    ]
+
+    kept = configured_client.filter_results_by_quality_preference(results)
+
+    usernames = {r.username for r in kept}
+    assert 'badpeer' not in usernames, "Quarantined source must be filtered before the quality picker"
+    assert 'goodpeer' in usernames
