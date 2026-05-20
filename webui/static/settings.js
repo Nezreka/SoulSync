@@ -3582,6 +3582,22 @@ async function testLidarrConnection() {
     }
 }
 
+function _setIndStatusDot(dotId, state) {
+    const dot = document.getElementById(dotId);
+    if (!dot) return;
+    dot.classList.remove('ind-status-dot-unknown', 'ind-status-dot-connected', 'ind-status-dot-error');
+    if (state === 'connected') {
+        dot.classList.add('ind-status-dot-connected');
+        dot.title = 'Connected';
+    } else if (state === 'error') {
+        dot.classList.add('ind-status-dot-error');
+        dot.title = 'Connection failed';
+    } else {
+        dot.classList.add('ind-status-dot-unknown');
+        dot.title = 'Not tested';
+    }
+}
+
 async function testProwlarrConnection() {
     const statusEl = document.getElementById('prowlarr-connection-status');
     if (!statusEl) return;
@@ -3598,14 +3614,17 @@ async function testProwlarrConnection() {
         if (data.success) {
             statusEl.textContent = data.message || 'Connected';
             statusEl.style.color = '#4caf50';
+            _setIndStatusDot('prowlarr-status-dot', 'connected');
             loadProwlarrIndexers();
         } else {
             statusEl.textContent = data.error || 'Connection failed';
             statusEl.style.color = '#f44336';
+            _setIndStatusDot('prowlarr-status-dot', 'error');
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
         statusEl.style.color = '#f44336';
+        _setIndStatusDot('prowlarr-status-dot', 'error');
     }
 }
 
@@ -3641,13 +3660,16 @@ async function testUsenetClientConnection() {
         if (data.success) {
             statusEl.textContent = data.message || 'Connected';
             statusEl.style.color = '#4caf50';
+            _setIndStatusDot('usenet-client-status-dot', 'connected');
         } else {
             statusEl.textContent = data.error || 'Connection failed';
             statusEl.style.color = '#f44336';
+            _setIndStatusDot('usenet-client-status-dot', 'error');
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
         statusEl.style.color = '#f44336';
+        _setIndStatusDot('usenet-client-status-dot', 'error');
     }
 }
 
@@ -3667,13 +3689,16 @@ async function testTorrentClientConnection() {
         if (data.success) {
             statusEl.textContent = data.message || 'Connected';
             statusEl.style.color = '#4caf50';
+            _setIndStatusDot('torrent-client-status-dot', 'connected');
         } else {
             statusEl.textContent = data.error || 'Connection failed';
             statusEl.style.color = '#f44336';
+            _setIndStatusDot('torrent-client-status-dot', 'error');
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
         statusEl.style.color = '#f44336';
+        _setIndStatusDot('torrent-client-status-dot', 'error');
     }
 }
 
@@ -3694,10 +3719,16 @@ async function loadProwlarrIndexers() {
         }
         const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         const rows = data.indexers.map(idx => {
-            const proto = idx.protocol === 'usenet' ? '📰 Usenet' : '🧲 Torrent';
-            const enabled = idx.enable ? '✅' : '⛔';
-            const privacy = idx.privacy ? `<span style="opacity:0.6;">(${esc(idx.privacy)})</span>` : '';
-            return `<div style="padding:3px 0;">${enabled} <strong>#${esc(idx.id)}</strong> ${esc(idx.name)} — ${proto} ${privacy}</div>`;
+            const protoClass = idx.protocol === 'usenet' ? 'ind-indexer-card-proto-usenet' : 'ind-indexer-card-proto-torrent';
+            const protoLabel = idx.protocol === 'usenet' ? 'Usenet' : 'Torrent';
+            const privacyHTML = idx.privacy ? `<span class="ind-indexer-card-privacy">${esc(idx.privacy)}</span>` : '';
+            const disabledClass = idx.enable ? '' : ' ind-indexer-card-disabled';
+            return `<div class="ind-indexer-card${disabledClass}">
+                <span class="ind-indexer-card-id">#${esc(idx.id)}</span>
+                <span class="ind-indexer-card-name">${esc(idx.name)}</span>
+                ${privacyHTML}
+                <span class="ind-indexer-card-proto ${protoClass}">${protoLabel}</span>
+            </div>`;
         }).join('');
         listEl.innerHTML = rows;
     } catch (e) {
