@@ -61,6 +61,26 @@ def test_is_authenticated_false_when_session_check_login_raises(tidal_client_wit
     assert client.is_authenticated() is False
 
 
+def test_check_device_auth_returns_helpful_message_for_non_json_tidal_response(tidal_client_with_engine):
+    client, _ = tidal_client_with_engine
+
+    class FakeFuture:
+        def running(self):
+            return False
+
+        def result(self, timeout=0):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    client._device_auth_future = FakeFuture()
+    client._device_auth_link = {'verification_uri': 'https://link.tidal.com', 'user_code': 'ABCD'}
+
+    result = client.check_device_auth()
+
+    assert result['status'] == 'error'
+    assert 'invalid auth response' in result['message']
+    assert 'Expecting value' not in result['message']
+
+
 # ---------------------------------------------------------------------------
 # download() — filename parsing + id contract
 # ---------------------------------------------------------------------------
