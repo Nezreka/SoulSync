@@ -21,6 +21,10 @@ export function useProfile() {
   return useShellContext().profile;
 }
 
+export function useShellStatus() {
+  return useShellContext().status ?? null;
+}
+
 export function LegacyRouteController({ pathname }: { pathname: string }) {
   const bridge = useShellBridge();
 

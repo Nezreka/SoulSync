@@ -1,10 +1,18 @@
 import '@testing-library/jest-dom/vitest';
-import { afterAll, afterEach, beforeAll, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 
-import { server } from './src/test/msw';
+import { HttpResponse, http, server } from './src/test/msw';
 
 beforeAll(() => {
   server.listen({ onUnhandledRequest: 'error' });
+});
+
+beforeEach(() => {
+  server.use(
+    http.get('/status', () =>
+      HttpResponse.json({ media_server: { type: 'plex', connected: true } }),
+    ),
+  );
 });
 
 afterEach(() => {
