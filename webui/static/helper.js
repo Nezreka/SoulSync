@@ -3413,6 +3413,21 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.0': [
+        { unreleased: true },
+        { title: 'Indexers & Downloaders tab restyled with collapsible sections', desc: 'tab now opens with an intro hero card explaining the flow (indexers find releases → downloader fetches them → SoulSync imports) and folds the rest into three collapsible sections: Indexers, Torrent Client, Usenet Client. each section gets a per-service color accent (Prowlarr orange, torrent sky-blue, usenet violet), a status dot in the header (green when Test Connection succeeds, red on failure, grey before testing), and Lidarr-style indexer cards with protocol badges instead of the inline emoji list. Indexers section is open by default; the downloader sections start collapsed since not everyone uses both protocols.' },
+        { title: 'Regression tests for the new indexer + downloader plumbing', desc: 'mocked unit tests for Prowlarr + all five downloader adapters (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet). 54 tests pin the state-mapping tables, the parse logic, and the protocol quirks each client needs handled (qBit Referer header, Transmission session-id renegotiation, Deluge magnet-vs-URL method split, SAB queue+history merge, NZBGet 64-bit size fields). next time anyone touches one of these adapters, CI catches breakage before it hits a real downloader.' },
+        { title: 'Usenet client adapters (SABnzbd, NZBGet)', desc: 'third commit in the torrent + usenet rollout. SoulSync now talks to SABnzbd and NZBGet through a sibling adapter contract that mirrors the torrent adapter set — pick one downloader in Settings → Indexers & Downloaders, fill in its API key (SABnzbd) or username + password (NZBGet), and Test Connection confirms the link. all three layers are now stood up: Prowlarr finds releases, the torrent adapter and the usenet adapter each know how to ship work to the underlying client. next commit wires Prowlarr search → adapter dispatch → archive extraction so the new sources actually download. job state mapping covers SABnzbd queue + history and NZBGet groups + history, including the verify/repair/unpack phases that are unique to usenet.' },
+        { title: 'Torrent client adapters (qBittorrent, Transmission, Deluge)', desc: 'second commit in the torrent + usenet rollout. SoulSync can now talk to any of the three big torrent clients through a single adapter contract — pick which one you use in Settings → Indexers & Downloaders, paste your WebUI URL and credentials, and Test Connection confirms the link. each adapter handles its own auth quirk (qBit cookies, Transmission session-id, Deluge JSON-RPC) and maps native state strings onto a uniform set so the rest of the app stays client-agnostic. no download wiring yet — that gets layered on once the usenet client adapters land in the next commit.' },
+        { title: 'Prowlarr integration', desc: 'new Indexers & Downloaders tab in Settings. point SoulSync at your Prowlarr instance with a URL and API key, and you can browse the indexers Prowlarr exposes from inside the app. this is the search half of the upcoming torrent and usenet download sources — wires up the indexer list now so later commits can plug the download flow on top. Lidarr already pulls from its own indexers; Prowlarr unlocks the same search surface to the rest of the download pipeline.' },
+    ],
+    '2.5.8': [
+        { date: 'May 20, 2026 — 2.5.8 release' },
+        { title: 'Fix: blank artist pages on Python / git-pull installs', desc: 'PR #644 moved the artist detail page behind a TanStack React route. installs that pull from git but never run `npm install && npm run build` ship without the Vite bundle, so the legacy shell saw `/artist-detail/<source>/<id>` URLs and bailed — every click left a blank pane. the legacy startup path now parses the URL itself and hands off to the existing artist detail loader, so Python users get artist pages back without needing to build the webui. Docker / built installs still take the React route as before.' },
+        { title: 'Fix: downloads marked complete before post-processing finished', desc: 'monitored Soulseek transfers were getting flipped to "successful" the moment slskd reported the file done — before SoulSync had actually run the post-processing worker (find on disk, fingerprint-verify, import to library). a failed import after that point left a phantom "completed" row that never made it into the library. completion now waits for the real post-processing result; if the worker can\'t even be scheduled, the task is marked failed and the batch slot is released so the queue keeps moving.' },
+        { title: 'Disk-backed artwork cache', desc: 'image fetches now route through a disk + SQLite cache with hashed URLs, size / mime validation, stale fallback when the upstream is down, and per-image fetch locking so 12 simultaneous requests for the same album cover share one network round-trip. cuts repeat-load latency and survives metadata source rate limits. served from new `/api/image-cache`; `/api/image-proxy` stays as a compatibility shim.' },
+        { title: 'Strict-source downloads check duration before pulling', desc: 'Tidal / Qobuz / HiFi / Deezer-DL / Amazon candidates now get a duration-tolerance check before the download starts, using the same tolerance logic post-processing would apply after. tracks whose duration is far enough off the metadata reference to fail the integrity check are skipped at pick time instead of after wasting the download. Soulseek and YouTube unchanged (they don\'t expose reliable pre-download duration).' },
+    ],
     '2.5.7': [
         { date: 'May 19, 2026 — 2.5.7 release' },
         { title: 'Fix: MusicBrainz manual search missing results', desc: 'the Fix popup and manual library service search were using strict Lucene phrase-match queries against the `recording` / `release` / `artist` fields — diacritics ("Bjork" vs canonical "Björk"), bracketed suffixes like "(Live)", and any AND-clause mismatch all killed recall. switched user-facing manual lookups to bare queries that hit MB\'s alias / sortname indexes with diacritic folding. enrichment workers stay strict for precision.' },
@@ -3464,6 +3479,46 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Usenet Client Adapters (SABnzbd, NZBGet)",
+        description: "third phase of the torrent + usenet rollout. SoulSync now also talks to the two big usenet downloaders through a sibling adapter contract. Prowlarr + torrent + usenet are all stood up — next commit wires them together into actual download sources.",
+        features: [
+            "• supports SABnzbd (API-key auth) and NZBGet (JSON-RPC basic auth)",
+            "• new Usenet Client section on the Indexers & Downloaders tab; client picker swaps the credential fields automatically (API key vs username + password)",
+            "• state mapping covers the verify / repair / unpack phases unique to usenet",
+            "• category override so SoulSync's NZBs land in a predictable post-processing folder",
+            "• Test Connection probes the live API",
+            "• next commit wires Prowlarr → adapter → archive extraction → match so the new sources fully download",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Usenet Client",
+    },
+    {
+        title: "Torrent Client Adapters (qBit, Transmission, Deluge)",
+        description: "second phase of the torrent + usenet rollout. SoulSync now speaks the three big torrent client APIs through one uniform adapter — pick which client you use and SoulSync handles the auth and protocol quirks for you.",
+        features: [
+            "• supports qBittorrent (WebUI v2), Transmission (RPC), Deluge 2.x (JSON-RPC)",
+            "• new Torrent Client section on the Indexers & Downloaders tab",
+            "• single client type picker — switching between clients is a dropdown change, no code path divergence",
+            "• per-client credential fields with hints (qBit / Transmission use username + password, Deluge uses password only)",
+            "• optional category/label and save-path overrides so SoulSync's torrents are easy to spot in your client",
+            "• Test Connection probes the live WebUI and confirms auth works",
+            "• no downloads triggered yet — the wire-up to Prowlarr search results lands once usenet client adapters ship",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Torrent Client",
+    },
+    {
+        title: "Prowlarr Integration (Phase 1 of Torrent + Usenet)",
+        description: "first commit toward torrent and usenet download sources. SoulSync can now talk to your Prowlarr instance and pull the list of configured indexers, setting up the search surface that the torrent and usenet clients will plug into next.",
+        features: [
+            "• new Indexers & Downloaders tab on the Settings page",
+            "• point SoulSync at Prowlarr with a URL and API key — same kind of setup as Lidarr",
+            "• Test Connection button confirms Prowlarr is reachable and authenticated",
+            "• Refresh Indexer List pulls the full list of indexers Prowlarr is currently managing (torrent + usenet, enabled state, privacy level)",
+            "• optional indexer-ID allowlist if you want SoulSync to only search a subset",
+            "• no downloads yet — torrent and usenet client adapters land in the next commits",
+        ],
+        usage_note: "Settings → Indexers & Downloaders → Prowlarr",
+    },
     {
         title: "MusicBrainz Is Now a First-Class Metadata Source",
         description: "MusicBrainz was already available as an optional search tab, but it wasn't selectable as your primary metadata source. now it is — switch to it in Settings → Metadata Source and the whole app routes through it.",
@@ -3795,7 +3850,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.7';
+    return versions[0] || '2.5.8';
 }
 
 function openWhatsNew() {

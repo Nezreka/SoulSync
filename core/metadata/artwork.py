@@ -192,13 +192,13 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
 
 
 def is_image_proxy_url(url: str) -> bool:
-    """Return True for SoulSync image-proxy URLs, absolute or relative."""
+    """Return True for SoulSync image proxy/cache URLs, absolute or relative."""
     if not url:
         return False
 
     try:
         parsed = urlparse(url)
-        return parsed.path == '/api/image-proxy'
+        return parsed.path == '/api/image-proxy' or parsed.path.startswith('/api/image-cache/')
     except Exception:
         return False
 
@@ -235,10 +235,19 @@ def _browser_safe_image_url(url: str) -> str:
     if is_image_proxy_url(url):
         return url
 
-    if url.startswith('/api/image-proxy?url='):
+    if url.startswith('/api/image-proxy?url=') or url.startswith('/api/image-cache/'):
         return url
 
     if url.startswith('http://') or url.startswith('https://'):
+        try:
+            from core.image_cache import cached_image_url
+
+            cached_url = cached_image_url(url)
+            if cached_url:
+                return cached_url
+        except Exception as exc:
+            logger.debug("image cache URL registration failed: %s", exc)
+
         if is_internal_image_host(url):
             return f"/api/image-proxy?url={quote(url, safe='')}"
         return url
