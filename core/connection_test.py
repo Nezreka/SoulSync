@@ -305,6 +305,25 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "torrent_client":
+            client_type = (config_manager.get('torrent_client.type', '') or '').strip().lower()
+            url = config_manager.get('torrent_client.url', '')
+            if not url:
+                return False, "Torrent client URL is required."
+            if not client_type:
+                return False, "Pick a torrent client (qBittorrent, Transmission, or Deluge)."
+            try:
+                from core.torrent_clients import adapter_for_type
+                adapter = adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown torrent client type: {client_type}"
+                if not adapter.is_configured():
+                    return False, "Torrent client missing required credentials."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Torrent client connection error: {str(e)}"
         elif service == "prowlarr":
             url = config_manager.get('prowlarr.url', '')
             api_key = config_manager.get('prowlarr.api_key', '')

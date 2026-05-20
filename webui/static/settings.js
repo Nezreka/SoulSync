@@ -952,6 +952,18 @@ async function loadSettingsData() {
         if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
         if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
         if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
+        const _tcType = document.getElementById('torrent-client-type');
+        const _tcUrl = document.getElementById('torrent-client-url');
+        const _tcUser = document.getElementById('torrent-client-username');
+        const _tcPass = document.getElementById('torrent-client-password');
+        const _tcCat = document.getElementById('torrent-client-category');
+        const _tcPath = document.getElementById('torrent-client-save-path');
+        if (_tcType) _tcType.value = settings.torrent_client?.type || 'qbittorrent';
+        if (_tcUrl) _tcUrl.value = settings.torrent_client?.url || '';
+        if (_tcUser) _tcUser.value = settings.torrent_client?.username || '';
+        if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
+        if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
+        if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -2702,6 +2714,14 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('prowlarr-api-key')?.value || '',
             indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
         },
+        torrent_client: {
+            type: document.getElementById('torrent-client-type')?.value || 'qbittorrent',
+            url: document.getElementById('torrent-client-url')?.value || '',
+            username: document.getElementById('torrent-client-username')?.value || '',
+            password: document.getElementById('torrent-client-password')?.value || '',
+            category: document.getElementById('torrent-client-category')?.value || 'soulsync',
+            save_path: document.getElementById('torrent-client-save-path')?.value || '',
+        },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
@@ -3558,6 +3578,32 @@ async function testProwlarrConnection() {
             statusEl.textContent = data.message || 'Connected';
             statusEl.style.color = '#4caf50';
             loadProwlarrIndexers();
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testTorrentClientConnection() {
+    const statusEl = document.getElementById('torrent-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'torrent_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
         } else {
             statusEl.textContent = data.error || 'Connection failed';
             statusEl.style.color = '#f44336';
