@@ -624,11 +624,20 @@ class TestSearchAlbums:
             albums = client.search_albums("GNX")
         assert len(albums) == 1
 
-    def test_ignores_track_hits(self):
+    def test_derives_albums_from_track_hits(self):
+        """search_albums now intentionally queries `types=track` and derives
+        Album objects from the album metadata carried on each track hit —
+        Amazon's album-type query is broken upstream, so the t2tunes fix
+        switched everything to track-type and reconstructs albums from the
+        results. Distinct album ASINs across the track hits yield distinct
+        albums; duplicates collapse via the explicit/clean dedup key."""
         client = _make_client({"amazon-music/search": SEARCH_RESPONSE_TRACKS})
         with patch("core.amazon_client._rate_limit"):
             albums = client.search_albums("Kendrick")
-        assert albums == []
+        # Two track hits → two distinct album ASINs → two derived albums.
+        assert {a.id for a in albums} == {"B0ABCDE123", "B0ABCDE456"}
+        assert {a.name for a in albums} == {"GNX", "euphoria"}
+        assert all(a.artists == ["Kendrick Lamar"] for a in albums)
 
     def test_strips_explicit_from_album_name(self):
         resp = {
