@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import threading
 import time
 import uuid
@@ -58,6 +57,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import config_manager
 from core.archive_pipeline import collect_audio_after_extraction
+from core.download_plugins.album_bundle import (
+    copy_audio_files_atomically,
+    get_poll_interval,
+    get_poll_timeout,
+    pick_best_album_release,
+)
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from core.prowlarr_client import (
@@ -83,14 +88,13 @@ _FILENAME_SEP = '||'
 # don't want to keep sharing.
 _COMPLETE_STATES = frozenset(['seeding', 'completed'])
 
-# Max seconds the poll thread keeps watching one download before
-# giving up. 6 hours covers slow private trackers without leaking
-# threads forever on dead torrents.
-_POLL_TIMEOUT_SECONDS = 6 * 60 * 60
-
-# Poll cadence — torrent state changes slowly; no point hammering
-# the WebUI more than once a second.
-_POLL_INTERVAL_SECONDS = 2.0
+# Poll cadence / timeout — both pull from config via the shared
+# album_bundle helpers so users can extend the deadline for slow
+# trackers without editing source. Kept as module aliases so the
+# per-track flow at the bottom of this file can still import them
+# under the legacy names without re-reading config every loop.
+_POLL_TIMEOUT_SECONDS = get_poll_timeout()
+_POLL_INTERVAL_SECONDS = get_poll_interval()
 
 
 class TorrentDownloadPlugin(DownloadSourcePlugin):
@@ -466,7 +470,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No torrent results found for "{query}"'
             return result
 
-        picked = _pick_best_album_release(candidates)
+        picked = pick_best_album_release(candidates, _guess_quality_from_title)
         if picked is None:
             result['error'] = 'No suitable torrent candidate after filtering'
             return result
@@ -504,16 +508,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No audio files found in {save_path}'
             return result
 
-        staging_path = Path(staging_dir)
-        staging_path.mkdir(parents=True, exist_ok=True)
-        copied: List[str] = []
-        for src in audio_files:
-            dst = _unique_staging_path(staging_path, src)
-            try:
-                shutil.copy2(src, dst)
-                copied.append(str(dst))
-            except Exception as e:
-                logger.warning("[Torrent album] Failed to copy %s -> %s: %s", src, dst, e)
+        copied = copy_audio_files_atomically(audio_files, Path(staging_dir))
         if not copied:
             result['error'] = 'No audio files copied to staging'
             return result
@@ -551,57 +546,6 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             time.sleep(_POLL_INTERVAL_SECONDS)
         logger.error("[Torrent album] '%s' timed out", title)
         return None
-
-
-# ---------------------------------------------------------------------------
-# Album-pick helpers
-# ---------------------------------------------------------------------------
-
-
-_QUALITY_SCORE = {'flac': 4, 'ogg': 3, 'aac': 2, 'mp3': 1}
-
-
-def _pick_best_album_release(candidates) -> Optional[Any]:
-    """Pick the single best torrent for an album-bundle download.
-
-    Heuristic, in priority order:
-    1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
-       releases that snuck in and quarantines suspicious giants.
-    2. Higher seeders > lower (dead torrents = dead downloads).
-    3. Higher quality (FLAC > AAC > MP3) inferred from title.
-    4. Larger size as tiebreaker (often = higher bitrate).
-    """
-    MIN_BYTES = 40 * 1024 * 1024
-    MAX_BYTES = 3 * 1024 * 1024 * 1024
-
-    sized = [c for c in candidates if MIN_BYTES <= (c.size or 0) <= MAX_BYTES]
-    pool = sized or candidates
-    if not pool:
-        return None
-
-    def _score(c) -> tuple:
-        seeders = c.seeders or 0
-        quality = _QUALITY_SCORE.get(_guess_quality_from_title(c.title), 0)
-        size = c.size or 0
-        return (seeders, quality, size)
-
-    return max(pool, key=_score)
-
-
-def _unique_staging_path(staging_dir: Path, src: Path) -> Path:
-    """Return a destination path inside ``staging_dir`` that doesn't
-    collide with an existing file. Appends ``_1``, ``_2``, etc. before
-    the extension when needed."""
-    dest = staging_dir / src.name
-    if not dest.exists():
-        return dest
-    stem = dest.stem
-    suffix = dest.suffix
-    for i in range(1, 1000):
-        candidate = staging_dir / f"{stem}_{i}{suffix}"
-        if not candidate.exists():
-            return candidate
-    return dest    # give up — overwrite
 
 
 # ---------------------------------------------------------------------------
