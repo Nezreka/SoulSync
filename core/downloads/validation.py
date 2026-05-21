@@ -146,14 +146,26 @@ def get_valid_candidates(results, spotify_track, query):
                 candidate_duration_ms=r.duration or 0,
             )
 
-            # Torrent / usenet results are typically release-level (album torrents).
-            # Looking for "Luther (with SZA)" against a candidate titled
-            # "GNX (2024) [FLAC]" scores ~0 on track-title alone, even though
-            # the album torrent does in fact contain the wanted track. Score
-            # the candidate title against the wanted track's ALBUM name too
-            # and take the max, so album-level releases match every track on
-            # them. The album_track_count bonus only kicks in when we have
-            # a non-empty album string to compare against.
+            # Album-name fallback for torrent / usenet per-track results.
+            #
+            # When this fallback runs: hybrid mode + non-album batch (single
+            # track wishlist / playlist of singles). Album-context batches
+            # never reach here — the album-bundle gate in
+            # core/downloads/album_bundle_dispatch.py engages the bulk-
+            # download flow in single-source mode, and the hybrid chain
+            # filter in core/downloads/task_worker.py strips torrent /
+            # usenet from album batches in hybrid mode. What's left is the
+            # single-track-in-hybrid case where a user is searching for one
+            # track and the only torrent / usenet result is the album that
+            # contains it.
+            #
+            # Without this fallback, "Luther (with SZA)" against a
+            # candidate titled "GNX (2024) [FLAC]" scores ~0 on track-title
+            # alone — even though the album torrent does in fact contain
+            # the wanted track. Scoring the candidate title against the
+            # wanted track's ALBUM name and taking the max gives album-
+            # level releases a fair shot. The Auto-Import sweep then picks
+            # the right file out of the downloaded album folder.
             if r.username in ('torrent', 'usenet') and spotify_track and spotify_track.album:
                 album_conf, _ = matching_engine.score_track_match(
                     source_title=spotify_track.album,
