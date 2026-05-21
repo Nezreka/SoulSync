@@ -597,10 +597,12 @@ const HYBRID_SOURCES = [
     { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
     { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
+    { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
+    { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -1536,6 +1538,11 @@ function updateDownloadSourceUI() {
     if (amazonContainer) amazonContainer.style.display = activeSources.has('amazon') ? 'block' : 'none';
     if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
     if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
+    const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
+    if (prowlarrRedirect) {
+        const showProwlarr = activeSources.has('torrent') || activeSources.has('usenet');
+        prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
+    }
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
