@@ -85,6 +85,7 @@ def test_default_registry_registers_all_sources():
     expected = {
         'soulseek', 'youtube', 'tidal', 'qobuz',
         'hifi', 'deezer', 'lidarr', 'soundcloud', 'amazon',
+        'torrent', 'usenet',
     }
     assert set(registry.names()) == expected
 
