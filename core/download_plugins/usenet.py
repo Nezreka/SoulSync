@@ -27,6 +27,7 @@ from core.download_plugins.torrent import (
     _decode_filename,
     _guess_quality_from_title,
     _parse_indexer_id_filter,
+    _parse_release_title,
     _row_to_status,
     _COMPLETE_STATES,
     _FILENAME_SEP,
@@ -114,6 +115,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 continue
             filename = f"{result.download_url}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
+            parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
                 username='usenet',
                 filename=filename,
@@ -126,9 +128,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 free_upload_slots=1,
                 upload_speed=0,
                 queue_length=0,
-                artist=None,
-                title=result.title,
-                album=None,
+                # Pre-fill artist + title so TrackResult.__post_init__
+                # doesn't auto-parse the filename — same URL-in-filename
+                # gotcha as the torrent plugin.
+                artist=parsed_artist or result.indexer_name or 'Usenet',
+                title=parsed_title or result.title,
+                album=parsed_title or None,
                 track_number=None,
                 _source_metadata={
                     'indexer': result.indexer_name,
@@ -141,8 +146,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             albums.append(AlbumResult(
                 username='usenet',
                 album_path=f"usenet/{result.guid}",
-                album_title=result.title,
-                artist=None,
+                album_title=parsed_title or result.title,
+                artist=parsed_artist or None,
                 track_count=1,
                 total_size=result.size,
                 tracks=[tr],

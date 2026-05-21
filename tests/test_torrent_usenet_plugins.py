@@ -22,6 +22,7 @@ from core.download_plugins.torrent import (
     _decode_filename,
     _FILENAME_SEP,
     _guess_quality_from_title,
+    _parse_release_title,
 )
 from core.download_plugins.usenet import UsenetDownloadPlugin
 from core.prowlarr_client import ProwlarrSearchResult
@@ -71,6 +72,45 @@ def test_guess_quality_from_title() -> None:
     assert _guess_quality_from_title('') == 'mp3'
 
 
+def test_parse_release_title_splits_artist_dash_title() -> None:
+    """Most release titles follow 'Artist - Title' / 'Artist - Album'."""
+    assert _parse_release_title('Danny Brown - Atrocity Exhibition') == ('Danny Brown', 'Atrocity Exhibition')
+    assert _parse_release_title('Kendrick Lamar - DAMN.') == ('Kendrick Lamar', 'DAMN.')
+
+
+def test_parse_release_title_strips_trailing_tags() -> None:
+    """Quality / year tags at the end shouldn't pollute the title."""
+    artist, title = _parse_release_title('Danny Brown - Atrocity Exhibition [FLAC]')
+    assert artist == 'Danny Brown'
+    assert title == 'Atrocity Exhibition'
+    artist, title = _parse_release_title('Danny Brown - Atrocity Exhibition (2016)')
+    assert artist == 'Danny Brown'
+    assert title == 'Atrocity Exhibition'
+
+
+def test_parse_release_title_handles_no_dash() -> None:
+    """Some indexers post bare titles. Caller should fall back to
+    the indexer name as the 'artist' field."""
+    artist, title = _parse_release_title('JustATitle')
+    assert artist == ''
+    assert title == 'JustATitle'
+
+
+def test_parse_release_title_handles_dashes_in_title() -> None:
+    """Track titles can themselves contain dashes — only split on
+    the FIRST one so subtitles survive."""
+    artist, title = _parse_release_title('Artist - Title - Live Version')
+    assert artist == 'Artist'
+    assert title == 'Title - Live Version'
+
+
+def test_parse_release_title_rejects_url_prefix() -> None:
+    """Defensive: if a URL somehow lands in the title field, refuse
+    to call it an artist."""
+    artist, title = _parse_release_title('https://example.com/x - Album')
+    assert artist == ''
+
+
 def test_adapter_state_mapping_covers_complete_states() -> None:
     assert _adapter_state_to_display('downloading') == 'InProgress, Downloading'
     assert _adapter_state_to_display('seeding') == 'Completed, Succeeded'
@@ -88,7 +128,7 @@ def test_adapter_state_mapping_covers_complete_states() -> None:
 
 def _make_torrent_result(**overrides) -> ProwlarrSearchResult:
     base = dict(
-        guid='guid-1', title='Some Album FLAC', indexer_id=3,
+        guid='guid-1', title='Danny Brown - Atrocity Exhibition [FLAC]', indexer_id=3,
         indexer_name='Indexer', protocol='torrent',
         download_url='https://x/y.torrent', magnet_uri=None,
         info_url=None, size=500_000_000, seeders=12, leechers=3,
@@ -107,7 +147,8 @@ def test_torrent_project_results_drops_non_torrent_protocol() -> None:
     ]
     tracks, albums = plugin._project_results(results)
     assert len(tracks) == 1
-    assert tracks[0].title == 'Some Album FLAC'
+    assert tracks[0].title == 'Atrocity Exhibition'
+    assert tracks[0].artist == 'Danny Brown'
     assert len(albums) == 1
 
 
@@ -133,7 +174,20 @@ def test_torrent_project_results_encodes_url_and_title_in_filename() -> None:
     tracks, _ = plugin._project_results([_make_torrent_result()])
     url, display = _decode_filename(tracks[0].filename)
     assert url == 'https://x/y.torrent'
-    assert display == 'Some Album FLAC'
+    assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
+
+
+def test_torrent_project_falls_back_to_indexer_name_when_title_lacks_dash() -> None:
+    """When the title has no 'Artist -' prefix we'd auto-parse the
+    filename (which starts with the indexer download URL) and end
+    up showing the URL in the UI's 'by' field. Pre-filling artist
+    with the indexer name avoids that."""
+    plugin = TorrentDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title='JustATitle')])
+    assert tracks[0].artist == 'Indexer'
+    # And the URL is definitely not the artist.
+    assert 'http' not in tracks[0].artist
+    assert '||' not in tracks[0].artist
 
 
 def test_torrent_project_results_neutralizes_soulseek_specific_fields() -> None:
@@ -252,7 +306,7 @@ def test_torrent_get_all_returns_status_objects() -> None:
 
 def _make_usenet_result(**overrides) -> ProwlarrSearchResult:
     base = dict(
-        guid='guid-u', title='Some Album', indexer_id=5,
+        guid='guid-u', title='Some Artist - Some Album', indexer_id=5,
         indexer_name='UsenetIndexer', protocol='usenet',
         download_url='https://x/y.nzb', magnet_uri=None,
         info_url=None, size=400_000_000, seeders=None, leechers=None,
@@ -285,7 +339,10 @@ def test_usenet_project_encodes_url_in_filename() -> None:
     tracks, _ = plugin._project_results([_make_usenet_result()])
     url, display = _decode_filename(tracks[0].filename)
     assert url == 'https://x/y.nzb'
-    assert display == 'Some Album'
+    assert display == 'Some Artist - Some Album'
+    # Artist + title should be parsed out, not auto-extracted from filename.
+    assert tracks[0].artist == 'Some Artist'
+    assert tracks[0].title == 'Some Album'
 
 
 def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:

@@ -164,6 +164,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 continue
             filename = f"{download_url}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
+            parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
                 username='torrent',
                 filename=filename,
@@ -177,9 +178,13 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 free_upload_slots=max(1, result.seeders or 0),
                 upload_speed=0,
                 queue_length=0,
-                artist=None,
-                title=result.title,
-                album=None,
+                # Pre-fill artist + title so TrackResult.__post_init__
+                # doesn't auto-parse the filename — our filename starts
+                # with the indexer download URL, which would otherwise
+                # show up as "by download?apikey=..." in the UI.
+                artist=parsed_artist or result.indexer_name or 'Torrent',
+                title=parsed_title or result.title,
+                album=parsed_title or None,
                 track_number=None,
                 _source_metadata={
                     'indexer': result.indexer_name,
@@ -194,8 +199,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             albums.append(AlbumResult(
                 username='torrent',
                 album_path=f"torrent/{result.guid}",
-                album_title=result.title,
-                artist=None,
+                album_title=parsed_title or result.title,
+                artist=parsed_artist or None,
                 track_count=1,    # unknown until download finishes
                 total_size=result.size,
                 tracks=[tr],
@@ -403,6 +408,37 @@ def _decode_filename(filename: str) -> Tuple[Optional[str], str]:
         return (None, filename or '')
     url, display = filename.split(_FILENAME_SEP, 1)
     return (url, display)
+
+
+def _parse_release_title(title: str) -> Tuple[str, str]:
+    """Split a release title into ``(artist, title)`` using the
+    ``Artist - Title`` / ``Artist - Album`` convention almost every
+    indexer follows. Returns ``('', title)`` when no dash is found.
+
+    Without this, ``TrackResult.__post_init__`` runs the bare
+    filename through ``parse_filename_metadata`` — and our filename
+    starts with the indexer's download URL, so the auto-parser
+    extracts garbage like ``download?apikey=...`` as the artist
+    and shows it in the search-result UI's "by" line. Pre-filling
+    the artist field short-circuits the auto-parse.
+    """
+    if not title:
+        return ('', '')
+    # Strip common quality / format tags so the dash split doesn't
+    # eat them — "Artist - Album [FLAC] (2020)" → "Artist", "Album".
+    cleaned = re.sub(r'\s*[\[\(][^\]\)]*[\]\)]\s*$', '', title.strip())
+    # Look for the FIRST " - " (or "-" surrounded by content). Some
+    # release titles have multiple dashes (subtitle dashes); the
+    # first split is the artist/work boundary.
+    parts = re.split(r'\s+-\s+|\s+-(?=\S)|(?<=\S)-\s+', cleaned, maxsplit=1)
+    if len(parts) == 2:
+        artist = parts[0].strip()
+        rest = parts[1].strip()
+        # Reject obvious non-artist prefixes (URLs, hashes, single
+        # punctuation) so we don't propagate garbage.
+        if artist and not re.match(r'^https?:|^[a-f0-9]{32,}$', artist):
+            return (artist, rest or cleaned)
+    return ('', cleaned)
 
 
 def _guess_quality_from_title(title: str) -> str:
