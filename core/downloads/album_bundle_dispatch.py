@@ -1,0 +1,179 @@
+"""Album-bundle dispatch for torrent / usenet single-source downloads.
+
+Lifted from ``run_full_missing_tracks_process`` so the master
+worker doesn't carry a 90-line inline branch and so the gate logic
+can be unit-tested in isolation.
+
+The gate fires only when ALL conditions hold:
+
+- Batch is an album-context download (``is_album_download`` flag).
+- Active download source is ``torrent`` or ``usenet`` (single-source
+  mode — hybrid stays per-track to preserve fallback).
+- Both album-name and artist-name are populated in batch context.
+- The resolved plugin exposes ``download_album_to_staging``.
+
+When the gate engages it runs the plugin synchronously (the master
+worker is already on a thread-pool executor) and mirrors the
+plugin's lifecycle payloads into the batch state so the Downloads
+page can render meaningful progress before per-track tasks exist.
+
+Return semantics: ``True`` means the gate handled the batch — the
+master worker should stop and not run per-track analysis. ``False``
+means the gate didn't engage (or engaged-and-fell-back) — caller
+continues the normal per-track flow.
+
+The ``BatchStateAccess`` Protocol exists so this module doesn't
+import ``download_batches`` from runtime_state directly. The
+caller (master worker) injects accessors so this module stays
+testable without touching live runtime state.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Callable, Optional, Protocol
+
+logger = logging.getLogger(__name__)
+
+
+class BatchStateAccess(Protocol):
+    """Narrow shim around the batch-state dict ops the dispatch needs.
+
+    Two methods to keep the surface small:
+    - ``update_fields(batch_id, fields)`` — atomic merge into the
+      batch dict under tasks_lock.
+    - ``mark_failed(batch_id, error)`` — convenience for the failure
+      path (sets phase + error + album_bundle_state in one shot).
+    """
+
+    def update_fields(self, batch_id: str, fields: dict) -> None: ...
+
+    def mark_failed(self, batch_id: str, error: str) -> None: ...
+
+
+# Fields the album-bundle progress callback may carry. Anything in
+# this set gets mirrored onto the batch row as ``album_bundle_<key>``
+# so the Downloads page can render it without coupling to the
+# specific payload shape.
+_MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
+                  'size', 'seeders', 'grabs', 'count')
+
+
+def is_eligible(
+    *,
+    mode: str,
+    is_album: bool,
+    album_name: str,
+    artist_name: str,
+) -> bool:
+    """Pure predicate: does this batch even qualify for the album
+    flow? Separate from the resolution+run step so tests can pin
+    the gate logic without standing up a plugin."""
+    if not is_album:
+        return False
+    if (mode or '').lower() not in ('torrent', 'usenet'):
+        return False
+    if not (album_name or '').strip():
+        return False
+    if not (artist_name or '').strip():
+        return False
+    return True
+
+
+def try_dispatch(
+    *,
+    batch_id: str,
+    is_album: bool,
+    album_context: Optional[dict],
+    artist_context: Optional[dict],
+    config_get: Callable[..., Any],
+    plugin_resolver: Callable[[str], Optional[Any]],
+    state: BatchStateAccess,
+) -> bool:
+    """Attempt the album-bundle flow. Returns ``True`` iff the
+    master worker should return early (gate engaged and completed
+    — success OR failure). ``False`` means fall through to the
+    normal per-track flow.
+
+    ``config_get`` is a callable shaped like ``config_manager.get``;
+    ``plugin_resolver`` resolves a source-name string to an
+    initialised plugin instance (or None); ``state`` is the
+    BatchStateAccess shim. Injecting these keeps the module
+    dependency-light + unit-testable.
+    """
+    mode = (config_get('download_source.mode', 'soulseek') or 'soulseek').lower()
+    album_name = (album_context or {}).get('name') or ''
+    artist_name = (artist_context or {}).get('name') or ''
+
+    if not is_eligible(mode=mode, is_album=is_album,
+                       album_name=album_name, artist_name=artist_name):
+        return False
+
+    album_name = album_name.strip()
+    artist_name = artist_name.strip()
+
+    plugin = None
+    try:
+        plugin = plugin_resolver(mode)
+    except Exception as exc:
+        logger.warning("[Album Bundle] Could not resolve %s plugin: %s", mode, exc)
+
+    if plugin is None or not hasattr(plugin, 'download_album_to_staging'):
+        logger.warning(
+            "[Album Bundle] Gate matched but plugin / context unavailable "
+            "(mode=%s album=%r artist=%r plugin=%s) — falling back to per-track flow",
+            mode, album_name, artist_name,
+            type(plugin).__name__ if plugin else None,
+        )
+        return False
+
+    staging_dir = config_get('import.staging_path', './Staging') or './Staging'
+    logger.info(
+        "[Album Bundle] Engaging %s album flow for '%s' by '%s' -> %s",
+        mode, album_name, artist_name, staging_dir,
+    )
+    state.update_fields(batch_id, {
+        'phase': 'album_downloading',
+        'album_bundle_state': 'searching',
+        'album_bundle_source': mode,
+    })
+
+    def _emit(payload):
+        """Mirror plugin lifecycle into batch state for UI rendering."""
+        try:
+            fields = {'album_bundle_state': payload.get('state', '')}
+            for key in _MIRRORED_KEYS:
+                if key in payload:
+                    fields[f'album_bundle_{key}'] = payload[key]
+            state.update_fields(batch_id, fields)
+        except Exception as exc:
+            logger.debug("[Album Bundle] emit failed: %s", exc)
+
+    try:
+        outcome = plugin.download_album_to_staging(
+            album_name, artist_name, staging_dir, _emit,
+        )
+    except Exception as exc:
+        logger.exception("[Album Bundle] %s plugin raised: %s", mode, exc)
+        outcome = {'success': False, 'error': f'Plugin error: {exc}'}
+
+    if not outcome.get('success'):
+        err = outcome.get('error', 'Album bundle download failed')
+        logger.error("[Album Bundle] %s flow failed for '%s': %s",
+                     mode, album_name, err)
+        state.mark_failed(batch_id, err)
+        return True
+
+    logger.info(
+        "[Album Bundle] %s staged %d files for '%s' — handing off to per-track staging matcher",
+        mode, len(outcome.get('files', [])), album_name,
+    )
+    state.update_fields(batch_id, {
+        'phase': 'analysis',
+        'album_bundle_state': 'staged',
+    })
+    # Engaged-and-succeeded: we DON'T early-return because the
+    # per-track flow needs to run to create + complete the per-track
+    # task rows. Those tasks will hit try_staging_match and pull the
+    # files we just staged.
+    return False
