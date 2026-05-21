@@ -480,11 +480,19 @@ class ConfigManager:
                 "search_min_delay_seconds": 0,
             },
             "download_source": {
-                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid"
+                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid", "torrent", "usenet"
                 "hybrid_primary": "soulseek",  # Legacy: primary source for hybrid mode
                 "hybrid_secondary": "youtube",  # Legacy: fallback source for hybrid mode
                 "hybrid_order": [],  # Ordered list of sources for hybrid mode (overrides primary/secondary)
                 "stream_source": "youtube",  # Options: "youtube" (instant, default), "active" (use download source; falls back to youtube if soulseek)
+                # Album-bundle (torrent / usenet single-source) poll tuning.
+                # Downloader is polled every N seconds until the release
+                # lands; whole job aborts at the timeout. Defaults match
+                # the previous hard-coded constants. Users on slow private
+                # trackers / large box sets can extend the timeout without
+                # editing source.
+                "album_bundle_poll_interval_seconds": 2.0,
+                "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"

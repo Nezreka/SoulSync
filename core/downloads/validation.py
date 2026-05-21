@@ -25,6 +25,20 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
+def _torrent_usenet_artist_is_fallback(result):
+    """True when a release result has no parsed artist, only indexer filler."""
+    if getattr(result, 'username', None) not in ('torrent', 'usenet'):
+        return False
+    artist = (getattr(result, 'artist', None) or '').strip()
+    if not artist:
+        return True
+    metadata = getattr(result, '_source_metadata', None) or {}
+    indexer = str(metadata.get('indexer') or '').strip()
+    if artist.lower() in ('torrent', 'usenet'):
+        return True
+    return bool(indexer and artist.lower() == indexer.lower())
+
+
 def filter_soundcloud_previews(results, expected_track):
     """Drop SoundCloud preview snippets so they never reach the cache,
     the modal, or the auto-download attempt.
@@ -97,8 +111,12 @@ def get_valid_candidates(results, spotify_track, query):
         return []
 
     # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer, SoundCloud) return structured API results
-    # with proper artist/title metadata — score using the same matching engine as Soulseek
-    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon")
+    # with proper artist/title metadata — score using the same matching engine as Soulseek.
+    # Torrent / usenet results also belong here: their filename field is a download URL, not
+    # a slskd-style ``Artist/Album/Track.flac`` path, so the Soulseek matcher would extract
+    # garbage segments from it. Routing them through the streaming path means score_track_match
+    # reads ``r.title`` and ``r.artist`` directly (which the torrent/usenet projections pre-fill).
+    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon", "torrent", "usenet")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
         expected_artists = spotify_track.artists if spotify_track else []
@@ -132,15 +150,54 @@ def get_valid_candidates(results, spotify_track, query):
                 )
                 continue
 
-            # Score using matching engine's generic scorer (same weights as Soulseek)
+            # Score using matching engine's generic scorer (same weights as Soulseek).
+            # Torrent/usenet release projections sometimes only have the indexer name
+            # in the artist field when a title did not parse as "Artist - Release".
+            # Treat that as unknown artist, not as a real mismatch.
+            has_only_fallback_artist = _torrent_usenet_artist_is_fallback(r)
+            candidate_artists = [] if has_only_fallback_artist else ([r.artist] if r.artist else [])
             confidence, match_type = matching_engine.score_track_match(
                 source_title=expected_title,
                 source_artists=expected_artists,
                 source_duration_ms=expected_duration,
                 candidate_title=r.title or '',
-                candidate_artists=[r.artist] if r.artist else [],
+                candidate_artists=candidate_artists,
                 candidate_duration_ms=r.duration or 0,
             )
+
+            # Album-name fallback for torrent / usenet per-track results.
+            #
+            # When this fallback runs: hybrid mode + non-album batch (single
+            # track wishlist / playlist of singles). Album-context batches
+            # never reach here — the album-bundle gate in
+            # core/downloads/album_bundle_dispatch.py engages the bulk-
+            # download flow in single-source mode, and the hybrid chain
+            # filter in core/downloads/task_worker.py strips torrent /
+            # usenet from album batches in hybrid mode. What's left is the
+            # single-track-in-hybrid case where a user is searching for one
+            # track and the only torrent / usenet result is the album that
+            # contains it.
+            #
+            # Without this fallback, "Luther (with SZA)" against a
+            # candidate titled "GNX (2024) [FLAC]" scores ~0 on track-title
+            # alone — even though the album torrent does in fact contain
+            # the wanted track. Scoring the candidate title against the
+            # wanted track's ALBUM name and taking the max gives album-
+            # level releases a fair shot. The Auto-Import sweep then picks
+            # the right file out of the downloaded album folder.
+            expected_album = getattr(spotify_track, 'album', None) if spotify_track else None
+            if r.username in ('torrent', 'usenet') and expected_album:
+                album_conf, _ = matching_engine.score_track_match(
+                    source_title=expected_album,
+                    source_artists=expected_artists,
+                    source_duration_ms=0,            # albums don't have one duration
+                    candidate_title=r.title or '',
+                    candidate_artists=candidate_artists,
+                    candidate_duration_ms=0,
+                )
+                if album_conf > confidence:
+                    confidence = album_conf
+                    match_type = 'album_release'
 
             # Version detection penalty — reject live/remix/acoustic when expecting original
             r_title_lower = (r.title or '').lower()
@@ -162,8 +219,10 @@ def get_valid_candidates(results, spotify_track, query):
 
             # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
             # so "My Will" by "B. Starr" should never match expected "B小町".
-            # Skip for YouTube — artist is parsed from video titles and often unreliable.
-            if r.username != 'youtube':
+            # YouTube stays excluded because video-title parsing is unreliable.
+            # Torrent/usenet must also pass this gate so title-only matches
+            # from the wrong artist do not get downloaded.
+            if r.username != 'youtube' and not has_only_fallback_artist:
                 from difflib import SequenceMatcher
                 import re as _re
                 _cand_artist_raw = r.artist or ''
@@ -195,6 +254,16 @@ def get_valid_candidates(results, spotify_track, query):
                 # so falling to SequenceMatcher means the strings are genuinely
                 # different. 0.5 gives a safer buffer without blocking real
                 # matches that would have scored above 0.85 anyway.
+                if r.username in ('torrent', 'usenet') and _best_artist < 0.5:
+                    logger.info(
+                        "[%s] Rejecting candidate due to artist mismatch: "
+                        "expected=%s candidate=%r title=%r",
+                        source_label,
+                        list(expected_artists),
+                        _cand_artist_raw,
+                        r.title or '',
+                    )
+                    continue
                 if _best_artist < 0.5 and confidence < 0.85:
                     continue
 

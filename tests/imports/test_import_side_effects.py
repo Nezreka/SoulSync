@@ -2,6 +2,8 @@ import os
 import sqlite3
 from types import SimpleNamespace
 
+import pytest
+
 from core.imports import side_effects
 
 
@@ -362,6 +364,42 @@ def test_library_history_labels_auto_import(monkeypatch):
     side_effects.record_library_history_download(context)
     assert captured["download_source"] == "Auto-Import"
     assert captured["title"] == "Auto-Imported Track"
+
+
+@pytest.mark.parametrize(
+    ("username", "expected"),
+    [
+        ("torrent", "Torrent"),
+        ("usenet", "Usenet"),
+        ("staging", "Staging"),
+    ],
+)
+def test_library_history_labels_release_and_staging_sources(monkeypatch, username, expected):
+    """Release/staging imports should not fall through to the Soulseek label."""
+    captured = {}
+
+    class _DBStub:
+        def add_library_history_entry(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: _DBStub())
+
+    context = {
+        "track_info": {
+            "name": "Imported Track",
+            "artists": [{"name": "Some Artist"}],
+            "album": "Some Album",
+        },
+        "original_search_result": {
+            "username": username,
+            "filename": "source-file.flac",
+        },
+        "_final_processed_path": "/library/some-album/01.flac",
+    }
+
+    side_effects.record_library_history_download(context)
+
+    assert captured["download_source"] == expected
 
 
 # ---------------------------------------------------------------------------
