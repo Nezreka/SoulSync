@@ -198,6 +198,10 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             "deezer_dl": "Deezer",
             "lidarr": "Lidarr",
             "soundcloud": "SoundCloud",
+            "amazon": "Amazon",
+            "staging": "Staging",
+            "torrent": "Torrent",
+            "usenet": "Usenet",
             # Auto-import isn't a download source, but flows through the
             # same post-process pipeline (file lands → record provenance
             # + history → write to library DB). Tagging it as "Auto-Import"

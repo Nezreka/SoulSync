@@ -16,8 +16,9 @@ Two flows:
    polls the adapter for completion.
 3. On completion the thread walks the adapter-reported save path
    via ``archive_pipeline.collect_audio_after_extraction`` and
-   marks the download succeeded with the first audio file as the
-   primary ``file_path``.
+   exposes the full audio-file list. Post-processing can then pick
+   the requested track from a completed release instead of importing
+   the first file blindly.
 
 **Album-bundle flow** (album-context batch downloads — wired in
 ``core/downloads/master.py``) —
@@ -257,6 +258,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 'transferred': 0,
                 'speed': 0,
                 'file_path': None,
+                'audio_files': [],
                 'torrent_hash': None,
                 'error': None,
             }
@@ -353,6 +355,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 row['state'] = 'Completed, Succeeded'
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
+                row['audio_files'] = [str(path) for path in audio_files]
         logger.info("Torrent download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
 
@@ -659,4 +662,5 @@ def _row_to_status(row: Dict[str, Any]) -> DownloadStatus:
         speed=int(row.get('speed', 0)),
         time_remaining=None,
         file_path=row.get('file_path'),
+        audio_files=row.get('audio_files') or None,
     )

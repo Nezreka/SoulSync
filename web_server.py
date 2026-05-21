@@ -2115,10 +2115,15 @@ def get_status():
             _status_cache_timestamps['media_server'] = current_time
         # else: use cached value
 
-        # Test Soulseek - only if it's the active source or in the hybrid order
-        if current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL:
-            download_mode = config_manager.get('download_source.mode', 'hybrid')
-            hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+        download_mode = config_manager.get('download_source.mode', 'hybrid')
+        hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+        if isinstance(hybrid_order, str):
+            hybrid_order = [hybrid_order]
+        source_cache_key = f"{download_mode}:{','.join(str(s) for s in (hybrid_order or []))}"
+
+        # Test Soulseek/download source only when the cached source selection is still current.
+        if (current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL or
+                _status_cache['soulseek'].get('source_cache_key') != source_cache_key):
             soulseek_relevant = (download_mode == 'soulseek' or
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
@@ -2130,11 +2135,24 @@ def get_status():
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
+            external_client_sources = ('torrent', 'usenet')
+            external_client_relevant = (
+                download_mode in external_client_sources or
+                (download_mode == 'hybrid' and
+                 hybrid_order and any(s in external_client_sources for s in hybrid_order))
+            )
 
             # Serverless check first — avoids slow slskd timeout when YouTube/HiFi are in hybrid order
             if is_serverless:
                 soulseek_status = True
                 soulseek_response_time = 0
+            elif external_client_relevant and download_orchestrator:
+                soulseek_start = time.time()
+                try:
+                    soulseek_status = run_async(download_orchestrator.check_connection())
+                except Exception:
+                    soulseek_status = False
+                soulseek_response_time = (time.time() - soulseek_start) * 1000
             elif soulseek_relevant and download_orchestrator:
                 soulseek_start = time.time()
                 try:
@@ -2148,13 +2166,17 @@ def get_status():
 
             _status_cache['soulseek'] = {
                 'connected': soulseek_status,
-                'response_time': round(soulseek_response_time, 1)
+                'response_time': round(soulseek_response_time, 1),
+                'source_cache_key': source_cache_key,
             }
             _status_cache_timestamps['soulseek'] = current_time
 
         # Include download source mode so frontend can update labels
-        download_mode = config_manager.get('download_source.mode', 'hybrid')
         _status_cache['soulseek']['source'] = download_mode
+        soulseek_data = {
+            key: value for key, value in _status_cache['soulseek'].items()
+            if key != 'source_cache_key'
+        }
 
         # Count active downloads for nav badge
         active_dl_count = 0
@@ -2167,7 +2189,7 @@ def get_status():
             'metadata_source': metadata_status['metadata_source'],
             'spotify': metadata_status['spotify'],
             'media_server': _status_cache['media_server'],
-            'soulseek': _status_cache['soulseek'],
+            'soulseek': soulseek_data,
             'active_media_server': active_server,
             'enrichment': _get_enrichment_status(),
             'active_downloads': active_dl_count,
@@ -5887,6 +5909,14 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     from difflib import SequenceMatcher
     from unidecode import unidecode
 
+    audio_extensions = {
+        '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma', '.alac',
+        '.aiff', '.aif', '.dsf', '.dff', '.ape',
+    }
+
+    def _is_audio_candidate(path):
+        return os.path.splitext(str(path or ''))[1].lower() in audio_extensions
+
     # YOUTUBE/TIDAL SUPPORT: Handle encoded filename format "id||title"
     # Extract just the title part for file matching
     if '||' in api_filename:
@@ -5921,9 +5951,12 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
             # Skip quarantine folder — contains known-wrong files from AcoustID verification
             dirs[:] = [d for d in dirs if d != 'ss_quarantine']
             for file in files:
+                file_path = os.path.join(root, file)
+                if not _is_audio_candidate(file_path):
+                    continue
+
                 # Direct basename match
                 if os.path.basename(file) == target_basename:
-                    file_path = os.path.join(root, file)
                     # Fast path: if path aligns with expected directory structure, return now
                     if api_dir_parts and _path_matches_api_dirs(file_path):
                         logger.info(f"Found path-confirmed match in {location_name}: {file_path}")
@@ -5940,7 +5973,6 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                 file_stem, file_ext_part = os.path.splitext(file)
                 stripped_stem = re.sub(r'_\d{10,}$', '', file_stem)
                 if stripped_stem != file_stem and stripped_stem + file_ext_part == target_basename:
-                    file_path = os.path.join(root, file)
                     if api_dir_parts and _path_matches_api_dirs(file_path):
                         logger.info(f"Found path-confirmed dedup match in {location_name}: {file_path}")
                         return file_path, 1.0
@@ -5956,7 +5988,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
 
                 if similarity > highest_fuzzy_similarity:
                     highest_fuzzy_similarity = similarity
-                    best_fuzzy_path = os.path.join(root, file)
+                    best_fuzzy_path = file_path
 
         # Return best exact match (disambiguated by path), or fall back to fuzzy
         if exact_matches:

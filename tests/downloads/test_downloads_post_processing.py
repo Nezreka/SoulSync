@@ -232,6 +232,28 @@ def test_file_found_in_downloads_with_context_runs_post_process_with_verificatio
     assert any(c[0] == 'post_process' for c in rec.calls)
 
 
+def test_file_search_ignores_non_audio_candidates(monkeypatch):
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': 'Artist - Album.cue',
+        'username': 'torrent',
+        'track_info': {'name': 'Money'},
+    }
+    matched_downloads_context['torrent::Artist - Album.cue'] = {
+        'original_search_result': {'title': 'Money', 'track_number': 1},
+    }
+    monkeypatch.setattr(pp.time, 'sleep', lambda s: None)
+    deps, rec = _build_deps(
+        find_completed_file=lambda *a, **kw: ('/downloads/Artist - Album.cue', 'download'),
+    )
+
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    assert download_tasks['t1']['status'] == 'failed'
+    assert not any(c[0] == 'post_process' for c in rec.calls)
+    assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
+
+
 def test_file_found_in_downloads_no_context_marks_completed_directly():
     """No matched context for the file → just mark completed since file exists."""
     download_tasks['t1'] = {
@@ -321,6 +343,139 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     pp.run_post_processing_worker('t1', 'b1', deps)
     # mark_completed should fire (file resolved from YouTube status)
     assert any(c[0] == 'mark_completed' for c in rec.calls)
+
+
+def test_torrent_release_copies_best_matching_audio_to_transfer(tmp_path):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    wrong = release_dir / '01 - Intro.flac'
+    right = release_dir / '02 - Money.flac'
+    wrong.write_bytes(b'wrong')
+    right.write_bytes(b'right')
+    transfer_dir = tmp_path / 'transfer'
+
+    filename = 'magnet:?xt=abc||Artist - Album'
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': filename,
+        'username': 'torrent',
+        'download_id': 'dl-torrent-1',
+        'track_info': {'name': 'Money', 'artists': [{'name': 'Artist'}]},
+    }
+    matched_downloads_context[f'torrent::{filename}'] = {
+        'original_search_result': {'title': 'Money', 'track_number': 2},
+    }
+
+    class _FakeStatus:
+        file_path = str(wrong)
+        audio_files = [str(wrong), str(right)]
+
+    class _FakeTorrentClient:
+        def get_download_status(self, dl_id):
+            assert dl_id == 'dl-torrent-1'
+            return _FakeStatus()
+
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(transfer_dir)}),
+        download_orchestrator=_FakeTorrentClient(),
+        run_async=lambda coro: coro,
+    )
+
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    copied = transfer_dir / '02 - Money.flac'
+    assert copied.exists()
+    assert right.exists()
+    assert any(c[0] == 'post_process' and c[1][2] == str(copied) for c in rec.calls)
+
+
+def test_torrent_release_prefers_task_title_over_release_context(tmp_path):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    wrong = release_dir / '09.Harry Styles - Pop.flac'
+    right = release_dir / '10.Harry Styles - American Girls.flac'
+    wrong.write_bytes(b'wrong')
+    right.write_bytes(b'right')
+    transfer_dir = tmp_path / 'transfer'
+
+    filename = 'http://prowlarr/download?id=1||Harry Styles - Kiss All The Time'
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': filename,
+        'username': 'torrent',
+        'download_id': 'dl-torrent-1',
+        'track_info': {'name': 'American Girls', 'artists': [{'name': 'Harry Styles'}]},
+    }
+    matched_downloads_context[f'torrent::{filename}'] = {
+        'original_search_result': {'title': 'Pop', 'clean_title': 'Pop', 'track_number': 9},
+    }
+
+    class _FakeStatus:
+        file_path = str(wrong)
+        audio_files = [str(wrong), str(right)]
+
+    class _FakeTorrentClient:
+        def get_download_status(self, dl_id):
+            assert dl_id == 'dl-torrent-1'
+            return _FakeStatus()
+
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(transfer_dir)}),
+        download_orchestrator=_FakeTorrentClient(),
+        run_async=lambda coro: coro,
+    )
+
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    copied = transfer_dir / '10.Harry Styles - American Girls.flac'
+    assert copied.exists()
+    assert any(c[0] == 'post_process' and c[1][2] == str(copied) for c in rec.calls)
+
+
+def test_torrent_release_without_matching_file_does_not_fallback_to_generic_search(tmp_path):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    wrong = release_dir / '09.Harry Styles - Pop.flac'
+    wrong.write_bytes(b'wrong')
+    transfer_dir = tmp_path / 'transfer'
+
+    filename = 'http://prowlarr/download?id=1||Harry Styles - Kiss All The Time'
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': filename,
+        'username': 'torrent',
+        'download_id': 'dl-torrent-1',
+        'track_info': {'name': 'American Girls', 'artists': [{'name': 'Harry Styles'}]},
+    }
+    matched_downloads_context[f'torrent::{filename}'] = {
+        'original_search_result': {'title': 'Pop', 'clean_title': 'Pop', 'track_number': 9},
+    }
+
+    class _FakeStatus:
+        file_path = str(wrong)
+        audio_files = [str(wrong)]
+
+    class _FakeTorrentClient:
+        def get_download_status(self, dl_id):
+            assert dl_id == 'dl-torrent-1'
+            return _FakeStatus()
+
+    def _unexpected_search(*args, **kwargs):
+        raise AssertionError("torrent releases should not fall back to generic file search")
+
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(transfer_dir)}),
+        download_orchestrator=_FakeTorrentClient(),
+        run_async=lambda coro: coro,
+        find_completed_file=_unexpected_search,
+    )
+
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    assert download_tasks['t1']['status'] == 'failed'
+    assert 'No matching audio file' in download_tasks['t1']['error_message']
+    assert any(c[0] == 'on_complete' and c[1] == ('b1', 't1', False) for c in rec.calls)
+    assert not list(transfer_dir.glob('*'))
 
 
 def test_fuzzy_context_matching_when_exact_key_missing(monkeypatch):

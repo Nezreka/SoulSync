@@ -190,6 +190,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 'transferred': 0,
                 'speed': 0,
                 'file_path': None,
+                'audio_files': [],
                 'job_id': None,
                 'error': None,
             }
@@ -281,6 +282,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 row['state'] = 'Completed, Succeeded'
                 row['progress'] = 100.0
                 row['file_path'] = str(primary)
+                row['audio_files'] = [str(path) for path in audio_files]
         logger.info("Usenet download complete: %s -> %s (%d audio files)",
                     download_id[:8], primary.name, len(audio_files))
 

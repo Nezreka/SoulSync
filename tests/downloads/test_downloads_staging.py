@@ -278,6 +278,180 @@ def test_explicit_album_context_uses_real_data(tmp_path):
     assert ctx['staging_source'] is True
 
 
+def test_staging_context_falls_back_to_matched_file_track_number(tmp_path):
+    """Album-bundle staging can recover numbering from the selected audio file."""
+    src_file = tmp_path / 'staging' / '03 - Backseat Freestyle.flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'Backseat Freestyle',
+                'artist': 'Kendrick Lamar',
+                'track_number': 3,
+                'disc_number': 1,
+            },
+        ],
+    )
+    _seed_task('t6b', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'good kid, m.A.A.d city (Deluxe)'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Kendrick Lamar'},
+    })
+
+    ds.try_staging_match(
+        't6b', 'b1',
+        _Track(name='Backseat Freestyle', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    ctx = matched_downloads_context['staging_t6b']
+    assert ctx['original_search_result']['track_number'] == 3
+    assert ctx['original_search_result']['disc_number'] == 1
+
+
+def test_private_album_bundle_staging_overrides_default_track_info_number(tmp_path):
+    """Private release staging trusts the selected file number over weak task defaults."""
+    src_file = tmp_path / 'staging' / '04-kendrick_lamar-the_art_of_peer_pressure.flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    def get_batch_field(_batch_id, field):
+        if field == 'album_bundle_source':
+            return 'torrent'
+        if field == 'album_bundle_private_staging':
+            return True
+        return None
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'The Art of Peer Pressure',
+                'artist': 'Kendrick Lamar',
+            },
+        ],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t6c', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'good kid, m.A.A.d city (Deluxe)'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Kendrick Lamar'},
+        'track_number': 1,
+    })
+
+    ds.try_staging_match(
+        't6c', 'b1',
+        _Track(name='The Art of Peer Pressure', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    ctx = matched_downloads_context['staging_t6c']
+    assert ctx['track_info']['track_number'] == 4
+    assert ctx['original_search_result']['track_number'] == 4
+    assert ctx['original_search_result']['username'] == 'torrent'
+    assert ctx['original_search_result']['filename'] == str(src_file)
+
+
+def test_staging_title_match_accepts_feature_suffix_from_release_file(tmp_path):
+    """Album releases can include featured artists in filenames."""
+    src_file = tmp_path / 'staging' / '05-kendrick_lamar-money_trees_(feat._jay_rock).flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'money_trees_(feat._jay_rock)',
+                'artist': 'Kendrick Lamar',
+                'track_number': 5,
+            },
+        ],
+    )
+    _seed_task('t_feature', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'good kid, m.A.A.d city (Deluxe)'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Kendrick Lamar'},
+    })
+
+    result = ds.try_staging_match(
+        't_feature', 'b1',
+        _Track(name='Money Trees', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    assert result is True
+    assert matched_downloads_context['staging_t_feature']['track_info']['track_number'] == 5
+
+
+def test_staging_title_match_accepts_bonus_track_against_release_file(tmp_path):
+    """Expected bonus labels should not block matching the actual release file."""
+    src_file = tmp_path / 'staging' / '13-kendrick_lamar-the_recipe_(feat._dr._dre).flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'the_recipe_(feat._dr._dre)',
+                'artist': 'Kendrick Lamar',
+                'track_number': 13,
+            },
+        ],
+    )
+    _seed_task('t_bonus', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'good kid, m.A.A.d city (Deluxe)'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Kendrick Lamar'},
+    })
+
+    result = ds.try_staging_match(
+        't_bonus', 'b1',
+        _Track(name='The Recipe (Bonus Track)', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    assert result is True
+    assert matched_downloads_context['staging_t_bonus']['track_info']['track_number'] == 13
+
+
+def test_staging_title_match_keeps_wrong_versions_separate(tmp_path):
+    """Do not strip remix/extended wording when matching staged release files."""
+    src_file = tmp_path / 'staging' / '17-kendrick_lamar-swimming_pools_(drank)_(black_hippy_remix).flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'swimming_pools_(drank)_(black_hippy_remix)',
+                'artist': 'Kendrick Lamar',
+                'track_number': 17,
+            },
+        ],
+    )
+    _seed_task('t_wrong_version')
+
+    result = ds.try_staging_match(
+        't_wrong_version', 'b1',
+        _Track(name='Swimming Pools (Drank) (Extended Version)', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    assert result is False
+    assert 'staging_t_wrong_version' not in matched_downloads_context
+
+
 def test_fallback_context_synthesizes_from_track(tmp_path):
     """Without explicit context, synthesizes spotify_artist/album from the track."""
     src_file = tmp_path / 'staging' / 'Hello.flac'

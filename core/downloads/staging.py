@@ -34,8 +34,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from core.imports.filename import extract_track_number_from_filename
 
 # `shutil` and `SequenceMatcher` are imported inline inside try_staging_match()
 # to keep the lift byte-identical with the original web_server.py function body.
@@ -48,6 +51,56 @@ from core.runtime_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_positive_int(value: Any, default: int = 0) -> int:
+    try:
+        coerced = int(str(value).split('/')[0])
+    except (TypeError, ValueError):
+        return default
+    return coerced if coerced > 0 else default
+
+
+def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list[str]:
+    """Return conservative title variants for release-file matching.
+
+    Torrent / usenet release files often encode featured artists in the
+    filename/title while streaming metadata keeps them in the artist credit.
+    Strip only feature/bonus noise here; keep version words like remix,
+    extended, live, acoustic, etc. so distinct recordings do not collapse.
+    """
+    raw = str(title or '').strip()
+    if not raw:
+        return []
+
+    compacted_separators = re.sub(r'[_]+', ' ', raw)
+    compacted_separators = re.sub(r'\s+', ' ', compacted_separators).strip()
+
+    without_feat = re.sub(
+        r'\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+[^)\]]*[\)\]]',
+        '',
+        compacted_separators,
+        flags=re.IGNORECASE,
+    )
+    without_feat = re.sub(
+        r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$',
+        '',
+        without_feat,
+        flags=re.IGNORECASE,
+    )
+    without_bonus = re.sub(
+        r'\s*[\(\[]\s*bonus\s+track\s*[\)\]]',
+        '',
+        without_feat,
+        flags=re.IGNORECASE,
+    )
+
+    variants: list[str] = []
+    for candidate in (raw, compacted_separators, without_feat, without_bonus):
+        normalized = normalize(candidate)
+        if normalized and normalized not in variants:
+            variants.append(normalized)
+    return variants
 
 
 @dataclass
@@ -86,19 +139,24 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     normalize = deps.matching_engine.normalize_string
     norm_title = normalize(track_title)
     norm_artist = normalize(track_artist)
+    title_variants = _staging_title_variants(track_title, normalize) or [norm_title]
 
     best_match = None
     best_score = 0.0
 
     for sf in staging_files:
-        sf_norm_title = normalize(sf['title'])
+        sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])
 
-        if not sf_norm_title:
+        if not sf_title_variants:
             continue
 
         # Title similarity (primary)
-        title_sim = SequenceMatcher(None, norm_title, sf_norm_title).ratio()
+        title_sim = max(
+            SequenceMatcher(None, expected, candidate).ratio()
+            for expected in title_variants
+            for candidate in sf_title_variants
+        )
         if title_sim < 0.80:
             continue
 
@@ -190,6 +248,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             track_info = download_tasks.get(task_id, {}).get('track_info', {})
         if not isinstance(track_info, dict):
             track_info = {}
+        else:
+            track_info = dict(track_info)
 
         # Build spotify_artist / spotify_album context so post-processing can apply
         # the path template. Without these, _post_process_matched_download returns
@@ -258,20 +318,37 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             )
             has_clean_data = bool(track_title and track_artist and track_album_name)
 
-        track_number = (
-            track_info.get('track_number', 0) or
-            getattr(track, 'track_number', 0) or 0
+        file_track_number = (
+            _coerce_positive_int(best_match.get('track_number'), 0) or
+            extract_track_number_from_filename(best_match.get('full_path', ''))
         )
-        disc_number = (
-            track_info.get('disc_number', 1) or
-            getattr(track, 'disc_number', 1) or 1
-        )
+        file_disc_number = _coerce_positive_int(best_match.get('disc_number'), 1)
+        if _private_album_bundle_staging:
+            track_number = file_track_number
+            disc_number = file_disc_number
+        else:
+            track_number = (
+                _coerce_positive_int(track_info.get('track_number'), 0) or
+                _coerce_positive_int(track_info.get('trackNumber'), 0) or
+                _coerce_positive_int(getattr(track, 'track_number', 0), 0) or
+                file_track_number
+            )
+            disc_number = (
+                _coerce_positive_int(track_info.get('disc_number'), 0) or
+                _coerce_positive_int(track_info.get('discNumber'), 0) or
+                _coerce_positive_int(getattr(track, 'disc_number', 0), 0) or
+                file_disc_number
+            )
+        track_info['track_number'] = track_number
+        track_info['disc_number'] = disc_number
 
         context = {
             'track_info': track_info,
             'spotify_artist': spotify_artist_ctx,
             'spotify_album': spotify_album_ctx,
             'original_search_result': {
+                'username': _provenance_username,
+                'filename': best_match.get('full_path', ''),
                 'title': track_title,
                 'artist': track_artist,
                 'spotify_clean_title': track_title,
