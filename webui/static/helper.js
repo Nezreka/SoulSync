@@ -3415,6 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.6.0': [
         { unreleased: true },
+        { title: 'Torrent and Usenet downloads', desc: 'two new download sources live in the Download Source dropdown: <strong>Torrent Only (via Prowlarr)</strong> and <strong>Usenet Only (via Prowlarr)</strong>. they reuse the Prowlarr + torrent client + usenet client you set up on the Indexers & Downloaders tab. searches go through Prowlarr filtered by protocol, picked releases get handed to your torrent client or usenet client, and the resulting files get walked through archive_pipeline (extracts .zip / .rar / .tar when the client didn\'t already do it) and handed to the matching pipeline. both sources are also available in hybrid mode alongside soulseek / youtube / tidal / etc. one caveat: SoulSync needs read access to the torrent / usenet client\'s save_path — works out of the box for everything-on-one-box setups, but remote downloader hosts will need a future sync step.' },
         { title: 'Archive pipeline module (groundwork for torrent / usenet downloads)', desc: 'new core/archive_pipeline.py — walks a directory for audio files (recursive, case-insensitive extensions), extracts zip / tar / tar.gz / rar / 7z archives in-place (rar and 7z are optional deps that warn but don\'t crash if absent), and rejects any archive member trying to escape the destination via path traversal. shared helper the upcoming torrent and usenet download plugins both consume — usenet downloaders usually auto-extract, but the occasional torrent ships an album in a .rar and SoulSync handles it now. 21 unit tests cover the walker + zip + tar extraction + path-traversal protection.' },
         { title: 'Indexers & Downloaders tab restyled with collapsible sections', desc: 'tab now opens with an intro hero card explaining the flow (indexers find releases → downloader fetches them → SoulSync imports) and folds the rest into three collapsible sections: Indexers, Torrent Client, Usenet Client. each section gets a per-service color accent (Prowlarr orange, torrent sky-blue, usenet violet), a status dot in the header (green when Test Connection succeeds, red on failure, grey before testing), and Lidarr-style indexer cards with protocol badges instead of the inline emoji list. Indexers section is open by default; the downloader sections start collapsed since not everyone uses both protocols.' },
         { title: 'Regression tests for the new indexer + downloader plumbing', desc: 'mocked unit tests for Prowlarr + all five downloader adapters (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet). 54 tests pin the state-mapping tables, the parse logic, and the protocol quirks each client needs handled (qBit Referer header, Transmission session-id renegotiation, Deluge magnet-vs-URL method split, SAB queue+history merge, NZBGet 64-bit size fields). next time anyone touches one of these adapters, CI catches breakage before it hits a real downloader.' },
@@ -3480,6 +3481,19 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Torrent and Usenet Are Now Live Download Sources",
+        description: "the long-awaited payoff. Two new entries in the Download Source dropdown — Torrent Only and Usenet Only — both backed by your Prowlarr indexers. Searches go through Prowlarr filtered by protocol, picked releases get shipped to your configured torrent client (qBit / Transmission / Deluge) or usenet client (SABnzbd / NZBGet), and the resulting files flow through SoulSync's matching pipeline like any other source.",
+        features: [
+            "• new 'Torrent Only (via Prowlarr)' and 'Usenet Only (via Prowlarr)' options in Settings → Downloads → Download Source",
+            "• both sources also available in hybrid mode — drop them into the priority list alongside soulseek / tidal / etc.",
+            "• shared archive_pipeline walks the downloaded directory and extracts any .zip / .rar / .tar archives the downloader didn't already unpack (with path-traversal protection)",
+            "• torrent state polling handles the qBit / Transmission / Deluge state quirks uniformly; usenet polling covers the verify / repair / unpack phases",
+            "• picking a torrent or usenet source on the Downloads tab now shows a redirect card pointing to the Indexers & Downloaders tab where the actual config lives",
+            "• caveat: SoulSync needs filesystem access to the torrent / usenet client's save_path. fine for everything-on-one-box; remote downloader hosts need a future sync step",
+        ],
+        usage_note: "Settings → Downloads → Download Source → Torrent / Usenet Only",
+    },
     {
         title: "Usenet Client Adapters (SABnzbd, NZBGet)",
         description: "third phase of the torrent + usenet rollout. SoulSync now also talks to the two big usenet downloaders through a sibling adapter contract. Prowlarr + torrent + usenet are all stood up — next commit wires them together into actual download sources.",

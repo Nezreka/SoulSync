@@ -4328,6 +4328,8 @@
                                         <option value="amazon">Amazon Music Only</option>
                                         <option value="lidarr">Lidarr Only</option>
                                         <option value="soundcloud">SoundCloud Only</option>
+                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -4731,6 +4733,15 @@
                                             Uses Lidarr's indexers and download clients (Usenet/torrent) for album downloads.
                                             <br><br>
                                             <strong>Best for full-album grabs.</strong> Lidarr is album-first by design — track-name searches usually return nothing useful, so in hybrid mode Lidarr is mostly a no-op for playlists and falls through to your other sources. Use Lidarr Only when you specifically want to grab whole albums via your indexers.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Torrent / Usenet Settings — settings live on the Indexers tab, just point the user there -->
+                                <div id="prowlarr-source-redirect" style="display: none;">
+                                    <div class="form-group">
+                                        <div class="setting-help-text" style="padding: 12px 14px; background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.2); border-radius: 10px;">
+                                            📡 Torrent and Usenet downloads run through your Prowlarr indexers and your configured downloader. Set up Prowlarr + the torrent / usenet client on the <strong>Indexers &amp; Downloaders</strong> tab. Once Test Connection is green on both, this source is ready to use.
                                         </div>
                                     </div>
                                 </div>
