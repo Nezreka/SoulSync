@@ -276,6 +276,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             "deezer_dl": "deezer",
             "lidarr": "lidarr",
             "soundcloud": "soundcloud",
+            "amazon": "amazon",
             # Auto-import: surfaced in provenance so the redownload modal
             # can tell the user "this came from staging on <date>" instead
             # of falsely listing soulseek as the source. The underlying
@@ -283,6 +284,16 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             # separately via the source-aware ID columns on the tracks
             # row itself.
             "auto_import": "auto_import",
+            # Generic staging-match (user dropped files manually OR a
+            # source we don't have a more specific label for). Better
+            # than defaulting to 'soulseek' which would falsely tag the
+            # provenance.
+            "staging": "staging",
+            # Torrent / usenet album-bundle flow — the staging matcher
+            # overrides 'staging' with the bundle source so the history
+            # shows where the files actually came from.
+            "torrent": "torrent",
+            "usenet": "usenet",
         }.get(username, "soulseek")
 
         ti = context.get("track_info") or context.get("search_result") or {}

@@ -141,12 +141,24 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         shutil.copy2(best_match['full_path'], dest_path)
         logger.info(f"[Staging] Copied to transfer: {dest_path}")
 
-        # Mark task as completed with staging context
+        # Mark task as completed with staging context.
+        # If the batch was populated by the torrent / usenet album-bundle
+        # flow, prefer that provenance label over generic 'staging' so the
+        # download history reflects the real source.
+        _provenance_override = None
+        try:
+            from core.runtime_state import download_batches as _db
+            _batch = _db.get(batch_id) if batch_id else None
+            if isinstance(_batch, dict):
+                _provenance_override = _batch.get('album_bundle_source')
+        except Exception:
+            _provenance_override = None
+        _provenance_username = _provenance_override or 'staging'
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'post_processing'
                 download_tasks[task_id]['filename'] = dest_path
-                download_tasks[task_id]['username'] = 'staging'
+                download_tasks[task_id]['username'] = _provenance_username
                 download_tasks[task_id]['staging_match'] = True
 
         # Run post-processing (tagging, AcoustID verification, path building)
