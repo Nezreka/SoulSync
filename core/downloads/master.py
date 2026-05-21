@@ -311,6 +311,100 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         if force_download_all:
             logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
 
+        # ════════════════════════════════════════════════════════════════
+        # ALBUM-BUNDLE GATE for torrent / usenet single-source mode.
+        #
+        # Indexer-based sources (torrent / usenet) are release-level — a
+        # Prowlarr search for "Luther (with SZA)" returns the GNX album
+        # torrent at near-zero confidence against the track title. The
+        # per-track search loop fails for every track on the album.
+        #
+        # Workaround: when the user is downloading an album AND has
+        # torrent / usenet selected as the SINGLE active source (not
+        # hybrid — hybrid stays per-track to preserve fallback to
+        # Soulseek / streaming sources), do ONE Prowlarr search for the
+        # whole album, hand the picked release to the torrent / usenet
+        # client, walk the resulting audio files, and drop them into the
+        # staging folder. Each per-track task then hits the existing
+        # ``try_staging_match`` early-return in the per-track worker
+        # before any Prowlarr search fires, and the normal post-
+        # processing pipeline imports each matched file.
+        #
+        # Gate intentionally narrow: hybrid mode, non-album batches, and
+        # plugins without ``download_album_to_staging`` (i.e. every
+        # source other than torrent / usenet) all bypass this branch
+        # untouched.
+        # ════════════════════════════════════════════════════════════════
+        _album_bundle_mode = (deps.config_manager.get('download_source.mode', 'soulseek') or 'soulseek').lower()
+        _is_torrent_or_usenet = _album_bundle_mode in ('torrent', 'usenet')
+        if batch_is_album and _is_torrent_or_usenet and batch_album_context and batch_artist_context:
+            _bundle_album = (batch_album_context.get('name') or '').strip()
+            _bundle_artist = (batch_artist_context.get('name') or '').strip()
+            _bundle_plugin = None
+            try:
+                _bundle_plugin = deps.download_orchestrator.client(_album_bundle_mode)
+            except Exception as _exc:
+                logger.warning("[Album Bundle] Could not resolve %s plugin: %s", _album_bundle_mode, _exc)
+            if _bundle_album and _bundle_artist and _bundle_plugin and hasattr(_bundle_plugin, 'download_album_to_staging'):
+                _staging_dir = deps.config_manager.get('import.staging_path', './Staging') or './Staging'
+                logger.info(
+                    "[Album Bundle] Engaging %s album flow for '%s' by '%s' -> %s",
+                    _album_bundle_mode, _bundle_album, _bundle_artist, _staging_dir,
+                )
+                with tasks_lock:
+                    if batch_id in download_batches:
+                        download_batches[batch_id]['phase'] = 'album_downloading'
+                        download_batches[batch_id]['album_bundle_state'] = 'searching'
+                        download_batches[batch_id]['album_bundle_source'] = _album_bundle_mode
+
+                def _bundle_emit(payload):
+                    """Mirror the album-download lifecycle into batch state so the
+                    Downloads page can render meaningful status while the torrent /
+                    usenet job runs (the per-track tasks don't exist yet)."""
+                    try:
+                        with tasks_lock:
+                            if batch_id in download_batches:
+                                _row = download_batches[batch_id]
+                                _row['album_bundle_state'] = payload.get('state', '')
+                                for _k in ('progress', 'release', 'speed', 'downloaded', 'size', 'seeders', 'grabs', 'count'):
+                                    if _k in payload:
+                                        _row[f'album_bundle_{_k}'] = payload[_k]
+                    except Exception as _emit_exc:
+                        logger.debug("[Album Bundle] emit failed: %s", _emit_exc)
+
+                try:
+                    _bundle_outcome = _bundle_plugin.download_album_to_staging(
+                        _bundle_album, _bundle_artist, _staging_dir, _bundle_emit,
+                    )
+                except Exception as _bundle_exc:
+                    logger.exception("[Album Bundle] %s plugin raised: %s", _album_bundle_mode, _bundle_exc)
+                    _bundle_outcome = {'success': False, 'error': f'Plugin error: {_bundle_exc}'}
+
+                if not _bundle_outcome.get('success'):
+                    _err = _bundle_outcome.get('error', 'Album bundle download failed')
+                    logger.error("[Album Bundle] %s flow failed for '%s': %s", _album_bundle_mode, _bundle_album, _err)
+                    with tasks_lock:
+                        if batch_id in download_batches:
+                            download_batches[batch_id]['phase'] = 'failed'
+                            download_batches[batch_id]['error'] = _err
+                            download_batches[batch_id]['album_bundle_state'] = 'failed'
+                    return
+                logger.info(
+                    "[Album Bundle] %s staged %d files for '%s' — handing off to per-track staging matcher",
+                    _album_bundle_mode, len(_bundle_outcome.get('files', [])), _bundle_album,
+                )
+                with tasks_lock:
+                    if batch_id in download_batches:
+                        download_batches[batch_id]['phase'] = 'analysis'
+                        download_batches[batch_id]['album_bundle_state'] = 'staged'
+            else:
+                logger.warning(
+                    "[Album Bundle] Gate matched but plugin / context unavailable "
+                    "(mode=%s album=%r artist=%r plugin=%s) — falling back to per-track flow",
+                    _album_bundle_mode, _bundle_album, _bundle_artist,
+                    type(_bundle_plugin).__name__ if _bundle_plugin else None,
+                )
+
         # Allow duplicate tracks across albums — when enabled, only skip tracks already
         # owned in THIS album, not tracks owned in other albums
         allow_duplicates = deps.config_manager.get('wishlist.allow_duplicate_tracks', True)
