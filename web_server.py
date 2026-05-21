@@ -16500,6 +16500,17 @@ def _get_staging_file_cache(batch_id):
 from core.downloads import staging as _downloads_staging
 
 
+def _staging_get_batch_field(batch_id, field):
+    """Accessor injected into StagingDeps so the staging-match helper
+    can read an album-bundle provenance override off the batch state
+    without importing ``download_batches`` directly."""
+    with tasks_lock:
+        row = download_batches.get(batch_id)
+        if isinstance(row, dict):
+            return row.get(field)
+    return None
+
+
 def _build_staging_deps():
     """Build the StagingDeps bundle from web_server.py globals on each call."""
     return _downloads_staging.StagingDeps(
@@ -16508,6 +16519,7 @@ def _build_staging_deps():
         get_staging_file_cache=_get_staging_file_cache,
         docker_resolve_path=docker_resolve_path,
         post_process_matched_download_with_verification=_post_process_matched_download_with_verification,
+        get_batch_field=_staging_get_batch_field,
     )
 
 

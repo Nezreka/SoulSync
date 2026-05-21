@@ -58,6 +58,12 @@ class StagingDeps:
     get_staging_file_cache: Callable[[str], list]
     docker_resolve_path: Callable[[str], str]
     post_process_matched_download_with_verification: Callable
+    # Optional batch-field accessor. Returns ``download_batches[batch_id].get(field)``
+    # when the runtime state is available, ``None`` otherwise. Injected so
+    # this module doesn't have to import from runtime_state directly —
+    # keeps the dep surface explicit and the function unit-testable
+    # without a live batch dict.
+    get_batch_field: Callable[[str, str], Any] = None    # type: ignore[assignment]
 
 
 def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
@@ -144,15 +150,15 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         # Mark task as completed with staging context.
         # If the batch was populated by the torrent / usenet album-bundle
         # flow, prefer that provenance label over generic 'staging' so the
-        # download history reflects the real source.
+        # download history reflects the real source. The accessor is
+        # injected via StagingDeps so this module doesn't reach into
+        # runtime_state directly (see deps.get_batch_field docstring).
         _provenance_override = None
-        try:
-            from core.runtime_state import download_batches as _db
-            _batch = _db.get(batch_id) if batch_id else None
-            if isinstance(_batch, dict):
-                _provenance_override = _batch.get('album_bundle_source')
-        except Exception:
-            _provenance_override = None
+        if batch_id and deps.get_batch_field is not None:
+            try:
+                _provenance_override = deps.get_batch_field(batch_id, 'album_bundle_source')
+            except Exception as _exc:
+                logger.debug("get_batch_field failed: %s", _exc)
         _provenance_username = _provenance_override or 'staging'
         with tasks_lock:
             if task_id in download_tasks:
