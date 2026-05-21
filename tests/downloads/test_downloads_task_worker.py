@@ -319,7 +319,7 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
