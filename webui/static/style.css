@@ -10333,6 +10333,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(100, 200, 130, 0.2);
 }
 
+.library-history-badge.download.source-torrent {
+    color: #5dade2;
+    background: rgba(93, 173, 226, 0.1);
+    border-color: rgba(93, 173, 226, 0.25);
+}
+
+.library-history-badge.download.source-usenet {
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.1);
+    border-color: rgba(167, 139, 250, 0.25);
+}
+
+.library-history-badge.download.source-staging,
+.library-history-badge.download.source-auto-import {
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
 .library-history-badge.import {
     color: rgba(120, 160, 230, 0.9);
     background: rgba(120, 160, 230, 0.1);
@@ -19883,6 +19902,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow:
         0 0 15px rgba(255, 107, 53, 0.6),
         inset 0 1px 2px rgba(255, 255, 255, 0.3);
+}
+
+.album-bundle-waiting {
+    color: rgba(255, 255, 255, 0.55);
+    font-style: italic;
 }
 
 /* Track Table Section */
@@ -58356,6 +58380,13 @@ body.reduce-effects *::after {
 .adl-batch-track-status.active { color: rgba(var(--accent-rgb), 1); }
 .adl-batch-track-status.failed { color: #ef4444; }
 .adl-batch-track-status.queued { color: rgba(255, 255, 255, 0.3); }
+
+.adl-batch-release-note {
+    padding: 6px 0;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
 
 /* Mini progress bar per track */
 .adl-batch-track-progress {
