@@ -395,20 +395,22 @@ def test_plugins_conform_to_protocol() -> None:
 def test_torrent_album_pick_prefers_seeded_flac(tmp_path: Path) -> None:
     """Album bundle picker prefers high-seeded FLAC over low-seeded MP3
     of comparable size — protects against picking a dead torrent."""
-    from core.download_plugins.torrent import _pick_best_album_release
+    from core.download_plugins.album_bundle import pick_best_album_release
+    from core.download_plugins.torrent import _guess_quality_from_title
     flac = _make_torrent_result(title='Kendrick Lamar - GNX [FLAC]', size=400_000_000, seeders=120)
     mp3 = _make_torrent_result(title='Kendrick Lamar - GNX [MP3 320]', size=120_000_000, seeders=5, guid='guid-2')
-    picked = _pick_best_album_release([flac, mp3])
+    picked = pick_best_album_release([flac, mp3], _guess_quality_from_title)
     assert picked is flac
 
 
 def test_torrent_album_pick_drops_too_small() -> None:
     """Single-track torrents (~10 MB) shouldn't be picked when the user
     is downloading a whole album — the size floor (40 MB) catches them."""
-    from core.download_plugins.torrent import _pick_best_album_release
+    from core.download_plugins.album_bundle import pick_best_album_release
+    from core.download_plugins.torrent import _guess_quality_from_title
     single = _make_torrent_result(title='Kendrick Lamar - HUMBLE', size=10_000_000, seeders=500)
     album = _make_torrent_result(title='Kendrick Lamar - DAMN [MP3]', size=120_000_000, seeders=50, guid='guid-2')
-    picked = _pick_best_album_release([single, album])
+    picked = pick_best_album_release([single, album], _guess_quality_from_title)
     assert picked is album
 
 
@@ -416,26 +418,27 @@ def test_torrent_album_pick_falls_back_when_all_outside_size_range() -> None:
     """If every candidate is below the floor (e.g. all results are
     singles), pick the most-seeded one rather than returning None —
     user still wants a download even if it's a track torrent."""
-    from core.download_plugins.torrent import _pick_best_album_release
+    from core.download_plugins.album_bundle import pick_best_album_release
+    from core.download_plugins.torrent import _guess_quality_from_title
     small_a = _make_torrent_result(title='X [MP3]', size=8_000_000, seeders=5)
     small_b = _make_torrent_result(title='Y [MP3]', size=9_000_000, seeders=80, guid='guid-2')
-    picked = _pick_best_album_release([small_a, small_b])
+    picked = pick_best_album_release([small_a, small_b], _guess_quality_from_title)
     assert picked is small_b
 
 
 def test_unique_staging_path_handles_collision(tmp_path: Path) -> None:
-    from core.download_plugins.torrent import _unique_staging_path
+    from core.download_plugins.album_bundle import unique_staging_path
     src = tmp_path / 'src' / 'track.flac'
     src.parent.mkdir()
     src.write_bytes(b'fLaC')
     dest_dir = tmp_path / 'staging'
     dest_dir.mkdir()
     # First call returns the natural name.
-    first = _unique_staging_path(dest_dir, src)
+    first = unique_staging_path(dest_dir, src)
     assert first == dest_dir / 'track.flac'
     first.write_bytes(b'fLaC')
     # Second call picks a non-colliding suffix.
-    second = _unique_staging_path(dest_dir, src)
+    second = unique_staging_path(dest_dir, src)
     assert second == dest_dir / 'track_1.flac'
 
 

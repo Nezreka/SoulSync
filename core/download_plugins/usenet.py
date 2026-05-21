@@ -14,7 +14,6 @@ module's docstring for the full pipeline rationale). Differences:
 
 from __future__ import annotations
 
-import shutil
 import threading
 import time
 import uuid
@@ -22,6 +21,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.archive_pipeline import collect_audio_after_extraction
+from core.download_plugins.album_bundle import (
+    copy_audio_files_atomically,
+    pick_best_album_release,
+)
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.torrent import (
     _adapter_state_to_display,
@@ -29,9 +32,7 @@ from core.download_plugins.torrent import (
     _guess_quality_from_title,
     _parse_indexer_id_filter,
     _parse_release_title,
-    _pick_best_album_release,
     _row_to_status,
-    _unique_staging_path,
     _COMPLETE_STATES,
     _FILENAME_SEP,
     _POLL_INTERVAL_SECONDS,
@@ -386,7 +387,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No usenet results found for "{query}"'
             return result
 
-        picked = _pick_best_album_release(candidates)
+        picked = pick_best_album_release(candidates, _guess_quality_from_title)
         if picked is None:
             result['error'] = 'No suitable NZB candidate after filtering'
             return result
@@ -420,16 +421,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No audio files found in {save_path}'
             return result
 
-        staging_path = Path(staging_dir)
-        staging_path.mkdir(parents=True, exist_ok=True)
-        copied: List[str] = []
-        for src in audio_files:
-            dst = _unique_staging_path(staging_path, src)
-            try:
-                shutil.copy2(src, dst)
-                copied.append(str(dst))
-            except Exception as e:
-                logger.warning("[Usenet album] Failed to copy %s -> %s: %s", src, dst, e)
+        copied = copy_audio_files_atomically(audio_files, Path(staging_dir))
         if not copied:
             result['error'] = 'No audio files copied to staging'
             return result
