@@ -209,8 +209,30 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             logger.debug(f"About to call soulseek search for task {task_id}")
 
             try:
+                # Hybrid + album-context batches must skip torrent / usenet during
+                # the per-track loop — they're release-level sources, can't match
+                # individual tracks meaningfully, and album-bundle handling only
+                # fires in single-source mode (see core/downloads/master.py). The
+                # exclusion lets the hybrid chain fall through to per-track-
+                # compatible sources (soulseek / streaming) instead of attempting
+                # N redundant Prowlarr searches that all download the same album
+                # torrent and rely on the auto-import sweep to clean up.
+                _exclude_for_hybrid_album = None
+                try:
+                    _batch_is_album = False
+                    if batch_id:
+                        from core.runtime_state import download_batches as _db
+                        _b = _db.get(batch_id)
+                        if isinstance(_b, dict):
+                            _batch_is_album = bool(_b.get('is_album_download'))
+                    if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
+                        _exclude_for_hybrid_album = ['torrent', 'usenet']
+                except Exception as _exc_filter_err:
+                    logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Perform search with timeout
-                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(query, timeout=30))
+                tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
+                    query, timeout=30, exclude_sources=_exclude_for_hybrid_album,
+                ))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns
