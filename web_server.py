@@ -16463,9 +16463,10 @@ def _get_staging_file_cache(batch_id):
     """Scan staging folder once per batch and cache the results."""
     with _staging_cache_lock:
         if batch_id in _staging_cache:
-            return _staging_cache[batch_id]
+            cached = _staging_cache[batch_id]
+            return [f for f in cached if os.path.exists(f.get('full_path', ''))]
 
-    staging_path = get_staging_path()
+    staging_path = _get_album_bundle_staging_path(batch_id) or get_staging_path()
     if not os.path.isdir(staging_path):
         with _staging_cache_lock:
             _staging_cache[batch_id] = []
@@ -16494,6 +16495,17 @@ def _get_staging_file_cache(batch_id):
     with _staging_cache_lock:
         _staging_cache[batch_id] = files
     return files
+
+
+def _get_album_bundle_staging_path(batch_id):
+    """Return the private album-bundle staging path for this batch, if any."""
+    if not batch_id:
+        return None
+    with tasks_lock:
+        row = download_batches.get(batch_id)
+        if isinstance(row, dict) and row.get('album_bundle_private_staging'):
+            return row.get('album_bundle_staging_path')
+    return None
 
 
 # Staging-folder match shortcut lives in core/downloads/staging.py.
@@ -16659,7 +16671,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon', 'torrent', 'usenet'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 

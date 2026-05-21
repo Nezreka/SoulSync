@@ -60,6 +60,7 @@ def _build_deps(
     transfer_path,
     staging_files=None,
     post_process_calls=None,
+    get_batch_field=None,
 ):
     post_process_calls = post_process_calls if post_process_calls is not None else []
     deps = ds.StagingDeps(
@@ -68,6 +69,7 @@ def _build_deps(
         get_staging_file_cache=lambda batch_id: staging_files or [],
         docker_resolve_path=lambda p: p,  # passthrough
         post_process_matched_download_with_verification=lambda *a, **kw: post_process_calls.append((a, kw)),
+        get_batch_field=get_batch_field,
     )
     deps._post_process_calls = post_process_calls
     return deps
@@ -155,6 +157,56 @@ def test_exact_match_copies_to_transfer_and_marks_post_processing(tmp_path):
     args, _ = deps._post_process_calls[0]
     context_key = args[0]
     assert context_key == 'staging_t4'
+
+
+def test_private_album_bundle_staging_source_is_removed_after_claim(tmp_path):
+    src_file = tmp_path / 'private' / 'Hello.flac'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'fake audio')
+
+    transfer_dir = tmp_path / 'transfer'
+
+    def get_batch_field(_batch_id, field):
+        if field == 'album_bundle_source':
+            return 'torrent'
+        if field == 'album_bundle_private_staging':
+            return True
+        return None
+
+    deps = _build_deps(
+        transfer_path=str(transfer_dir),
+        staging_files=[
+            {'full_path': str(src_file), 'title': 'Hello', 'artist': 'Artist One'},
+        ],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t_private')
+
+    result = ds.try_staging_match('t_private', 'b_private', _Track(), deps)
+
+    assert result is True
+    assert (transfer_dir / 'Hello.flac').exists()
+    assert not src_file.exists()
+    assert download_tasks['t_private']['username'] == 'torrent'
+
+
+def test_public_staging_source_is_kept_after_match(tmp_path):
+    src_file = tmp_path / 'staging' / 'Hello.flac'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'fake audio')
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {'full_path': str(src_file), 'title': 'Hello', 'artist': 'Artist One'},
+        ],
+    )
+    _seed_task('t_public')
+
+    result = ds.try_staging_match('t_public', 'b_public', _Track(), deps)
+
+    assert result is True
+    assert src_file.exists()
 
 
 def test_existing_file_in_transfer_gets_staging_suffix(tmp_path):

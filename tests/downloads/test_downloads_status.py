@@ -85,6 +85,38 @@ def test_analysis_phase_includes_analysis_progress_and_results():
     assert out['analysis_results'] == [{'track_index': 0, 'found': True}]
 
 
+def test_album_downloading_phase_exposes_bundle_progress_without_task_safety_valve():
+    deps, _ = _build_deps(config=_FakeConfig({'soulseek.download_timeout': 1}))
+    download_tasks['t1'] = {
+        'track_index': 0,
+        'status': 'queued',
+        'track_info': {},
+        'status_change_time': 0,
+    }
+    batch = {
+        'phase': 'album_downloading',
+        'queue': ['t1'],
+        'album_bundle_state': 'downloading',
+        'album_bundle_source': 'torrent',
+        'album_bundle_release': 'GNX [FLAC]',
+        'album_bundle_progress': 0.42,
+        'album_bundle_speed': 2048,
+        'album_bundle_size': 4096,
+    }
+    out = st.build_batch_status_data('b1', batch, {}, deps)
+    assert out['album_bundle'] == {
+        'state': 'downloading',
+        'source': 'torrent',
+        'release': 'GNX [FLAC]',
+        'progress': 0.42,
+        'progress_percent': 42,
+        'speed': 2048,
+        'size': 4096,
+    }
+    assert 'tasks' not in out
+    assert download_tasks['t1']['status'] == 'queued'
+
+
 def test_complete_phase_includes_wishlist_summary_when_present():
     deps, _ = _build_deps()
     batch = {
@@ -338,6 +370,26 @@ def test_batched_status_no_filter_returns_all_batches():
     download_batches['b2'] = {'phase': 'unknown'}
     out = st.build_batched_status([], deps)
     assert set(out['batches'].keys()) == {'b1', 'b2'}
+
+
+def test_unified_downloads_response_includes_album_bundle_summary():
+    deps, _ = _build_deps()
+    download_batches['b1'] = {
+        'phase': 'album_downloading',
+        'playlist_id': 'pl1',
+        'playlist_name': 'GNX',
+        'queue': [],
+        'album_bundle_state': 'downloading',
+        'album_bundle_source': 'torrent',
+        'album_bundle_progress': 75,
+    }
+    out = st.build_unified_downloads_response(300, deps)
+    assert out['batches'][0]['album_bundle'] == {
+        'state': 'downloading',
+        'source': 'torrent',
+        'progress': 75,
+        'progress_percent': 75,
+    }
 
 
 def test_batched_status_metadata_present():

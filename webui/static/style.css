@@ -58212,6 +58212,9 @@ body.reduce-effects *::after {
     font-size: 0.7rem;
     color: rgba(255, 255, 255, 0.4);
     margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .adl-batch-card-source {

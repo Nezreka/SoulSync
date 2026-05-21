@@ -465,7 +465,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'Prowlarr search failed: {e}'
             return result
 
-        candidates = [r for r in search_results if r.protocol == 'torrent']
+        candidates = [r for r in search_results
+                      if r.protocol == 'torrent' and (r.magnet_uri or r.download_url)]
         if not candidates:
             result['error'] = f'No torrent results found for "{query}"'
             return result
