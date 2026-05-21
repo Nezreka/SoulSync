@@ -3449,7 +3449,10 @@ function renderHistoryEntry(entry) {
         const parts = [];
         if (entry.download_source) parts.push(entry.download_source);
         if (entry.quality) parts.push(entry.quality);
-        badge = parts.map(p => `<span class="library-history-badge download">${escapeHtml(p)}</span>`).join('');
+        badge = parts.map(p => {
+            const cls = String(p || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            return `<span class="library-history-badge download source-${escapeHtml(cls)}">${escapeHtml(p)}</span>`;
+        }).join('');
     } else if (entry.event_type === 'import' && entry.server_source) {
         const sourceName = { plex: 'Plex', jellyfin: 'Jellyfin', navidrome: 'Navidrome' }[entry.server_source] || entry.server_source;
         badge = `<span class="library-history-badge import">${escapeHtml(sourceName)}</span>`;

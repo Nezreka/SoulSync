@@ -2473,6 +2473,46 @@ function _adlFormatSpeed(bytesPerSecond) {
     return formatted ? `${formatted}/s` : '';
 }
 
+function _adlSourceLabel(source) {
+    const labels = {
+        torrent: 'Torrent',
+        usenet: 'Usenet',
+        soulseek: 'Soulseek',
+        youtube: 'YouTube',
+        tidal: 'Tidal',
+        qobuz: 'Qobuz',
+        hifi: 'HiFi',
+        deezer_dl: 'Deezer',
+        amazon: 'Amazon',
+        lidarr: 'Lidarr',
+        soundcloud: 'SoundCloud'
+    };
+    const key = String(source || '').toLowerCase();
+    return labels[key] || (source ? String(source) : 'Release');
+}
+
+function _adlBundleStateLabel(state) {
+    const labels = {
+        searching: 'searching for release',
+        downloading: 'downloading release',
+        staged: 'matching tracks',
+        failed: 'release failed'
+    };
+    const key = String(state || '').toLowerCase();
+    return labels[key] || (state ? String(state).replace(/_/g, ' ') : 'downloading release');
+}
+
+function _adlBundleProgressText(bundle) {
+    const pct = _adlBundleProgressPercent(bundle);
+    const source = _adlSourceLabel(bundle && bundle.source);
+    const state = _adlBundleStateLabel(bundle && bundle.state);
+    const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    const speed = _adlFormatSpeed(bundle && bundle.speed);
+    const size = _adlFormatBytes(bundle && bundle.size);
+    const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
+    return `${source} ${state} ${pct}%${release}${detail}`;
+}
+
 async function adlClearCompleted() {
     try {
         const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
@@ -2565,12 +2605,7 @@ function _adlRenderBatchPanel() {
             phaseText = 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'album_downloading') {
-            const source = albumBundle && albumBundle.source ? `${albumBundle.source} ` : '';
-            const release = albumBundle && albumBundle.release ? ` - ${albumBundle.release}` : '';
-            const speed = _adlFormatSpeed(albumBundle && albumBundle.speed);
-            const size = _adlFormatBytes(albumBundle && albumBundle.size);
-            const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
-            phaseText = `${source}album ${albumBundle && albumBundle.state ? albumBundle.state : 'downloading'} ${bundleProgress}%${release}${detail}`;
+            phaseText = _adlBundleProgressText(albumBundle);
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
@@ -2635,7 +2670,9 @@ function _adlRenderBatchPanel() {
                     </div>`;
                 }).join('');
             } else {
-                tracksHtml = '<div style="font-size:0.7rem;color:rgba(255,255,255,0.3);padding:4px 0">No tracks loaded</div>';
+                tracksHtml = batch.phase === 'album_downloading'
+                    ? '<div class="adl-batch-release-note">Downloading one release first. Track matching starts after staging.</div>'
+                    : '<div style="font-size:0.7rem;color:rgba(255,255,255,0.3);padding:4px 0">No tracks loaded</div>';
             }
         }
 

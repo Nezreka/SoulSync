@@ -3328,6 +3328,46 @@ function _downloadModalFormatSpeed(bytesPerSecond) {
     return formatted ? `${formatted}/s` : '';
 }
 
+function _downloadModalSourceLabel(source) {
+    const labels = {
+        torrent: 'Torrent',
+        usenet: 'Usenet',
+        soulseek: 'Soulseek',
+        youtube: 'YouTube',
+        tidal: 'Tidal',
+        qobuz: 'Qobuz',
+        hifi: 'HiFi',
+        deezer_dl: 'Deezer',
+        amazon: 'Amazon',
+        lidarr: 'Lidarr',
+        soundcloud: 'SoundCloud'
+    };
+    const key = String(source || '').toLowerCase();
+    return labels[key] || (source ? String(source) : 'Release');
+}
+
+function _downloadModalBundleStateLabel(state) {
+    const labels = {
+        searching: 'searching for release',
+        downloading: 'downloading release',
+        staged: 'matching tracks',
+        failed: 'release failed'
+    };
+    const key = String(state || '').toLowerCase();
+    return labels[key] || (state ? String(state).replace(/_/g, ' ') : 'downloading release');
+}
+
+function _downloadModalBundleProgressText(bundle) {
+    const percent = _downloadModalBundleProgressPercent(bundle);
+    const source = _downloadModalSourceLabel(bundle && bundle.source);
+    const state = _downloadModalBundleStateLabel(bundle && bundle.state);
+    const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    const speed = _downloadModalFormatSpeed(bundle && bundle.speed);
+    const size = _downloadModalFormatBytes(bundle && bundle.size);
+    const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
+    return `${source} ${state} ${percent}%${release}${detail}`;
+}
+
 function processModalStatusUpdate(playlistId, data) {
     // This function contains ALL the existing polling logic from startModalDownloadPolling
     // Extracted so it can be called from both individual and batched polling
@@ -3384,16 +3424,12 @@ function processModalStatusUpdate(playlistId, data) {
 
         const bundle = data.album_bundle || {};
         const percent = _downloadModalBundleProgressPercent(bundle);
-        const source = bundle.source ? `${bundle.source} ` : '';
-        const release = bundle.release ? ` - ${bundle.release}` : '';
-        const speed = _downloadModalFormatSpeed(bundle.speed);
-        const size = _downloadModalFormatBytes(bundle.size);
-        const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
         const downloadFill = document.getElementById(`download-progress-fill-${playlistId}`);
         const downloadText = document.getElementById(`download-progress-text-${playlistId}`);
         if (downloadFill) downloadFill.style.width = `${percent}%`;
         if (downloadText) {
-            downloadText.textContent = `${source}album ${bundle.state || 'downloading'} ${percent}%${release}${detail}`;
+            downloadText.textContent = _downloadModalBundleProgressText(bundle);
+            downloadText.title = 'SoulSync downloads one album release first, then matches the selected tracks from the staged files.';
         }
 
         const modal = document.getElementById(`download-missing-modal-${playlistId}`);
@@ -3401,7 +3437,9 @@ function processModalStatusUpdate(playlistId, data) {
             modal.querySelectorAll('[id^="download-"]').forEach(statusEl => {
                 if (!statusEl.id.startsWith(`download-${playlistId}-`)) return;
                 if (!statusEl.textContent || statusEl.textContent === '-' || statusEl.textContent.includes('Pending')) {
-                    statusEl.textContent = 'Waiting for album bundle';
+                    statusEl.textContent = 'Waiting for release';
+                    statusEl.classList.add('album-bundle-waiting');
+                    statusEl.title = 'The album release is downloading first. Tracks will move to processing once SoulSync can match files from it.';
                 }
             });
         }
