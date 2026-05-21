@@ -3406,7 +3406,7 @@ async function loadLibraryHistory() {
             const sc = data.stats?.source_counts || {};
             const srcEntries = Object.entries(sc).sort((a, b) => b[1] - a[1]);
             if (srcEntries.length > 0 && tab === 'download') {
-                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff' };
+                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff', Lidarr: '#5dade2', Amazon: '#ff9900', SoundCloud: '#ff7700', Torrent: '#5dade2', Usenet: '#a78bfa', Staging: '#888', 'Auto-Import': '#888' };
                 sourceBar.innerHTML = srcEntries.map(([src, cnt]) =>
                     `<span class="history-source-chip" style="border-color:${_srcColors[src] || '#888'};color:${_srcColors[src] || '#888'}">${src}: ${cnt}</span>`
                 ).join('');
