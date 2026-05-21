@@ -197,3 +197,4 @@ class DownloadStatus:
     speed: int
     time_remaining: Optional[int] = None
     file_path: Optional[str] = None
+    audio_files: Optional[List[str]] = None

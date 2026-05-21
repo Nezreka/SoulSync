@@ -123,3 +123,47 @@ def test_keeps_tidal_candidate_inside_integrity_duration_tolerance(monkeypatch):
     result = get_valid_candidates([tidal], expected, 'Artist Song')
 
     assert result == [tidal]
+
+
+def test_rejects_torrent_title_match_from_wrong_artist(monkeypatch):
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _Track(duration_ms=180_000, name='The Man I Need', artists=('Olivia Dean',))
+    wrong_artist = _Candidate(
+        username='torrent',
+        duration=None,
+        title='The Man I Need',
+        artist='Tinkabelle',
+    )
+
+    assert get_valid_candidates([wrong_artist], expected, 'Olivia Dean The Man I Need') == []
+
+
+def test_keeps_torrent_title_match_from_expected_artist(monkeypatch):
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _Track(duration_ms=180_000, name='The Man I Need', artists=('Olivia Dean',))
+    correct_artist = _Candidate(
+        username='torrent',
+        duration=None,
+        title='The Man I Need',
+        artist='Olivia Dean',
+    )
+
+    result = get_valid_candidates([correct_artist], expected, 'Olivia Dean The Man I Need')
+
+    assert result == [correct_artist]
+
+
+def test_keeps_torrent_title_match_when_artist_is_indexer_fallback(monkeypatch):
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _Track(duration_ms=180_000, name='The Man I Need', artists=('Olivia Dean',))
+    candidate = _Candidate(
+        username='torrent',
+        duration=None,
+        title='The Man I Need',
+        artist='Indexer',
+    )
+    candidate._source_metadata = {'indexer': 'Indexer'}
+
+    result = get_valid_candidates([candidate], expected, 'Olivia Dean The Man I Need')
+
+    assert result == [candidate]

@@ -25,10 +25,39 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from core.runtime_state import download_tasks, tasks_lock
+from core.runtime_state import download_batches, download_tasks, tasks_lock
 from core.spotify_client import Track as SpotifyTrack
 
 logger = logging.getLogger(__name__)
+
+
+def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
+    """Return a user-facing miss reason when per-track search should stop.
+
+    Torrent / usenet album batches first download one private staged release,
+    then each track claims the matching staged file. If that claim fails after
+    the release is already staged, falling through to the normal per-track
+    search only retries release-level sources N times and can keep re-adding
+    the same torrent. Treat the staged release as authoritative for this pass.
+    """
+    if not batch_id:
+        return None
+
+    batch = download_batches.get(batch_id)
+    if not isinstance(batch, dict):
+        return None
+
+    source = (batch.get('album_bundle_source') or '').lower()
+    mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
+    if (
+        batch.get('album_bundle_private_staging')
+        and batch.get('album_bundle_state') == 'staged'
+        and source in ('torrent', 'usenet')
+        and mode == source
+    ):
+        return f'Track was not found in the staged {source} album release'
+
+    return None
 
 
 @dataclass
@@ -128,6 +157,21 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # === STAGING CHECK: Check staging folder for existing file before searching ===
         if deps.try_staging_match(task_id, batch_id, track):
             return
+        staging_miss_reason = _private_album_bundle_staging_miss_reason(batch_id, deps)
+        if staging_miss_reason:
+            logger.warning(
+                "[Modal Worker] %s for '%s'; skipping redundant per-track %s search",
+                staging_miss_reason,
+                track.name,
+                getattr(deps.download_orchestrator, 'mode', 'release-source'),
+            )
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'not_found'
+                    download_tasks[task_id]['error_message'] = staging_miss_reason
+            if batch_id:
+                deps.on_download_completed(batch_id, task_id, False)
+            return
 
         # Initialize task state tracking (like GUI's parallel_search_tracking)
         with tasks_lock:
@@ -146,6 +190,27 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
+
+        release_queries = []
+        try:
+            _download_mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
+            _track_album = (getattr(track, 'album', '') or '').strip()
+            _track_title = (getattr(track, 'name', '') or '').strip()
+            _track_artists = list(getattr(track, 'artists', []) or [])
+            _first_artist = _track_artists[0] if _track_artists else ''
+            _primary_artist = (
+                (_first_artist.get('name', '') if isinstance(_first_artist, dict) else str(_first_artist))
+                or ''
+            ).strip()
+            if (
+                _download_mode in ('torrent', 'usenet')
+                and _primary_artist
+                and _track_album
+                and _track_album.lower() not in ('unknown album', _track_title.lower())
+            ):
+                release_queries.append(f"{_primary_artist} {_track_album}".strip())
+        except Exception as _release_query_exc:
+            logger.debug("[Modal Worker] release query hint failed: %s", _release_query_exc)
 
         # Start with matching engine queries
         search_queries = deps.matching_engine.generate_download_queries(track)
@@ -175,8 +240,14 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         if cleaned_name and cleaned_name.lower() != track_name.lower():
             legacy_queries.append(cleaned_name.strip())
 
-        # Combine enhanced queries with legacy fallbacks
-        all_queries = search_queries + legacy_queries
+        # Combine enhanced queries with legacy fallbacks.
+        #
+        # Torrent / usenet can use full album releases as a fallback for
+        # single-track requests, but trying the album release first makes
+        # playlist batches download whole albums before checking whether a
+        # track-shaped release exists. Keep release queries last so singles
+        # stay light when the indexer has a direct result.
+        all_queries = search_queries + legacy_queries + release_queries
 
         # Remove duplicates while preserving order
         unique_queries = []
