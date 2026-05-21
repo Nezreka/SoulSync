@@ -97,8 +97,12 @@ def get_valid_candidates(results, spotify_track, query):
         return []
 
     # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer, SoundCloud) return structured API results
-    # with proper artist/title metadata — score using the same matching engine as Soulseek
-    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon")
+    # with proper artist/title metadata — score using the same matching engine as Soulseek.
+    # Torrent / usenet results also belong here: their filename field is a download URL, not
+    # a slskd-style ``Artist/Album/Track.flac`` path, so the Soulseek matcher would extract
+    # garbage segments from it. Routing them through the streaming path means score_track_match
+    # reads ``r.title`` and ``r.artist`` directly (which the torrent/usenet projections pre-fill).
+    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon", "torrent", "usenet")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
         expected_artists = spotify_track.artists if spotify_track else []
@@ -142,6 +146,27 @@ def get_valid_candidates(results, spotify_track, query):
                 candidate_duration_ms=r.duration or 0,
             )
 
+            # Torrent / usenet results are typically release-level (album torrents).
+            # Looking for "Luther (with SZA)" against a candidate titled
+            # "GNX (2024) [FLAC]" scores ~0 on track-title alone, even though
+            # the album torrent does in fact contain the wanted track. Score
+            # the candidate title against the wanted track's ALBUM name too
+            # and take the max, so album-level releases match every track on
+            # them. The album_track_count bonus only kicks in when we have
+            # a non-empty album string to compare against.
+            if r.username in ('torrent', 'usenet') and spotify_track and spotify_track.album:
+                album_conf, _ = matching_engine.score_track_match(
+                    source_title=spotify_track.album,
+                    source_artists=expected_artists,
+                    source_duration_ms=0,            # albums don't have one duration
+                    candidate_title=r.title or '',
+                    candidate_artists=[r.artist] if r.artist else [],
+                    candidate_duration_ms=0,
+                )
+                if album_conf > confidence:
+                    confidence = album_conf
+                    match_type = 'album_release'
+
             # Version detection penalty — reject live/remix/acoustic when expecting original
             r_title_lower = (r.title or '').lower()
             is_wrong_version = False
@@ -162,8 +187,11 @@ def get_valid_candidates(results, spotify_track, query):
 
             # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
             # so "My Will" by "B. Starr" should never match expected "B小町".
-            # Skip for YouTube — artist is parsed from video titles and often unreliable.
-            if r.username != 'youtube':
+            # Skip for YouTube (video-title parsing is unreliable) and torrent/usenet
+            # (album-level releases legitimately don't expose per-track artist —
+            # the projection layer fills artist with the indexer name as a fallback,
+            # which would otherwise fail the gate against every Spotify artist).
+            if r.username not in ('youtube', 'torrent', 'usenet'):
                 from difflib import SequenceMatcher
                 import re as _re
                 _cand_artist_raw = r.artist or ''
