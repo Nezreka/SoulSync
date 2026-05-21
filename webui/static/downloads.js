@@ -3300,6 +3300,74 @@ function closeCandidatesModal() {
     }
 }
 
+function _downloadModalBundleProgressPercent(bundle) {
+    if (!bundle) return 0;
+    const raw = bundle.progress_percent ?? bundle.progress ?? 0;
+    let progress = Number(raw);
+    if (!Number.isFinite(progress)) progress = 0;
+    if (progress <= 1) progress *= 100;
+    return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+function _downloadModalFormatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    const decimals = size >= 10 || unit === 0 ? 0 : 1;
+    return `${size.toFixed(decimals)} ${units[unit]}`;
+}
+
+function _downloadModalFormatSpeed(bytesPerSecond) {
+    const formatted = _downloadModalFormatBytes(bytesPerSecond);
+    return formatted ? `${formatted}/s` : '';
+}
+
+function _downloadModalSourceLabel(source) {
+    const labels = {
+        torrent: 'Torrent',
+        usenet: 'Usenet',
+        soulseek: 'Soulseek',
+        youtube: 'YouTube',
+        tidal: 'Tidal',
+        qobuz: 'Qobuz',
+        hifi: 'HiFi',
+        deezer_dl: 'Deezer',
+        amazon: 'Amazon',
+        lidarr: 'Lidarr',
+        soundcloud: 'SoundCloud'
+    };
+    const key = String(source || '').toLowerCase();
+    return labels[key] || (source ? String(source) : 'Release');
+}
+
+function _downloadModalBundleStateLabel(state) {
+    const labels = {
+        searching: 'searching for release',
+        downloading: 'downloading release',
+        staged: 'matching tracks',
+        failed: 'release failed'
+    };
+    const key = String(state || '').toLowerCase();
+    return labels[key] || (state ? String(state).replace(/_/g, ' ') : 'downloading release');
+}
+
+function _downloadModalBundleProgressText(bundle) {
+    const percent = _downloadModalBundleProgressPercent(bundle);
+    const source = _downloadModalSourceLabel(bundle && bundle.source);
+    const state = _downloadModalBundleStateLabel(bundle && bundle.state);
+    const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    const speed = _downloadModalFormatSpeed(bundle && bundle.speed);
+    const size = _downloadModalFormatBytes(bundle && bundle.size);
+    const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
+    return `${source} ${state} ${percent}%${release}${detail}`;
+}
+
 function processModalStatusUpdate(playlistId, data) {
     // This function contains ALL the existing polling logic from startModalDownloadPolling
     // Extracted so it can be called from both individual and batched polling
@@ -3347,6 +3415,33 @@ function processModalStatusUpdate(playlistId, data) {
 
             // Auto-save M3U file for playlists after analysis
             autoSavePlaylistM3U(playlistId);
+        }
+    } else if (data.phase === 'album_downloading') {
+        const analysisFill = document.getElementById(`analysis-progress-fill-${playlistId}`);
+        const analysisText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        if (analysisFill) analysisFill.style.width = '100%';
+        if (analysisText) analysisText.textContent = 'Analysis complete!';
+
+        const bundle = data.album_bundle || {};
+        const percent = _downloadModalBundleProgressPercent(bundle);
+        const downloadFill = document.getElementById(`download-progress-fill-${playlistId}`);
+        const downloadText = document.getElementById(`download-progress-text-${playlistId}`);
+        if (downloadFill) downloadFill.style.width = `${percent}%`;
+        if (downloadText) {
+            downloadText.textContent = _downloadModalBundleProgressText(bundle);
+            downloadText.title = 'SoulSync downloads one album release first, then matches the selected tracks from the staged files.';
+        }
+
+        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+        if (modal) {
+            modal.querySelectorAll('[id^="download-"]').forEach(statusEl => {
+                if (!statusEl.id.startsWith(`download-${playlistId}-`)) return;
+                if (!statusEl.textContent || statusEl.textContent === '-' || statusEl.textContent.includes('Pending')) {
+                    statusEl.textContent = 'Waiting for release';
+                    statusEl.classList.add('album-bundle-waiting');
+                    statusEl.title = 'The album release is downloading first. Tracks will move to processing once SoulSync can match files from it.';
+                }
+            });
         }
     } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
         console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);

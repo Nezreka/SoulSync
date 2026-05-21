@@ -1,0 +1,217 @@
+"""Shared helpers for the album-bundle download flow.
+
+The torrent and usenet download plugins both implement a
+``download_album_to_staging`` method that searches Prowlarr for a
+whole release, hands it to the active downloader, walks the
+resulting audio files, and copies them into the staging folder. The
+two implementations share the same release-picker heuristic and the
+same staging-path collision logic.
+
+Pulled out of ``core/download_plugins/torrent.py`` so the usenet
+plugin doesn't have to import private helpers from a sibling
+plugin (Cin's "no leaky module boundaries" standard).
+
+Also exposes ``atomic_copy_to_staging`` — the audio file is copied
+to a ``.tmp.<random>`` sidecar first and atomically renamed onto its
+final extension. The Auto-Import worker filters by audio extension
+so the in-flight ``.tmp`` file is never picked up mid-copy, closing
+the race between the album-bundle copy loop and Auto-Import's
+folder scan.
+"""
+
+from __future__ import annotations
+
+import shutil
+import time
+import uuid
+from pathlib import Path
+from typing import Iterable, Optional
+
+from config.settings import config_manager
+from utils.logging_config import get_logger
+
+logger = get_logger("download_plugins.album_bundle")
+
+
+# Album-pick size floor / ceiling. Single-track torrents (~10 MB)
+# are rejected when bigger candidates exist; anything past 3 GB is
+# treated as suspicious (multi-disc box-set + scans + extras).
+ALBUM_PICK_MIN_BYTES = 40 * 1024 * 1024
+ALBUM_PICK_MAX_BYTES = 3 * 1024 * 1024 * 1024
+
+
+# Quality-score weights for the album-pick heuristic. Mirrors the
+# tier order in ``core/imports/file_ops.py``'s ``quality_tiers`` —
+# higher number = preferred.
+_QUALITY_SCORE = {'flac': 4, 'ogg': 3, 'aac': 2, 'mp3': 1}
+
+
+# Default poll cadence + timeout for the album-download poll loop.
+# Both are overridable through config so users with slow trackers
+# / large box-sets can extend the deadline without editing code.
+DEFAULT_POLL_INTERVAL_SECONDS = 2.0
+DEFAULT_POLL_TIMEOUT_SECONDS = 6 * 60 * 60
+
+
+def get_poll_interval() -> float:
+    """Return the per-poll sleep duration (seconds). Configurable via
+    ``download_source.album_bundle_poll_interval_seconds``."""
+    raw = config_manager.get('download_source.album_bundle_poll_interval_seconds',
+                             DEFAULT_POLL_INTERVAL_SECONDS)
+    try:
+        value = float(raw)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def get_poll_timeout() -> float:
+    """Return the total deadline for an album-bundle download
+    (seconds). Configurable via
+    ``download_source.album_bundle_timeout_seconds``."""
+    raw = config_manager.get('download_source.album_bundle_timeout_seconds',
+                             DEFAULT_POLL_TIMEOUT_SECONDS)
+    try:
+        value = float(raw)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_POLL_TIMEOUT_SECONDS
+
+
+def quality_score(title: str, quality_guess) -> int:
+    """Map a release title's inferred quality to a sortable integer.
+
+    ``quality_guess`` is the function from each plugin that maps a
+    title string to a quality string ('flac' / 'mp3' / etc.) — passed
+    in so this module doesn't have to import either plugin and risk
+    a circular import."""
+    return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
+
+
+def pick_best_album_release(candidates, quality_guess) -> Optional[object]:
+    """Pick the single best torrent / NZB for an album-bundle download.
+
+    Heuristic, in priority order:
+    1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
+       releases that snuck in and quarantines suspicious giants.
+    2. Higher seeders > lower (dead torrents = dead downloads).
+       Usenet releases use ``grabs`` as a popularity proxy when
+       seeders is None.
+    3. Higher quality (FLAC > AAC > MP3) inferred from title.
+    4. Larger size as tiebreaker (often = higher bitrate).
+    """
+    if not candidates:
+        return None
+    sized = [c for c in candidates
+             if ALBUM_PICK_MIN_BYTES <= (c.size or 0) <= ALBUM_PICK_MAX_BYTES]
+    pool = sized or list(candidates)
+    if not pool:
+        return None
+
+    def _score(c) -> tuple:
+        seeders = c.seeders if c.seeders is not None else (c.grabs or 0)
+        return (seeders, quality_score(c.title or '', quality_guess), c.size or 0)
+
+    return max(pool, key=_score)
+
+
+def unique_staging_path(staging_dir: Path, src: Path) -> Path:
+    """Return a destination path inside ``staging_dir`` that doesn't
+    collide with an existing file. Appends ``_1``, ``_2``, ... before
+    the extension when needed; gives up after 1000 candidates and
+    returns the unsuffixed path so the caller will overwrite (better
+    than infinite loop or crash)."""
+    dest = staging_dir / src.name
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    for i in range(1, 1000):
+        candidate = staging_dir / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return dest
+
+
+def atomic_copy_to_staging(src: Path, dest: Path) -> bool:
+    """Copy ``src`` to ``dest`` without exposing a partial file to
+    folder scanners.
+
+    The Auto-Import worker filters by audio extension when scanning
+    Staging — see ``AUDIO_EXTENSIONS`` in ``core/auto_import_worker.py``.
+    Naming the in-flight file ``<dest>.tmp.<random>`` keeps it
+    invisible until the rename atomically swings it to its final
+    extension. ``os.replace`` (used by ``Path.rename`` on Python 3.x)
+    is atomic on the same filesystem, so Auto-Import either sees the
+    file at its final name (complete) or doesn't see it at all
+    (in flight).
+
+    Returns True on success, False on copy / rename failure. Caller
+    is expected to log the failure case so we don't double-log here.
+    """
+    tmp = dest.with_name(f"{dest.name}.tmp.{uuid.uuid4().hex[:8]}")
+    try:
+        shutil.copy2(src, tmp)
+    except Exception:
+        # Best-effort cleanup of the partial file. If unlink fails
+        # (locked, permissions) we leave it — Auto-Import ignores it
+        # anyway because of the .tmp extension.
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception as cleanup_exc:
+            logger.debug("album_bundle tmp cleanup failed: %s", cleanup_exc)
+        raise
+    try:
+        tmp.replace(dest)
+        return True
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception as cleanup_exc:
+            logger.debug("album_bundle tmp cleanup failed: %s", cleanup_exc)
+        raise
+
+
+def copy_audio_files_atomically(
+    sources: Iterable[Path], staging_dir: Path,
+) -> list:
+    """Convenience wrapper: pick a non-colliding staging path for
+    each source, copy via ``atomic_copy_to_staging``. Returns the
+    list of final destination paths (as strings). Files that fail
+    to copy are logged and skipped; the caller decides what to do
+    with a partial result."""
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    out: list = []
+    for src in sources:
+        dest = unique_staging_path(staging_dir, src)
+        try:
+            atomic_copy_to_staging(src, dest)
+            out.append(str(dest))
+        except Exception as e:
+            logger.warning("[album_bundle] Failed to stage %s -> %s: %s", src, dest, e)
+    return out
+
+
+# Re-export so callers don't have to remember which module owns
+# what. The ``time`` import is kept so plugins can ``from
+# core.download_plugins.album_bundle import time`` if they want to,
+# avoiding a second std-lib import line for a single use.
+__all__ = [
+    "ALBUM_PICK_MIN_BYTES",
+    "ALBUM_PICK_MAX_BYTES",
+    "DEFAULT_POLL_INTERVAL_SECONDS",
+    "DEFAULT_POLL_TIMEOUT_SECONDS",
+    "atomic_copy_to_staging",
+    "copy_audio_files_atomically",
+    "get_poll_interval",
+    "get_poll_timeout",
+    "pick_best_album_release",
+    "quality_score",
+    "time",
+    "unique_staging_path",
+]

@@ -329,6 +329,48 @@ def test_batch_completion_emits_batch_complete_when_all_done():
     assert 'b1' in monitor.stopped
 
 
+def test_batch_completion_cleans_private_album_bundle_staging(tmp_path):
+    staging_dir = tmp_path / 'b1'
+    staging_dir.mkdir()
+    (staging_dir / 'leftover.flac').write_bytes(b'audio')
+
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+        'album_bundle_private_staging': True,
+        'album_bundle_source': 'torrent',
+        'album_bundle_staging_path': str(staging_dir),
+    }
+    deps, _ = _build_deps()
+
+    lc.on_download_completed('b1', 't1', True, deps)
+
+    assert not staging_dir.exists()
+
+
+def test_batch_completion_keeps_unexpected_staging_path(tmp_path):
+    staging_dir = tmp_path / 'shared-staging'
+    staging_dir.mkdir()
+    (staging_dir / 'leftover.flac').write_bytes(b'audio')
+
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+        'album_bundle_private_staging': True,
+        'album_bundle_source': 'torrent',
+        'album_bundle_staging_path': str(staging_dir),
+    }
+    deps, _ = _build_deps()
+
+    lc.on_download_completed('b1', 't1', True, deps)
+
+    assert staging_dir.exists()
+
+
 def test_batch_completion_skips_emit_when_zero_successful():
     """Don't emit batch_complete if nothing actually downloaded."""
     download_tasks['t1'] = {'status': 'failed', 'track_info': {'name': 'X'}, 'track_index': 0}

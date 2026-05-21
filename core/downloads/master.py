@@ -35,6 +35,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable
 
+from core.downloads import album_bundle_dispatch as _album_bundle_dispatch
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 
 logger = logging.getLogger(__name__)
@@ -270,6 +271,26 @@ class MasterDeps:
     reset_wishlist_auto_processing: Callable[[], None]
 
 
+class _BatchStateAccessImpl:
+    """Concrete ``BatchStateAccess`` for the runtime ``download_batches``
+    dict — wraps the lock + the existing-batch check so the album-
+    bundle dispatcher stays decoupled from runtime_state."""
+
+    def update_fields(self, batch_id: str, fields: dict) -> None:
+        with tasks_lock:
+            row = download_batches.get(batch_id)
+            if row is not None:
+                row.update(fields)
+
+    def mark_failed(self, batch_id: str, error: str) -> None:
+        with tasks_lock:
+            row = download_batches.get(batch_id)
+            if row is not None:
+                row['phase'] = 'failed'
+                row['error'] = error
+                row['album_bundle_state'] = 'failed'
+
+
 def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps):
     """
     A master worker that handles the entire missing tracks process:
@@ -310,6 +331,23 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
         if force_download_all:
             logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
+
+        # Album-bundle gate for torrent / usenet single-source mode.
+        # See ``core/downloads/album_bundle_dispatch`` for the full
+        # narrow-gate rationale. Returns True iff the master worker
+        # should stop (gate fired and failed); False = engaged-and-
+        # succeeded OR didn't engage, both fall through to per-track.
+        _bundle_state = _BatchStateAccessImpl()
+        if _album_bundle_dispatch.try_dispatch(
+            batch_id=batch_id,
+            is_album=batch_is_album,
+            album_context=batch_album_context,
+            artist_context=batch_artist_context,
+            config_get=deps.config_manager.get,
+            plugin_resolver=deps.download_orchestrator.client,
+            state=_bundle_state,
+        ):
+            return
 
         # Allow duplicate tracks across albums — when enabled, only skip tracks already
         # owned in THIS album, not tracks owned in other albums

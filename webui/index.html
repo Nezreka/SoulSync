@@ -4328,6 +4328,8 @@
                                         <option value="amazon">Amazon Music Only</option>
                                         <option value="lidarr">Lidarr Only</option>
                                         <option value="soundcloud">SoundCloud Only</option>
+                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -4735,6 +4737,15 @@
                                     </div>
                                 </div>
 
+                                <!-- Torrent / Usenet Settings — settings live on the Indexers tab, just point the user there -->
+                                <div id="prowlarr-source-redirect" style="display: none;">
+                                    <div class="form-group">
+                                        <div class="setting-help-text" style="padding: 12px 14px; background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.2); border-radius: 10px;">
+                                            📡 Torrent and Usenet downloads run through your Prowlarr indexers and your configured downloader. Set up Prowlarr + the torrent / usenet client on the <strong>Indexers &amp; Downloaders</strong> tab. Once Test Connection is green on both, this source is ready to use.
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- YouTube Settings (shown when youtube or hybrid mode) -->
                                 <div id="youtube-settings-container" style="display: none;">
                                     <div class="form-group">
@@ -4959,6 +4970,17 @@
                                 </div>
                                 <div class="ind-hero-sub">
                                     Configure your Prowlarr instance to feed search results, and pick a torrent client and/or usenet client to handle the actual downloads. You only need to set up the protocols you actually use.
+                                </div>
+                                <div class="ind-hero-warning">
+                                    <div class="ind-hero-warning-title">💡 Filesystem access — easiest setup</div>
+                                    <div class="ind-hero-warning-body">
+                                        Torrent and usenet clients write files to <strong>their own download folders</strong>, not Soulseek's. SoulSync needs read access to those folders to import the files. <strong>Simplest fix:</strong> point all your downloaders (Soulseek, qBittorrent, SABnzbd / NZBGet) at the <em>same</em> download folder. One folder, one path to worry about, everything just works.
+                                        <ul>
+                                            <li><strong>Bare-metal:</strong> just set every client's download path to the same folder (e.g. your existing slskd folder). Done.</li>
+                                            <li><strong>Docker:</strong> easiest is to reuse the <code>./downloads</code> mount you already have for slskd — point qBit and SAB at <code>/downloads</code> inside their containers too. Or use the commented placeholders in <code>docker-compose.yml</code> if you want separate folders.</li>
+                                            <li><strong>Remote client (NAS / different host):</strong> mount the remote folder locally (SMB / NFS / rclone) before SoulSync can see it.</li>
+                                        </ul>
+                                    </div>
                                 </div>
                             </div>
 
