@@ -4971,6 +4971,17 @@
                                 <div class="ind-hero-sub">
                                     Configure your Prowlarr instance to feed search results, and pick a torrent client and/or usenet client to handle the actual downloads. You only need to set up the protocols you actually use.
                                 </div>
+                                <div class="ind-hero-warning">
+                                    <div class="ind-hero-warning-title">⚠️ Filesystem access required</div>
+                                    <div class="ind-hero-warning-body">
+                                        Your torrent / usenet client downloads to <strong>its own folder</strong> (not Soulseek's). SoulSync needs read access to that folder to import the files.
+                                        <ul>
+                                            <li><strong>Bare-metal (everything on one PC):</strong> works out of the box — SoulSync reads the path directly.</li>
+                                            <li><strong>Docker:</strong> map the client's save folder into the SoulSync container at the <em>same path</em> the client reports. Commented examples are in <code>docker-compose.yml</code> — uncomment and edit the host paths.</li>
+                                            <li><strong>Remote client (NAS / different host):</strong> mount the remote folder locally (SMB / NFS / rclone) before SoulSync can see it.</li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- ─── INDEXERS section ─── -->
