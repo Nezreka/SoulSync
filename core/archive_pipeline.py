@@ -225,6 +225,12 @@ def _extract_7z(archive_path: Path, dest: Path) -> Optional[Path]:
         return None
     try:
         with py7zr.SevenZipFile(archive_path, 'r') as sz:
+            dest_resolved = dest.resolve()
+            for name in sz.getnames():
+                target = (dest_resolved / name).resolve()
+                if dest_resolved not in target.parents and target != dest_resolved:
+                    logger.error("archive_pipeline: refusing path-traversal 7z member %r", name)
+                    return None
             sz.extractall(path=dest)
         return dest
     except Exception as e:

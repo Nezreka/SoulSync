@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -450,6 +450,22 @@ def test_torrent_album_to_staging_short_circuits_when_not_configured() -> None:
         outcome = plugin.download_album_to_staging('GNX', 'Kendrick Lamar', '/tmp/staging')
     assert outcome['success'] is False
     assert 'not configured' in outcome['error'].lower()
+
+
+def test_torrent_album_to_staging_ignores_candidates_without_download_url(tmp_path: Path) -> None:
+    plugin = TorrentDownloadPlugin()
+    fake_adapter = MagicMock()
+    fake_adapter.is_configured.return_value = True
+    with patch.object(plugin, 'is_configured', return_value=True), \
+         patch.object(plugin._prowlarr, 'search', new=AsyncMock(return_value=[
+             _make_torrent_result(download_url=None, magnet_uri=None),
+         ])), \
+         patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=fake_adapter):
+        outcome = plugin.download_album_to_staging('GNX', 'Kendrick Lamar', str(tmp_path))
+
+    assert outcome['success'] is False
+    assert 'No torrent results' in outcome['error']
+    fake_adapter.add_torrent.assert_not_called()
 
 
 def test_registry_includes_torrent_and_usenet() -> None:

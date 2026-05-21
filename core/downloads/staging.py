@@ -160,12 +160,29 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             except Exception as _exc:
                 logger.debug("get_batch_field failed: %s", _exc)
         _provenance_username = _provenance_override or 'staging'
+        _private_album_bundle_staging = False
+        if batch_id and deps.get_batch_field is not None:
+            try:
+                _private_album_bundle_staging = bool(
+                    deps.get_batch_field(batch_id, 'album_bundle_private_staging')
+                )
+            except Exception as _exc:
+                logger.debug("get_batch_field failed: %s", _exc)
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'post_processing'
                 download_tasks[task_id]['filename'] = dest_path
                 download_tasks[task_id]['username'] = _provenance_username
                 download_tasks[task_id]['staging_match'] = True
+
+        if _private_album_bundle_staging:
+            try:
+                os.remove(best_match['full_path'])
+                logger.debug("[Staging] Removed private album-bundle staging file: %s", best_match['full_path'])
+            except FileNotFoundError:
+                pass
+            except Exception as _exc:
+                logger.debug("[Staging] Could not remove private album-bundle staging file: %s", _exc)
 
         # Run post-processing (tagging, AcoustID verification, path building)
         context_key = f"staging_{task_id}"

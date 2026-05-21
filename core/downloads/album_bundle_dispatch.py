@@ -31,6 +31,7 @@ testable without touching live runtime state.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,11 @@ def try_dispatch(
         )
         return False
 
-    staging_dir = config_get('import.staging_path', './Staging') or './Staging'
+    staging_root = config_get(
+        'download_source.album_bundle_staging_path',
+        'storage/album_bundle_staging',
+    ) or 'storage/album_bundle_staging'
+    staging_dir = str(Path(staging_root) / _safe_batch_dirname(batch_id))
     logger.info(
         "[Album Bundle] Engaging %s album flow for '%s' by '%s' -> %s",
         mode, album_name, artist_name, staging_dir,
@@ -136,6 +141,8 @@ def try_dispatch(
         'phase': 'album_downloading',
         'album_bundle_state': 'searching',
         'album_bundle_source': mode,
+        'album_bundle_staging_path': staging_dir,
+        'album_bundle_private_staging': True,
     })
 
     def _emit(payload):
@@ -177,3 +184,8 @@ def try_dispatch(
     # task rows. Those tasks will hit try_staging_match and pull the
     # files we just staged.
     return False
+
+
+def _safe_batch_dirname(batch_id: str) -> str:
+    safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in str(batch_id or 'batch'))
+    return safe or 'batch'

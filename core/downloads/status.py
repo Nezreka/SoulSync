@@ -247,6 +247,9 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
         "playlist_id": batch.get('playlist_id'),  # Include playlist_id for rehydration
         "playlist_name": batch.get('playlist_name'),  # Include playlist_name for reference
     }
+    album_bundle = _build_album_bundle_status(batch)
+    if album_bundle:
+        response_data['album_bundle'] = album_bundle
 
     if response_data["phase"] == 'analysis':
         response_data['analysis_progress'] = {
@@ -610,7 +613,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
         for bid, batch in download_batches.items():
             queue = batch.get('queue', [])
             statuses = [download_tasks[tid]['status'] for tid in queue if tid in download_tasks]
-            batch_summaries.append({
+            summary = {
                 'batch_id': bid,
                 'playlist_id': batch.get('playlist_id', ''),
                 'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
@@ -621,7 +624,11 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
                 'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
                 'queued': sum(1 for s in statuses if s in ('queued', 'pending')),
-            })
+            }
+            album_bundle = _build_album_bundle_status(batch)
+            if album_bundle:
+                summary['album_bundle'] = album_bundle
+            batch_summaries.append(summary)
 
     return {
         'success': True,
@@ -630,3 +637,38 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
         'batches': batch_summaries,
         'timestamp': time.time(),
     }
+
+
+def _build_album_bundle_status(batch: dict) -> dict:
+    """Return public batch-level status for torrent/Usenet album-bundle work."""
+    state = batch.get('album_bundle_state')
+    if not state:
+        return {}
+
+    status = {
+        'state': state,
+        'source': batch.get('album_bundle_source'),
+        'release': batch.get('album_bundle_release'),
+        'progress': batch.get('album_bundle_progress'),
+        'progress_percent': _album_bundle_progress_percent(
+            batch.get('album_bundle_progress')
+        ),
+        'speed': batch.get('album_bundle_speed'),
+        'downloaded': batch.get('album_bundle_downloaded'),
+        'size': batch.get('album_bundle_size'),
+        'seeders': batch.get('album_bundle_seeders'),
+        'grabs': batch.get('album_bundle_grabs'),
+        'count': batch.get('album_bundle_count'),
+    }
+    return {key: value for key, value in status.items() if value is not None}
+
+
+def _album_bundle_progress_percent(value: Any) -> int:
+    try:
+        progress = float(value)
+    except (TypeError, ValueError):
+        return 0
+
+    if progress <= 1:
+        progress *= 100
+    return max(0, min(100, int(round(progress))))

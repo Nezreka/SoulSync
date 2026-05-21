@@ -187,12 +187,34 @@ def test_dispatch_success_returns_false_so_per_track_can_run() -> None:
     args = plugin.download_album_to_staging.call_args
     assert args.args[0] == 'GNX'
     assert args.args[1] == 'Kendrick Lamar'
-    assert args.args[2] == '/staging/path'
+    assert args.args[2].replace('\\', '/').endswith('storage/album_bundle_staging/b1')
     # Phase transitioned through searching → analysis.
     assert state.fields['phase'] == 'analysis'
     assert state.fields['album_bundle_state'] == 'staged'
     assert state.fields['album_bundle_source'] == 'torrent'
+    assert state.fields['album_bundle_private_staging'] is True
+    assert state.fields['album_bundle_staging_path'].replace('\\', '/').endswith('storage/album_bundle_staging/b1')
     assert state.failed_with == ''
+
+
+def test_dispatch_uses_configured_private_album_bundle_staging_root() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {'success': True, 'files': ['/tmp/a.flac']}
+
+    try_dispatch(
+        batch_id='batch:with/slash', is_album=True,
+        album_context={'name': 'GNX'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({
+            'download_source.mode': 'torrent',
+            'download_source.album_bundle_staging_path': '/private/staging',
+        }),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+
+    staging_arg = plugin.download_album_to_staging.call_args.args[2].replace('\\', '/')
+    assert staging_arg == '/private/staging/batch_with_slash'
+    assert state.fields['album_bundle_staging_path'].replace('\\', '/') == staging_arg
 
 
 def test_dispatch_failure_returns_true_so_master_stops() -> None:
