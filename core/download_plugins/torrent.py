@@ -1,7 +1,9 @@
 """TorrentDownloadPlugin — composes Prowlarr search + torrent client
 adapter + archive_pipeline into a uniform download source.
 
-Pipeline:
+Two flows:
+
+**Per-track flow** (basic search, single-track wishlist) —
 1. ``search(query)`` calls ``ProwlarrClient.search`` filtered to
    ``protocol='torrent'`` results, projects releases into
    ``TrackResult`` / ``AlbumResult`` shaped objects the existing
@@ -15,9 +17,20 @@ Pipeline:
 3. On completion the thread walks the adapter-reported save path
    via ``archive_pipeline.collect_audio_after_extraction`` and
    marks the download succeeded with the first audio file as the
-   primary ``file_path`` (matches Lidarr's single-track-pick
-   contract — picking which specific track to import happens in
-   post-processing, not here).
+   primary ``file_path``.
+
+**Album-bundle flow** (album-context batch downloads — wired in
+``core/downloads/master.py``) —
+4. ``download_album_to_staging(album, artist, staging_dir)`` does
+   ONE Prowlarr search for the whole release, picks the best
+   torrent (prefers FLAC, decent seeders, reasonable size),
+   downloads it, extracts archives if needed, copies every audio
+   file into the staging directory. The existing per-track
+   ``try_staging_match`` flow then finds + imports each track by
+   fuzzy title match against the staged files. Per-track Prowlarr
+   queries never fire — track titles like "Luther (with SZA)"
+   would match album torrents like "GNX (2024) [FLAC]" at near-
+   zero confidence and break the per-track dispatch.
 
 Limitations:
 - ``save_path`` is the torrent client's view of the disk. If
@@ -36,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -393,6 +407,201 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 if state.startswith('Completed') or state == 'Cancelled':
                     self.active_downloads.pop(did, None)
         return True
+
+    # ------------------------------------------------------------------
+    # Album-bundle flow
+    # ------------------------------------------------------------------
+
+    def download_album_to_staging(
+        self,
+        album_name: str,
+        artist_name: str,
+        staging_dir: str,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """One-shot album download: search Prowlarr for the whole
+        release, pick the best torrent, fetch it, extract if needed,
+        copy every audio file into ``staging_dir`` so the existing
+        ``try_staging_match`` flow can hand each track off to the
+        post-processing pipeline.
+
+        ``progress_callback`` is called with a dict on each state
+        change so the batch UI can show download progress without
+        waiting for the whole thing.
+
+        Returns ``{'success': bool, 'files': [paths], 'error': str|None}``.
+        """
+        result: Dict[str, Any] = {'success': False, 'files': [], 'error': None}
+        if not self.is_configured():
+            result['error'] = 'Torrent source not configured'
+            return result
+
+        adapter = get_active_torrent_adapter()
+        if adapter is None or not adapter.is_configured():
+            result['error'] = 'No active torrent client'
+            return result
+
+        def _emit(state: str, **extra) -> None:
+            if progress_callback:
+                payload = {'state': state, **extra}
+                try:
+                    progress_callback(payload)
+                except Exception as cb_exc:
+                    logger.debug("[Torrent album] progress callback failed: %s", cb_exc)
+
+        # Phase 1: search Prowlarr for the album.
+        query = f"{artist_name} {album_name}".strip()
+        _emit('searching', query=query)
+        try:
+            search_results = run_async(self._prowlarr.search(
+                query, categories=DEFAULT_MUSIC_CATEGORIES,
+                indexer_ids=_parse_indexer_id_filter(),
+            ))
+        except Exception as e:
+            result['error'] = f'Prowlarr search failed: {e}'
+            return result
+
+        candidates = [r for r in search_results if r.protocol == 'torrent']
+        if not candidates:
+            result['error'] = f'No torrent results found for "{query}"'
+            return result
+
+        picked = _pick_best_album_release(candidates)
+        if picked is None:
+            result['error'] = 'No suitable torrent candidate after filtering'
+            return result
+
+        download_url = picked.magnet_uri or picked.download_url
+        logger.info("[Torrent album] Picked '%s' (size=%.1fMB seeders=%s indexer=%s)",
+                    picked.title, picked.size / 1_048_576, picked.seeders, picked.indexer_name)
+        _emit('queued', release=picked.title, size=picked.size, seeders=picked.seeders)
+
+        # Phase 2: hand to adapter.
+        try:
+            torrent_id = run_async(adapter.add_torrent(download_url))
+        except Exception as e:
+            result['error'] = f'Torrent client refused the release: {e}'
+            return result
+        if not torrent_id:
+            result['error'] = 'Torrent client refused the release'
+            return result
+
+        # Phase 3: poll until complete.
+        _emit('downloading', release=picked.title)
+        save_path = self._poll_album_download(adapter, torrent_id, picked.title, _emit)
+        if save_path is None:
+            result['error'] = 'Torrent download failed or timed out'
+            return result
+
+        # Phase 4: extract + walk + copy to staging.
+        _emit('staging', release=picked.title)
+        try:
+            audio_files = collect_audio_after_extraction(Path(save_path))
+        except Exception as e:
+            result['error'] = f'Failed to walk audio files: {e}'
+            return result
+        if not audio_files:
+            result['error'] = f'No audio files found in {save_path}'
+            return result
+
+        staging_path = Path(staging_dir)
+        staging_path.mkdir(parents=True, exist_ok=True)
+        copied: List[str] = []
+        for src in audio_files:
+            dst = _unique_staging_path(staging_path, src)
+            try:
+                shutil.copy2(src, dst)
+                copied.append(str(dst))
+            except Exception as e:
+                logger.warning("[Torrent album] Failed to copy %s -> %s: %s", src, dst, e)
+        if not copied:
+            result['error'] = 'No audio files copied to staging'
+            return result
+        logger.info("[Torrent album] Staged %d audio files for '%s'", len(copied), album_name)
+        _emit('staged', count=len(copied))
+        result['success'] = True
+        result['files'] = copied
+        return result
+
+    def _poll_album_download(self, adapter, torrent_id, title, emit) -> Optional[str]:
+        """Poll the adapter until the torrent is complete. Returns
+        the save path or ``None`` on timeout / failure."""
+        deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
+        last_save_path: Optional[str] = None
+        while time.monotonic() < deadline:
+            if self.shutdown_check and self.shutdown_check():
+                return None
+            try:
+                status = run_async(adapter.get_status(torrent_id))
+            except Exception as e:
+                logger.warning("[Torrent album] Poll error: %s", e)
+                status = None
+            if status is None:
+                logger.error("[Torrent album] '%s' disappeared from client", title)
+                return None
+            emit('downloading', progress=status.progress, downloaded=status.downloaded,
+                 speed=status.download_speed)
+            if status.save_path:
+                last_save_path = status.save_path
+            if status.state in _COMPLETE_STATES:
+                return last_save_path
+            if status.state == 'error':
+                logger.error("[Torrent album] '%s' errored: %s", title, status.error)
+                return None
+            time.sleep(_POLL_INTERVAL_SECONDS)
+        logger.error("[Torrent album] '%s' timed out", title)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Album-pick helpers
+# ---------------------------------------------------------------------------
+
+
+_QUALITY_SCORE = {'flac': 4, 'ogg': 3, 'aac': 2, 'mp3': 1}
+
+
+def _pick_best_album_release(candidates) -> Optional[Any]:
+    """Pick the single best torrent for an album-bundle download.
+
+    Heuristic, in priority order:
+    1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
+       releases that snuck in and quarantines suspicious giants.
+    2. Higher seeders > lower (dead torrents = dead downloads).
+    3. Higher quality (FLAC > AAC > MP3) inferred from title.
+    4. Larger size as tiebreaker (often = higher bitrate).
+    """
+    MIN_BYTES = 40 * 1024 * 1024
+    MAX_BYTES = 3 * 1024 * 1024 * 1024
+
+    sized = [c for c in candidates if MIN_BYTES <= (c.size or 0) <= MAX_BYTES]
+    pool = sized or candidates
+    if not pool:
+        return None
+
+    def _score(c) -> tuple:
+        seeders = c.seeders or 0
+        quality = _QUALITY_SCORE.get(_guess_quality_from_title(c.title), 0)
+        size = c.size or 0
+        return (seeders, quality, size)
+
+    return max(pool, key=_score)
+
+
+def _unique_staging_path(staging_dir: Path, src: Path) -> Path:
+    """Return a destination path inside ``staging_dir`` that doesn't
+    collide with an existing file. Appends ``_1``, ``_2``, etc. before
+    the extension when needed."""
+    dest = staging_dir / src.name
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    for i in range(1, 1000):
+        candidate = staging_dir / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return dest    # give up — overwrite
 
 
 # ---------------------------------------------------------------------------

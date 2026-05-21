@@ -14,6 +14,7 @@ module's docstring for the full pipeline rationale). Differences:
 
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 import uuid
@@ -28,7 +29,9 @@ from core.download_plugins.torrent import (
     _guess_quality_from_title,
     _parse_indexer_id_filter,
     _parse_release_title,
+    _pick_best_album_release,
     _row_to_status,
+    _unique_staging_path,
     _COMPLETE_STATES,
     _FILENAME_SEP,
     _POLL_INTERVAL_SECONDS,
@@ -335,3 +338,130 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 if state.startswith('Completed') or state == 'Cancelled':
                     self.active_downloads.pop(did, None)
         return True
+
+    # ------------------------------------------------------------------
+    # Album-bundle flow
+    # ------------------------------------------------------------------
+
+    def download_album_to_staging(
+        self,
+        album_name: str,
+        artist_name: str,
+        staging_dir: str,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """Usenet sibling of ``TorrentDownloadPlugin.download_album_to_staging``.
+        See that method's docstring for the contract."""
+        result: Dict[str, Any] = {'success': False, 'files': [], 'error': None}
+        if not self.is_configured():
+            result['error'] = 'Usenet source not configured'
+            return result
+
+        adapter = get_active_usenet_adapter()
+        if adapter is None or not adapter.is_configured():
+            result['error'] = 'No active usenet client'
+            return result
+
+        def _emit(state: str, **extra) -> None:
+            if progress_callback:
+                try:
+                    progress_callback({'state': state, **extra})
+                except Exception as cb_exc:
+                    logger.debug("[Usenet album] progress callback failed: %s", cb_exc)
+
+        query = f"{artist_name} {album_name}".strip()
+        _emit('searching', query=query)
+        try:
+            search_results = run_async(self._prowlarr.search(
+                query, categories=DEFAULT_MUSIC_CATEGORIES,
+                indexer_ids=_parse_indexer_id_filter(),
+            ))
+        except Exception as e:
+            result['error'] = f'Prowlarr search failed: {e}'
+            return result
+
+        candidates = [r for r in search_results
+                      if r.protocol == 'usenet' and r.download_url]
+        if not candidates:
+            result['error'] = f'No usenet results found for "{query}"'
+            return result
+
+        picked = _pick_best_album_release(candidates)
+        if picked is None:
+            result['error'] = 'No suitable NZB candidate after filtering'
+            return result
+
+        logger.info("[Usenet album] Picked '%s' (size=%.1fMB grabs=%s indexer=%s)",
+                    picked.title, picked.size / 1_048_576, picked.grabs, picked.indexer_name)
+        _emit('queued', release=picked.title, size=picked.size, grabs=picked.grabs)
+
+        try:
+            job_id = run_async(adapter.add_nzb(picked.download_url))
+        except Exception as e:
+            result['error'] = f'Usenet client refused the NZB: {e}'
+            return result
+        if not job_id:
+            result['error'] = 'Usenet client refused the NZB'
+            return result
+
+        _emit('downloading', release=picked.title)
+        save_path = self._poll_album_download(adapter, job_id, picked.title, _emit)
+        if save_path is None:
+            result['error'] = 'Usenet download failed or timed out'
+            return result
+
+        _emit('staging', release=picked.title)
+        try:
+            audio_files = collect_audio_after_extraction(Path(save_path))
+        except Exception as e:
+            result['error'] = f'Failed to walk audio files: {e}'
+            return result
+        if not audio_files:
+            result['error'] = f'No audio files found in {save_path}'
+            return result
+
+        staging_path = Path(staging_dir)
+        staging_path.mkdir(parents=True, exist_ok=True)
+        copied: List[str] = []
+        for src in audio_files:
+            dst = _unique_staging_path(staging_path, src)
+            try:
+                shutil.copy2(src, dst)
+                copied.append(str(dst))
+            except Exception as e:
+                logger.warning("[Usenet album] Failed to copy %s -> %s: %s", src, dst, e)
+        if not copied:
+            result['error'] = 'No audio files copied to staging'
+            return result
+        logger.info("[Usenet album] Staged %d audio files for '%s'", len(copied), album_name)
+        _emit('staged', count=len(copied))
+        result['success'] = True
+        result['files'] = copied
+        return result
+
+    def _poll_album_download(self, adapter, job_id, title, emit) -> Optional[str]:
+        deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
+        last_save_path: Optional[str] = None
+        while time.monotonic() < deadline:
+            if self.shutdown_check and self.shutdown_check():
+                return None
+            try:
+                status = run_async(adapter.get_status(job_id))
+            except Exception as e:
+                logger.warning("[Usenet album] Poll error: %s", e)
+                status = None
+            if status is None:
+                logger.error("[Usenet album] '%s' disappeared from client", title)
+                return None
+            emit('downloading', progress=status.progress, downloaded=status.downloaded,
+                 speed=status.download_speed)
+            if status.save_path:
+                last_save_path = status.save_path
+            if status.state in _COMPLETE_STATES:
+                return last_save_path
+            if status.state == 'failed':
+                logger.error("[Usenet album] '%s' failed: %s", title, status.error)
+                return None
+            time.sleep(_POLL_INTERVAL_SECONDS)
+        logger.error("[Usenet album] '%s' timed out", title)
+        return None
