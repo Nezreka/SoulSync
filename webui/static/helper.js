@@ -3413,8 +3413,13 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    '2.6.0': [
-        { unreleased: true },
+    '2.5.9': [
+        { date: 'May 21, 2026 — 2.5.9 release' },
+        { title: 'Torrent and Usenet release downloads', desc: 'torrent and usenet are now real download sources backed by Prowlarr plus your configured downloader client. album downloads use a release-first staging flow so SoulSync downloads one release, watches live progress, then imports the matching tracks from the staged files. hybrid mode keeps torrent / usenet out of album batches, but still lets them participate for playlist singles and wishlist tracks.' },
+        { title: 'Fix: HiFi public instance compatibility', desc: 'HiFi instance probing now understands both supported manifest shapes: the newer /trackManifests-style flow and the public hifi-api /track/ legacy flow. instances that can search and return a playable HLS manifest are no longer mislabeled as Search only. browser-openable pages can still be offline from the API side, so HTTP 502 / Offline labels are still shown honestly.' },
+        { title: 'Fix: Jellyfin full refresh imports tracks on older databases', desc: 'full refresh could import artists and albums but fail every Jellyfin track on upgraded databases that were missing newer media columns. startup repair now adds the missing tracks.file_size and albums.api_track_count columns before refresh work runs, so old databases can accept new Jellyfin track rows again.' },
+        { title: 'Fix: transient SQLite disk I/O errors retry cleanly', desc: 'cache maintenance and the Tools page full-refresh job now retry short-lived SQLite disk I/O failures around destructive maintenance writes. this targets the reported pattern where the first run failed with disk I/O error and an immediate second run succeeded.' },
+        { title: 'Fix: Album Completeness blocks wrong-artist fills', desc: 'artist matching now wins before album/single title matching. if Album Completeness is filling a Jamiroquai track, a same-title release by a different artist is rejected instead of being allowed through by a loose title match.' },
         { title: 'Fix: Album Completeness no longer cross-contaminates artists', desc: 'reported case: filling a Jamiroquai "Light Years" single brought in tracks from Gut\'s "Light Years" album — completely different artist, completely different genre. Root cause: the auto-fill artist gate was a loose 0.50 SequenceMatcher threshold that could let unrelated candidates through. Two new defenses now block this entirely. <strong>Stage 1</strong> skips the whole track-fill operation up front if the missing track\'s source artist doesn\'t match the target album artist — compilation albums (various artists / soundtrack) still pass through. <strong>Stage 2</strong> replaces the per-candidate 0.50 SequenceMatcher with an alias-aware 0.82 strict matcher that handles diacritics (Beyoncé/Beyonce) and known artist aliases. Both stages logged with structured warnings so future mismatches are diagnosable from the logs.' },
         { title: 'Code review refactor pass on the torrent / usenet flow', desc: 'cleanup commits before review. Lifted the shared album-pick + staging-collision helpers out of torrent.py into a new core/download_plugins/album_bundle.py module so usenet.py no longer reaches into a sibling plugin\'s private surface. Lifted the ~90-line inline album-bundle gate out of run_full_missing_tracks_process into core/downloads/album_bundle_dispatch.py with a clean pure-predicate / inject-deps design so the gate is unit-testable in isolation. Replaced the staging matcher\'s direct download_batches import with an injected get_batch_field accessor on StagingDeps. Made the 6h poll timeout configurable via download_source.album_bundle_timeout_seconds. Added atomic .tmp + rename copy so the Auto-Import worker can never observe a partial audio file during the album-bundle copy loop. 49 new tests across album_bundle, album_bundle_dispatch, and staging-provenance modules pin the contracts.' },
         { title: 'Hybrid mode skips torrent / usenet on album batches', desc: 'follow-up to the album-bundle flow. When download mode is set to Hybrid AND the batch is an album, the per-track search loop now silently strips torrent and usenet from the source chain — they\'re release-level sources that can\'t match per-track meaningfully, and the album-bundle handling only fires in single-source mode. Without the skip, hybrid + torrent-first would fire N redundant Prowlarr searches per album and rely on Auto-Import sweeping Staging to recover. Cleaner now: hybrid falls straight through to per-track-compatible sources (Soulseek / streaming) for albums, and torrent / usenet still get a shot for single-track / wishlist / basic-search use cases where per-track makes sense.' },
@@ -3486,6 +3491,18 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "2.5.9 Release Stability Pass",
+        description: "this release ties together the new release-based download sources and a set of fixes from real user reports: HiFi instance detection, Jellyfin full refreshes, transient SQLite disk I/O failures, and wrong-artist Album Completeness fills.",
+        features: [
+            "Torrent and Usenet are now available as Prowlarr-backed download sources with release staging, live progress, and source-aware history labels",
+            "HiFi instances are probed by actually checking whether they can return a playable manifest, including legacy public hifi-api instances",
+            "Jellyfin full refresh repairs older media databases before importing tracks, so stale schemas no longer drop every track row",
+            "Cache maintenance and full refresh retry transient SQLite disk I/O errors instead of failing the whole job on the first attempt",
+            "Album Completeness rejects same-title releases from the wrong artist before importing anything",
+        ],
+        usage_note: "version 2.5.9 focuses on safer matching and making the new release-based sources usable without disturbing existing source flows",
+    },
     {
         title: "Torrent and Usenet Are Now Live Download Sources",
         description: "the long-awaited payoff. Two new entries in the Download Source dropdown — Torrent Only and Usenet Only — both backed by your Prowlarr indexers. Searches go through Prowlarr filtered by protocol, picked releases get shipped to your configured torrent client (qBit / Transmission / Deluge) or usenet client (SABnzbd / NZBGet), and the resulting files flow through SoulSync's matching pipeline like any other source.",
@@ -3870,7 +3887,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.8';
+    return versions[0] || '2.5.9';
 }
 
 function openWhatsNew() {
