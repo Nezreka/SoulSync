@@ -4591,45 +4591,72 @@ class MusicDatabase:
                 
                 # VACUUM to actually shrink the database file and reclaim disk space
                 logger.info("Vacuuming database to reclaim disk space...")
-                cursor.execute("VACUUM")
+                self._vacuum_best_effort(cursor)
                 
                 logger.info("All database data cleared and file compacted")
                 
         except Exception as e:
             logger.error(f"Error clearing database: {e}")
             raise
+
+    def _vacuum_best_effort(self, cursor):
+        """Run VACUUM without making the caller fail if compaction hiccups."""
+        try:
+            cursor.execute("VACUUM")
+        except Exception as e:
+            logger.warning(
+                "Database VACUUM failed after data was already cleared; continuing without compaction: %s",
+                e,
+            )
+
+    @staticmethod
+    def _is_transient_sqlite_io_error(exc: Exception) -> bool:
+        return "disk i/o error" in str(exc).lower()
     
     def clear_server_data(self, server_source: str):
         """Clear data for specific server only (server-aware full refresh)"""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Delete only data from the specified server
-                # Order matters: tracks -> albums -> artists (foreign key constraints)
-                cursor.execute("DELETE FROM tracks WHERE server_source = ?", (server_source,))
-                tracks_deleted = cursor.rowcount
-                
-                cursor.execute("DELETE FROM albums WHERE server_source = ?", (server_source,))
-                albums_deleted = cursor.rowcount
-                
-                cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
-                artists_deleted = cursor.rowcount
-                
-                conn.commit()
-                
-                # Only VACUUM if we deleted a significant amount of data
-                if tracks_deleted > 1000 or albums_deleted > 100:
-                    logger.info("Vacuuming database to reclaim disk space...")
-                    cursor.execute("VACUUM")
-                
-                logger.info(f"Cleared {server_source} data: {artists_deleted} artists, {albums_deleted} albums, {tracks_deleted} tracks")
-                
-                # Note: Watchlist and wishlist are preserved as they are server-agnostic
-                
-        except Exception as e:
-            logger.error(f"Error clearing {server_source} database data: {e}")
-            raise
+        for attempt in range(2):
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+
+                    # Delete only data from the specified server
+                    # Order matters: tracks -> albums -> artists (foreign key constraints)
+                    cursor.execute("DELETE FROM tracks WHERE server_source = ?", (server_source,))
+                    tracks_deleted = cursor.rowcount
+
+                    cursor.execute("DELETE FROM albums WHERE server_source = ?", (server_source,))
+                    albums_deleted = cursor.rowcount
+
+                    cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
+                    artists_deleted = cursor.rowcount
+
+                    conn.commit()
+
+                    # Only VACUUM if we deleted a significant amount of data
+                    if tracks_deleted > 1000 or albums_deleted > 100:
+                        logger.info("Vacuuming database to reclaim disk space...")
+                        self._vacuum_best_effort(cursor)
+
+                    logger.info(
+                        f"Cleared {server_source} data: {artists_deleted} artists, "
+                        f"{albums_deleted} albums, {tracks_deleted} tracks"
+                    )
+
+                    # Note: Watchlist and wishlist are preserved as they are server-agnostic
+                    return
+
+            except Exception as e:
+                if self._is_transient_sqlite_io_error(e) and attempt == 0:
+                    logger.warning(
+                        "Transient disk I/O error clearing %s database data; retrying once: %s",
+                        server_source,
+                        e,
+                    )
+                    time.sleep(0.25)
+                    continue
+                logger.error(f"Error clearing {server_source} database data: {e}")
+                raise
     
     def cleanup_orphaned_records(self) -> Dict[str, int]:
         """Remove artists and albums that have no associated tracks"""
