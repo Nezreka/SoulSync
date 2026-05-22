@@ -1,6 +1,8 @@
 """Tests for `worker_utils.set_album_api_track_count` — the shared helper
 enrichment workers call to cache authoritative track counts."""
 
+import sqlite3
+
 from core.worker_utils import set_album_api_track_count
 
 
@@ -114,3 +116,21 @@ def test_swallows_cursor_execute_errors():
     cursor = _BrokenCursor()
     # Should not raise.
     set_album_api_track_count(cursor, "album-z", 10)
+
+
+def test_repairs_missing_api_track_count_column():
+    conn = sqlite3.connect(":memory:")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, title TEXT)")
+    cursor.execute("INSERT INTO albums (id, title) VALUES ('album-z', 'Album')")
+
+    set_album_api_track_count(cursor, "album-z", 10)
+
+    cursor.execute("PRAGMA table_info(albums)")
+    cols = {row[1] for row in cursor.fetchall()}
+    cursor.execute("SELECT api_track_count FROM albums WHERE id = 'album-z'")
+    row = cursor.fetchone()
+    conn.close()
+
+    assert 'api_track_count' in cols
+    assert row[0] == 10
