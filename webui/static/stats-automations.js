@@ -1248,7 +1248,7 @@ function _renderSuggestionCard(a) {
         id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
     };
     return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
-        <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+        <img src="${a.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
         <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
@@ -1282,7 +1282,7 @@ async function importPageSearchAlbum() {
             };
             return `
             <div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
-                <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+                <img src="${a.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
                 <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
                 <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
                 <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
@@ -1341,7 +1341,7 @@ async function importPageSelectAlbum(albumId) {
         // Render hero
         const album = data.album;
         document.getElementById('import-page-album-hero').innerHTML = `
-            <img src="${album.image_url || '/static/placeholder.png'}" alt="${_escAttr(album.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+            <img src="${album.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(album.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
             <div class="import-page-album-hero-info">
                 <div class="import-page-album-hero-title">${_esc(album.name)}</div>
                 <div class="import-page-album-hero-artist">${_esc(album.artist)}</div>
@@ -1761,7 +1761,7 @@ async function importPageSearchSingleTrack(fileIdx, query) {
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
             return `
                 <div class="import-page-single-result-item" onclick="importPageSelectSingleMatch(${fileIdx}, ${tIdx})">
-                    ${t.image_url ? `<img class="import-page-single-result-img" src="${t.image_url}" onerror="this.src='/static/placeholder.png'">` : ''}
+                    ${t.image_url ? `<img class="import-page-single-result-img" src="${t.image_url}" onerror="this.src='/static/placeholder-album.png'">` : ''}
                     <div class="import-page-single-result-info">
                         <div class="import-page-single-result-name">${_esc(t.name)} - ${_esc(t.artist)}</div>
                         <div class="import-page-single-result-detail">${_esc(t.album)}${dur ? ' · ' + dur : ''}</div>
@@ -1923,7 +1923,7 @@ function _importQueueRender() {
         return `
             <div class="import-page-queue-item">
                 ${j.imageUrl
-                ? `<img class="import-page-queue-art" src="${j.imageUrl}" onerror="this.src='/static/placeholder.png'">`
+                ? `<img class="import-page-queue-art" src="${j.imageUrl}" onerror="this.src='/static/placeholder-album.png'">`
                 : `<div class="import-page-queue-art" style="background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;color:rgba(255,255,255,0.3);">&#9834;</div>`}
                 <div class="import-page-queue-info">
                     <div class="import-page-queue-name">${_esc(j.label)}</div>
