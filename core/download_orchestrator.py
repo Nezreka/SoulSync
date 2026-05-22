@@ -113,6 +113,22 @@ class DownloadOrchestrator:
             if hasattr(amazon, '_client') and amazon._client:
                 amazon._client.preferred_codec = quality
 
+        # Let registry-backed plugins refresh any config they cache at
+        # construction time. This covers Prowlarr-backed torrent / usenet
+        # clients without rebuilding the registry and losing active downloads.
+        for name, client in self.registry.all_plugins():
+            if not hasattr(client, 'reload_settings'):
+                continue
+            try:
+                client.reload_settings()
+                logger.info("%s client settings reloaded", self.registry.display_name(name))
+            except Exception as exc:
+                logger.warning(
+                    "%s client settings reload failed: %s",
+                    self.registry.display_name(name),
+                    exc,
+                )
+
         # Reload download path for all clients that cache it.
         # Soulseek owns the path config and is reloaded above; every
         # other source mirrors that path so files all land in one
