@@ -26,9 +26,11 @@ Lifted verbatim from web_server.py. Dependencies injected via
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from core.downloads.history import record_sync_history_completion
@@ -40,6 +42,47 @@ from core.runtime_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_batch_dirname(batch_id: str) -> str:
+    safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in str(batch_id or 'batch'))
+    return safe or 'batch'
+
+
+def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
+    """Best-effort cleanup for torrent/usenet private staging copies.
+
+    The torrent/usenet clients keep their own completed download folders.
+    This only removes SoulSync's per-batch copy under album-bundle staging.
+    """
+    if not batch.get('album_bundle_private_staging'):
+        return
+    if (batch.get('album_bundle_source') or '').lower() not in ('torrent', 'usenet'):
+        return
+
+    staging_path = batch.get('album_bundle_staging_path')
+    if not staging_path:
+        return
+
+    path = Path(staging_path)
+    expected_name = _safe_batch_dirname(batch_id)
+    if path.name != expected_name:
+        logger.warning(
+            "[Album Bundle] Refusing to clean private staging path with unexpected name: %s",
+            staging_path,
+        )
+        return
+    if not path.exists():
+        return
+    if not path.is_dir():
+        logger.warning("[Album Bundle] Refusing to clean non-directory staging path: %s", staging_path)
+        return
+
+    try:
+        shutil.rmtree(path)
+        logger.info("[Album Bundle] Cleaned private staging folder for batch %s: %s", batch_id, staging_path)
+    except Exception as exc:
+        logger.warning("[Album Bundle] Could not clean private staging folder %s: %s", staging_path, exc)
 
 
 @dataclass
@@ -398,6 +441,7 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
 
                 logger.info(f"[Batch Manager] Batch {batch_id} complete - stopping monitor")
                 deps.download_monitor.stop_monitoring(batch_id)
+                _cleanup_private_album_bundle_staging(batch_id, batch)
 
                 # M3U REGENERATION: Regenerate M3U with real library paths now that
                 # all post-processing (tagging, moving, DB writes) is complete.
@@ -606,6 +650,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
 
                 logger.info(f"[Completion Check V2] Batch {batch_id} complete - stopping monitor")
                 deps.download_monitor.stop_monitoring(batch_id)
+                _cleanup_private_album_bundle_staging(batch_id, batch)
 
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if deps.repair_worker:

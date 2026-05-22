@@ -165,3 +165,132 @@ def test_monitor_waits_for_post_processing_before_batch_success(monkeypatch):
             dm.download_batches.update(previous_batches)
 
 
+def test_monitor_matches_release_download_by_id_when_filename_changes(monkeypatch):
+    """Torrent/usenet rows can expose the completed audio filename, not
+    the original indexer URL/title stored on the task. The monitor must
+    still claim the completed release by stable download_id.
+    """
+    monkeypatch.setattr(dm, '_make_context_key', lambda u, f: f"{u}::{f}")
+    monkeypatch.setattr(dm.WebUIDownloadMonitor, '_validate_worker_counts', lambda self: None)
+
+    submitted = []
+
+    class FakeExecutor:
+        def submit(self, func, task_id, batch_id):
+            submitted.append((func, task_id, batch_id))
+
+    def fake_post_processing_worker(task_id, batch_id):
+        return None
+
+    monkeypatch.setattr(dm, 'missing_download_executor', FakeExecutor())
+    monkeypatch.setattr(dm, '_run_post_processing_worker', fake_post_processing_worker)
+    monkeypatch.setattr(dm, '_on_download_completed', lambda *args: None)
+
+    with dm.tasks_lock:
+        previous_tasks = dict(dm.download_tasks)
+        previous_batches = dict(dm.download_batches)
+        dm.download_tasks.clear()
+        dm.download_batches.clear()
+        dm.download_tasks['task-1'] = {
+            'track_info': {'name': 'Ran To Atlanta'},
+            'username': 'torrent',
+            'filename': 'http://prowlarr/download?id=123||Drake - ICEMAN',
+            'status': 'downloading',
+            'download_id': 'torrent-1',
+            'status_change_time': time.time(),
+        }
+        dm.download_batches['batch-1'] = {'queue': ['task-1']}
+
+    try:
+        monitor = dm.WebUIDownloadMonitor()
+        monitor.monitoring = True
+        monitor.monitored_batches.add('batch-1')
+        monkeypatch.setattr(
+            monitor,
+            '_get_live_transfers',
+            lambda: {
+                'download_id::torrent-1': {
+                    'id': 'torrent-1',
+                    'username': 'torrent',
+                    'filename': '01. Drake - Make Them Cry.flac',
+                    'state': 'Completed, Succeeded',
+                    'size': 100,
+                    'bytesTransferred': 100,
+                }
+            },
+        )
+
+        monitor._check_all_downloads()
+
+        assert submitted == [(fake_post_processing_worker, 'task-1', 'batch-1')]
+        assert dm.download_tasks['task-1']['status'] == 'post_processing'
+    finally:
+        with dm.tasks_lock:
+            dm.download_tasks.clear()
+            dm.download_tasks.update(previous_tasks)
+            dm.download_batches.clear()
+            dm.download_batches.update(previous_batches)
+
+
+def test_monitor_recovers_premature_failed_release_download(monkeypatch):
+    monkeypatch.setattr(dm, '_make_context_key', lambda u, f: f"{u}::{f}")
+    monkeypatch.setattr(dm.WebUIDownloadMonitor, '_validate_worker_counts', lambda self: None)
+
+    submitted = []
+
+    class FakeExecutor:
+        def submit(self, func, task_id, batch_id):
+            submitted.append((func, task_id, batch_id))
+
+    def fake_post_processing_worker(task_id, batch_id):
+        return None
+
+    monkeypatch.setattr(dm, 'missing_download_executor', FakeExecutor())
+    monkeypatch.setattr(dm, '_run_post_processing_worker', fake_post_processing_worker)
+    monkeypatch.setattr(dm, '_on_download_completed', lambda *args: None)
+
+    with dm.tasks_lock:
+        previous_tasks = dict(dm.download_tasks)
+        previous_batches = dict(dm.download_batches)
+        dm.download_tasks.clear()
+        dm.download_batches.clear()
+        dm.download_tasks['task-1'] = {
+            'track_info': {'name': 'DAISIES'},
+            'username': 'torrent',
+            'filename': 'http://prowlarr/download?id=123||Justin Bieber - Swag',
+            'status': 'failed',
+            'download_id': 'torrent-1',
+            'status_change_time': time.time(),
+        }
+        dm.download_batches['batch-1'] = {'queue': ['task-1']}
+
+    try:
+        monitor = dm.WebUIDownloadMonitor()
+        monitor.monitoring = True
+        monitor.monitored_batches.add('batch-1')
+        monkeypatch.setattr(
+            monitor,
+            '_get_live_transfers',
+            lambda: {
+                'download_id::torrent-1': {
+                    'id': 'torrent-1',
+                    'username': 'torrent',
+                    'filename': '02. Justin Bieber - DAISIES.flac',
+                    'state': 'Completed, Succeeded',
+                    'size': 100,
+                    'bytesTransferred': 100,
+                }
+            },
+        )
+
+        monitor._check_all_downloads()
+
+        assert submitted == [(fake_post_processing_worker, 'task-1', 'batch-1')]
+        assert dm.download_tasks['task-1']['status'] == 'post_processing'
+    finally:
+        with dm.tasks_lock:
+            dm.download_tasks.clear()
+            dm.download_tasks.update(previous_tasks)
+            dm.download_batches.clear()
+            dm.download_batches.update(previous_batches)
+

@@ -164,28 +164,60 @@ class QBittorrentAdapter:
         category: str,
         save_path: Optional[str],
     ) -> Optional[str]:
-        data = {'urls': url_or_magnet, 'category': category or self._category}
+        cat = category or self._category
+        # Snapshot the current set of torrent hashes BEFORE adding —
+        # qBittorrent's /add endpoint returns 200 "Ok." regardless of
+        # whether the URL was actually accepted or registered, and
+        # category-filtered lookups race the add (qBit hasn't
+        # categorised the new torrent yet on the first poll). Diffing
+        # before / after is the only reliable way to recover the hash.
+        before = self._all_hashes()
+        if before is None:
+            return None
+        data = {'urls': url_or_magnet, 'category': cat}
         if save_path or self._save_path:
             data['savepath'] = save_path or self._save_path
         resp = self._call('POST', '/api/v2/torrents/add', data=data)
         if not resp or not resp.ok:
+            logger.warning("qBittorrent /torrents/add returned HTTP %s body=%r",
+                           resp.status_code if resp else 'no-response',
+                           (resp.text[:200] if resp else ''))
             return None
-        # qBittorrent's /add endpoint returns 200 "Ok." on success but
-        # NOT the resulting info-hash. We have to look it up via
-        # /torrents/info filtered by category — the just-added torrent
-        # will be the newest entry in that category.
-        return self._lookup_latest_hash(category or self._category)
+        if resp.text and resp.text.strip() and resp.text.strip() != 'Ok.':
+            logger.warning("qBittorrent /torrents/add unexpected body: %r", resp.text[:200])
+            return None
+        new_hash = self._poll_for_new_hash(before)
+        if not new_hash:
+            logger.error("qBittorrent accepted the request but no new torrent appeared — "
+                         "URL may have been rejected (bad magnet, unreachable HTTPS, "
+                         "duplicate hash, etc.)")
+        return new_hash
 
-    def _lookup_latest_hash(self, category: str) -> Optional[str]:
-        resp = self._call('GET', '/api/v2/torrents/info', params={'category': category, 'sort': 'added_on', 'reverse': 'true', 'limit': 1})
+    def _all_hashes(self) -> Optional[set]:
+        """Return the set of every torrent hash qBit currently tracks,
+        or None on lookup failure."""
+        resp = self._call('GET', '/api/v2/torrents/info')
         if not resp or not resp.ok:
             return None
         try:
-            items = resp.json()
-            if items:
-                return items[0].get('hash')
+            return {item.get('hash') for item in resp.json() if item.get('hash')}
         except Exception as e:
             logger.error("qBittorrent /torrents/info parse failed: %s", e)
+            return None
+
+    def _poll_for_new_hash(self, before: set) -> Optional[str]:
+        """Poll up to ~5s for a new torrent to appear (qBit takes a
+        moment to fetch the .torrent file from the URL and register
+        it). Returns the new hash, or None if nothing showed up."""
+        import time as _time
+        for _ in range(10):
+            _time.sleep(0.5)
+            current = self._all_hashes()
+            if current is None:
+                continue
+            new = current - before
+            if new:
+                return next(iter(new))
         return None
 
     async def add_torrent_file(
@@ -205,14 +237,18 @@ class QBittorrentAdapter:
         category: str,
         save_path: Optional[str],
     ) -> Optional[str]:
-        data = {'category': category or self._category}
+        cat = category or self._category
+        before = self._all_hashes()
+        if before is None:
+            return None
+        data = {'category': cat}
         if save_path or self._save_path:
             data['savepath'] = save_path or self._save_path
         files = {'torrents': ('soulsync.torrent', file_bytes, 'application/x-bittorrent')}
         resp = self._call('POST', '/api/v2/torrents/add', data=data, files=files)
         if not resp or not resp.ok:
             return None
-        return self._lookup_latest_hash(category or self._category)
+        return self._poll_for_new_hash(before)
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
         loop = asyncio.get_event_loop()

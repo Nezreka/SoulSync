@@ -23,6 +23,8 @@ import re
 import uuid
 import time
 import shutil
+import json
+import base64
 import subprocess
 import threading
 from typing import List, Optional, Dict, Any, Tuple
@@ -74,6 +76,13 @@ HLS_QUALITY_MAP = {
 }
 
 HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
+
+TRACK_ENDPOINT_QUALITY_MAP = {
+    'hires': 'HI_RES_LOSSLESS',
+    'lossless': 'LOSSLESS',
+    'high': 'HIGH',
+    'low': 'LOW',
+}
 
 # Default public hifi-api instances (ordered by preference)
 DEFAULT_INSTANCES = [
@@ -243,6 +252,122 @@ class HiFiClient(DownloadSourcePlugin):
         if data and isinstance(data, dict):
             return data.get('version') or data.get('data', {}).get('version')
         return None
+
+    @staticmethod
+    def _extract_manifest_uri(data: Any) -> Optional[str]:
+        try:
+            inner = data.get('data', data) if isinstance(data, dict) else data
+            attrs = inner.get('data', {}).get('attributes', {})
+            return attrs.get('uri')
+        except (AttributeError, KeyError):
+            return None
+
+    @staticmethod
+    def _extract_track_manifest_urls(data: Any) -> List[str]:
+        try:
+            inner = data.get('data', data) if isinstance(data, dict) else data
+            manifest_b64 = inner.get('manifest')
+            if not manifest_b64:
+                return []
+            manifest = json.loads(base64.b64decode(manifest_b64))
+            if manifest.get('encryptionType') not in (None, 'NONE'):
+                return []
+            urls = manifest.get('urls') or []
+            return [url for url in urls if isinstance(url, str) and url]
+        except Exception as e:
+            logger.debug("Failed to extract legacy HiFi track manifest URLs: %s", e)
+            return []
+
+    @staticmethod
+    def _extension_from_track_manifest(data: Any, fallback: str) -> str:
+        try:
+            inner = data.get('data', data) if isinstance(data, dict) else data
+            manifest = json.loads(base64.b64decode(inner.get('manifest') or ''))
+            mime = (manifest.get('mimeType') or '').lower()
+            codecs = (manifest.get('codecs') or '').lower()
+            if 'flac' in mime or 'flac' in codecs:
+                return 'flac'
+            if 'mp4' in mime or 'aac' in codecs:
+                return 'm4a'
+        except Exception as e:
+            logger.debug("Failed to infer legacy HiFi track manifest extension: %s", e)
+        return fallback
+
+    def check_instance_capabilities(self, url: str, timeout: int = 5) -> Dict[str, Any]:
+        """Probe one public HiFi instance using the endpoints SoulSync needs."""
+        entry = {
+            'url': url,
+            'status': 'unknown',
+            'version': None,
+            'can_search': False,
+            'can_download': False,
+        }
+        try:
+            root = self.session.get(
+                f'{url}/',
+                timeout=timeout,
+                headers={'Accept': 'application/json'},
+            )
+            if not root.ok:
+                entry['status'] = f'error (HTTP {root.status_code})'
+                return entry
+
+            data = root.json()
+            entry['version'] = data.get('version') or data.get('data', {}).get('version')
+            entry['status'] = 'online'
+
+            search = self.session.get(
+                f'{url}/search/',
+                params={'s': 'test', 'limit': 1},
+                timeout=timeout,
+            )
+            entry['can_search'] = search.ok
+
+            manifest = self.session.get(
+                f'{url}/trackManifests/',
+                params={
+                    'id': '1550546',
+                    'formats': 'FLAC',
+                    'usage': 'DOWNLOAD',
+                    'manifestType': 'HLS',
+                    'adaptive': 'true',
+                    'uriScheme': 'HTTPS',
+                },
+                timeout=timeout,
+            )
+            entry['can_download'] = (
+                manifest.ok
+                and bool(self._extract_manifest_uri(manifest.json()))
+            )
+            if not manifest.ok:
+                entry['download_error'] = f'HTTP {manifest.status_code}'
+            elif not entry['can_download']:
+                legacy = self.session.get(
+                    f'{url}/track/',
+                    params={'id': '1550546', 'quality': 'LOSSLESS'},
+                    timeout=timeout,
+                )
+                entry['can_download'] = (
+                    legacy.ok
+                    and bool(self._extract_track_manifest_urls(legacy.json()))
+                )
+                if not legacy.ok:
+                    entry['download_error'] = f'HTTP {legacy.status_code}'
+                elif not entry['can_download']:
+                    entry['download_error'] = 'No playable manifest URL'
+                else:
+                    entry['download_probe'] = 'track'
+            else:
+                entry['download_probe'] = 'trackManifests'
+        except http_requests.exceptions.SSLError:
+            entry['status'] = 'ssl_error'
+        except http_requests.exceptions.ConnectTimeout:
+            entry['status'] = 'timeout'
+        except http_requests.exceptions.ConnectionError:
+            entry['status'] = 'offline'
+        except Exception as e:
+            entry['status'] = f'error ({type(e).__name__})'
+        return entry
 
     def search_tracks(self, title: str = None, artist: str = None,
                       album: str = None, limit: int = 20) -> List[Dict]:
@@ -433,15 +558,12 @@ class HiFiClient(DownloadSourcePlugin):
 
         data = self._api_get('/trackManifests/', params=params, timeout=20)
         if not data:
-            return None
+            return self._get_legacy_track_manifest(track_id, quality)
 
-        try:
-            inner = data.get('data', data) if isinstance(data, dict) else data
-            attrs = inner.get('data', {}).get('attributes', {})
-            uri = attrs.get('uri')
-        except (AttributeError, KeyError) as e:
-            logger.warning(f"Failed to extract playlist URI from manifest response: {e}")
-            return None
+        uri = self._extract_manifest_uri(data)
+        if uri is None:
+            logger.warning("Failed to extract playlist URI from manifest response")
+            return self._get_legacy_track_manifest(track_id, quality)
 
         if not uri:
             logger.warning(f"No playlist URI in manifest for track {track_id}")
@@ -484,6 +606,28 @@ class HiFiClient(DownloadSourcePlugin):
             'init_uri': init_uri,
             'segment_uris': segment_uris,
             'extension': q_info['extension'],
+            'codec': q_info['codec'],
+            'quality': quality,
+        }
+
+    def _get_legacy_track_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
+        q_info = HLS_QUALITY_MAP.get(quality, HLS_QUALITY_MAP['lossless'])
+        api_quality = TRACK_ENDPOINT_QUALITY_MAP.get(quality, 'LOSSLESS')
+        data = self._api_get('/track/', params={'id': track_id, 'quality': api_quality}, timeout=20)
+        if not data:
+            return None
+
+        direct_urls = self._extract_track_manifest_urls(data)
+        if not direct_urls:
+            logger.warning(f"No playable URL in legacy HiFi manifest for track {track_id}")
+            return None
+
+        extension = self._extension_from_track_manifest(data, q_info['extension'])
+        logger.info(f"HiFi legacy track manifest for track {track_id}: "
+                    f"{len(direct_urls)} direct URL(s) ({quality})")
+        return {
+            'direct_urls': direct_urls,
+            'extension': extension,
             'codec': q_info['codec'],
             'quality': quality,
         }
@@ -619,7 +763,13 @@ class HiFiClient(DownloadSourcePlugin):
                 return None
 
             manifest_info = self._get_hls_manifest(track_id, quality=q_key)
-            if not manifest_info or not manifest_info.get('segment_uris'):
+            if (
+                not manifest_info
+                or (
+                    not manifest_info.get('segment_uris')
+                    and not manifest_info.get('direct_urls')
+                )
+            ):
                 logger.warning(f"No HLS manifest at quality {q_key}, trying next")
                 continue
 
@@ -628,16 +778,17 @@ class HiFiClient(DownloadSourcePlugin):
             out_filename = f"{safe_name}.{extension}"
             out_path = self.download_path / out_filename
 
-            is_flac = q_key in ('hires', 'lossless')
+            is_direct = bool(manifest_info.get('direct_urls'))
+            is_flac = q_key in ('hires', 'lossless') and not is_direct
             intermediate_path = out_path.with_suffix('.m4a') if is_flac else out_path
 
             try:
                 init_uri = manifest_info.get('init_uri')
-                segment_uris = manifest_info['segment_uris']
+                segment_uris = manifest_info.get('segment_uris') or manifest_info.get('direct_urls') or []
                 total_segments = len(segment_uris) + (1 if init_uri else 0)
 
                 logger.info(f"Downloading from HiFi ({q_key}): {out_filename} "
-                            f"({total_segments} segments)")
+                            f"({total_segments} {'URL(s)' if is_direct else 'segments'})")
 
                 downloaded = 0
                 speed_start = time.time()
