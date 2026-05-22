@@ -5,14 +5,16 @@ from __future__ import annotations
 import pytest
 
 from core.downloads import task_worker as tw
-from core.runtime_state import download_tasks
+from core.runtime_state import download_batches, download_tasks
 
 
 @pytest.fixture(autouse=True)
 def reset_state():
     download_tasks.clear()
+    download_batches.clear()
     yield
     download_tasks.clear()
+    download_batches.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +39,7 @@ class _FakeClient:
     orchestrator); plain attrs (hybrid_order, hybrid_primary, etc.)
     are set as attributes so getattr() lookups still resolve them."""
     _CLIENT_NAMES = {'soulseek', 'youtube', 'tidal', 'qobuz', 'hifi',
-                     'deezer_dl', 'lidarr', 'soundcloud'}
+                     'deezer_dl', 'lidarr', 'soundcloud', 'torrent', 'usenet'}
 
     def __init__(self, results=None, mode='soulseek', subclients=None):
         self._results = results if results is not None else []
@@ -54,7 +56,7 @@ class _FakeClient:
     def client(self, name):
         return self._client_map.get(name)
 
-    async def search(self, query, timeout=30):
+    async def search(self, query, timeout=30, exclude_sources=None):
         self.search_calls.append((query, timeout))
         return (self._results, None)
 
@@ -194,6 +196,33 @@ def test_staging_match_hit_returns_immediately():
     assert rec.calls == []
 
 
+def test_private_torrent_album_staging_miss_skips_per_track_search():
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Money Trees', 'artists': ['Kendrick Lamar'],
+        'album': 'good kid, m.A.A.d city (Deluxe)', 'duration_ms': 387000,
+    })
+    download_batches['b1'] = {
+        'album_bundle_private_staging': True,
+        'album_bundle_state': 'staged',
+        'album_bundle_source': 'torrent',
+    }
+    client = _FakeClient(results=['should-not-search'], mode='torrent')
+    rec = _Recorder()
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Kendrick Lamar Money Trees']),
+        try_staging_match=lambda *a, **kw: False,
+        on_download_completed=rec('done'),
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls == []
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert 'staged torrent album release' in download_tasks['t1']['error_message']
+    assert ('done', ('b1', 't1', False), {}) in rec.calls
+
+
 # ---------------------------------------------------------------------------
 # Search loop happy path
 # ---------------------------------------------------------------------------
@@ -217,6 +246,25 @@ def test_first_query_success_returns_after_storing_source():
     tw.download_track_worker('t1', 'b1', deps)
     assert ('store', ('b1', 'u1', 'song.flac'), {}) in rec.calls
     assert download_tasks['t1']['status'] == 'searching'
+
+
+def test_torrent_mode_uses_album_release_after_track_queries():
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Money', 'artists': ['Pink Floyd'],
+        'album': 'The Dark Side of the Moon', 'duration_ms': 383000,
+    })
+    client = _FakeClient(results=[], mode='torrent')
+    rec = _Recorder()
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Pink Floyd Money']),
+        on_download_completed=rec('done'),
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls[0][0] == 'Pink Floyd Money'
+    assert client.search_calls[-1][0] == 'Pink Floyd The Dark Side of the Moon'
 
 
 def test_no_results_marks_not_found_and_calls_completion():
@@ -271,7 +319,7 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():

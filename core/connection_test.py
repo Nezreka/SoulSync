@@ -191,6 +191,12 @@ def run_service_test(service, test_config):
                     'tidal': "Tidal download source ready.",
                     'qobuz': "Qobuz download source ready.",
                     'hifi': "HiFi download source ready.",
+                    'deezer_dl': "Deezer download source ready.",
+                    'amazon': "Amazon download source ready.",
+                    'lidarr': "Lidarr download source ready.",
+                    'soundcloud': "SoundCloud download source ready.",
+                    'torrent': "Torrent download source ready.",
+                    'usenet': "Usenet download source ready.",
                     'hybrid': "Download sources ready (Hybrid mode)."
                 }
                 message = mode_messages.get(download_mode, "Download source connected.")
@@ -203,6 +209,12 @@ def run_service_test(service, test_config):
                     'tidal': "Tidal download source not available. Check authentication.",
                     'qobuz': "Qobuz download source not available. Check authentication.",
                     'hifi': "HiFi download source not available. Public API instances may be down.",
+                    'deezer_dl': "Deezer download source not available. Check authentication.",
+                    'amazon': "Amazon download source not available.",
+                    'lidarr': "Lidarr download source not available. Check Lidarr URL and API key.",
+                    'soundcloud': "SoundCloud download source not available.",
+                    'torrent': "Torrent download source not available. Check Prowlarr and torrent client settings.",
+                    'usenet': "Usenet download source not available. Check Prowlarr and usenet client settings.",
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
                 error = mode_errors.get(download_mode, "Download source connection failed.")

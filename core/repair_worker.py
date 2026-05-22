@@ -35,6 +35,64 @@ logger = get_logger("repair_worker")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def _album_fill_artist_names_match(expected_artist: str, candidate_artist: str) -> bool:
+    """Strict artist gate for Album Completeness auto-fill.
+
+    Auto-fill moves/copies files into an existing album, so artist identity
+    must outrank album/title similarity. Use the alias-aware matcher when it
+    is available, then fall back to conservative normalized similarity.
+    """
+    expected = (expected_artist or '').strip()
+    candidate = (candidate_artist or '').strip()
+    if not expected or not candidate:
+        return False
+
+    try:
+        from core.matching.artist_aliases import artist_names_match
+        matched, score = artist_names_match(expected, candidate, threshold=0.82)
+        if matched:
+            return True
+        if score < 0.82:
+            return False
+    except Exception as alias_err:
+        logger.debug("artist_names_match unavailable, using fallback: %s", alias_err)
+
+    try:
+        from core.matching_engine import MusicMatchingEngine
+        engine = MusicMatchingEngine()
+        expected_norm = engine.clean_artist(expected)
+        candidate_norm = engine.clean_artist(candidate)
+    except Exception:
+        expected_norm = expected.lower()
+        candidate_norm = candidate.lower()
+
+    if not expected_norm or not candidate_norm:
+        return False
+    return expected_norm == candidate_norm or SequenceMatcher(None, expected_norm, candidate_norm).ratio() >= 0.82
+
+
+def _album_fill_target_artist_allows_track(album_artist: str, track_artists: List[str]) -> bool:
+    """Return whether a source track can be auto-filled into an album artist.
+
+    Compilation-style album artists are allowed to contain varied track
+    artists. Normal albums require at least one source track artist to match
+    the target album artist before any local candidate is considered.
+    """
+    album_artist = (album_artist or '').strip()
+    if not album_artist:
+        return False
+
+    normalized_album_artist = album_artist.lower().strip()
+    if normalized_album_artist in {'various artists', 'various', 'soundtrack'}:
+        return True
+
+    source_artists = [str(a).strip() for a in (track_artists or []) if str(a or '').strip()]
+    if not source_artists:
+        return True
+
+    return any(_album_fill_artist_names_match(album_artist, artist) for artist in source_artists)
+
+
 def _split_acoustid_credit(credit: str) -> List[str]:
     """Split an AcoustID artist credit into individual contributor names.
 
@@ -2097,6 +2155,21 @@ class RepairWorker:
                 track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no track name'})
                 continue
 
+            if not _album_fill_target_artist_allows_track(artist_name, track_artists):
+                skipped_count += 1
+                logger.warning(
+                    "Album auto-fill skipped '%s': source artist(s) %s do not match target album artist '%s'",
+                    track_name, track_artists, artist_name,
+                )
+                track_details.append({
+                    'track': track_name,
+                    'status': 'skipped',
+                    'reason': 'source artist does not match target album artist',
+                    'source_artists': track_artists,
+                    'target_artist': artist_name,
+                })
+                continue
+
             # Search library for this track
             candidates = self.db.search_tracks(title=track_name, artist=artist_search, limit=20)
 
@@ -2117,8 +2190,22 @@ class RepairWorker:
 
                 # Artist match (more lenient)
                 cand_artist = getattr(cand, 'artist_name', '') or ''
-                artist_sim = SequenceMatcher(None, artist_search.lower(), cand_artist.lower()).ratio()
-                if artist_sim < 0.50:
+                candidate_artist_fields = [
+                    cand_artist,
+                    getattr(cand, 'track_artist', '') or '',
+                ]
+                expected_artist_names = track_artists or [artist_name]
+                if not any(
+                    _album_fill_artist_names_match(expected, candidate)
+                    for expected in expected_artist_names
+                    for candidate in candidate_artist_fields
+                ):
+                    logger.debug(
+                        "Album auto-fill rejected candidate '%s' by '%s' for expected artist(s) %s",
+                        getattr(cand, 'title', ''),
+                        cand_artist,
+                        expected_artist_names,
+                    )
                     continue
 
                 # Quality gate
