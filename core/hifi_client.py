@@ -289,8 +289,8 @@ class HiFiClient(DownloadSourcePlugin):
                 return 'flac'
             if 'mp4' in mime or 'aac' in codecs:
                 return 'm4a'
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to infer legacy HiFi track manifest extension: %s", e)
         return fallback
 
     def check_instance_capabilities(self, url: str, timeout: int = 5) -> Dict[str, Any]:
