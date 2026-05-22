@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import time
 
 import pytest
@@ -94,3 +95,18 @@ def test_load_webui_vite_manifest_reloads_when_file_changes(tmp_path):
 
     second = load_webui_vite_manifest(manifest_path)
     assert second["src/app/main.tsx"]["file"] == "assets/two.js"
+
+
+def test_static_ui_uses_existing_album_placeholder_asset():
+    repo_root = Path(__file__).resolve().parents[2]
+    static_dir = repo_root / "webui" / "static"
+
+    assert (static_dir / "placeholder-album.png").exists()
+    assert not (static_dir / "placeholder.png").exists()
+
+    stale_refs = []
+    for path in static_dir.glob("*.js"):
+        if "/static/placeholder.png" in path.read_text(encoding="utf-8"):
+            stale_refs.append(path.name)
+
+    assert stale_refs == []
