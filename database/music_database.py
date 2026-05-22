@@ -766,6 +766,8 @@ class MusicDatabase:
             except Exception as ps_err:
                 logger.error(f"Personalized-playlist schema init failed: {ps_err}")
 
+            self._ensure_core_media_schema_columns(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
 
@@ -774,6 +776,29 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+
+    def _ensure_core_media_schema_columns(self, cursor):
+        """Repair required media-library columns that older migrations may miss.
+
+        A few legacy migrations rebuild artists/albums/tracks in place. Newer
+        installs get these columns from CREATE TABLE, but upgraded databases can
+        occasionally miss one if a previous migration path failed or was marked
+        complete before the column existed.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(tracks)")
+            track_cols = {c[1] for c in cursor.fetchall()}
+            if track_cols and 'file_size' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
+                logger.info("Repaired missing file_size column on tracks table")
+
+            cursor.execute("PRAGMA table_info(albums)")
+            album_cols = {c[1] for c in cursor.fetchall()}
+            if album_cols and 'api_track_count' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
+                logger.info("Repaired missing api_track_count column on albums table")
+        except Exception as e:
+            logger.error("Error repairing core media schema columns: %s", e)
 
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
@@ -5499,6 +5524,25 @@ class MusicDatabase:
                 return True
                 
             except Exception as e:
+                error_text = str(e).lower()
+                if (
+                    'file_size' in error_text
+                    and ('no such column' in error_text or 'no column named' in error_text)
+                    and retry_count < max_retries - 1
+                ):
+                    try:
+                        repair_conn = conn if 'conn' in locals() else self._get_connection()
+                        repair_cursor = repair_conn.cursor()
+                        self._ensure_core_media_schema_columns(repair_cursor)
+                        repair_conn.commit()
+                        if repair_conn is not conn:
+                            repair_conn.close()
+                        retry_count += 1
+                        logger.info("Repaired missing file_size column while importing media track; retrying")
+                        continue
+                    except Exception as schema_error:
+                        logger.error("Failed to repair tracks.file_size during track import: %s", schema_error)
+
                 retry_count += 1
                 if "database is locked" in str(e).lower() and retry_count < max_retries:
                     logger.warning(f"Database locked on track '{getattr(track_obj, 'title', 'Unknown')}', retrying {retry_count}/{max_retries}...")
