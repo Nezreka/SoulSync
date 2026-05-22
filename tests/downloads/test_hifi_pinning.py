@@ -102,3 +102,78 @@ def test_cancel_download_marks_cancelled(hifi_client_with_engine):
     ok = _run_async(client.cancel_download('dl-1', None, remove=False))
     assert ok is True
     assert engine.get_record('hifi', 'dl-1')['state'] == 'Cancelled'
+
+
+def test_instance_capability_probe_uses_track_manifests_not_legacy_track():
+    class _Response:
+        def __init__(self, *, ok=True, status_code=200, payload=None):
+            self.ok = ok
+            self.status_code = status_code
+            self._payload = payload or {}
+
+        def json(self):
+            return self._payload
+
+    class _Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            if url.endswith('/search/'):
+                return _Response(payload={'items': []})
+            if url.endswith('/trackManifests/'):
+                return _Response(payload={
+                    'data': {
+                        'data': {
+                            'attributes': {
+                                'uri': 'https://cdn.example/playlist.m3u8',
+                            },
+                        },
+                    },
+                })
+            if url.endswith('/'):
+                return _Response(payload={'version': 'test'})
+            return _Response(ok=False, status_code=404)
+
+    client = HiFiClient.__new__(HiFiClient)
+    client.session = _Session()
+
+    result = client.check_instance_capabilities('https://hifi.example')
+
+    called_urls = [url for url, _ in client.session.calls]
+    assert result['can_search'] is True
+    assert result['can_download'] is True
+    assert any(url.endswith('/trackManifests/') for url in called_urls)
+    assert not any(url.endswith('/track') for url in called_urls)
+
+
+def test_instance_capability_probe_reports_manifest_without_uri_as_limited():
+    class _Response:
+        ok = True
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class _Session:
+        def get(self, url, **kwargs):
+            if url.endswith('/search/'):
+                return _Response({'items': []})
+            if url.endswith('/trackManifests/'):
+                return _Response({'data': {'data': {'attributes': {}}}})
+            if url.endswith('/'):
+                return _Response({'version': 'test'})
+            return _Response({'data': {'data': {'attributes': {}}}})
+
+    client = HiFiClient.__new__(HiFiClient)
+    client.session = _Session()
+
+    result = client.check_instance_capabilities('https://hifi.example')
+
+    assert result['can_search'] is True
+    assert result['can_download'] is False
+    assert result['download_error'] == 'No HLS manifest URI'

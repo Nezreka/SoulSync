@@ -244,6 +244,75 @@ class HiFiClient(DownloadSourcePlugin):
             return data.get('version') or data.get('data', {}).get('version')
         return None
 
+    @staticmethod
+    def _extract_manifest_uri(data: Any) -> Optional[str]:
+        try:
+            inner = data.get('data', data) if isinstance(data, dict) else data
+            attrs = inner.get('data', {}).get('attributes', {})
+            return attrs.get('uri')
+        except (AttributeError, KeyError):
+            return None
+
+    def check_instance_capabilities(self, url: str, timeout: int = 5) -> Dict[str, Any]:
+        """Probe one public HiFi instance using the endpoints SoulSync needs."""
+        entry = {
+            'url': url,
+            'status': 'unknown',
+            'version': None,
+            'can_search': False,
+            'can_download': False,
+        }
+        try:
+            root = self.session.get(
+                f'{url}/',
+                timeout=timeout,
+                headers={'Accept': 'application/json'},
+            )
+            if not root.ok:
+                entry['status'] = f'error (HTTP {root.status_code})'
+                return entry
+
+            data = root.json()
+            entry['version'] = data.get('version') or data.get('data', {}).get('version')
+            entry['status'] = 'online'
+
+            search = self.session.get(
+                f'{url}/search/',
+                params={'s': 'test', 'limit': 1},
+                timeout=timeout,
+            )
+            entry['can_search'] = search.ok
+
+            manifest = self.session.get(
+                f'{url}/trackManifests/',
+                params={
+                    'id': '1550546',
+                    'formats': 'FLAC',
+                    'usage': 'DOWNLOAD',
+                    'manifestType': 'HLS',
+                    'adaptive': 'true',
+                    'uriScheme': 'HTTPS',
+                },
+                timeout=timeout,
+            )
+            entry['can_download'] = (
+                manifest.ok
+                and bool(self._extract_manifest_uri(manifest.json()))
+            )
+            if not manifest.ok:
+                entry['download_error'] = f'HTTP {manifest.status_code}'
+            elif not entry['can_download']:
+                entry['download_error'] = 'No HLS manifest URI'
+        except http_requests.exceptions.SSLError:
+            entry['status'] = 'ssl_error'
+        except http_requests.exceptions.ConnectTimeout:
+            entry['status'] = 'timeout'
+        except http_requests.exceptions.ConnectionError:
+            entry['status'] = 'offline'
+        except Exception as e:
+            entry['status'] = f'error ({type(e).__name__})'
+        return entry
+
     def search_tracks(self, title: str = None, artist: str = None,
                       album: str = None, limit: int = 20) -> List[Dict]:
         params = {'limit': limit}
@@ -435,12 +504,9 @@ class HiFiClient(DownloadSourcePlugin):
         if not data:
             return None
 
-        try:
-            inner = data.get('data', data) if isinstance(data, dict) else data
-            attrs = inner.get('data', {}).get('attributes', {})
-            uri = attrs.get('uri')
-        except (AttributeError, KeyError) as e:
-            logger.warning(f"Failed to extract playlist URI from manifest response: {e}")
+        uri = self._extract_manifest_uri(data)
+        if uri is None:
+            logger.warning("Failed to extract playlist URI from manifest response")
             return None
 
         if not uri:
