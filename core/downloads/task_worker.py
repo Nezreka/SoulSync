@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
     """Return a user-facing miss reason when per-track search should stop.
 
-    Torrent / usenet album batches first download one private staged release,
+    Torrent / usenet / Soulseek album batches first download one private staged release,
     then each track claims the matching staged file. If that claim fails after
     the release is already staged, falling through to the normal per-track
     search only retries release-level sources N times and can keep re-adding
@@ -49,11 +49,19 @@ def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any
 
     source = (batch.get('album_bundle_source') or '').lower()
     mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
+    hybrid_first = ''
+    if mode == 'hybrid':
+        order = getattr(deps.download_orchestrator, 'hybrid_order', None) or []
+        if order:
+            hybrid_first = str(order[0] or '').lower()
+        else:
+            hybrid_first = str(getattr(deps.download_orchestrator, 'hybrid_primary', '') or '').lower()
     if (
         batch.get('album_bundle_private_staging')
         and batch.get('album_bundle_state') == 'staged'
-        and source in ('torrent', 'usenet')
-        and mode == source
+        and not batch.get('album_bundle_partial')
+        and source in ('torrent', 'usenet', 'soulseek')
+        and (mode == source or (mode == 'hybrid' and hybrid_first == source))
     ):
         return f'Track was not found in the staged {source} album release'
 
