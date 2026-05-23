@@ -380,11 +380,13 @@ body {
     width: 216px;
     background: transparent;
     border: 1px solid transparent;
+    color: inherit;
     border-radius: 12px;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 14px;
+    text-decoration: none;
     padding: 0 16px;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     font-family: 'SF Pro Text', -apple-system, sans-serif;
