@@ -589,7 +589,8 @@ async function importPageMatchAutoGroup(groupIdx) {
             importPageState._autoGroupFilePaths = group.file_paths;
 
             // Render results — user picks the right album
-            grid.innerHTML = data.albums.map(a => _renderSuggestionCard(a)).join('');
+            const banner = _renderImportFallbackBanner(data.albums, data.primary_source);
+            grid.innerHTML = banner + data.albums.map(a => _renderSuggestionCard(a, data.primary_source)).join('');
         } else {
             grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found — try searching manually</div>';
         }
@@ -625,26 +626,49 @@ async function importPageLoadSuggestions() {
         }
 
         section.style.display = '';
-        grid.innerHTML = data.suggestions.map(a => _renderSuggestionCard(a)).join('');
+        const banner = _renderImportFallbackBanner(data.suggestions, data.primary_source);
+        grid.innerHTML = banner + data.suggestions.map(a => _renderSuggestionCard(a, data.primary_source)).join('');
     } catch (err) {
         // Network error or server not ready — fail silently
         console.warn('Failed to load import suggestions:', err);
     }
 }
 
-function _renderSuggestionCard(a) {
+function _renderSuggestionCard(a, primarySource) {
     // Cache the album lookup so importPageSelectAlbum can pull source +
     // name + artist on click (the onclick can only carry the ID string
     // — see github issue #524 root cause).
     importPageState._albumLookup[a.id] = {
         id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
     };
+    // Surface the served source when it differs from the user's configured
+    // primary — the search route silently falls through to the next source
+    // in METADATA_SOURCE_PRIORITY when the primary returns nothing
+    // (intentional design, see core/auto_import_worker.py:1316). Without
+    // this badge the user has no idea their MusicBrainz / Discogs choice
+    // got bypassed (github issue #681).
+    const sourceBadge = (a.source && primarySource && a.source !== primarySource)
+        ? `<div class="import-page-album-card-source">via ${_esc((SOURCE_LABELS[a.source] || {}).text || a.source)}</div>`
+        : '';
     return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
         <img src="${a.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
         <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
+        ${sourceBadge}
     </div>`;
+}
+
+function _renderImportFallbackBanner(albums, primarySource) {
+    if (!primarySource || !albums || !albums.length) return '';
+    const allFallback = albums.every(a => a.source && a.source !== primarySource);
+    if (!allFallback) return '';
+    const servedSource = albums[0].source;
+    const primaryLabel = (SOURCE_LABELS[primarySource] || {}).text || primarySource;
+    const servedLabel = (SOURCE_LABELS[servedSource] || {}).text || servedSource;
+    // Neutral wording — covers both live-search fallback (primary returned 0)
+    // and cache-stale suggestions (primary changed since cache was built).
+    return `<div class="import-page-fallback-banner">Showing ${_esc(servedLabel)} results — not from your primary source (${_esc(primaryLabel)}).</div>`;
 }
 
 // --- Album Tab: Search ---
@@ -666,20 +690,8 @@ async function importPageSearchAlbum() {
             grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found</div>';
             return;
         }
-        grid.innerHTML = data.albums.map(a => {
-            // Cache album lookup so the click handler can include source
-            // + name + artist on the match POST (see #524).
-            importPageState._albumLookup[a.id] = {
-                id: a.id, name: a.name || '', artist: a.artist || '', source: a.source || '',
-            };
-            return `
-            <div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
-                <img src="${a.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
-                <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
-                <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
-                <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
-            </div>`;
-        }).join('');
+        const banner = _renderImportFallbackBanner(data.albums, data.primary_source);
+        grid.innerHTML = banner + data.albums.map(a => _renderSuggestionCard(a, data.primary_source)).join('');
         document.getElementById('import-page-album-clear-btn').classList.remove('hidden');
     } catch (err) {
         grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;

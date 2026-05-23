@@ -40320,6 +40320,25 @@ div.artist-hero-badge {
     margin-top: 4px;
 }
 
+.import-page-album-card-source {
+    font-size: 10px;
+    color: rgba(255, 200, 100, 0.75);
+    margin-top: 2px;
+    font-style: italic;
+}
+
+.import-page-fallback-banner {
+    grid-column: 1 / -1;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: rgba(255, 200, 100, 0.08);
+    border: 1px solid rgba(255, 200, 100, 0.25);
+    border-radius: 8px;
+    color: rgba(255, 220, 170, 0.9);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
 /* Album hero (selected album) */
 .import-page-album-hero {
     display: flex;
