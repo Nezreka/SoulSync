@@ -228,6 +228,7 @@ export function SinglesImportPanel({
                       ✓ {manualMatch.name} - {manualMatch.artist}
                       <button
                         className={styles.importPageSingleMatchedChange}
+                        data-import-page-inline-action
                         onClick={() => onOpenSearch(file)}
                       >
                         change
@@ -302,6 +303,7 @@ function SingleSearchPanel({
             <button
               key={`${track.source || 'source'}-${track.id}-${index}`}
               className={styles.importPageSingleResultItem}
+              data-import-page-result-row
               onClick={() => onSelectMatch(fileKey, track)}
             >
               {track.image_url ? (

@@ -1834,7 +1834,7 @@
     /* --- Phase 9: Touch & Hover Adaptations --- */
 
     /* Global touch targets - only standalone/action buttons, not inline */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
         min-height: 38px;
     }
 

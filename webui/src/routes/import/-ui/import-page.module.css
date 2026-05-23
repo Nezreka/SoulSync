@@ -639,11 +639,11 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-.importPageSingleResultSelect {
-  padding: 4px 12px;
-  background: rgba(var(--accent-light-rgb), 0.15);
-  border: 1px solid rgba(var(--accent-light-rgb), 0.3);
-  border-radius: 6px;
+  .importPageSingleResultSelect {
+    padding: 4px 12px;
+    background: rgba(var(--accent-light-rgb), 0.15);
+    border: 1px solid rgba(var(--accent-light-rgb), 0.3);
+    border-radius: 6px;
   color: rgb(var(--accent-light-rgb));
   font-size: 11px;
   font-weight: 600;
@@ -651,14 +651,14 @@
   flex-shrink: 0;
 }
 
-.importPageSingleResultSelect:hover {
-  background: rgba(var(--accent-light-rgb), 0.25);
-}
+  .importPageSingleResultSelect:hover {
+    background: rgba(var(--accent-light-rgb), 0.25);
+  }
 
-/* Empty state */
-.importPageEmptyState {
-  text-align: center;
-  padding: 60px 20px;
+  /* Empty state */
+  .importPageEmptyState {
+    text-align: center;
+    padding: 60px 20px;
   color: rgba(255, 255, 255, 0.3);
   font-size: 14px;
 }
@@ -1273,5 +1273,534 @@
     flex-direction: row;
     width: 100%;
     justify-content: space-between;
+  }
+}
+
+/* Mobile import layout:
+   keep the page feeling like the legacy shell on phones by stacking
+   high-friction controls and letting cards breathe vertically. */
+@media (max-width: 768px) {
+  .importPageContainer {
+    padding: 16px 16px 20px;
+  }
+
+  .importPageHeader {
+    margin-bottom: 16px;
+  }
+
+  .importPageTitleRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .importPageTitle {
+    gap: 10px;
+    font-size: 22px;
+  }
+
+  .importPageTitle > img {
+    width: 24px;
+    height: 24px;
+  }
+
+  .importPageTitleRow > button,
+  .importPageSearchBar > button,
+  .importPageMatchActions > button,
+  .importPageMatchFooter > button,
+  .importPageQueueHeader > button,
+  .importPageSinglesActions > button,
+  .autoImportToggleRow > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .importPageStagingBar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+
+  .importStagingPath {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+
+  .importStagingStats,
+  .importStagingRefreshAt {
+    white-space: normal;
+  }
+
+  .importPageTabBar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .importPageTabBar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .importPageTab {
+    padding: 8px 14px;
+    white-space: nowrap;
+  }
+
+  .importPageSearchBar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  #import-page-album-search-input {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  #import-page-album-clear-btn {
+    flex: 0 0 auto;
+    min-height: 36px;
+  }
+
+  #import-page-album-clear-btn + button {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .importPageAlbumGrid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .importPageAutoGroups .importPageAlbumGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .importPageAlbumCard {
+    padding: 10px;
+  }
+
+  .importPageAlbumCard img {
+    margin-bottom: 6px;
+  }
+
+  .importPageAlbumCardTitle {
+    font-size: 12px;
+  }
+
+  .importPageAlbumCardArtist {
+    font-size: 10px;
+  }
+
+  .importPageAutoGroupCard {
+    gap: 10px;
+  }
+
+  .importPageAlbumHero {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .importPageAlbumHero img {
+    width: 96px;
+    height: 96px;
+  }
+
+  .importPageAlbumHeroTitle {
+    font-size: 20px;
+  }
+
+  .importPageAlbumHeroArtist {
+    font-size: 14px;
+  }
+
+  .importPageAlbumHeroInfo {
+    width: 100%;
+  }
+
+  .importPageMatchHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .importPageMatchHeader h3 {
+    font-size: 15px;
+  }
+
+  .importPageMatchActions {
+    flex-direction: column;
+  }
+
+  .importPageMatchRow {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'num track track'
+      'num file unmatch';
+    gap: 6px 8px;
+    align-items: center;
+    padding: 10px 12px;
+  }
+
+  .importPageMatchNum {
+    grid-area: num;
+  }
+
+  .importPageMatchTrack {
+    grid-area: track;
+    white-space: normal;
+  }
+
+  .importPageMatchFile {
+    grid-area: file;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .importPageMatchRow > :last-child {
+    grid-area: unmatch;
+    justify-self: end;
+  }
+
+  .importPageUnmatchedPool {
+    padding: 12px;
+  }
+
+  .importPagePoolChips {
+    gap: 6px;
+  }
+
+  .importPageMatchFooter {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .importPageMatchStats {
+    text-align: center;
+  }
+
+  .importPageSinglesHeader {
+    align-items: stretch;
+  }
+
+  .importPageSinglesActions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .importPageSingleItem {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'checkbox info actions'
+      'search search search';
+    align-items: start;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .importPageSingleCheckboxWrap {
+    margin-top: 0;
+  }
+
+  .importPageSingleActions {
+    grid-area: actions;
+    justify-self: end;
+    align-self: start;
+  }
+
+  .importPageSingleSearchPanel {
+    grid-area: search;
+    padding-left: 0;
+  }
+
+  .importPageSingleSearchBar {
+    flex-direction: column;
+  }
+
+  .importPageSingleSearchResults {
+    max-height: 260px;
+  }
+
+  .importPageSingleResultItem {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .importPageQueueHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .importPageQueueItem {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      'art info'
+      'art progress';
+    gap: 8px 10px;
+    align-items: start;
+    padding: 10px 12px;
+  }
+
+  .importPageQueueArt {
+    grid-area: art;
+  }
+
+  .importPageQueueInfo {
+    grid-area: info;
+  }
+
+  .importPageQueueProgress {
+    grid-area: progress;
+    width: 100%;
+  }
+
+  .importPageQueueStatus {
+    text-align: left;
+  }
+
+  .autoImportControls {
+    padding: 8px 0 12px;
+  }
+
+  .autoImportToggleRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .autoImportSettingsRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .autoImportSetting {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .autoImportConfidenceValue {
+    flex: 0 0 auto;
+  }
+
+  .autoImportFilters {
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .autoImportFilters .importPageFlexSpacer {
+    display: none;
+  }
+
+  .autoImportFilters > button {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+
+  .autoImportCard {
+    padding: 12px;
+  }
+
+  .autoImportCardTop {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-areas:
+      'art body'
+      'right right';
+    align-items: start;
+    gap: 10px 12px;
+  }
+
+  .autoImportCardLeft {
+    grid-area: art;
+  }
+
+  .autoImportCardCenter {
+    grid-area: body;
+    width: auto;
+  }
+
+  .autoImportCardAlbum,
+  .autoImportCardArtist,
+  .autoImportCardError,
+  .autoImportCardFolderPath {
+    white-space: normal;
+  }
+
+  .autoImportCardRight {
+    grid-area: right;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .autoImportStatusBadge {
+    align-self: flex-start;
+  }
+
+  .autoImportConfidenceBar {
+    width: 100%;
+  }
+
+  .autoImportConfidenceText {
+    align-self: flex-start;
+  }
+
+  .autoImportActions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .autoImportActions > button {
+    width: 100%;
+  }
+
+  .autoImportCardMeta {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .autoImportCardFolderPath {
+    line-height: 1.35;
+  }
+
+  .autoImportTrackListHeader {
+    display: none;
+  }
+
+  .autoImportTrackList.expanded {
+    padding-top: 6px;
+  }
+
+  .autoImportTrackRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name conf'
+      'file conf';
+    gap: 2px 8px;
+    padding: 6px 0;
+  }
+
+  .autoImportTrackName {
+    grid-area: name;
+    white-space: normal;
+  }
+
+  .autoImportTrackFile {
+    grid-area: file;
+    white-space: normal;
+  }
+
+  .autoImportTrackConf {
+    grid-area: conf;
+    align-self: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .importPageContainer {
+    padding: 12px 12px 16px;
+  }
+
+  .importPageTitle {
+    font-size: 20px;
+  }
+
+  .importPageTitleRow > button,
+  .importPageMatchActions > button,
+  .importPageMatchFooter > button,
+  .importPageQueueHeader > button,
+  .importPageSinglesActions > button,
+  .autoImportToggleRow > button,
+  .autoImportFilters > button {
+    width: 100%;
+  }
+
+  #import-page-album-clear-btn + button {
+    width: 100%;
+  }
+
+  .autoImportFilters > button {
+    flex: 1 1 100%;
+  }
+
+  .importPageAlbumGrid {
+    gap: 8px;
+  }
+
+  .importPageAlbumHero {
+    padding: 14px;
+  }
+
+  .importPageAlbumHero img {
+    width: 88px;
+    height: 88px;
+  }
+
+  .importPageMatchRow,
+  .importPageSingleItem,
+  .importPageQueueItem {
+    padding: 10px;
+  }
+
+  .importPageSingleSearchResults {
+    max-height: 220px;
+  }
+
+  .importPageSingleResultItem {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .importPageSingleResultImg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .importPageSingleResultName {
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .importPageSingleResultDetail {
+    font-size: 11px;
+    white-space: normal;
+  }
+
+  .importPageSingleResultSelect {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+
+  .autoImportCard {
+    padding: 10px;
+  }
+
+  .autoImportCardTop {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 8px 10px;
+  }
+
+  .autoImportCardArt,
+  .autoImportCardArtFallback {
+    width: 48px;
+    height: 48px;
+  }
+
+  .autoImportConfidenceBar {
+    width: 100%;
   }
 }
