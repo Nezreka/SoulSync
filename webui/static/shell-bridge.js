@@ -22,15 +22,18 @@ function showLegacyPage(pageId) {
 function setActivePageChrome(pageId) {
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
+        btn.removeAttribute('aria-current');
     });
     const navButton = document.querySelector(`[data-page="${pageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
+        navButton.setAttribute('aria-current', 'page');
     } else if (pageId === 'artist-detail') {
         // Artist detail is a Library context, so keep the sidebar anchored there.
         const libraryBtn = document.querySelector('[data-page="library"]');
         if (libraryBtn) {
             libraryBtn.classList.add('active');
+            libraryBtn.setAttribute('aria-current', 'page');
         }
     }
     currentPage = pageId;
@@ -181,35 +184,40 @@ function _handleShellLinkClick(event) {
 
     const anchor = event.target?.closest?.('a[href]');
     if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+    if (anchor.hasAttribute('download')) return;
 
     const href = anchor.getAttribute('href');
     if (!href || href === '#' || href.startsWith('javascript:')) return;
 
-    const router = getWebRouter();
-    if (!router?.navigateToPage) return;
-
     const pathname = anchor.pathname || new URL(anchor.href, window.location.href).pathname;
+    const navPageId = anchor.matches('.nav-button[data-page]') ? anchor.getAttribute('data-page') : null;
+    if (navPageId) {
+        event.preventDefault();
+        void navigateToPage(navPageId);
+        return;
+    }
 
     if (pathname.startsWith('/artist-detail/')) {
-        _handleArtistDetailLinkClick(event, pathname, router);
+        _handleArtistDetailLinkClick(event, pathname);
         return;
     }
 }
 
-function _handleArtistDetailLinkClick(event, pathname, router) {
+function _handleArtistDetailLinkClick(event, pathname) {
     const parts = pathname.split('/').filter(Boolean);
     if (parts.length < 3) return;
 
-    // Keep the semantic link, but hand the click back to TanStack so artist
-    // detail navigations stay in the SPA when the router is available.
+    // Keep the semantic link, but hand the click back to the SPA router so
+    // artist detail navigations stay in-app when the link is left-clicked.
     const source = decodeURIComponent(parts[1] || '');
     const artistId = decodeURIComponent(parts.slice(2).join('/'));
     if (!source || !artistId) return;
 
     event.preventDefault();
-    void router.navigateToPage('artist-detail', {
+    void navigateToPage('artist-detail', {
         artistId,
         artistSource: source,
+        forceReload: true,
     });
 }
 
