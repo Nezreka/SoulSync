@@ -64,8 +64,20 @@ function toggleMediaPlayerExpansion() {
 function extractTrackTitle(filename) {
     if (!filename) return null;
 
+    // Strip the ``<source_id>||<display>`` prefix used by YouTube /
+    // Tidal / Qobuz / torrent / usenet plugins to thread the source-
+    // side identifier through ``filename`` without polluting the
+    // display string. The id always comes first, the human title
+    // after. If no separator is present, fall through with the raw
+    // value so existing slskd / streaming-source paths are untouched.
+    let title = filename;
+    const sepIdx = title.indexOf('||');
+    if (sepIdx >= 0) {
+        title = title.slice(sepIdx + 2);
+    }
+
     // Remove file extension
-    let title = filename.replace(/\.[^/.]+$/, '');
+    title = title.replace(/\.[^/.]+$/, '');
 
     // Remove path components, keep only the filename
     title = title.split('/').pop().split('\\').pop();
@@ -82,17 +94,28 @@ function extractTrackTitle(filename) {
     return title || null;
 }
 
+function _stripSourceIdPrefix(value) {
+    // Defensive cleanup for callers that pass a raw ``<source_id>||<display>``
+    // string straight into setTrackInfo without first running
+    // extractTrackTitle. The id always precedes the separator; the display
+    // string follows. Strings with no separator pass through unchanged.
+    if (!value || typeof value !== 'string') return value;
+    const idx = value.indexOf('||');
+    if (idx < 0) return value;
+    return value.slice(idx + 2);
+}
+
 function setTrackInfo(track) {
     currentTrack = track;
 
     const trackTitleElement = document.getElementById('track-title');
-    const trackTitle = track.title || 'Unknown Track';
+    const trackTitle = _stripSourceIdPrefix(track.title) || 'Unknown Track';
 
     // Set up the HTML structure for scrolling
     trackTitleElement.innerHTML = `<span class="title-text">${escapeHtml(trackTitle)}</span>`;
 
-    document.getElementById('artist-name').textContent = track.artist || 'Unknown Artist';
-    document.getElementById('album-name').textContent = track.album || 'Unknown Album';
+    document.getElementById('artist-name').textContent = _stripSourceIdPrefix(track.artist) || 'Unknown Artist';
+    document.getElementById('album-name').textContent = _stripSourceIdPrefix(track.album) || 'Unknown Album';
 
     // Check if title needs scrolling (similar to GUI app)
     setTimeout(() => {
@@ -120,12 +143,35 @@ function setTrackInfo(track) {
             gotoArtistBtn.setAttribute('aria-disabled', 'true');
             gotoArtistBtn.tabIndex = -1;
         }
+        // Close the expanded now-playing modal when the user navigates
+        // to the artist page — otherwise the modal sits open over the
+        // page they just opened. ``_npGotoArtistHandlerAttached`` flag
+        // keeps us from binding multiple listeners across setTrackInfo
+        // calls (fires on every track change).
+        if (!gotoArtistBtn._npGotoArtistHandlerAttached) {
+            gotoArtistBtn.addEventListener('click', () => {
+                if (gotoArtistBtn.getAttribute('aria-disabled') === 'true') return;
+                try { closeNowPlayingModal(); } catch (e) { console.debug('closeNowPlayingModal failed:', e); }
+            });
+            gotoArtistBtn._npGotoArtistHandlerAttached = true;
+        }
     }
 
     // Sync expanded player and media session
     updateNpTrackInfo();
     updateMediaSessionMetadata();
     updateMediaSessionPlaybackState();
+
+    // Kick off lyrics fetch for the new track. The panel stays
+    // collapsed by default — fetching in the background means the
+    // user gets instant lyrics the first time they expand it.
+    _npLyricsLoadForTrack({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        is_library: track.is_library,
+        filename: track.filename,
+    });
 }
 
 function checkAndEnableScrolling(element, text) {
@@ -922,6 +968,202 @@ function updateAudioProgress() {
 
     // Sync expanded player modal
     if (npModalOpen) updateNpProgress();
+
+    // Sync lyrics highlight when synced LRC is loaded.
+    if (_npLyricsState.synced && _npLyricsState.lines.length) {
+        _npLyricsHighlight(audioPlayer.currentTime);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Lyrics panel (now-playing modal)
+// ─────────────────────────────────────────────────────────────────
+
+// Module-level state for the currently-loaded lyrics. Reset on each
+// track change. ``lines`` is an array of {time, text} for synced
+// lyrics or null for plain text. ``activeIndex`` tracks the last
+// highlighted line to avoid re-rendering on every timeupdate tick.
+const _npLyricsState = {
+    trackKey: null,
+    lines: [],
+    synced: false,
+    activeIndex: -1,
+    fetchInFlight: false,
+    autoOpen: false,
+};
+
+function _npLyricsResetUI() {
+    const content = document.getElementById('np-lyrics-content');
+    const status = document.getElementById('np-lyrics-status');
+    if (content) content.innerHTML = '<div class="np-lyrics-empty">No lyrics loaded</div>';
+    if (status) status.textContent = '';
+}
+
+function _npLyricsParseLrc(synced) {
+    // Parse a standard LRC string. Lines without a timestamp are
+    // dropped (metadata tags like ``[ti:Title]`` aren't lyrics). The
+    // same line can carry multiple timestamps — emit one entry per
+    // timestamp so seeks land correctly when a chorus repeats.
+    const out = [];
+    if (!synced) return out;
+    const re = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+    synced.split(/\r?\n/).forEach(raw => {
+        const stamps = [];
+        let m;
+        re.lastIndex = 0;
+        while ((m = re.exec(raw)) !== null) {
+            const minutes = parseInt(m[1], 10);
+            const seconds = parseFloat(m[2]);
+            if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) continue;
+            stamps.push(minutes * 60 + seconds);
+        }
+        if (!stamps.length) return;
+        const text = raw.replace(re, '').trim();
+        stamps.forEach(t => out.push({ time: t, text }));
+    });
+    out.sort((a, b) => a.time - b.time);
+    return out;
+}
+
+function _npLyricsRenderSynced(lines) {
+    const content = document.getElementById('np-lyrics-content');
+    if (!content) return;
+    if (!lines.length) {
+        content.innerHTML = '<div class="np-lyrics-empty">No timestamped lyrics for this track</div>';
+        return;
+    }
+    content.innerHTML = lines.map((line, idx) => {
+        const safe = (line.text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) || '&nbsp;';
+        return `<div class="np-lyrics-line" data-idx="${idx}">${safe}</div>`;
+    }).join('');
+}
+
+function _npLyricsRenderPlain(text) {
+    const content = document.getElementById('np-lyrics-content');
+    if (!content) return;
+    const safe = (text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    content.innerHTML = `<div class="np-lyrics-plain">${safe.replace(/\n/g, '<br>')}</div>`;
+}
+
+function _npLyricsHighlight(currentTime) {
+    const { lines } = _npLyricsState;
+    if (!lines.length) return;
+    let idx = -1;
+    // Binary-search style linear scan — N is small (200 lines max).
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].time <= currentTime) idx = i;
+        else break;
+    }
+    if (idx === _npLyricsState.activeIndex) return;
+    _npLyricsState.activeIndex = idx;
+    const content = document.getElementById('np-lyrics-content');
+    if (!content) return;
+    content.querySelectorAll('.np-lyrics-line').forEach((el, i) => {
+        el.classList.remove('active', 'passed', 'upcoming');
+        if (i === idx) el.classList.add('active');
+        else if (i < idx) el.classList.add('passed');
+        else el.classList.add('upcoming');
+    });
+    const activeEl = content.querySelector('.np-lyrics-line.active');
+    if (activeEl) {
+        // Smooth-scroll the active line into the middle of the lyrics body.
+        const body = document.getElementById('np-lyrics-body');
+        if (body) {
+            const bodyRect = body.getBoundingClientRect();
+            const lineRect = activeEl.getBoundingClientRect();
+            const targetTop = (lineRect.top - bodyRect.top) - (bodyRect.height / 2) + (lineRect.height / 2);
+            body.scrollTo({ top: body.scrollTop + targetTop, behavior: 'smooth' });
+        }
+    }
+}
+
+function _npLyricsTrackKey(track) {
+    if (!track) return null;
+    return `${track.title || ''}|${track.artist || ''}|${track.album || ''}`;
+}
+
+async function _npLyricsLoadForTrack(track) {
+    const key = _npLyricsTrackKey(track);
+    if (!key) return;
+    if (_npLyricsState.trackKey === key) return;     // already loaded
+    if (_npLyricsState.fetchInFlight) return;
+    _npLyricsState.trackKey = key;
+    _npLyricsState.lines = [];
+    _npLyricsState.synced = false;
+    _npLyricsState.activeIndex = -1;
+    _npLyricsResetUI();
+    const status = document.getElementById('np-lyrics-status');
+    if (status) status.textContent = 'Fetching…';
+    _npLyricsState.fetchInFlight = true;
+    try {
+        const resp = await fetch('/api/lyrics/fetch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: _stripSourceIdPrefix(track.title) || '',
+                artist: _stripSourceIdPrefix(track.artist) || '',
+                album: _stripSourceIdPrefix(track.album) || '',
+                duration: Math.round(audioPlayer?.duration || 0),
+                file_path: track.is_library ? track.filename : null,
+            }),
+        });
+        const data = await resp.json();
+        if (_npLyricsState.trackKey !== key) return;    // track changed mid-fetch
+        if (data && data.success) {
+            if (data.synced) {
+                const parsed = _npLyricsParseLrc(data.synced);
+                if (parsed.length) {
+                    _npLyricsState.synced = true;
+                    _npLyricsState.lines = parsed;
+                    _npLyricsRenderSynced(parsed);
+                    if (status) status.textContent = 'Synced';
+                    return;
+                }
+            }
+            if (data.plain) {
+                _npLyricsState.synced = false;
+                _npLyricsState.lines = [];
+                _npLyricsRenderPlain(data.plain);
+                if (status) status.textContent = 'Plain';
+                return;
+            }
+        }
+        const content = document.getElementById('np-lyrics-content');
+        if (content) content.innerHTML = '<div class="np-lyrics-empty">No lyrics found</div>';
+        if (status) status.textContent = '';
+    } catch (e) {
+        console.debug('lyrics fetch failed:', e);
+        const content = document.getElementById('np-lyrics-content');
+        if (content) content.innerHTML = '<div class="np-lyrics-empty">Lyrics unavailable</div>';
+        if (status) status.textContent = '';
+    } finally {
+        _npLyricsState.fetchInFlight = false;
+    }
+}
+
+function _npLyricsTogglePanel(forceOpen = null) {
+    const panel = document.getElementById('np-lyrics-panel');
+    const body = document.getElementById('np-lyrics-body');
+    const toggle = document.getElementById('np-lyrics-toggle');
+    if (!panel || !body || !toggle) return;
+    const willOpen = forceOpen === null ? body.classList.contains('hidden') : forceOpen;
+    if (willOpen) {
+        body.classList.remove('hidden');
+        panel.classList.remove('collapsed');
+        toggle.setAttribute('aria-expanded', 'true');
+    } else {
+        body.classList.add('hidden');
+        panel.classList.add('collapsed');
+        toggle.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function _npLyricsInit() {
+    const toggle = document.getElementById('np-lyrics-toggle');
+    if (toggle && !toggle._lyricsBound) {
+        toggle.addEventListener('click', () => _npLyricsTogglePanel());
+        toggle._lyricsBound = true;
+    }
 }
 
 function onAudioEnded() {
@@ -1287,6 +1529,10 @@ function openNowPlayingModal() {
     overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     syncExpandedPlayerUI();
+    // Bind lyrics toggle (idempotent — only attaches once). Lyrics
+    // fetch fires from setTrackInfo so by the time the modal opens
+    // the panel is usually already populated.
+    _npLyricsInit();
     // Start visualizer if already playing
     if (isPlaying) { npInitVisualizer(); npStartVisualizerLoop(); }
 }

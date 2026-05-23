@@ -883,10 +883,16 @@ function generateWishlistTrackList(tracks, trackOwnership) {
         const badge = isOwned
             ? '<div class="wishlist-track-badge owned"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>'
             : '';
+        // Play button shows for every track. ``playWishlistModalTrack`` ->
+        // ``playTrackFromLibraryOrStream`` resolves a local file when one
+        // exists and falls back to the streaming source otherwise, matching
+        // the same pattern used by the download-missing modals elsewhere.
+        const playButton = `<button class="modal-track-play-btn wishlist-track-play-btn" onclick="event.stopPropagation(); playWishlistModalTrack(${index})" title="${isOwned ? 'Play from library' : 'Play (stream fallback)'}">&#9654;</button>`;
 
         return `
             <div class="wishlist-track-item ${ownershipClass}">
                 <div class="wishlist-track-number">${trackNumber}</div>
+                ${playButton}
                 <div class="wishlist-track-info">
                     <div class="wishlist-track-name">${trackName}</div>
                     <div class="wishlist-track-artists">${artistsString}</div>
@@ -1073,6 +1079,25 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName 
             if (isOwned) {
                 ownedCount++;
                 item.classList.add('owned');
+                // Play button is rendered up front for every track now. Upgrade
+                // the tooltip + click handler once ownership confirms so the
+                // local-file path is used directly without the resolve-track
+                // round trip. Falls back to creating a fresh button if the
+                // initial render somehow skipped it (defensive — should not
+                // happen post-refactor).
+                let playBtn = item.querySelector('.wishlist-track-play-btn');
+                if (!playBtn) {
+                    playBtn = document.createElement('button');
+                    playBtn.className = 'modal-track-play-btn wishlist-track-play-btn';
+                    playBtn.innerHTML = '&#9654;';
+                    item.querySelector('.wishlist-track-number')?.after(playBtn);
+                }
+                playBtn.title = 'Play from library';
+                playBtn.onclick = null;
+                playBtn.addEventListener('click', event => {
+                    event.stopPropagation();
+                    playWishlistModalTrack(index, trackData);
+                });
                 // Add metadata line below track name
                 const trackInfo = item.querySelector('.wishlist-track-info');
                 if (trackInfo && (trackData.format || trackData.bitrate)) {
@@ -1160,6 +1185,35 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName 
     } catch (e) {
         console.warn('Could not load track ownership:', e);
     }
+}
+
+async function playWishlistModalTrack(index, ownershipData = null) {
+    if (!currentWishlistModalData || !currentWishlistModalData.tracks) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    const track = currentWishlistModalData.tracks[index];
+    if (!track) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    const trackData = ownershipData || {};
+    const playbackTrack = {
+        ...track,
+        id: trackData.track_id || track.id || null,
+        title: trackData.title || track.title || track.name,
+        file_path: trackData.file_path || track.file_path || null,
+        bitrate: trackData.bitrate || track.bitrate,
+        _stats_image: currentWishlistModalData.album?.image_url || currentWishlistModalData.album?.images?.[0]?.url || null
+    };
+
+    await playTrackFromLibraryOrStream(
+        playbackTrack,
+        trackData.album || currentWishlistModalData.album?.name || currentWishlistModalData.album?.title || '',
+        getModalTrackArtistName(track, currentWishlistModalData.artist?.name || '')
+    );
 }
 
 /**

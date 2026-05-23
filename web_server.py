@@ -8738,6 +8738,9 @@ def library_check_tracks():
                 file_ext = os.path.splitext(matched_db_track.file_path or '')[1].lstrip('.').upper() or None
                 owned_map[track_name] = {
                     "owned": True,
+                    "track_id": getattr(matched_db_track, 'id', None),
+                    "title": getattr(matched_db_track, 'title', track_name),
+                    "file_path": getattr(matched_db_track, 'file_path', None),
                     "format": file_ext,
                     "bitrate": matched_db_track.bitrate,
                     "album": getattr(matched_db_track, 'album_title', None)
@@ -33163,6 +33166,101 @@ def stats_recent():
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lyrics/fetch', methods=['POST'])
+def fetch_lyrics_endpoint():
+    """Fetch lyrics for the now-playing media player.
+
+    Body: ``{title, artist, album?, duration?}``. Returns
+    ``{success, synced, plain, source}`` where ``synced`` is an LRC
+    string with ``[mm:ss.xx] line`` timestamps (or None) and ``plain``
+    is the untimestamped text (or None). ``source`` is the lookup
+    strategy that hit (``exact`` / ``search`` / ``sidecar``).
+
+    Tries the local ``.lrc`` / ``.txt`` sidecar first when a
+    ``file_path`` is supplied — already-downloaded tracks should not
+    bounce LRClib on every play. Falls through to LRClib's exact-
+    match endpoint when title+artist+album+duration are all available,
+    then to its generic search endpoint.
+    """
+    try:
+        data = request.get_json() or {}
+        title = (data.get('title') or '').strip()
+        artist = (data.get('artist') or '').strip()
+        album = (data.get('album') or '').strip() or None
+        try:
+            duration = int(data.get('duration') or 0) or None
+        except (TypeError, ValueError):
+            duration = None
+        file_path = data.get('file_path') or None
+
+        if not title or not artist:
+            return jsonify({'success': False, 'error': 'title and artist required',
+                            'synced': None, 'plain': None, 'source': None}), 400
+
+        # 1. Sidecar — fastest, no network. The post-processing flow
+        #    drops .lrc / .txt next to the audio for every successful
+        #    enrichment, so existing downloads almost always have one.
+        if file_path:
+            try:
+                import os as _os
+                stem, _ = _os.path.splitext(file_path)
+                lrc_path = stem + '.lrc'
+                txt_path = stem + '.txt'
+                if _os.path.exists(lrc_path):
+                    with open(lrc_path, 'r', encoding='utf-8') as fh:
+                        body = fh.read().strip()
+                    if body:
+                        return jsonify({'success': True, 'synced': body,
+                                        'plain': None, 'source': 'sidecar'})
+                if _os.path.exists(txt_path):
+                    with open(txt_path, 'r', encoding='utf-8') as fh:
+                        body = fh.read().strip()
+                    if body:
+                        return jsonify({'success': True, 'synced': None,
+                                        'plain': body, 'source': 'sidecar'})
+            except Exception as sidecar_err:
+                logger.debug("lyrics sidecar read skipped: %s", sidecar_err)
+
+        # 2. LRClib network lookup via the shared client instance.
+        from core.lyrics_client import lyrics_client as _lyrics_client
+        api = getattr(_lyrics_client, 'api', None)
+        if api is None:
+            return jsonify({'success': False, 'error': 'lrclib unavailable',
+                            'synced': None, 'plain': None, 'source': None}), 200
+
+        result = None
+        # Exact-match endpoint requires all four fields. LRClib's API
+        # will 404 on any miss; treat as soft failure and fall through
+        # to the search endpoint.
+        if album and duration:
+            try:
+                result = api.get_lyrics(track_name=title, artist_name=artist,
+                                        album_name=album, duration=duration)
+            except Exception as exact_err:
+                logger.debug("lrclib exact lookup failed: %s", exact_err)
+
+        if result is None:
+            try:
+                hits = api.search_lyrics(track_name=title, artist_name=artist)
+                if hits:
+                    result = hits[0]
+            except Exception as search_err:
+                logger.debug("lrclib search lookup failed: %s", search_err)
+
+        if result is None:
+            return jsonify({'success': False, 'error': 'no lyrics found',
+                            'synced': None, 'plain': None, 'source': None})
+
+        synced = getattr(result, 'synced_lyrics', None) or None
+        plain = getattr(result, 'plain_lyrics', None) or None
+        return jsonify({'success': bool(synced or plain), 'synced': synced,
+                        'plain': plain, 'source': 'lrclib'})
+    except Exception as e:
+        logger.error("lyrics fetch failed: %s", e)
+        return jsonify({'success': False, 'error': str(e),
+                        'synced': None, 'plain': None, 'source': None}), 500
+
 
 @app.route('/api/stats/resolve-track', methods=['POST'])
 def stats_resolve_track():
