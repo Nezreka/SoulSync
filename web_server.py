@@ -24315,9 +24315,10 @@ def select_profile():
                 return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
         session['profile_id'] = profile_id
-        # If PIN was just validated, also mark launch PIN as verified
-        # so the subsequent page reload doesn't ask again
-        if pin:
+        # If the admin PIN was just validated, also mark launch PIN as
+        # verified so the subsequent page reload doesn't ask again. A
+        # non-admin profile PIN must not unlock the admin launch lock.
+        if pin and profile_id == 1:
             session['launch_pin_verified'] = True
         return jsonify({'success': True, 'profile': profile})
     except Exception as e:
@@ -24402,12 +24403,16 @@ def reset_pin_via_credential():
 
         # Credential verified — clear PIN for the requested profile (default: admin)
         database = get_database()
-        target_profile = data.get('profile_id', 1)
+        try:
+            target_profile = int(data.get('profile_id', 1))
+        except (TypeError, ValueError):
+            target_profile = 1
         database.update_profile(target_profile, pin_hash=None)
         # If clearing admin PIN, also disable launch lock
         if target_profile == 1:
             config_manager.set('security.require_pin_on_launch', False)
-        session['launch_pin_verified'] = True
+        if target_profile == 1:
+            session['launch_pin_verified'] = True
 
         return jsonify({'success': True, 'message': 'PIN cleared. You can set a new PIN in Settings.'})
     except Exception as e:

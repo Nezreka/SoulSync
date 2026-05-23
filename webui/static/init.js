@@ -707,8 +707,19 @@ function showPinDialog(profile) {
     const dialog = document.getElementById('profile-pin-dialog');
     const avatar = document.getElementById('profile-pin-avatar');
     const nameEl = document.getElementById('profile-pin-name');
-    const input = document.getElementById('profile-pin-input');
     const errorEl = document.getElementById('profile-pin-error');
+    const oldInput = document.getElementById('profile-pin-input');
+    const oldSubmit = document.getElementById('profile-pin-submit');
+    const oldCancel = document.getElementById('profile-pin-cancel');
+
+    // Replace controls on every open so stale listeners from a previous
+    // profile cannot submit the new PIN against the old profile id.
+    const input = oldInput.cloneNode(true);
+    const submit = oldSubmit.cloneNode(true);
+    const cancel = oldCancel.cloneNode(true);
+    oldInput.parentNode.replaceChild(input, oldInput);
+    oldSubmit.parentNode.replaceChild(submit, oldSubmit);
+    oldCancel.parentNode.replaceChild(cancel, oldCancel);
 
     renderProfileAvatar(avatar, profile);
     nameEl.textContent = profile.name;
@@ -718,13 +729,12 @@ function showPinDialog(profile) {
     dialog.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
 
-    const submit = document.getElementById('profile-pin-submit');
-    const cancel = document.getElementById('profile-pin-cancel');
-
     const wasSwitching = !!currentProfile;
     const handleSubmit = async () => {
         const pin = input.value;
         if (!pin) return;
+        submit.disabled = true;
+        submit.textContent = 'Verifying...';
         try {
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
@@ -753,7 +763,8 @@ function showPinDialog(profile) {
             errorEl.textContent = 'Connection error';
             errorEl.style.display = '';
         }
-        cleanup();
+        submit.disabled = false;
+        submit.textContent = 'Submit';
     };
 
     const handleCancel = () => {
