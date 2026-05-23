@@ -223,6 +223,92 @@ def test_private_torrent_album_staging_miss_skips_per_track_search():
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
+def test_private_soulseek_album_staging_miss_skips_per_track_search():
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
+        'album': 'Album', 'duration_ms': 180000,
+    })
+    download_batches['b1'] = {
+        'album_bundle_private_staging': True,
+        'album_bundle_state': 'staged',
+        'album_bundle_source': 'soulseek',
+    }
+    client = _FakeClient(results=['should-not-search'], mode='soulseek')
+    rec = _Recorder()
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Artist Song']),
+        try_staging_match=lambda *a, **kw: False,
+        on_download_completed=rec('done'),
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls == []
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert 'staged soulseek album release' in download_tasks['t1']['error_message']
+    assert ('done', ('b1', 't1', False), {}) in rec.calls
+
+
+def test_private_hybrid_first_soulseek_album_staging_miss_skips_per_track_search():
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
+        'album': 'Album', 'duration_ms': 180000,
+    })
+    download_batches['b1'] = {
+        'album_bundle_private_staging': True,
+        'album_bundle_state': 'staged',
+        'album_bundle_source': 'soulseek',
+    }
+    client = _FakeClient(
+        results=['should-not-search'],
+        mode='hybrid',
+        subclients={'hybrid_order': ['soulseek', 'hifi']},
+    )
+    rec = _Recorder()
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Artist Song']),
+        try_staging_match=lambda *a, **kw: False,
+        on_download_completed=rec('done'),
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls == []
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert 'staged soulseek album release' in download_tasks['t1']['error_message']
+
+
+def test_partial_private_hybrid_first_soulseek_album_staging_miss_allows_per_track_search():
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
+        'album': 'Album', 'duration_ms': 180000,
+    })
+    download_batches['b1'] = {
+        'album_bundle_private_staging': True,
+        'album_bundle_state': 'staged',
+        'album_bundle_source': 'soulseek',
+        'album_bundle_partial': True,
+    }
+    client = _FakeClient(
+        results=[],
+        mode='hybrid',
+        subclients={'hybrid_order': ['soulseek', 'hifi']},
+    )
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Artist Song']),
+        try_staging_match=lambda *a, **kw: False,
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert 'staged soulseek album release' not in download_tasks['t1']['error_message']
+
+
 # ---------------------------------------------------------------------------
 # Search loop happy path
 # ---------------------------------------------------------------------------

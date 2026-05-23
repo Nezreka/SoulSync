@@ -50,6 +50,7 @@ _VARIANT_WORDS = {
     'remix', 'rmx', 'acapella', 'a cappella', 'instrumental', 'karaoke',
     'live', 'demo', 'extended',
 }
+_ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek'))
 
 
 def _norm_text(value: Any) -> str:
@@ -245,6 +246,29 @@ def _soulseek_album_preflight_enabled(config_manager: Any) -> bool:
     return primary == 'soulseek'
 
 
+def _resolve_album_bundle_source(config_manager: Any) -> str:
+    """Return the album-bundle source for this batch.
+
+    In single-source mode, the active source may own the whole album if
+    it supports album bundles. In hybrid mode, only the first source in
+    the configured order may claim the whole album; later sources remain
+    per-track fallback.
+    """
+    mode = (config_manager.get('download_source.mode', 'soulseek') or 'soulseek').lower()
+    if mode in _ALBUM_BUNDLE_SOURCES:
+        return mode
+    if mode != 'hybrid':
+        return ''
+
+    order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+    first = ''
+    if order:
+        first = str(order[0] or '').lower()
+    else:
+        first = str(config_manager.get('download_source.hybrid_primary', '') or '').lower()
+    return first if first in _ALBUM_BUNDLE_SOURCES else ''
+
+
 @dataclass
 class MasterDeps:
     """Bundle of cross-cutting deps the master worker needs."""
@@ -338,16 +362,19 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         # should stop (gate fired and failed); False = engaged-and-
         # succeeded OR didn't engage, both fall through to per-track.
         _bundle_state = _BatchStateAccessImpl()
-        if _album_bundle_dispatch.try_dispatch(
-            batch_id=batch_id,
-            is_album=batch_is_album,
-            album_context=batch_album_context,
-            artist_context=batch_artist_context,
-            config_get=deps.config_manager.get,
-            plugin_resolver=deps.download_orchestrator.client,
-            state=_bundle_state,
-        ):
-            return
+        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
+        if _album_bundle_source and _album_bundle_source != 'soulseek':
+            if _album_bundle_dispatch.try_dispatch(
+                batch_id=batch_id,
+                is_album=batch_is_album,
+                album_context=batch_album_context,
+                artist_context=batch_artist_context,
+                config_get=deps.config_manager.get,
+                plugin_resolver=deps.download_orchestrator.client,
+                state=_bundle_state,
+                source_override=_album_bundle_source,
+            ):
+                return
 
         # Allow duplicate tracks across albums — when enabled, only skip tracks already
         # owned in THIS album, not tracks owned in other albums
@@ -640,6 +667,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
+            batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
@@ -648,7 +676,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         preflight_source = None
         preflight_tracks = None
         soulseek_is_source = _soulseek_album_preflight_enabled(deps.config_manager)
-        if batch_is_album and batch_album_context and batch_artist_context and soulseek_is_source:
+        if (batch_is_album and batch_album_context and batch_artist_context
+                and soulseek_is_source and not batch_private_album_bundle):
             artist_name = batch_artist_context.get('name', '')
             album_name = batch_album_context.get('name', '')
             if artist_name and album_name:
@@ -761,13 +790,44 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     logger.error(f"[Album Pre-flight] Search failed (non-fatal, falling back to track-by-track): {preflight_err}")
                     deps.source_reuse_logger.info(f"[Album Pre-flight] Exception: {preflight_err}")
 
+        # Soulseek album bundles run after analysis so an already-owned
+        # album does not get downloaded just because the source supports a
+        # whole-folder flow. When preflight selected a folder, pass that
+        # exact source into the bundle downloader so we keep the richer
+        # tracklist-aware scoring instead of doing a weaker second pick.
+        _bundle_state = _BatchStateAccessImpl()
+        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
+        if _album_bundle_source == 'soulseek':
+            if _album_bundle_dispatch.try_dispatch(
+                batch_id=batch_id,
+                is_album=batch_is_album,
+                album_context=batch_album_context,
+                artist_context=batch_artist_context,
+                config_get=deps.config_manager.get,
+                plugin_resolver=deps.download_orchestrator.client,
+                state=_bundle_state,
+                source_override=_album_bundle_source,
+                plugin_kwargs={
+                    'preferred_source': preflight_source,
+                    'preferred_tracks': preflight_tracks,
+                } if preflight_source and preflight_tracks else None,
+            ):
+                return
+
         with tasks_lock:
             if batch_id not in download_batches: return
 
             download_batches[batch_id]['phase'] = 'downloading'
 
             # Store album pre-flight results on batch for source reuse
-            if preflight_source and preflight_tracks:
+            # unless the Soulseek album-bundle path already staged a private
+            # release. Task workers check source reuse before staging match, so
+            # preloading here would make the staged happy path re-download.
+            if (
+                preflight_source
+                and preflight_tracks
+                and not download_batches[batch_id].get('album_bundle_private_staging')
+            ):
                 download_batches[batch_id]['last_good_source'] = preflight_source
                 download_batches[batch_id]['source_folder_tracks'] = preflight_tracks
                 download_batches[batch_id]['failed_sources'] = set()

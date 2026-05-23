@@ -28,6 +28,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from core.soulseek_client import SoulseekClient
+from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 
 
 def _run_async(coro):
@@ -119,6 +120,153 @@ def test_download_extracts_id_from_dict_response(configured_client):
                       AsyncMock(return_value={'id': 'abc123'})):
         result = _run_async(configured_client.download('user', 'song.flac', 1024))
     assert result == 'abc123'
+
+
+# ---------------------------------------------------------------------------
+# album bundle
+# ---------------------------------------------------------------------------
+
+
+def _track(username='peer', filename='Artist/Album/01 - Song.flac', title='Song', number=1, size=10):
+    return TrackResult(
+        username=username,
+        filename=filename,
+        size=size,
+        bitrate=None,
+        duration=180000,
+        quality='flac',
+        free_upload_slots=1,
+        upload_speed=1_000_000,
+        queue_length=0,
+        artist='Artist',
+        title=title,
+        album='Album',
+        track_number=number,
+    )
+
+
+def test_album_bundle_stages_one_selected_soulseek_folder(configured_client, tmp_path):
+    configured_client.download_path = tmp_path
+    local_file = tmp_path / '01 - Song.flac'
+    local_file.write_bytes(b'audio')
+    track = _track(filename='Artist/Album/01 - Song.flac')
+    album = AlbumResult(
+        username='peer',
+        album_path='Artist/Album',
+        album_title='Album',
+        artist='Artist',
+        track_count=1,
+        total_size=10,
+        tracks=[track],
+        dominant_quality='flac',
+        free_upload_slots=1,
+        upload_speed=1_000_000,
+        queue_length=0,
+    )
+    events = []
+
+    with patch.object(configured_client, 'search', AsyncMock(return_value=([], [album]))), \
+         patch.object(configured_client, 'browse_user_directory', AsyncMock(return_value=[
+             {'filename': '01 - Song.flac', 'size': 10}
+         ])), \
+         patch.object(configured_client, 'filter_results_by_quality_preference', side_effect=lambda tracks: tracks), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='dl-1')) as download_mock, \
+         patch.object(configured_client, 'get_all_downloads', AsyncMock(return_value=[
+             DownloadStatus(
+                 id='dl-1',
+                 username='peer',
+                 filename='Artist/Album/01 - Song.flac',
+                 state='Completed, Succeeded',
+                 progress=100,
+                 size=10,
+                 transferred=10,
+                 speed=0,
+             )
+         ])), \
+         patch('core.soulseek_client.get_poll_timeout', return_value=1), \
+         patch('core.soulseek_client.get_poll_interval', return_value=0.01):
+        outcome = configured_client.download_album_to_staging(
+            'Album',
+            'Artist',
+            str(tmp_path / 'staging'),
+            events.append,
+        )
+
+    assert outcome['success'] is True
+    assert outcome['fallback'] is False
+    assert len(outcome['files']) == 1
+    assert Path(outcome['files'][0]).read_bytes() == b'audio'
+    download_mock.assert_awaited_once_with(
+        'peer',
+        'Artist/Album/01 - Song.flac',
+        10,
+    )
+    assert events[-1]['state'] == 'staged'
+
+
+def test_album_bundle_stages_completed_files_when_same_source_partially_times_out(configured_client, tmp_path):
+    configured_client.download_path = tmp_path
+    (tmp_path / '01 - Ready.flac').write_bytes(b'audio')
+    ready = _track(filename='Artist/Album/01 - Ready.flac', title='Ready', number=1)
+    timed_out = _track(filename='Artist/Album/02 - Waiting.flac', title='Waiting', number=2)
+    events = []
+
+    with patch.object(configured_client, 'download', AsyncMock(side_effect=['dl-1', 'dl-2'])), \
+         patch.object(configured_client, 'filter_results_by_quality_preference', side_effect=lambda tracks: tracks), \
+         patch.object(configured_client, 'get_all_downloads', AsyncMock(return_value=[
+             DownloadStatus(
+                 id='dl-1',
+                 username='peer',
+                 filename='Artist/Album/01 - Ready.flac',
+                 state='Completed, Succeeded',
+                 progress=100,
+                 size=10,
+                 transferred=10,
+                 speed=0,
+             ),
+             DownloadStatus(
+                 id='dl-2',
+                 username='peer',
+                 filename='Artist/Album/02 - Waiting.flac',
+                 state='TimedOut',
+                 progress=0,
+                 size=10,
+                 transferred=0,
+                 speed=0,
+             ),
+         ])), \
+         patch('core.soulseek_client.get_poll_timeout', return_value=1), \
+         patch('core.soulseek_client.get_poll_interval', return_value=0.01):
+        outcome = configured_client.download_album_to_staging(
+            'Album',
+            'Artist',
+            str(tmp_path / 'staging'),
+            events.append,
+            preferred_source={'username': 'peer', 'folder_path': 'Artist/Album'},
+            preferred_tracks=[ready, timed_out],
+        )
+
+    assert outcome['success'] is True
+    assert outcome['fallback'] is False
+    assert len(outcome['files']) == 1
+    assert Path(outcome['files'][0]).name == '01 - Ready.flac'
+    assert any(event.get('failed') == 1 for event in events)
+
+
+def test_album_bundle_falls_back_when_no_album_folder(configured_client, tmp_path):
+    configured_client.download_path = tmp_path
+    with patch.object(configured_client, 'search', AsyncMock(return_value=([], []))), \
+         patch.object(configured_client, 'download', AsyncMock(return_value='dl-1')) as dl:
+        outcome = configured_client.download_album_to_staging(
+            'Missing Album',
+            'Artist',
+            str(tmp_path / 'staging'),
+        )
+
+    assert outcome['success'] is False
+    assert outcome['fallback'] is True
+    assert 'No complete Soulseek album folders' in outcome['error']
+    dl.assert_not_awaited()
 
 
 def test_download_extracts_id_from_list_response(configured_client):

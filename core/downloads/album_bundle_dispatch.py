@@ -7,8 +7,9 @@ can be unit-tested in isolation.
 The gate fires only when ALL conditions hold:
 
 - Batch is an album-context download (``is_album_download`` flag).
-- Active download source is ``torrent`` or ``usenet`` (single-source
-  mode — hybrid stays per-track to preserve fallback).
+- Active download source is ``torrent``, ``usenet``, or ``soulseek``.
+  In hybrid mode the caller may pass the first configured source as a
+  source override; later hybrid sources stay per-track to preserve fallback.
 - Both album-name and artist-name are populated in batch context.
 - The resolved plugin exposes ``download_album_to_staging``.
 
@@ -57,7 +58,7 @@ class BatchStateAccess(Protocol):
 # so the Downloads page can render it without coupling to the
 # specific payload shape.
 _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
-                  'size', 'seeders', 'grabs', 'count')
+                  'size', 'seeders', 'grabs', 'count', 'failed')
 
 
 def is_eligible(
@@ -72,7 +73,7 @@ def is_eligible(
     the gate logic without standing up a plugin."""
     if not is_album:
         return False
-    if (mode or '').lower() not in ('torrent', 'usenet'):
+    if (mode or '').lower() not in ('torrent', 'usenet', 'soulseek'):
         return False
     if not (album_name or '').strip():
         return False
@@ -90,6 +91,8 @@ def try_dispatch(
     config_get: Callable[..., Any],
     plugin_resolver: Callable[[str], Optional[Any]],
     state: BatchStateAccess,
+    source_override: Optional[str] = None,
+    plugin_kwargs: Optional[dict] = None,
 ) -> bool:
     """Attempt the album-bundle flow. Returns ``True`` iff the
     master worker should return early (gate engaged and completed
@@ -102,7 +105,7 @@ def try_dispatch(
     BatchStateAccess shim. Injecting these keeps the module
     dependency-light + unit-testable.
     """
-    mode = (config_get('download_source.mode', 'soulseek') or 'soulseek').lower()
+    mode = (source_override or config_get('download_source.mode', 'soulseek') or 'soulseek').lower()
     album_name = (album_context or {}).get('name') or ''
     artist_name = (artist_context or {}).get('name') or ''
 
@@ -159,6 +162,7 @@ def try_dispatch(
     try:
         outcome = plugin.download_album_to_staging(
             album_name, artist_name, staging_dir, _emit,
+            **(plugin_kwargs or {}),
         )
     except Exception as exc:
         logger.exception("[Album Bundle] %s plugin raised: %s", mode, exc)
@@ -166,6 +170,17 @@ def try_dispatch(
 
     if not outcome.get('success'):
         err = outcome.get('error', 'Album bundle download failed')
+        if outcome.get('fallback'):
+            logger.warning(
+                "[Album Bundle] %s flow could not commit for '%s': %s — falling back to per-track flow",
+                mode, album_name, err,
+            )
+            state.update_fields(batch_id, {
+                'phase': 'analysis',
+                'album_bundle_state': 'fallback',
+                'album_bundle_error': err,
+            })
+            return False
         logger.error("[Album Bundle] %s flow failed for '%s': %s",
                      mode, album_name, err)
         state.mark_failed(batch_id, err)
@@ -178,6 +193,9 @@ def try_dispatch(
     state.update_fields(batch_id, {
         'phase': 'analysis',
         'album_bundle_state': 'staged',
+        'album_bundle_partial': bool(outcome.get('partial')),
+        'album_bundle_expected_count': outcome.get('expected_count'),
+        'album_bundle_completed_count': outcome.get('completed_count', len(outcome.get('files', []))),
     })
     # Engaged-and-succeeded: we DON'T early-return because the
     # per-track flow needs to run to create + complete the per-track

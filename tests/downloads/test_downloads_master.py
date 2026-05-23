@@ -132,6 +132,37 @@ class _FakeSoulseekWrapper:
         return self.soulseek if name == 'soulseek' else None
 
 
+class _FakePluginWrapper:
+    def __init__(self, plugins):
+        self._plugins = dict(plugins)
+
+    def client(self, name):
+        return self._plugins.get(name)
+
+
+class _FakeAlbumBundleSoulseek:
+    def __init__(self, outcome=None):
+        self.calls = []
+        self.outcome = outcome or {'success': True, 'files': ['/tmp/a.flac']}
+
+    def download_album_to_staging(self, album, artist, staging, emit, **kwargs):
+        self.calls.append((album, artist, staging, kwargs))
+        emit({'state': 'staged', 'count': len(self.outcome.get('files', []))})
+        return self.outcome
+
+
+class _FakePreflightAlbumBundleSoulseek(_FakeSoulseek):
+    def __init__(self, *args, outcome=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = []
+        self.outcome = outcome or {'success': True, 'files': ['/tmp/a.flac']}
+
+    def download_album_to_staging(self, album, artist, staging, emit, **kwargs):
+        self.calls.append((album, artist, staging, kwargs))
+        emit({'state': 'staged', 'count': len(self.outcome.get('files', []))})
+        return self.outcome
+
+
 class _FakeMonitor:
     def __init__(self):
         self.started = []
@@ -702,6 +733,133 @@ def test_soulseek_album_preflight_does_not_jump_ahead_of_hybrid_primary(monkeypa
 
     assert slsk.search_calls == []
     assert 'last_good_source' not in download_batches['B24']
+
+
+def test_soulseek_album_bundle_runs_after_missing_analysis(monkeypatch):
+    """Soulseek whole-folder bundles should engage only after analysis
+    has confirmed there is something missing."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'soulseek'}),
+        soulseek=_FakeSoulseekWrapper(plugin),
+    )
+    _seed_batch(
+        'B25',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+
+    mw.run_full_missing_tracks_process('B25', 'album:1', tracks, deps)
+
+    assert len(plugin.calls) == 1
+    album, artist, staging, kwargs = plugin.calls[0]
+    assert (album, artist) == ('Test Album', 'Artist')
+    assert staging.replace('\\', '/').endswith('storage/album_bundle_staging/B25')
+    assert kwargs == {}
+    assert download_batches['B25']['album_bundle_source'] == 'soulseek'
+    assert download_batches['B25']['album_bundle_private_staging'] is True
+    assert download_batches['B25']['album_bundle_state'] == 'staged'
+    assert 'last_good_source' not in download_batches['B25']
+
+
+def test_hybrid_first_soulseek_uses_album_bundle(monkeypatch):
+    """Hybrid keeps fallback semantics, but the first source can own
+    album-bundle downloads when it supports them."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': ['soulseek', 'hifi'],
+        }),
+        soulseek=_FakeSoulseekWrapper(plugin),
+    )
+    _seed_batch(
+        'B26',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+
+    mw.run_full_missing_tracks_process('B26', 'album:1', tracks, deps)
+
+    assert len(plugin.calls) == 1
+    assert download_batches['B26']['album_bundle_source'] == 'soulseek'
+    assert download_batches['B26']['album_bundle_private_staging'] is True
+
+
+def test_soulseek_album_bundle_uses_preflight_source_without_preloading_reuse(monkeypatch):
+    """When the bundle path stages files, workers must claim staging
+    before any Soulseek source-reuse attempt can fire."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+    folder_tracks = [_slsk_track('T1', 1, folder='Artist/Test Album')]
+    album = _album_result('peer', 'Artist/Test Album', 'Test Album', folder_tracks)
+    slsk = _FakePreflightAlbumBundleSoulseek(
+        album_results=[album],
+        browse_files=None,
+        parsed_tracks=folder_tracks,
+    )
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'soulseek'}),
+        soulseek=_FakeSoulseekWrapper(slsk),
+    )
+    _seed_batch(
+        'B28',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process('B28', 'album:1', tracks, deps)
+
+    assert len(slsk.calls) == 1
+    assert slsk.calls[0][3] == {
+        'preferred_source': {
+            'username': 'peer',
+            'folder_path': 'Artist/Test Album',
+        },
+        'preferred_tracks': folder_tracks,
+    }
+    assert download_batches['B28']['album_bundle_private_staging'] is True
+    assert 'last_good_source' not in download_batches['B28']
+    assert 'source_folder_tracks' not in download_batches['B28']
+
+
+def test_hybrid_first_torrent_uses_album_bundle_before_per_track(monkeypatch):
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({
+            'download_source.mode': 'hybrid',
+            'download_source.hybrid_order': ['torrent', 'soulseek'],
+        }),
+        soulseek=_FakePluginWrapper({'torrent': plugin}),
+    )
+    _seed_batch(
+        'B27',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+
+    mw.run_full_missing_tracks_process('B27', 'album:1', tracks, deps)
+
+    assert len(plugin.calls) == 1
+    assert download_batches['B27']['album_bundle_source'] == 'torrent'
 
 
 # ---------------------------------------------------------------------------
