@@ -2,35 +2,10 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
-
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
-
-function createResponse(body: unknown, ok = true, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
-function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
-  return {
-    getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
-    isPageAllowed: vi.fn(() => true),
-    getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
-    setActivePageChrome: vi.fn(),
-    activateLegacyPath: vi.fn(),
-    showReactHost: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    playLibraryTrack: vi.fn(),
-    startStream: vi.fn(),
-    showLoadingOverlay: vi.fn(),
-    hideLoadingOverlay: vi.fn(),
-    ...overrides,
-  };
-}
+import { HttpResponse, http, server } from '@/test/msw';
+import { createShellBridge } from '@/test/shell-bridge';
 
 function renderStatsRoute(initialEntries = ['/stats']) {
   const queryClient = createAppQueryClient();
@@ -47,52 +22,50 @@ describe('stats route', () => {
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showToast = vi.fn();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.includes('/api/stats/cached')) {
-          return createResponse({
-            success: true,
-            overview: {
-              total_plays: 24,
-              total_time_ms: 6_600_000,
-              unique_artists: 3,
-              unique_albums: 4,
-              unique_tracks: 12,
-            },
-            top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
-            top_albums: [],
-            top_tracks: [],
-            timeline: [{ date: 'May 10', plays: 4 }],
-            genres: [{ genre: 'House', play_count: 10, percentage: 80 }],
-            recent: [{ title: 'Track A', artist: 'Artist A', played_at: '2026-05-14T08:00:00Z' }],
-            health: { total_tracks: 12, format_breakdown: { FLAC: 12 } },
-          });
-        }
-        if (url.includes('/api/listening-stats/status')) {
-          return createResponse({ stats: { last_poll: '2026-05-14 10:00:00' } });
-        }
-        if (url.includes('/api/stats/db-storage')) {
-          return createResponse({
-            success: true,
-            tables: [{ name: 'tracks', size: 2048 }],
-            total_file_size: 4096,
-            method: 'dbstat',
-          });
-        }
-        if (url.includes('/api/stats/library-disk-usage')) {
-          return createResponse({
-            success: true,
-            has_data: true,
-            total_bytes: 2048,
-            tracks_with_size: 12,
-            tracks_without_size: 0,
-            by_format: { flac: 2048 },
-          });
-        }
-        return createResponse({ success: true });
-      }) as unknown as typeof fetch,
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: {
+            total_plays: 24,
+            total_time_ms: 6_600_000,
+            unique_artists: 3,
+            unique_albums: 4,
+            unique_tracks: 12,
+          },
+          top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [{ date: 'May 10', plays: 4 }],
+          genres: [{ genre: 'House', play_count: 10, percentage: 80 }],
+          recent: [{ title: 'Track A', artist: 'Artist A', played_at: '2026-05-14T08:00:00Z' }],
+          health: { total_tracks: 12, format_breakdown: { FLAC: 12 } },
+        }),
+      ),
+      http.get('/api/listening-stats/status', () =>
+        HttpResponse.json({ stats: { last_poll: '2026-05-14 10:00:00' } }),
+      ),
+      http.get('/status', () =>
+        HttpResponse.json({ media_server: { type: 'plex', connected: true } }),
+      ),
+      http.get('/api/stats/db-storage', () =>
+        HttpResponse.json({
+          success: true,
+          tables: [{ name: 'tracks', size: 2048 }],
+          total_file_size: 4096,
+          method: 'dbstat',
+        }),
+      ),
+      http.get('/api/stats/library-disk-usage', () =>
+        HttpResponse.json({
+          success: true,
+          has_data: true,
+          total_bytes: 2048,
+          tracks_with_size: 12,
+          tracks_without_size: 0,
+          by_format: { flac: 2048 },
+        }),
+      ),
     );
   });
 
@@ -107,52 +80,10 @@ describe('stats route', () => {
   });
 
   it('still renders when listening stats status prefetch fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.includes('/api/stats/cached')) {
-          return createResponse({
-            success: true,
-            overview: {
-              total_plays: 24,
-              total_time_ms: 6_600_000,
-              unique_artists: 3,
-              unique_albums: 4,
-              unique_tracks: 12,
-            },
-            top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
-            top_albums: [],
-            top_tracks: [],
-            timeline: [{ date: 'May 10', plays: 4 }],
-            genres: [{ genre: 'House', play_count: 10, percentage: 80 }],
-            recent: [{ title: 'Track A', artist: 'Artist A', played_at: '2026-05-14T08:00:00Z' }],
-            health: { total_tracks: 12, format_breakdown: { FLAC: 12 } },
-          });
-        }
-        if (url.includes('/api/listening-stats/status')) {
-          return createResponse({ error: 'status unavailable' }, false, 500);
-        }
-        if (url.includes('/api/stats/db-storage')) {
-          return createResponse({
-            success: true,
-            tables: [{ name: 'tracks', size: 2048 }],
-            total_file_size: 4096,
-            method: 'dbstat',
-          });
-        }
-        if (url.includes('/api/stats/library-disk-usage')) {
-          return createResponse({
-            success: true,
-            has_data: true,
-            total_bytes: 2048,
-            tracks_with_size: 12,
-            tracks_without_size: 0,
-            by_format: { flac: 2048 },
-          });
-        }
-        return createResponse({ success: true });
-      }) as unknown as typeof fetch,
+    server.use(
+      http.get('/api/listening-stats/status', () =>
+        HttpResponse.json({ error: 'status unavailable' }, { status: 500 }),
+      ),
     );
 
     renderStatsRoute();
@@ -160,6 +91,22 @@ describe('stats route', () => {
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
     expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
     expect(screen.getByText('Not synced yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync listening stats' })).toBeInTheDocument();
+  });
+
+  it('shows an explicit standalone notice instead of the sync button', async () => {
+    server.use(
+      http.get('/status', () =>
+        HttpResponse.json({ media_server: { type: 'soulsync', connected: true } }),
+      ),
+    );
+
+    renderStatsRoute();
+
+    await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
+    expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
+    expect(screen.getByText('Standalone mode: manual sync unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync listening stats' })).not.toBeInTheDocument();
   });
 
   it('stores the time range in route search state', async () => {
@@ -186,61 +133,16 @@ describe('stats route', () => {
       startStream: vi.fn(),
     });
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.includes('/api/stats/cached')) {
-          return createResponse({
-            success: true,
-            overview: {
-              total_plays: 24,
-              total_time_ms: 6_600_000,
-              unique_artists: 3,
-              unique_albums: 4,
-              unique_tracks: 12,
-            },
-            top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
-            top_albums: [],
-            top_tracks: [{ name: 'Track A', artist: 'Artist A', album: 'Album A', play_count: 3 }],
-            timeline: [{ date: 'May 10', plays: 4 }],
-            genres: [{ genre: 'House', play_count: 10, percentage: 80 }],
-            recent: [{ title: 'Track A', artist: 'Artist A', played_at: '2026-05-14T08:00:00Z' }],
-            health: { total_tracks: 12, format_breakdown: { FLAC: 12 } },
-          });
-        }
-        if (url.includes('/api/listening-stats/status')) {
-          return createResponse({ stats: { last_poll: '2026-05-14 10:00:00' } });
-        }
-        if (url.includes('/api/stats/resolve-track')) {
-          return createResponse({ error: 'resolve unavailable' }, false, 500);
-        }
-        if (url.includes('/api/enhanced-search/stream-track')) {
-          return createResponse({
-            success: true,
-            result: { stream_url: '/api/stream/1' },
-          });
-        }
-        if (url.includes('/api/stats/db-storage')) {
-          return createResponse({
-            success: true,
-            tables: [{ name: 'tracks', size: 2048 }],
-            total_file_size: 4096,
-            method: 'dbstat',
-          });
-        }
-        if (url.includes('/api/stats/library-disk-usage')) {
-          return createResponse({
-            success: true,
-            has_data: true,
-            total_bytes: 2048,
-            tracks_with_size: 12,
-            tracks_without_size: 0,
-            by_format: { flac: 2048 },
-          });
-        }
-        return createResponse({ success: true });
-      }) as unknown as typeof fetch,
+    server.use(
+      http.post('/api/stats/resolve-track', () =>
+        HttpResponse.json({ error: 'resolve unavailable' }, { status: 500 }),
+      ),
+      http.post('/api/enhanced-search/stream-track', () =>
+        HttpResponse.json({
+          success: true,
+          result: { stream_url: '/api/stream/1' },
+        }),
+      ),
     );
 
     renderStatsRoute();

@@ -168,7 +168,6 @@ window.SoulSyncWebShellBridge = {
     activateLegacyPath(pathname) {
         activateLegacyPath(pathname);
     },
-    navigateToArtistDetail,
     cancelSimilarArtistsLoad() {
         if (typeof cancelSimilarArtistsLoad === 'function') {
             cancelSimilarArtistsLoad();
