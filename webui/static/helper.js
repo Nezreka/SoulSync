@@ -1632,7 +1632,7 @@ const HELPER_CONTENT = {
 
     // ─── STATS PAGE ──────────────────────────────────────────────────
 
-    '.stats-container': {
+    '#stats-container': {
         title: 'Listening Stats',
         description: 'Analytics dashboard showing your listening activity, top artists/albums/tracks, genre breakdown, library health, and storage usage. Data syncs from your media server.',
     },

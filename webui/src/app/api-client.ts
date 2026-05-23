@@ -6,9 +6,18 @@ const apiBaseUrl =
   typeof globalThis.location === 'object'
     ? new URL('/api/', globalThis.location.origin).toString()
     : 'http://localhost/api/';
+const shellBaseUrl =
+  typeof globalThis.location === 'object'
+    ? new URL('/', globalThis.location.origin).toString()
+    : 'http://localhost/';
 
 export const apiClient = ky.create({
   baseUrl: apiBaseUrl,
+  retry: 0,
+});
+
+export const shellClient = ky.create({
+  baseUrl: shellBaseUrl,
   retry: 0,
 });
 
