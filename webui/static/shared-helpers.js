@@ -1092,7 +1092,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                                                    onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>

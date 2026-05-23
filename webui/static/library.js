@@ -7974,6 +7974,45 @@ async function playLibraryTrack(track, albumTitle, artistName) {
         return;
     }
 
+    // Library tracks have authoritative metadata in the SoulSync DB —
+    // any title / artist / album the caller passes in is downstream of
+    // whatever modal triggered playback and may carry noise like the
+    // ``<source_id>||<display>`` filename prefix from a Prowlarr result.
+    // When the caller has a track.id, fetch the canonical row from
+    // resolve-track and overwrite the caller-supplied fields with the
+    // DB values. Falls back silently to the caller-supplied values on
+    // any error so we never lose the play action over a metadata fetch.
+    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+        try {
+            const _dbResp = await fetch('/api/stats/resolve-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: track.title || track.name,
+                    artist: artistName || track.artist_name || '',
+                }),
+            });
+            const _dbData = await _dbResp.json();
+            if (_dbData && _dbData.success && _dbData.track) {
+                const _row = _dbData.track;
+                track = {
+                    ...track,
+                    id: _row.id ?? track.id,
+                    title: _row.title || track.title,
+                    file_path: _row.file_path || track.file_path,
+                    bitrate: _row.bitrate ?? track.bitrate,
+                    artist_id: _row.artist_id ?? track.artist_id,
+                    album_id: _row.album_id ?? track.album_id,
+                    _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
+                };
+                if (_row.album_title) albumTitle = _row.album_title;
+                if (_row.artist_name) artistName = _row.artist_name;
+            }
+        } catch (_dbErr) {
+            console.debug('library track DB refresh skipped:', _dbErr);
+        }
+    }
+
     try {
         // Stop any current playback first
         if (audioPlayer && !audioPlayer.paused) {
