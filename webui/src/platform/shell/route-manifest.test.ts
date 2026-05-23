@@ -6,6 +6,7 @@ import {
   normalizeShellPath,
   reactShellRoutes,
   resolveLegacyShellPageFromPath,
+  resolveShellNavPage,
   resolveShellPageFromPath,
   shellRouteManifest,
 } from './route-manifest';
@@ -41,8 +42,9 @@ describe('shellRouteManifest', () => {
 
   it('tracks whether a route is rendered by React or the legacy shell', () => {
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
+    expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['issues']);
+    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['stats', 'issues']);
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
   });
 
@@ -54,5 +56,10 @@ describe('shellRouteManifest', () => {
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/does-not-exist')).toBeNull();
+  });
+
+  it('maps contextual pages to the nav chrome they belong under', () => {
+    expect(resolveShellNavPage('artist-detail')).toBe('library');
+    expect(resolveShellNavPage('stats')).toBe('stats');
   });
 });

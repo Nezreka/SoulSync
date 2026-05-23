@@ -4,31 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
-  type ShellBridge,
   type ShellProfileContext,
   type ShellPageId,
 } from '@/platform/shell/bridge';
+import { HttpResponse, http, server } from '@/test/msw';
+import { createShellBridge } from '@/test/shell-bridge';
 
 import { createAppQueryClient } from './query-client';
 import { AppRouterProvider, createAppRouter } from './router';
 
-function mockIssuesFetch() {
-  return vi.fn(async (input: RequestInfo | URL) => {
-    const url = input instanceof Request ? input.url : String(input);
-
-    if (url.includes('/api/issues/counts')) {
-      return new Response(
-        JSON.stringify({
+describe('createAppRouter', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('/api/issues/counts', () =>
+        HttpResponse.json({
           success: true,
           counts: { open: 2, in_progress: 1, resolved: 0, dismissed: 0, total: 3 },
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-
-    if (url.includes('/api/issues?')) {
-      return new Response(
-        JSON.stringify({
+      ),
+      http.get('/api/issues', () =>
+        HttpResponse.json({
           success: true,
           total: 1,
           issues: [
@@ -44,32 +39,8 @@ function mockIssuesFetch() {
             },
           ],
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-
-    throw new Error(`Unexpected fetch request: ${url}`);
-  });
-}
-
-function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
-  return {
-    getCurrentProfileContext: vi.fn(() => ({ profileId: 1, isAdmin: false })),
-    isPageAllowed: vi.fn(() => true),
-    getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
-    setActivePageChrome: vi.fn(),
-    activateLegacyPath: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    cancelSimilarArtistsLoad: vi.fn(),
-    showReactHost: vi.fn(),
-    ...overrides,
-  };
-}
-
-describe('createAppRouter', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', mockIssuesFetch());
+      ),
+    );
   });
 
   afterEach(() => {

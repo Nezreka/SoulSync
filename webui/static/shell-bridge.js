@@ -168,7 +168,6 @@ window.SoulSyncWebShellBridge = {
     activateLegacyPath(pathname) {
         activateLegacyPath(pathname);
     },
-    navigateToArtistDetail,
     cancelSimilarArtistsLoad() {
         if (typeof cancelSimilarArtistsLoad === 'function') {
             cancelSimilarArtistsLoad();
@@ -176,6 +175,21 @@ window.SoulSyncWebShellBridge = {
     },
     showReactHost(pageId) {
         showReactHost(pageId);
+    },
+    navigateToArtistDetail(artistId, artistName, sourceOverride, options) {
+        return navigateToArtistDetail(artistId, artistName, sourceOverride, options);
+    },
+    playLibraryTrack(track, albumTitle, artistName) {
+        return playLibraryTrack(track, albumTitle, artistName);
+    },
+    startStream(searchResult) {
+        return startStream(searchResult);
+    },
+    showLoadingOverlay(message) {
+        return showLoadingOverlay(message);
+    },
+    hideLoadingOverlay() {
+        return hideLoadingOverlay();
     },
 };
 

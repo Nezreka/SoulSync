@@ -45,6 +45,22 @@ declare global {
       ) => void;
       cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
+      playLibraryTrack: (
+        track: {
+          id: string | number;
+          title: string;
+          file_path: string;
+          bitrate?: string | number | null;
+          artist_id?: string | number | null;
+          album_id?: string | number | null;
+          _stats_image?: string | null;
+        },
+        albumTitle: string,
+        artistName: string,
+      ) => void | Promise<void>;
+      startStream: (searchResult: Record<string, unknown>) => void | Promise<void>;
+      showLoadingOverlay: (message?: string) => void;
+      hideLoadingOverlay: () => void;
     };
   }
 }
