@@ -3414,6 +3414,8 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     '2.5.9': [
+        { date: 'Unreleased — dev cycle' },
+        { title: 'Import search: show when results came from the fallback source', desc: 'if you picked MusicBrainz (or Discogs / iTunes / etc.) as your primary metadata source but the Import album search ended up serving Deezer cards, you had no idea — the chain silently fell through when the primary returned nothing. now each card shows a small "via Deezer" label when the source differs from your primary, and a banner above the grid spells it out when all results came from the fallback. backend behavior unchanged.' },
         { date: 'May 21, 2026 — 2.5.9 release' },
         { title: 'Now-playing modal: lyrics panel', desc: 'new lyrics panel below the player controls in the expanded now-playing modal. fetches from LRClib via /api/lyrics/fetch, but prefers the local .lrc / .txt sidecar files SoulSync drops next to your audio during post-processing so downloaded tracks show lyrics instantly with zero network. synced LRC (timestamped) highlights the active line and auto-scrolls it into the middle of the viewport on every audio timeupdate; plain text renders without highlighting. status chip shows whether the result came back Synced or Plain. panel is collapsed by default — click the Lyrics header to expand. cached per track so revisiting a track doesn\'t refetch.' },
         { title: 'Now-playing modal: View Artist closes the modal first', desc: 'tapping View Artist on the expanded media player now closes the now-playing modal before navigating, so the artist page is actually visible instead of sitting under a modal you\'d have to manually dismiss. click is a no-op when no artist_id is attached to the current track.' },
@@ -3502,6 +3504,7 @@ const VERSION_MODAL_SECTIONS = [
             "Jellyfin full refresh repairs older media databases before importing tracks, so stale schemas no longer drop every track row",
             "Cache maintenance and full refresh retry transient SQLite disk I/O errors instead of failing the whole job on the first attempt",
             "Album Completeness rejects same-title releases from the wrong artist before importing anything",
+            "Import album search now labels each card with the source that served it and warns when results came from a fallback instead of your primary",
         ],
         usage_note: "version 2.5.9 focuses on safer matching and making the new release-based sources usable without disturbing existing source flows",
     },
