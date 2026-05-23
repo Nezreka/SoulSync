@@ -2136,15 +2136,9 @@ function initApp() {
 // ===============================
 
 function initializeNavigation() {
-    const navButtons = document.querySelectorAll('.nav-button');
-
-    navButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            const page = button.getAttribute('data-page');
-            navigateToPage(page);
-        });
-    });
-
+    // Sidebar navigation is now driven by native link navigation.
+    // Page activation and active-state styling are synchronized from the
+    // current URL by the shell bridge and route controllers.
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([

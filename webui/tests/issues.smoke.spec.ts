@@ -30,7 +30,7 @@ async function waitForShellRoute(page: Page, pageId: string) {
 
 function getExpectedNavPage(pageId: ShellPageId): string {
   if (pageId === 'artist-detail') {
-    return '';
+    return 'library';
   }
 
   return pageId;
@@ -95,7 +95,15 @@ test('browser history restores top-level routes', async ({ page, baseURL }) => {
   await page.goto(new URL('/discover', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await waitForShellRoute(page, 'discover');
 
-  await page.getByRole('button', { name: 'Issues' }).click();
+  await page.evaluate(() => {
+    (window as typeof window & { __spaNavMarker?: string }).__spaNavMarker = 'persist';
+  });
+  await page.getByRole('link', { name: 'Issues' }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as typeof window & { __spaNavMarker?: string }).__spaNavMarker ?? null),
+    )
+    .toBe('persist');
   await waitForShellRoute(page, 'issues');
   await expect(page).toHaveURL(/\/issues(?:\?status=open&category=all)?$/);
 
@@ -125,7 +133,7 @@ test('browser history leaves artist detail when going back to library', async ({
 
   await page.locator('.library-artist-card').first().click();
   await waitForShellRoute(page, 'artist-detail');
-  await expect(page).toHaveURL(/\/artist-detail$/);
+  await expect(page).toHaveURL(/\/artist-detail\/library\/[^/]+$/);
 
   await page.goBack();
   await waitForShellRoute(page, 'library');
