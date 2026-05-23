@@ -172,21 +172,22 @@ describe('form primitives', () => {
 
     expect(screen.getByText('12')).toHaveAttribute('data-tone', 'warning');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute(
-      'data-variant',
-      'primary',
-    );
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('data-variant', 'primary');
   });
 
   it('supports compact option button groups', () => {
     const { container } = render(
       <OptionButtonGroup size="sm">
         <OptionButton selected>All</OptionButton>
-        <OptionButton>Pending</OptionButton>
+        <OptionButton variant="ghost">Pending</OptionButton>
       </OptionButtonGroup>,
     );
 
     expect(container.querySelector('[data-size="sm"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pending' })).toHaveAttribute(
+      'data-variant',
+      'ghost',
+    );
   });
 
   it('supports compact select sizing', () => {

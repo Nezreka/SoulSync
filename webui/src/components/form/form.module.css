@@ -420,7 +420,21 @@
     background: rgba(255, 255, 255, 0.08);
   }
 
+  &[data-variant='ghost'] {
+    border-color: transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  &[data-variant='ghost']:hover:not(:disabled) {
+    transform: none;
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+  }
+
   &[data-selected='true'] {
+    color: #fff;
     border-color: rgba(var(--accent-light-rgb), 0.5);
     background: rgba(var(--accent-rgb), 0.18);
     box-shadow: 0 0 0 1px rgba(var(--accent-light-rgb), 0.08);
@@ -598,7 +612,6 @@
   }
 
   &[data-variant='ghost']:hover:not(:disabled) {
-    transform: none;
     border-color: rgba(255, 255, 255, 0.14);
     background: rgba(255, 255, 255, 0.07);
     color: #fff;
@@ -610,7 +623,7 @@
   }
 
   &[data-variant='ghost']:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
   }
 }
 
