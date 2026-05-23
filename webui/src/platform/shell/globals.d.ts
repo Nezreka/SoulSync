@@ -45,12 +45,6 @@ declare global {
       ) => void;
       cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
-      navigateToArtistDetail: (
-        artistId: string | number,
-        artistName: string,
-        sourceOverride?: string | null,
-        options?: Record<string, unknown>,
-      ) => void;
       playLibraryTrack: (
         track: {
           id: string | number;

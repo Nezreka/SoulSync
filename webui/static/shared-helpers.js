@@ -3199,6 +3199,7 @@ async function fetchAndUpdateServiceStatus() {
         const isSoulsyncStandalone2 = data.media_server?.type === 'soulsync';
         _isSoulsyncStandalone = isSoulsyncStandalone2;
         document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
+            if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
             if (isSoulsyncStandalone2) {
                 btn.dataset.hiddenByStandalone = '1';
                 btn.style.display = 'none';

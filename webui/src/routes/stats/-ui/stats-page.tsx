@@ -15,7 +15,7 @@ import {
 
 import type { ShellBridge } from '@/platform/shell/bridge';
 
-import { useReactPageShell } from '@/platform/shell/route-controllers';
+import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
 
 import type {
   StatsAlbumRow,
@@ -125,6 +125,8 @@ export function StatsPage() {
   const overview = cachedStats?.overview ?? EMPTY_STATS_OVERVIEW;
   const hasData = hasStatsData(overview);
   const lastSynced = listeningStatusQuery.data?.stats?.last_poll ?? null;
+  const shellStatus = useShellStatus();
+  const isStandalone = shellStatus?.media_server?.type === 'soulsync';
 
   const onRangeChange = (nextRange: StatsRange) => {
     void navigate({
@@ -166,20 +168,32 @@ export function StatsPage() {
             ))}
           </div>
           <div className={styles.statsSyncControls}>
-            <span className={styles.statsLastSynced}>
-              {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
-            </span>
-            <button
-              id="stats-sync-btn"
-              type="button"
-              className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
-              onClick={() => syncMutation.mutate()}
-              disabled={syncing}
-              aria-label="Sync listening stats"
-              title="Sync now"
-            >
-              <span aria-hidden="true">↻</span>
-            </button>
+            {isStandalone ? (
+              <span
+                className={styles.statsStandaloneNotice}
+                role="note"
+                title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
+              >
+                Standalone mode: manual sync unavailable
+              </span>
+            ) : (
+              <>
+                <span className={styles.statsLastSynced}>
+                  {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
+                </span>
+                <button
+                  id="stats-sync-btn"
+                  type="button"
+                  className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncing}
+                  aria-label="Sync listening stats"
+                  title="Sync now"
+                >
+                  <span aria-hidden="true">↻</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>

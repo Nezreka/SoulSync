@@ -94,6 +94,9 @@
   gap: 16px;
   position: relative;
   z-index: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .statsTimeRange {
@@ -133,11 +136,25 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .statsLastSynced {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.72rem;
   color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statsStandaloneNotice {
+  max-width: 260px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.38);
+  text-align: right;
 }
 
 .statsSyncButton {
@@ -861,6 +878,11 @@
   .statsSyncControls {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .statsStandaloneNotice {
+    max-width: none;
+    text-align: left;
   }
 
   .headerIcon {
