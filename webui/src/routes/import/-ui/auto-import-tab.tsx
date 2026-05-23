@@ -258,6 +258,7 @@ export function AutoImportPanel({
             <OptionButton
               key={filter}
               selected={autoFilter === filter}
+              variant={autoFilter === filter ? 'default' : 'ghost'}
               onClick={() => onFilterChange(filter)}
             >
               <span>{getAutoImportFilterLabel(filter)}</span>

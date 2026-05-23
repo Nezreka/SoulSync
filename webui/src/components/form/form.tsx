@@ -89,12 +89,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   ref,
 ) {
   return (
-    <select
-      ref={ref}
-      className={clsx(styles.select, className)}
-      data-size={size}
-      {...props}
-    />
+    <select ref={ref} className={clsx(styles.select, className)} data-size={size} {...props} />
   );
 });
 
@@ -186,7 +181,10 @@ export const RangeInput = forwardRef<HTMLDivElement, RangeInputProps>(function R
       <Slider.Control className={styles.rangeControl}>
         <Slider.Track className={styles.rangeTrack}>
           <Slider.Indicator className={styles.rangeIndicator} />
-          <Slider.Thumb aria-label={typeof label === 'string' ? label : undefined} className={styles.rangeThumb} />
+          <Slider.Thumb
+            aria-label={typeof label === 'string' ? label : undefined}
+            className={styles.rangeThumb}
+          />
         </Slider.Track>
       </Slider.Control>
     </Slider.Root>
@@ -249,11 +247,7 @@ export interface OptionButtonGroupProps {
   size?: OptionButtonGroupSize;
 }
 
-export function OptionButtonGroup({
-  className,
-  children,
-  size = 'md',
-}: OptionButtonGroupProps) {
+export function OptionButtonGroup({ className, children, size = 'md' }: OptionButtonGroupProps) {
   return (
     <div className={clsx(styles.optionButtonGroup, className)} data-size={size}>
       {children}
@@ -261,14 +255,17 @@ export function OptionButtonGroup({
   );
 }
 
+export type OptionButtonVariant = 'default' | 'ghost';
+
 export interface OptionButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value'> {
   className?: string;
   selected?: boolean;
+  variant?: OptionButtonVariant;
   value?: string;
 }
 
 export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(function OptionButton(
-  { className, children, selected = false, type = 'button', ...props },
+  { className, children, selected = false, type = 'button', variant = 'default', ...props },
   ref,
 ) {
   return (
@@ -277,6 +274,7 @@ export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(fun
       pressed={selected}
       className={clsx(styles.optionButton, className)}
       data-selected={selected ? 'true' : undefined}
+      data-variant={variant}
       type={type}
       {...props}
     >
@@ -298,14 +296,7 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
   { className, tone = 'neutral', ...props },
   ref,
 ) {
-  return (
-    <span
-      ref={ref}
-      className={clsx(styles.badge, className)}
-      data-tone={tone}
-      {...props}
-    />
-  );
+  return <span ref={ref} className={clsx(styles.badge, className)} data-tone={tone} {...props} />;
 });
 
 type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
