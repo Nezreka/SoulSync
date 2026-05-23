@@ -52933,6 +52933,23 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
 }
+.hybrid-source-badge {
+    flex-shrink: 0;
+    font-size: 0.68em;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    padding: 4px 7px;
+    border-radius: 6px;
+    border: 1px solid rgba(125, 211, 252, 0.24);
+    background: rgba(125, 211, 252, 0.1);
+    color: #7dd3fc;
+}
+.hybrid-source-badge-track {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.48);
+}
 .hybrid-source-priority {
     font-size: 0.75em;
     color: rgba(255, 255, 255, 0.3);
