@@ -42,6 +42,7 @@ def _build_deps(
     cached_transfers=None,
     download_orchestrator=None,
     run_async=None,
+    persistent_history=None,
 ):
     submitted = []
 
@@ -57,6 +58,7 @@ def _build_deps(
         get_cached_transfer_data=cached_transfers or (lambda: {}),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
+        get_persistent_download_history=persistent_history,
     )
     return deps, submitted
 
@@ -655,3 +657,88 @@ def test_unified_response_respects_limit():
     out = st.build_unified_downloads_response(5, deps)
     assert len(out['downloads']) == 5
     assert out['total'] == 20  # total still reflects all
+
+
+def test_unified_response_includes_persistent_download_history():
+    deps, _ = _build_deps(
+        persistent_history=lambda limit: [
+            {
+                'id': 42,
+                'title': 'Persisted Track',
+                'artist_name': 'Deezer Artist',
+                'album_name': 'Persistent Album',
+                'thumb_url': 'http://cover.jpg',
+                'download_source': 'Deezer',
+                'quality': 'FLAC',
+                'created_at': '2026-05-24 12:34:56',
+            }
+        ]
+    )
+
+    out = st.build_unified_downloads_response(100, deps)
+
+    assert out['total'] == 1
+    item = out['downloads'][0]
+    assert item['task_id'] == 'history-42'
+    assert item['title'] == 'Persisted Track'
+    assert item['artist'] == 'Deezer Artist'
+    assert item['album'] == 'Persistent Album'
+    assert item['artwork'] == 'http://cover.jpg'
+    assert item['status'] == 'completed'
+    assert item['progress'] == 100
+    assert item['batch_name'] == 'Deezer'
+    assert item['is_persistent_history'] is True
+
+
+def test_unified_response_dedupes_history_against_live_task():
+    download_tasks['live'] = {
+        'track_index': 0,
+        'status': 'completed',
+        'track_info': {
+            'name': 'Same Track',
+            'artist': 'Same Artist',
+            'album': 'Same Album',
+        },
+    }
+    deps, _ = _build_deps(
+        persistent_history=lambda limit: [
+            {
+                'id': 7,
+                'title': 'Same Track',
+                'artist_name': 'Same Artist',
+                'album_name': 'Same Album',
+                'created_at': '2026-05-24 12:34:56',
+            }
+        ]
+    )
+
+    out = st.build_unified_downloads_response(100, deps)
+
+    assert len(out['downloads']) == 1
+    assert out['downloads'][0]['task_id'] == 'live'
+    assert out['downloads'][0]['is_persistent_history'] is False
+
+
+def test_unified_response_caps_persistent_history_tail():
+    requested_limits = []
+
+    def _history(limit):
+        requested_limits.append(limit)
+        return [
+            {
+                'id': i,
+                'title': f'Track {i}',
+                'artist_name': 'Artist',
+                'album_name': 'Album',
+                'created_at': '2026-05-24 12:34:56',
+            }
+            for i in range(limit + 10)
+        ]
+
+    deps, _ = _build_deps(persistent_history=_history)
+
+    out = st.build_unified_downloads_response(300, deps)
+
+    assert requested_limits == [50]
+    assert len(out['downloads']) == 50
+    assert out['total'] == 50
