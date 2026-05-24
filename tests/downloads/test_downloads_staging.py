@@ -357,6 +357,49 @@ def test_private_album_bundle_staging_overrides_default_track_info_number(tmp_pa
     assert ctx['original_search_result']['filename'] == str(src_file)
 
 
+def test_private_album_bundle_staging_keeps_task_number_when_file_has_no_number(tmp_path):
+    """Private release staging must not turn every unnumbered release file into track 1."""
+    src_file = tmp_path / 'staging' / 'Katy Perry - Firework.flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    def get_batch_field(_batch_id, field):
+        if field == 'album_bundle_source':
+            return 'soulseek'
+        if field == 'album_bundle_private_staging':
+            return True
+        return None
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'Firework',
+                'artist': 'Katy Perry',
+            },
+        ],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t6d', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'Teenage Dream: The Complete Confection'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Katy Perry'},
+        'track_number': 4,
+        'disc_number': 1,
+    })
+
+    ds.try_staging_match(
+        't6d', 'b1',
+        _Track(name='Firework', artists=['Katy Perry']),
+        deps,
+    )
+
+    ctx = matched_downloads_context['staging_t6d']
+    assert ctx['track_info']['track_number'] == 4
+    assert ctx['original_search_result']['track_number'] == 4
+
+
 def test_staging_title_match_accepts_feature_suffix_from_release_file(tmp_path):
     """Album releases can include featured artists in filenames."""
     src_file = tmp_path / 'staging' / '05-kendrick_lamar-money_trees_(feat._jay_rock).flac'

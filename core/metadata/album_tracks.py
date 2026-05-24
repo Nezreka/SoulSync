@@ -264,6 +264,11 @@ def _build_album_info_typed(album_data: Dict[str, Any], album_id: str,
             if isinstance(first, dict):
                 ctx['image_url'] = first.get('url') or ctx.get('image_url')
 
+    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id'):
+        value = album_data.get(key)
+        if value:
+            ctx[key] = value
+
     return ctx
 
 
@@ -327,7 +332,7 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
     if not image_url:
         image_url = _extract_lookup_value(album_data, 'image_url', 'thumb_url')
 
-    return {
+    album_info = {
         'id': _extract_lookup_value(album_data, 'id', 'album_id', 'collectionId', 'release_id', default=album_id) or album_id,
         'name': _extract_lookup_value(album_data, 'name', 'title', default=album_name or album_id) or album_name or album_id,
         'artist': resolved_artist_name or '',
@@ -345,6 +350,11 @@ def _build_album_info_legacy(album_data: Any, album_id: str,
         ),
         'total_tracks': _extract_lookup_value(album_data, 'total_tracks', 'track_count', default=0) or 0,
     }
+    for key in ('format', 'country', 'status', 'label', 'disambiguation', 'release_group_id'):
+        value = _extract_lookup_value(album_data, key, default='')
+        if value:
+            album_info[key] = value
+    return album_info
 
 
 def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source: str) -> Dict[str, Any]:

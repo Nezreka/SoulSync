@@ -354,6 +354,10 @@ def build_album_import_context(
         "images": album.get("images") or ([] if not track_album_image else [{"url": track_album_image}]),
         "source": source,
     }
+    for key in ("format", "country", "status", "label", "disambiguation", "release_group_id"):
+        value = str(album.get(key) or "").strip()
+        if value:
+            normalized_album[key] = value
 
     original_search = {
         "title": normalized_track["name"],

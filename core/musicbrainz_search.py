@@ -57,6 +57,12 @@ class Album:
     album_type: str
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
+    format: Optional[str] = None
+    country: Optional[str] = None
+    status: Optional[str] = None
+    label: Optional[str] = None
+    disambiguation: Optional[str] = None
+    release_group_id: Optional[str] = None
 
 
 def _cover_art_url(mbid: str, scope: str = 'release') -> Optional[str]:
@@ -316,7 +322,101 @@ class MusicBrainzSearchClient:
             album_type=album_type,
             image_url=image_url,
             external_urls={'musicbrainz': f'https://musicbrainz.org/release-group/{rg_mbid}'} if rg_mbid else {},
+            disambiguation=rg.get('disambiguation') or None,
+            release_group_id=rg_mbid or None,
         )
+
+    def _release_total_tracks(self, release: Dict[str, Any]) -> int:
+        total_tracks = 0
+        for medium in release.get('media', []) or []:
+            try:
+                total_tracks += int(medium.get('track-count') or 0)
+            except (TypeError, ValueError):
+                pass
+        return total_tracks
+
+    def _release_formats(self, release: Dict[str, Any]) -> str:
+        formats = []
+        for medium in release.get('media', []) or []:
+            fmt = (medium.get('format') or '').strip()
+            if fmt and fmt not in formats:
+                formats.append(fmt)
+        return ', '.join(formats)
+
+    def _release_label(self, release: Dict[str, Any]) -> str:
+        for info in release.get('label-info', []) or []:
+            label = (info.get('label') or {}) if isinstance(info, dict) else {}
+            name = (label.get('name') or '').strip()
+            if name:
+                return name
+        return ''
+
+    def _release_to_album(self, release: Dict[str, Any],
+                          fallback_artist_name: Optional[str] = None) -> Optional[Album]:
+        """Project a concrete MusicBrainz release into our Album dataclass."""
+        mbid = release.get('id', '')
+        title = release.get('title', '') or ''
+        if not title:
+            return None
+
+        artists = _extract_artist_credit(release.get('artist-credit', []))
+        if not artists and fallback_artist_name:
+            artists = [fallback_artist_name]
+
+        rg = release.get('release-group', {}) or {}
+        primary_type = rg.get('primary-type', '') or ''
+        secondary_types = rg.get('secondary-types', []) or []
+        album_type = _map_release_type(primary_type, secondary_types)
+        rg_mbid = rg.get('id', '') or release.get('release-group-id', '')
+        image_url = self._cached_art(mbid, rg_mbid)
+
+        return Album(
+            id=mbid,
+            name=title,
+            artists=artists if artists else ['Unknown Artist'],
+            release_date=release.get('date', '') or '',
+            total_tracks=self._release_total_tracks(release),
+            album_type=album_type,
+            image_url=image_url,
+            external_urls={'musicbrainz': f'https://musicbrainz.org/release/{mbid}'} if mbid else {},
+            format=self._release_formats(release) or None,
+            country=(release.get('country') or '').strip() or None,
+            status=(release.get('status') or '').strip() or None,
+            label=self._release_label(release) or None,
+            disambiguation=(release.get('disambiguation') or '').strip() or None,
+            release_group_id=rg_mbid or None,
+        )
+
+    def _release_variant_key(self, album: Album):
+        status_rank = 0 if (album.status or '').lower() == 'official' else 1
+        date = (album.release_date or '9999-99-99')[:10] or '9999-99-99'
+        track_rank = album.total_tracks or 9999
+        country_rank = 0 if (album.country or '') in ('XW', 'US', 'GB') else 1
+        return (
+            status_rank,
+            date,
+            country_rank,
+            track_rank,
+            album.format or '',
+            album.disambiguation or '',
+            album.id,
+        )
+
+    def _release_group_releases_to_albums(self, rg: Dict[str, Any], artist_name: str,
+                                          limit: int) -> List[Album]:
+        rg_mbid = rg.get('id', '')
+        if not rg_mbid:
+            return []
+
+        releases = self._client.browse_release_group_releases(rg_mbid, limit=max(limit, 25))
+        albums = []
+        for release in releases:
+            release.setdefault('release-group', rg)
+            album = self._release_to_album(release, fallback_artist_name=artist_name)
+            if album:
+                albums.append(album)
+        albums.sort(key=self._release_variant_key)
+        return albums[:limit]
 
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search MusicBrainz for releases (albums).
@@ -400,6 +500,13 @@ class MusicBrainzSearchClient:
                     matched = [rg for rg in rgs if hint_lower in (rg.get('title') or '').lower()]
                     if matched:
                         rgs = matched
+                        expanded = []
+                        for rg in rgs:
+                            expanded.extend(self._release_group_releases_to_albums(rg, tname, limit))
+                            if len(expanded) >= limit:
+                                break
+                        if expanded:
+                            return expanded[:limit]
                     else:
                         fallback = self._search_albums_text(title_hint, tname, limit)
                         if fallback:
@@ -436,63 +543,24 @@ class MusicBrainzSearchClient:
 
             albums = []
             for r in results:
-                mbid = r.get('id', '')
-                title = r.get('title', '')
-                if not title:
-                    continue
+                album = self._release_to_album(r)
+                if album:
+                    albums.append(album)
 
-                artists = _extract_artist_credit(r.get('artist-credit', []))
-                release_date = r.get('date', '') or ''
-
-                # Track count from media
-                total_tracks = 0
-                media = r.get('media', [])
-                for m in media:
-                    total_tracks += m.get('track-count', 0)
-
-                # Release type
-                rg = r.get('release-group', {})
-                primary_type = rg.get('primary-type', '') or ''
-                secondary_types = rg.get('secondary-types', []) or []
-                album_type = _map_release_type(primary_type, secondary_types)
-
-                # Cover art (non-blocking — skip if slow)
-                rg_mbid = rg.get('id', '')
-                image_url = self._cached_art(mbid, rg_mbid)
-
-                external_urls = {'musicbrainz': f'https://musicbrainz.org/release/{mbid}'} if mbid else {}
-
-                albums.append(Album(
-                    id=mbid,
-                    name=title,
-                    artists=artists if artists else ['Unknown Artist'],
-                    release_date=release_date,
-                    total_tracks=total_tracks,
-                    album_type=album_type,
-                    image_url=image_url,
-                    external_urls=external_urls,
-                ))
-            # Deduplicate: keep best version of each title+artist combo
-            # (prefer ones with release dates and cover art)
-            seen = {}
-            deduped = []
+            # Keep distinct MusicBrainz releases. The same title/artist/date
+            # can represent explicit, clean, regional, format, or bonus-track
+            # variants with different tracklists, which manual import must let
+            # the user choose.
+            seen_ids = set()
+            unique = []
             for album in albums:
-                key = (album.name.lower().strip(), ', '.join(album.artists).lower().strip())
-                if key not in seen:
-                    seen[key] = album
-                    deduped.append(album)
-                else:
-                    existing = seen[key]
-                    # Prefer: has date > no date, has art > no art
-                    better = False
-                    if not existing.release_date and album.release_date:
-                        better = True
-                    elif not existing.image_url and album.image_url:
-                        better = True
-                    if better:
-                        deduped[deduped.index(existing)] = album
-                        seen[key] = album
-            return deduped
+                if album.id and album.id in seen_ids:
+                    continue
+                if album.id:
+                    seen_ids.add(album.id)
+                unique.append(album)
+            unique.sort(key=self._release_variant_key)
+            return unique[:limit]
         except Exception as e:
             logger.warning(f"MusicBrainz album search failed: {e}")
             return []
@@ -1030,6 +1098,12 @@ class MusicBrainzSearchClient:
             'images': images,
             'tracks': tracks,
             'external_urls': {'musicbrainz': f'https://musicbrainz.org/release/{release_mbid}'},
+            'format': self._release_formats(release),
+            'country': release.get('country') or '',
+            'status': release.get('status') or '',
+            'label': self._release_label(release),
+            'disambiguation': release.get('disambiguation') or '',
+            'release_group_id': rg_mbid,
         }
 
     def get_artist_albums(self, artist_mbid: str, album_type: str = 'album,single', limit: int = 200) -> List:

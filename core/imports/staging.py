@@ -198,6 +198,12 @@ def _normalize_album_result(album: Any, source: str) -> Dict[str, Any]:
     ).strip()
     release_date = str(_extract_value(album, "release_date", "releaseDate", default="") or "").strip()
     album_type = str(_extract_value(album, "album_type", "type", default="album") or "album").strip() or "album"
+    release_format = str(_extract_value(album, "format", "release_format", default="") or "").strip()
+    country = str(_extract_value(album, "country", default="") or "").strip()
+    status = str(_extract_value(album, "status", default="") or "").strip()
+    label = str(_extract_value(album, "label", default="") or "").strip()
+    disambiguation = str(_extract_value(album, "disambiguation", default="") or "").strip()
+    release_group_id = str(_extract_value(album, "release_group_id", "releaseGroupId", default="") or "").strip()
 
     total_tracks = _extract_value(album, "total_tracks", "track_count", default=0)
     if isinstance(total_tracks, (list, tuple, set)):
@@ -225,7 +231,7 @@ def _normalize_album_result(album: Any, source: str) -> Dict[str, Any]:
             else:
                 image_url = _extract_value(first_image, "url", "image_url", "src", default="")
 
-    return {
+    suggestion = {
         "id": album_id or album_name or "unknown-album",
         "name": album_name or album_id or "Unknown Album",
         "artist": artist_name or "Unknown Artist",
@@ -235,14 +241,30 @@ def _normalize_album_result(album: Any, source: str) -> Dict[str, Any]:
         "album_type": album_type,
         "source": source,
     }
+    if release_format:
+        suggestion["format"] = release_format
+    if country:
+        suggestion["country"] = country
+    if status:
+        suggestion["status"] = status
+    if label:
+        suggestion["label"] = label
+    if disambiguation:
+        suggestion["disambiguation"] = disambiguation
+    if release_group_id:
+        suggestion["release_group_id"] = release_group_id
+    return suggestion
 
 
-def _album_fingerprint(album: Dict[str, Any]) -> Tuple[str, str, str, str]:
+def _album_fingerprint(album: Dict[str, Any]) -> Tuple[str, ...]:
+    if album.get("source") == "musicbrainz" and album.get("id"):
+        return ("musicbrainz", str(album.get("id", "") or "").strip().casefold())
     return (
         str(album.get("name", "") or "").strip().casefold(),
         str(album.get("artist", "") or "").strip().casefold(),
         str(album.get("release_date", "") or "").strip()[:10].casefold(),
         str(album.get("album_type", "") or "").strip().casefold(),
+        str(album.get("total_tracks", "") or "").strip(),
     )
 
 

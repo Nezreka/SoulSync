@@ -2435,10 +2435,6 @@
                         <span>← Back</span>
                     </button>
 
-                    <button class="library-artist-watchlist-btn" id="library-artist-watchlist-btn">
-                        <span class="watchlist-icon">👁️</span>
-                        <span class="watchlist-text">Add to Watchlist</span>
-                    </button>
                 </div>
 
                 <!-- Artist Hero Section -->
@@ -2466,6 +2462,17 @@
                                     <span class="radio-icon">📻</span>
                                     <span class="radio-text">Artist Radio</span>
                                 </button>
+                                <button class="library-artist-watchlist-btn" id="library-artist-watchlist-btn">
+                                    <span class="watchlist-icon">👁️</span>
+                                    <span class="watchlist-text">Add to Watchlist</span>
+                                </button>
+                                <div class="discog-download-wrap" id="discog-download-wrap" style="display:none;">
+                                    <button class="discog-download-btn discog-btn-compact" id="discog-download-btn" onclick="openDiscographyModal()">
+                                        <span class="discog-btn-icon">⬇</span>
+                                        <span class="discog-btn-text">Download Discography</span>
+                                        <span class="discog-btn-shimmer"></span>
+                                    </button>
+                                </div>
                                 <button class="library-artist-enhance-btn hidden" id="library-artist-enhance-btn"
                                     onclick="openEnhanceQualityModal()">
                                     <span class="enhance-icon">⚡</span>
@@ -2485,13 +2492,6 @@
                                 </div>
                             </div>
 
-                            <div class="discog-download-wrap" id="discog-download-wrap" style="display:none;">
-                                <button class="discog-download-btn discog-btn-compact" id="discog-download-btn" onclick="openDiscographyModal()">
-                                    <span class="discog-btn-icon">⬇</span>
-                                    <span class="discog-btn-text">Download Discography</span>
-                                    <span class="discog-btn-shimmer"></span>
-                                </button>
-                            </div>
 
                             <div class="collection-overview">
                                 <div class="collection-category">
@@ -6199,159 +6199,6 @@
                 </div>
             </div>
 
-            <!-- Import Page -->
-            <div class="page" id="import-page">
-                <div class="import-page-container">
-            <!-- Header with staging info -->
-            <div class="import-page-header">
-                <div class="import-page-title-row">
-                    <h1 class="import-page-title"><img src="/static/import.png" class="page-header-icon" alt=""><span>Import Music</span></h1>
-                    <button class="import-page-refresh-btn" onclick="importPageRefreshStaging()" title="Re-scan import folder">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
-                        Refresh
-                    </button>
-                </div>
-                <div class="import-page-staging-bar" id="import-staging-bar">
-                    <span class="import-staging-path" id="import-page-staging-path">Import folder: loading...</span>
-                    <span class="import-staging-stats" id="import-page-staging-stats"></span>
-                </div>
-            </div>
-
-            <!-- Processing Queue -->
-            <div class="import-page-queue hidden" id="import-page-queue">
-                <div class="import-page-queue-header">
-                    <span class="import-page-queue-title">Processing</span>
-                    <button class="import-page-queue-clear" id="import-page-queue-clear" onclick="importPageClearFinishedJobs()">Clear finished</button>
-                </div>
-                <div class="import-page-queue-list" id="import-page-queue-list"></div>
-            </div>
-
-            <!-- Tab Bar -->
-            <div class="import-page-tab-bar">
-                <button class="import-page-tab" id="import-page-tab-auto" onclick="importPageSwitchTab('auto')">Auto</button>
-                <button class="import-page-tab active" id="import-page-tab-album" onclick="importPageSwitchTab('album')">Albums</button>
-                <button class="import-page-tab" id="import-page-tab-singles" onclick="importPageSwitchTab('singles')">Singles</button>
-            </div>
-
-            <!-- Auto Import Tab -->
-            <div class="import-page-tab-content" id="import-page-auto-content">
-                <div class="auto-import-controls">
-                    <div class="auto-import-toggle-row">
-                        <label class="auto-import-toggle-label">
-                            <input type="checkbox" id="auto-import-enabled" onchange="_autoImportToggle(this.checked)">
-                            <span class="repair-toggle-slider"></span>
-                            <span>Auto-Import</span>
-                        </label>
-                        <span class="auto-import-status" id="auto-import-status-text">Disabled</span>
-                        <button class="auto-import-scan-now-btn" id="auto-import-scan-now" onclick="_autoImportScanNow()" title="Scan import folder now" style="display:none">
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
-                            Scan Now
-                        </button>
-                    </div>
-                    <div class="auto-import-settings-row" id="auto-import-settings-row" style="display:none;">
-                        <label>Confidence: <input type="range" id="auto-import-confidence" min="50" max="100" value="90" oninput="document.getElementById('auto-import-conf-val').textContent=this.value+'%'"> <span id="auto-import-conf-val">90%</span></label>
-                        <label>Interval: <select id="auto-import-interval" onchange="_autoImportSaveSettings()">
-                            <option value="30">30s</option>
-                            <option value="60" selected>60s</option>
-                            <option value="120">2m</option>
-                            <option value="300">5m</option>
-                        </select></label>
-                        <button class="watchlist-action-btn watchlist-action-secondary" onclick="_autoImportSaveSettings()">Save</button>
-                    </div>
-                    <!-- Live scan progress -->
-                    <div class="auto-import-progress" id="auto-import-progress" style="display:none">
-                        <div class="auto-import-progress-text" id="auto-import-progress-text">Scanning...</div>
-                        <div class="auto-import-progress-bar"><div class="auto-import-progress-fill" id="auto-import-progress-fill"></div></div>
-                    </div>
-                </div>
-                <!-- Stats summary -->
-                <div class="auto-import-stats" id="auto-import-stats" style="display:none">
-                    <span class="auto-import-stat" id="auto-import-stat-imported">0 imported</span>
-                    <span class="auto-import-stat auto-import-stat-review" id="auto-import-stat-review">0 review</span>
-                    <span class="auto-import-stat auto-import-stat-failed" id="auto-import-stat-failed">0 failed</span>
-                </div>
-                <!-- Filter pills -->
-                <div class="auto-import-filters" id="auto-import-filters" style="display:none">
-                    <button class="adl-pill active" data-filter="all" onclick="_autoImportSetFilter('all')">All</button>
-                    <button class="adl-pill" data-filter="pending" onclick="_autoImportSetFilter('pending')">Needs Review</button>
-                    <button class="adl-pill" data-filter="imported" onclick="_autoImportSetFilter('imported')">Imported</button>
-                    <button class="adl-pill" data-filter="failed" onclick="_autoImportSetFilter('failed')">Failed</button>
-                    <div style="flex:1"></div>
-                    <button class="auto-import-batch-btn" id="auto-import-approve-all" onclick="_autoImportApproveAll()" style="display:none">Approve All</button>
-                    <button class="auto-import-batch-btn auto-import-clear-btn" id="auto-import-clear-completed" onclick="_autoImportClearCompleted()" style="display:none">Clear History</button>
-                </div>
-                <div class="auto-import-results" id="auto-import-results">
-                    <div class="auto-import-empty">
-                        <p>Enable auto-import to watch your import folder for new music.</p>
-                        <p style="opacity:0.5;font-size:12px;">Drop album folders or single tracks into your import folder and SoulSync will identify, match, and import them automatically.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Album Tab -->
-            <div class="import-page-tab-content active" id="import-page-album-content">
-                <!-- Search state -->
-                <div id="import-page-album-search-section">
-                    <div class="import-page-suggestions" id="import-page-suggestions">
-                        <div class="import-page-section-label">Suggested from your import folder</div>
-                        <div class="import-page-album-grid" id="import-page-suggestions-grid"></div>
-                    </div>
-                    <div class="import-page-search-bar">
-                        <input type="text" id="import-page-album-search-input" class="import-page-search-input"
-                            placeholder="Search for an album..." onkeydown="if(event.key==='Enter')importPageSearchAlbum()">
-                        <button class="import-page-search-btn" onclick="importPageSearchAlbum()">Search</button>
-                        <button class="import-page-clear-btn hidden" id="import-page-album-clear-btn"
-                            onclick="importPageResetAlbumSearch()" title="Clear search">✕</button>
-                    </div>
-                    <div class="import-page-album-grid" id="import-page-album-results"></div>
-                </div>
-
-                <!-- Match state (hidden initially) -->
-                <div id="import-page-album-match-section" class="hidden">
-                    <div class="import-page-album-hero" id="import-page-album-hero"></div>
-                    <div class="import-page-match-header">
-                        <h3>Track Matching</h3>
-                        <div class="import-page-match-actions">
-                            <button class="import-page-secondary-btn" onclick="importPageAutoRematch()">Re-match Automatically</button>
-                            <button class="import-page-back-btn" onclick="importPageResetAlbumSearch()">Back to Search</button>
-                        </div>
-                    </div>
-                    <div class="import-page-match-list" id="import-page-match-list"></div>
-
-                    <!-- Unmatched file pool for drag-drop -->
-                    <div class="import-page-unmatched-pool" id="import-page-unmatched-pool">
-                        <div class="import-page-pool-label">Unmatched Files (<span id="import-page-unmatched-count">0</span>)</div>
-                        <div class="import-page-pool-chips" id="import-page-pool-chips"></div>
-                    </div>
-
-                    <div class="import-page-match-footer">
-                        <div class="import-page-match-stats" id="import-page-match-stats"></div>
-                        <button class="import-page-process-btn" id="import-page-album-process-btn"
-                            onclick="importPageProcessAlbum()">Process Album</button>
-                    </div>
-                </div>
-
-            </div>
-
-            <!-- Singles Tab -->
-            <div class="import-page-tab-content" id="import-page-singles-content">
-                <div class="import-page-singles-header">
-                    <div class="import-page-singles-actions">
-                        <button class="import-page-secondary-btn" onclick="importPageSelectAllSingles()">
-                            <span id="import-page-select-all-text">Select All</span>
-                        </button>
-                        <button class="import-page-process-btn" id="import-page-singles-process-btn"
-                            onclick="importPageProcessSingles()" disabled>Process Selected (0)</button>
-                    </div>
-                </div>
-                <div class="import-page-singles-list" id="import-page-singles-list">
-                    <div class="import-page-empty-state">Navigate to this page to scan your import folder for audio files.</div>
-                </div>
-
-            </div>
-        </div>
-            </div>
-
             <!-- Help & Docs Page -->
             <div class="page" id="help-page">
                 <div class="docs-layout">
@@ -7174,8 +7021,10 @@
                         <span class="np-queue-count" id="np-queue-count"></span>
                     </button>
                     <div class="np-queue-header-actions">
-                        <button class="np-radio-btn" id="np-radio-btn" title="Radio mode - auto-add similar tracks">
+                        <button class="np-radio-btn" id="np-radio-btn" title="Radio mode - auto-add similar tracks" aria-pressed="false">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M1.5 9.289a15 15 0 0 1 21 0"/></svg>
+                            <span class="np-radio-label">Radio</span>
+                            <span class="np-radio-pulse"></span>
                         </button>
                         <button class="np-queue-clear-btn" id="np-queue-clear" title="Clear queue">Clear</button>
                     </div>

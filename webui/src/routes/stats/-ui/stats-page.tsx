@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -72,6 +72,8 @@ const STATS_CHART_CURSOR = {
   fill: 'rgba(var(--accent-rgb), 0.12)',
 } as const;
 
+const ARTIST_DETAIL_SOURCE = 'library' as const;
+
 export function StatsPage() {
   const bridge = useReactPageShell('stats');
 
@@ -134,10 +136,6 @@ export function StatsPage() {
       search: { range: nextRange },
       replace: true,
     });
-  };
-
-  const openArtistDetail = (artistId: string | number, artistName: string) => {
-    bridge.navigateToArtistDetail(artistId, artistName);
   };
 
   return (
@@ -229,25 +227,15 @@ export function StatsPage() {
             </div>
             <div className={styles.statsRightCol}>
               <StatsSectionCard title="Top Artists">
-                <TopArtistsVisual
-                  artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
-                />
-                <StatsRankedArtists
-                  artists={cachedStats?.top_artists ?? []}
-                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
-                />
+                <TopArtistsVisual artists={cachedStats?.top_artists ?? []} />
+                <StatsRankedArtists artists={cachedStats?.top_artists ?? []} />
               </StatsSectionCard>
               <StatsSectionCard title="Top Albums">
-                <StatsRankedAlbums
-                  albums={cachedStats?.top_albums ?? []}
-                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
-                />
+                <StatsRankedAlbums albums={cachedStats?.top_albums ?? []} />
               </StatsSectionCard>
               <StatsSectionCard title="Top Tracks">
                 <StatsRankedTracks
                   tracks={cachedStats?.top_tracks ?? []}
-                  onArtistSelect={(artistId, artistName) => openArtistDetail(artistId, artistName)}
                   onPlay={(track) => playStatsTrack(bridge, track)}
                 />
               </StatsSectionCard>
@@ -405,13 +393,7 @@ function StatsGenreLegend({
   );
 }
 
-function TopArtistsVisual({
-  artists,
-  onArtistSelect,
-}: {
-  artists: StatsArtistRow[];
-  onArtistSelect: (artistId: string | number, artistName: string) => void;
-}) {
+function TopArtistsVisual({ artists }: { artists: StatsArtistRow[] }) {
   const topArtists = getTopArtistBubbles(artists);
   if (topArtists.length === 0) return null;
 
@@ -420,18 +402,8 @@ function TopArtistsVisual({
       <div className={styles.statsArtistBubbles}>
         {topArtists.map(({ artist, percent, size }) => {
           const isClickable = artist.id !== null && artist.id !== undefined;
-          return (
-            <button
-              key={`${artist.name}-${artist.id ?? 'unknown'}`}
-              type="button"
-              className={styles.statsArtistBubble}
-              onClick={() => {
-                if (isClickable) {
-                  onArtistSelect(artist.id as string | number, artist.name);
-                }
-              }}
-              disabled={!isClickable}
-            >
+          const bubbleContent = (
+            <>
               <div
                 className={styles.statsBubbleImage}
                 style={{
@@ -451,7 +423,25 @@ function TopArtistsVisual({
               <div className={styles.statsBubbleCount}>
                 {formatCompactNumber(artist.play_count)}
               </div>
-            </button>
+            </>
+          );
+          return isClickable ? (
+            <ArtistDetailLink
+              key={`${artist.name}-${artist.id ?? 'unknown'}`}
+              artistId={artist.id}
+              className={styles.statsArtistBubble}
+              aria-label={`Open artist detail for ${artist.name}`}
+            >
+              {bubbleContent}
+            </ArtistDetailLink>
+          ) : (
+            <div
+              key={`${artist.name}-${artist.id ?? 'unknown'}`}
+              className={`${styles.statsArtistBubble} ${styles.statsArtistBubbleDisabled}`}
+              aria-disabled="true"
+            >
+              {bubbleContent}
+            </div>
           );
         })}
       </div>
@@ -459,13 +449,30 @@ function TopArtistsVisual({
   );
 }
 
-function StatsRankedArtists({
-  artists,
-  onArtistSelect,
+function ArtistDetailLink({
+  artistId,
+  children,
+  ...linkProps
 }: {
-  artists: StatsArtistRow[];
-  onArtistSelect: (artistId: string | number, artistName: string) => void;
-}) {
+  artistId: string | number | null | undefined;
+  children: ReactNode;
+} & Omit<ComponentPropsWithoutRef<'a'>, 'children' | 'href'>) {
+  if (artistId == null) {
+    return <>{children}</>;
+  }
+
+  return (
+    <Link
+      to="/artist-detail/$source/$id"
+      params={{ source: ARTIST_DETAIL_SOURCE, id: String(artistId) }}
+      {...linkProps}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function StatsRankedArtists({ artists }: { artists: StatsArtistRow[] }) {
   return (
     <div id="stats-top-artists" className={styles.statsRankedList}>
       {artists.length === 0 ? <EmptyListState message="No data yet" /> : null}
@@ -479,17 +486,9 @@ function StatsRankedArtists({
           )}
           <div className={styles.statsRankedInfo}>
             <div className={styles.statsRankedName}>
-              {artist.id ? (
-                <button
-                  type="button"
-                  className={styles.statsArtistLink}
-                  onClick={() => onArtistSelect(artist.id as string | number, artist.name)}
-                >
-                  {artist.name}
-                </button>
-              ) : (
-                artist.name
-              )}
+              <ArtistDetailLink artistId={artist.id} className={styles.statsArtistLink}>
+                {artist.name}
+              </ArtistDetailLink>
               {artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_') ? (
                 <img src="/static/trans2.png" className={styles.statsSoulIdBadge} alt="SoulID" />
               ) : null}
@@ -509,13 +508,7 @@ function StatsRankedArtists({
   );
 }
 
-function StatsRankedAlbums({
-  albums,
-  onArtistSelect,
-}: {
-  albums: StatsAlbumRow[];
-  onArtistSelect: (artistId: string | number, artistName: string) => void;
-}) {
+function StatsRankedAlbums({ albums }: { albums: StatsAlbumRow[] }) {
   return (
     <div id="stats-top-albums" className={styles.statsRankedList}>
       {albums.length === 0 ? <EmptyListState message="No data yet" /> : null}
@@ -530,19 +523,9 @@ function StatsRankedAlbums({
           <div className={styles.statsRankedInfo}>
             <div className={styles.statsRankedName}>{album.name}</div>
             <div className={styles.statsRankedMeta}>
-              {album.artist_id ? (
-                <button
-                  type="button"
-                  className={styles.statsArtistLink}
-                  onClick={() =>
-                    onArtistSelect(album.artist_id as string | number, album.artist || '')
-                  }
-                >
-                  {album.artist || ''}
-                </button>
-              ) : (
-                album.artist || ''
-              )}
+              <ArtistDetailLink artistId={album.artist_id} className={styles.statsArtistLink}>
+                {album.artist || ''}
+              </ArtistDetailLink>
             </div>
           </div>
           <span className={styles.statsRankedCount}>
@@ -556,11 +539,9 @@ function StatsRankedAlbums({
 
 function StatsRankedTracks({
   tracks,
-  onArtistSelect,
   onPlay,
 }: {
   tracks: StatsTrackRow[];
-  onArtistSelect: (artistId: string | number, artistName: string) => void;
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
 }) {
   return (
@@ -577,19 +558,9 @@ function StatsRankedTracks({
           <div className={styles.statsRankedInfo}>
             <div className={styles.statsRankedName}>{track.name}</div>
             <div className={styles.statsRankedMeta}>
-              {track.artist_id ? (
-                <button
-                  type="button"
-                  className={styles.statsArtistLink}
-                  onClick={() =>
-                    onArtistSelect(track.artist_id as string | number, track.artist || '')
-                  }
-                >
-                  {track.artist || ''}
-                </button>
-              ) : (
-                track.artist || ''
-              )}
+              <ArtistDetailLink artistId={track.artist_id} className={styles.statsArtistLink}>
+                {track.artist || ''}
+              </ArtistDetailLink>
               {track.album ? ` · ${track.album}` : ''}
             </div>
           </div>
