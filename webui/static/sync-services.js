@@ -8418,6 +8418,8 @@ function openYouTubeDiscoveryModal(urlHash) {
             console.log('🔄 Modal opened in syncing phase - starting immediate polling...');
             if (state.is_tidal_playlist) {
                 startTidalSyncPolling(urlHash);
+            } else if (state.is_qobuz_playlist) {
+                startQobuzSyncPolling(urlHash);
             } else if (state.is_deezer_playlist) {
                 startDeezerSyncPolling(urlHash);
             } else if (state.is_spotify_public_playlist) {
@@ -9011,13 +9013,14 @@ function closeYouTubeDiscoveryModal(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (state) {
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
         const isSpotifyPublic = state.is_spotify_public_playlist;
         const isBeatport = state.is_beatport_playlist;
 
         // Reset to 'discovered' phase if modal is closed after completion (like Tidal does)
         if (state.phase === 'sync_complete' || state.phase === 'download_complete') {
-            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))} state after completion`);
+            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isQobuz ? 'Qobuz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))))} state after completion`);
 
             if (isSpotifyPublic) {
                 // Spotify Public: Extract url_hash and reset state
@@ -9111,6 +9114,37 @@ function closeYouTubeDiscoveryModal(urlHash) {
                         });
                     } catch (error) {
                         console.warn('⚠️ Error updating backend Tidal phase:', error);
+                    }
+                }
+            } else if (isQobuz) {
+                // Qobuz: same shape as Tidal — preserve discovery data,
+                // reset phase to 'discovered', push update to backend.
+                const qobuzPlaylistId = state.qobuz_playlist_id || null;
+                if (qobuzPlaylistId && qobuzPlaylistStates[qobuzPlaylistId]) {
+                    const preservedData = {
+                        playlist: qobuzPlaylistStates[qobuzPlaylistId].playlist,
+                        discovery_results: qobuzPlaylistStates[qobuzPlaylistId].discovery_results,
+                        spotify_matches: qobuzPlaylistStates[qobuzPlaylistId].spotify_matches,
+                        discovery_progress: qobuzPlaylistStates[qobuzPlaylistId].discovery_progress,
+                        convertedSpotifyPlaylistId: qobuzPlaylistStates[qobuzPlaylistId].convertedSpotifyPlaylistId
+                    };
+
+                    delete qobuzPlaylistStates[qobuzPlaylistId].download_process_id;
+                    delete qobuzPlaylistStates[qobuzPlaylistId].phase;
+
+                    Object.assign(qobuzPlaylistStates[qobuzPlaylistId], preservedData);
+                    qobuzPlaylistStates[qobuzPlaylistId].phase = 'discovered';
+
+                    updateQobuzCardPhase(qobuzPlaylistId, 'discovered');
+
+                    try {
+                        fetch(`/api/qobuz/update_phase/${qobuzPlaylistId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                    } catch (error) {
+                        console.warn('⚠️ Error updating backend Qobuz phase:', error);
                     }
                 }
             } else if (isBeatport) {
