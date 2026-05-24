@@ -2557,9 +2557,16 @@ def _build_system_stats():
     active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
                            if batch_data.get('phase') == 'downloading'])
 
-    # Count finished downloads (completed this session) - use session counter like dashboard.py
-    with session_stats_lock:
-        finished_downloads = session_completed_downloads
+    # Count finished downloads from persistent history so the dashboard
+    # survives Docker/container restarts and streaming downloads that leave
+    # the in-memory task tracker after post-processing.
+    try:
+        persistent_finished = int(get_database().get_library_history_stats().get('downloads', 0) or 0)
+        with session_stats_lock:
+            finished_downloads = max(persistent_finished, session_completed_downloads)
+    except Exception:
+        with session_stats_lock:
+            finished_downloads = session_completed_downloads
 
     # Calculate total download speed from active soulseek transfers
     # Skip the slskd API call entirely when Soulseek is not the active download
@@ -16928,6 +16935,11 @@ def _build_status_deps():
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         on_download_completed=_on_download_completed,
+        get_persistent_download_history=lambda limit: get_database().get_library_history(
+            event_type='download',
+            page=1,
+            limit=limit,
+        )[0],
     )
 
 

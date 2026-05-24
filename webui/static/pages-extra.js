@@ -2278,7 +2278,9 @@ function _adlRender() {
     else if (_adlFilter === 'completed') filtered = filtered.filter(d => completedStatuses.includes(d.status));
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
-    const completedN = _adlData.filter(d => [...completedStatuses, ...failedStatuses].includes(d.status)).length;
+    const completedN = _adlData.filter(d =>
+        [...completedStatuses, ...failedStatuses].includes(d.status) && !d.is_persistent_history
+    ).length;
 
     if (countEl) {
         const activeN = _adlData.filter(d => activeStatuses.includes(d.status)).length;
