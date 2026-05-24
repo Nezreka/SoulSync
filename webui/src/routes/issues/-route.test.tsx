@@ -136,7 +136,11 @@ describe('issues route', () => {
   it('renders stats and list items through the app router', async () => {
     renderIssuesRoute();
     await waitFor(() => expect(screen.getByTestId('issue-counts')).toHaveTextContent('2'));
-    expect(await screen.findByTestId('issue-card-7')).toHaveTextContent('Bad tags');
+    const issueCard = await screen.findByRole('link', { name: /Bad tags/i });
+    expect(issueCard).toHaveAttribute('href', expect.stringContaining('/issues?'));
+    expect(issueCard).toHaveAttribute('href', expect.stringContaining('status=open'));
+    expect(issueCard).toHaveAttribute('href', expect.stringContaining('category=all'));
+    expect(issueCard).toHaveAttribute('href', expect.stringContaining('issueId=7'));
   });
 
   it('loads the detail modal from the route search state', async () => {
@@ -157,17 +161,22 @@ describe('issues route', () => {
 
   it('opens and closes the detail modal', async () => {
     const { history } = renderIssuesRoute();
-    fireEvent.click(await screen.findByTestId('issue-card-7'));
+    fireEvent.click(await screen.findByRole('link', { name: /Bad tags/i }));
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
     await waitFor(() => expect(history.location.search).toContain('issueId=7'));
-    fireEvent.click(screen.getByRole('button', { name: /close issue detail/i }));
+    const closeLink = screen.getByRole('link', { name: /^close$/i });
+    expect(closeLink).toHaveAttribute(
+      'href',
+      expect.stringContaining('/issues?status=open&category=all'),
+    );
+    fireEvent.click(closeLink);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await waitFor(() => expect(history.location.search).toBe('?status=open&category=all'));
   });
 
   it('closes the detail modal with Escape', async () => {
     const { history } = renderIssuesRoute();
-    fireEvent.click(await screen.findByTestId('issue-card-7'));
+    fireEvent.click(await screen.findByRole('link', { name: /Bad tags/i }));
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
     await waitFor(() => expect(history.location.search).toContain('issueId=7'));
 
@@ -179,7 +188,7 @@ describe('issues route', () => {
 
   it('focuses the detail modal close button on open', async () => {
     renderIssuesRoute();
-    fireEvent.click(await screen.findByTestId('issue-card-7'));
+    fireEvent.click(await screen.findByRole('link', { name: /Bad tags/i }));
 
     const closeButton = await screen.findByRole('button', {
       name: /close issue detail/i,
@@ -190,7 +199,7 @@ describe('issues route', () => {
 
   it('invokes the shared workflow adapter for admin downloads', async () => {
     renderIssuesRoute();
-    fireEvent.click(await screen.findByTestId('issue-card-7'));
+    fireEvent.click(await screen.findByRole('link', { name: /Bad tags/i }));
     fireEvent.click(await screen.findByRole('button', { name: /download album/i }));
     await waitFor(() => expect(workflowActions.openDownloadMissingAlbum).toHaveBeenCalled());
     expect(workflowActions.openDownloadMissingAlbum).toHaveBeenCalledWith(
