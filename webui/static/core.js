@@ -67,6 +67,11 @@ let deezerPlaylistStates = {};
 let deezerArlPlaylists = [];
 let deezerArlPlaylistsLoaded = false;
 
+// --- Qobuz Playlist State Management (mirrors Tidal — github issue #677) ---
+let qobuzPlaylists = [];
+let qobuzPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
+let qobuzPlaylistsLoaded = false;
+
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
 let beatportContentState = {

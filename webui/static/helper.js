@@ -3415,6 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.5.9': [
         { date: 'Unreleased — dev cycle' },
+        { title: 'Qobuz playlist sync', desc: 'new Qobuz tab on the Sync page. Connect Qobuz in Settings → Connections, hit Refresh on the tab, and your Qobuz playlists + Favorite Tracks show up alongside Tidal and Deezer. clicks run the same discovery → sync → download flow as the other sources.', page: 'sync' },
         { title: 'Import search: show when results came from the fallback source', desc: 'if you picked MusicBrainz (or Discogs / iTunes / etc.) as your primary metadata source but the Import album search ended up serving Deezer cards, you had no idea — the chain silently fell through when the primary returned nothing. now each card shows a small "via Deezer" label when the source differs from your primary, and a banner above the grid spells it out when all results came from the fallback. backend behavior unchanged.' },
         { date: 'May 21, 2026 — 2.5.9 release' },
         { title: 'Now-playing modal: lyrics panel', desc: 'new lyrics panel below the player controls in the expanded now-playing modal. fetches from LRClib via /api/lyrics/fetch, but prefers the local .lrc / .txt sidecar files SoulSync drops next to your audio during post-processing so downloaded tracks show lyrics instantly with zero network. synced LRC (timestamped) highlights the active line and auto-scrolls it into the middle of the viewport on every audio timeupdate; plain text renders without highlighting. status chip shows whether the result came back Synced or Plain. panel is collapsed by default — click the Lyrics header to expand. cached per track so revisiting a track doesn\'t refetch.' },
@@ -3495,6 +3496,17 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Qobuz Playlist Sync",
+        description: "Qobuz joins Tidal and Deezer as a first-class playlist sync source on the Sync page. Browse your Qobuz playlists and Favorite Tracks, run them through the same discovery flow as Tidal, sync the resulting Spotify-matched tracks, and queue downloads — same multi-step pipeline you already know.",
+        features: [
+            "new Qobuz tab on the Sync page, listed between Deezer and Deezer Link",
+            "lists your Qobuz user playlists plus a Favorite Tracks entry (same virtual-playlist treatment Tidal gets)",
+            "click any card to fire discovery (Spotify-preferred, your primary metadata fallback otherwise), then sync or download just like Tidal / Deezer playlists",
+            "uses the Qobuz auth token you already configured for downloads — no extra connection step",
+        ],
+        usage_note: "Sync → Qobuz → 🔄 Refresh",
+    },
     {
         title: "2.5.9 Release Stability Pass",
         description: "this release ties together the new release-based download sources and a set of fixes from real user reports: HiFi instance detection, Jellyfin full refreshes, transient SQLite disk I/O failures, and wrong-artist Album Completeness fills.",

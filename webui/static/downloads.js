@@ -64,10 +64,11 @@ function _wingItAction(urlHash, action) {
         const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
         const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isLB = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isDeezer = state.is_deezer_playlist;
-        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
         if (!tracks.length) {
             showToast('No tracks available for Wing It', 'error');
@@ -347,10 +348,11 @@ async function _wingItFromModal(urlHash) {
     const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
     const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
     const isTidal = state.is_tidal_playlist;
+    const isQobuz = state.is_qobuz_playlist;
     const isLB = state.is_listenbrainz_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isDeezer = state.is_deezer_playlist;
-    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
     if (!tracks.length) {
         showToast('No tracks available for Wing It', 'error');
