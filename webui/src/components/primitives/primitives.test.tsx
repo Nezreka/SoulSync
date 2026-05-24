@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { Notice, Show } from './primitives';
+import { Badge, Notice, Show } from './primitives';
 
 describe('Show', () => {
   it('renders children when the condition is true', () => {
@@ -48,5 +48,20 @@ describe('Notice', () => {
     );
 
     expect(screen.getByRole('note')).toHaveAttribute('data-tone', 'warning');
+  });
+});
+
+describe('Badge', () => {
+  it('renders with neutral styling by default', () => {
+    render(<Badge>12</Badge>);
+
+    expect(screen.getByText('12')).toHaveAttribute('data-slot', 'badge');
+    expect(screen.getByText('12')).toHaveAttribute('data-tone', 'neutral');
+  });
+
+  it('supports tone overrides', () => {
+    render(<Badge tone="warning">12</Badge>);
+
+    expect(screen.getByText('12')).toHaveAttribute('data-tone', 'warning');
   });
 });

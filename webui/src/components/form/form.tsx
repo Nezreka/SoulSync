@@ -283,22 +283,6 @@ export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(fun
   );
 });
 
-type BaseBadgeProps = ComponentPropsWithoutRef<'span'>;
-
-export type BadgeTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
-
-export type BadgeProps = Omit<BaseBadgeProps, 'className'> & {
-  className?: string;
-  tone?: BadgeTone;
-};
-
-export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
-  { className, tone = 'neutral', ...props },
-  ref,
-) {
-  return <span ref={ref} className={clsx(styles.badge, className)} data-tone={tone} {...props} />;
-});
-
 type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
 
 export type ButtonProps = Omit<BaseButtonProps, 'className'> & {

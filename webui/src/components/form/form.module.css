@@ -449,48 +449,6 @@
   }
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2ch;
-  padding: 1px 7px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  line-height: 1.2;
-  white-space: nowrap;
-  vertical-align: middle;
-  color: rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-
-  &[data-tone='info'] {
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.12);
-    border-color: rgba(var(--accent-light-rgb), 0.12);
-  }
-
-  &[data-tone='success'] {
-    color: #4ade80;
-    background: rgba(74, 222, 128, 0.12);
-    border-color: rgba(74, 222, 128, 0.12);
-  }
-
-  &[data-tone='warning'] {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.12);
-    border-color: rgba(251, 191, 36, 0.12);
-  }
-
-  &[data-tone='danger'] {
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.12);
-    border-color: rgba(248, 113, 113, 0.12);
-  }
-}
-
 .button {
   display: inline-flex;
   align-items: center;
@@ -576,7 +534,7 @@
     color: rgba(0, 0, 0, 0.55);
   }
 
-  &[data-variant='primary'] .badge {
+  &[data-variant='primary'] [data-slot='badge'] {
     color: #fff;
     background: rgba(0, 0, 0, 0.18);
     border-color: rgba(0, 0, 0, 0.22);

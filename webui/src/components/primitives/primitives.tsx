@@ -23,6 +23,30 @@ export function Show<T>({ fallback = null, children, when }: ShowProps<T>) {
   return <>{children}</>;
 }
 
+type BaseBadgeProps = ComponentPropsWithoutRef<'span'>;
+
+export type BadgeTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+
+export type BadgeProps = Omit<BaseBadgeProps, 'className'> & {
+  className?: string;
+  tone?: BadgeTone;
+};
+
+export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
+  { className, tone = 'neutral', ...props },
+  ref,
+) {
+  return (
+    <span
+      ref={ref}
+      className={clsx(styles.badge, className)}
+      data-slot="badge"
+      data-tone={tone}
+      {...props}
+    />
+  );
+});
+
 export type NoticeTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
 export type NoticeProps = Omit<ComponentPropsWithoutRef<'div'>, 'className'> & {
