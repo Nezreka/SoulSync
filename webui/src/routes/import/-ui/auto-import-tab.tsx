@@ -10,7 +10,7 @@ import {
   Select,
   Switch,
 } from '@/components/form/form';
-import { Badge } from '@/components/primitives';
+import { Badge, Notice } from '@/components/primitives';
 
 import type {
   ImportAutoFilter,
@@ -151,17 +151,18 @@ export function AutoImportPanel({
   const counts = getAutoImportCounts(allResults);
   const activeLines = getActiveImportLines(statusQuery.data);
   const statusTone = getAutoImportStatusTone(statusQuery.data);
-
-  if (statusQuery.error) {
-    return (
-      <div className={styles.autoImportEmpty}>
-        Auto-import is unavailable: {getErrorMessage(statusQuery.error)}
-      </div>
-    );
-  }
+  const statusError =
+    statusQuery.error && !statusQuery.data ? getErrorMessage(statusQuery.error) : '';
+  const resultsError =
+    resultsQuery.error && !resultsQuery.data ? getErrorMessage(resultsQuery.error) : '';
 
   return (
     <>
+      {statusError ? (
+        <Notice tone="danger" role="alert">
+          Auto-import is unavailable: {statusError}
+        </Notice>
+      ) : null}
       <div className={styles.autoImportControls}>
         <div className={styles.autoImportToggleRow}>
           <div className={styles.autoImportToggleLabel}>
@@ -293,10 +294,10 @@ export function AutoImportPanel({
       ) : null}
 
       <div className={styles.autoImportResults} id="auto-import-results">
-        {resultsQuery.error ? (
-          <div className={styles.autoImportEmpty}>
-            Failed to load imports: {getErrorMessage(resultsQuery.error)}
-          </div>
+        {resultsError ? (
+          <Notice tone="danger" role="alert">
+            Failed to load imports: {resultsError}
+          </Notice>
         ) : allResults.length === 0 ? (
           <div className={styles.autoImportEmpty}>
             <p>No imports yet. Drop album folders or single tracks into your import folder.</p>
