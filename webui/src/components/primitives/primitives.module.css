@@ -1,0 +1,87 @@
+.notice {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.notice[data-tone='neutral'] {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.notice[data-tone='info'] {
+  border-color: rgba(var(--accent-light-rgb), 0.24);
+  background: rgba(var(--accent-light-rgb), 0.08);
+  color: rgba(255, 232, 188, 0.94);
+}
+
+.notice[data-tone='success'] {
+  border-color: rgba(110, 220, 150, 0.26);
+  background: rgba(110, 220, 150, 0.08);
+  color: rgba(210, 255, 228, 0.94);
+}
+
+.notice[data-tone='warning'] {
+  border-color: rgba(255, 200, 100, 0.26);
+  background: rgba(255, 200, 100, 0.08);
+  color: rgba(255, 232, 188, 0.94);
+}
+
+.notice[data-tone='danger'] {
+  border-color: rgba(255, 120, 120, 0.26);
+  background: rgba(255, 120, 120, 0.08);
+  color: rgba(255, 214, 214, 0.94);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2ch;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.badge[data-tone='info'] {
+  color: rgb(var(--accent-light-rgb));
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-light-rgb), 0.12);
+}
+
+.badge[data-tone='success'] {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.12);
+}
+
+.badge[data-tone='warning'] {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.12);
+}
+
+.badge[data-tone='danger'] {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.12);
+}
