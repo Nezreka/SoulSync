@@ -2420,9 +2420,6 @@ async function loadPageData(pageId) {
                 loadApiKeys();
                 loadBlacklistCount();
                 break;
-            case 'import':
-                initializeImportPage();
-                break;
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
                 try {
