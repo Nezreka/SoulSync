@@ -58,6 +58,11 @@ export interface ImportAlbumResult {
   image_url?: string | null;
   total_tracks?: number | null;
   release_date?: string | null;
+  format?: string | null;
+  country?: string | null;
+  disambiguation?: string | null;
+  status?: string | null;
+  label?: string | null;
 }
 
 export interface ImportAlbumSearchPayload {
@@ -98,6 +103,11 @@ export interface ImportAlbum {
   image_url?: string | null;
   total_tracks?: number | null;
   release_date?: string | null;
+  format?: string | null;
+  country?: string | null;
+  disambiguation?: string | null;
+  status?: string | null;
+  label?: string | null;
 }
 
 export interface ImportAlbumTrack {

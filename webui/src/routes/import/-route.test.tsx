@@ -97,6 +97,11 @@ describe('import route', () => {
               source: 'deezer',
               total_tracks: 1,
               release_date: '2026-01-01',
+              format: 'CD',
+              country: 'US',
+              disambiguation: '25th Anniversary Edition',
+              status: 'official',
+              label: 'MusicBrainz',
             },
           ],
         });
@@ -113,6 +118,11 @@ describe('import route', () => {
               source: 'deezer',
               total_tracks: 1,
               release_date: '2026-01-01',
+              format: 'CD',
+              country: 'US',
+              disambiguation: '25th Anniversary Edition',
+              status: 'official',
+              label: 'MusicBrainz',
             },
           ],
         });
@@ -130,6 +140,11 @@ describe('import route', () => {
             source: 'deezer',
             total_tracks: 1,
             release_date: '2026-01-01',
+            format: 'CD',
+            country: 'US',
+            disambiguation: '25th Anniversary Edition',
+            status: 'official',
+            label: 'MusicBrainz',
           },
           matches: [
             {
@@ -196,6 +211,10 @@ describe('import route', () => {
     await waitFor(() => expect(screen.getByTestId('import-page')).toBeInTheDocument());
     expect(await screen.findByText('Import Music')).toBeInTheDocument();
     expect(screen.getByText('Import: /music/Staging')).toBeInTheDocument();
+    expect(
+      await screen.findByText('1 tracks · 2026 · CD · US · 25th Anniversary Edition'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('official · MusicBrainz')).toBeInTheDocument();
     expect(
       await screen.findByText('Showing Deezer results - not from your primary source (Spotify).'),
     ).toBeInTheDocument();
