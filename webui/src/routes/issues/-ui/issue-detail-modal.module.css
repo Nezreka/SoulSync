@@ -878,6 +878,43 @@
   font-size: 13px;
 }
 
+.modalLinkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-decoration: none;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.modalLinkButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.modalLinkButton:focus-visible {
+  outline: none;
+  border-color: rgba(var(--accent-light-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
+}
+
 .modalButtonSecondary {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.8);
