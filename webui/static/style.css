@@ -45706,6 +45706,10 @@ textarea.enhanced-meta-field-input {
 
 .discog-download-wrap { margin: 12px 0 4px; }
 
+.artist-hero-actions .discog-download-wrap { margin: 0; }
+
+.artist-hero-actions .discog-btn-compact { margin-top: 0; }
+
 .discog-download-btn {
     position: relative;
     display: flex;
@@ -45751,6 +45755,112 @@ textarea.enhanced-meta-field-input {
     top: 0; left: -100%; width: 50%; height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
     animation: discogShimmer 3s ease-in-out infinite;
+}
+
+.artist-hero-actions {
+    gap: 10px;
+    align-items: center;
+}
+
+.artist-hero-actions .library-artist-radio-btn,
+.artist-hero-actions .library-artist-watchlist-btn,
+.artist-hero-actions .discog-download-btn,
+.artist-hero-actions .library-artist-enhance-btn {
+    --artist-action-rgb: var(--accent-rgb);
+    min-height: 38px;
+    width: auto;
+    max-width: none;
+    padding: 8px 14px 8px 12px;
+    gap: 8px;
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.82);
+    background:
+        linear-gradient(135deg, rgba(var(--artist-action-rgb), 0.13), rgba(var(--artist-action-rgb), 0.03)),
+        rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(var(--artist-action-rgb), 0.26);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 8px 22px rgba(0, 0, 0, 0.22);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0;
+    line-height: 1;
+    backdrop-filter: blur(14px) saturate(1.25);
+    transform: none;
+}
+
+.artist-hero-actions .library-artist-radio-btn { --artist-action-rgb: 79, 195, 247; }
+.artist-hero-actions .library-artist-watchlist-btn { --artist-action-rgb: 255, 193, 7; }
+.artist-hero-actions .discog-download-btn { --artist-action-rgb: var(--accent-rgb); }
+.artist-hero-actions .library-artist-enhance-btn { --artist-action-rgb: 180, 132, 255; }
+
+.artist-hero-actions .library-artist-radio-btn::before,
+.artist-hero-actions .library-artist-watchlist-btn::before,
+.artist-hero-actions .library-artist-enhance-btn::before,
+.artist-hero-actions .discog-download-btn::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    position: relative;
+    inset: auto;
+    flex: 0 0 auto;
+    opacity: 1;
+    background: rgb(var(--artist-action-rgb));
+    box-shadow: 0 0 14px rgba(var(--artist-action-rgb), 0.85);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.artist-hero-actions .library-artist-radio-btn:hover,
+.artist-hero-actions .library-artist-watchlist-btn:hover:not(:disabled),
+.artist-hero-actions .discog-download-btn:hover,
+.artist-hero-actions .library-artist-enhance-btn:hover {
+    color: #ffffff;
+    border-color: rgba(var(--artist-action-rgb), 0.5);
+    background:
+        linear-gradient(135deg, rgba(var(--artist-action-rgb), 0.22), rgba(var(--artist-action-rgb), 0.06)),
+        rgba(255, 255, 255, 0.055);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 12px 28px rgba(0, 0, 0, 0.28),
+        0 0 0 1px rgba(var(--artist-action-rgb), 0.12);
+    transform: translateY(-1px);
+}
+
+.artist-hero-actions .library-artist-radio-btn:hover::before,
+.artist-hero-actions .library-artist-watchlist-btn:hover:not(:disabled)::before,
+.artist-hero-actions .discog-download-btn:hover::before,
+.artist-hero-actions .library-artist-enhance-btn:hover::before {
+    transform: scale(1.25);
+    box-shadow: 0 0 18px rgba(var(--artist-action-rgb), 1);
+}
+
+.artist-hero-actions .library-artist-watchlist-btn.watching {
+    color: #ffd761;
+    border-color: rgba(255, 193, 7, 0.52);
+    background:
+        linear-gradient(135deg, rgba(255, 193, 7, 0.24), rgba(255, 193, 7, 0.06)),
+        rgba(255, 255, 255, 0.04);
+}
+
+.artist-hero-actions .library-artist-radio-btn .radio-icon,
+.artist-hero-actions .library-artist-watchlist-btn .watchlist-icon,
+.artist-hero-actions .discog-download-btn .discog-btn-icon,
+.artist-hero-actions .library-artist-enhance-btn .enhance-icon {
+    font-size: 13px;
+    position: relative;
+    z-index: 1;
+    transform: none;
+}
+
+.artist-hero-actions .library-artist-radio-btn:hover .radio-icon,
+.artist-hero-actions .library-artist-watchlist-btn:hover:not(:disabled) .watchlist-icon,
+.artist-hero-actions .library-artist-enhance-btn:hover .enhance-icon {
+    transform: none;
+}
+
+.artist-hero-actions .discog-btn-shimmer {
+    display: none;
 }
 
 @keyframes discogShimmer {
