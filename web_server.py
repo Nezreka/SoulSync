@@ -35272,6 +35272,7 @@ def _emit_discovery_progress_loop():
     """Push discovery progress to subscribed rooms every 1 second."""
     platform_states = {
         'tidal': lambda: tidal_discovery_states,
+        'qobuz': lambda: qobuz_discovery_states,
         'deezer': lambda: deezer_discovery_states,
         'youtube': lambda: youtube_playlist_states,
         'beatport': lambda: beatport_chart_states,
