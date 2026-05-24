@@ -1512,6 +1512,70 @@ const _TOP_TRACKS_SOURCE_LABELS = {
     lastfm: 'Popular on Last.fm',
 };
 
+async function playTrackByMetadata(title, artist, album = '') {
+    // 1. Try the library first — fastest and best quality if owned.
+    try {
+        const resp = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist }),
+        });
+        const data = await resp.json();
+        if (data.success && data.track) {
+            const track = data.track;
+            playLibraryTrack(
+                {
+                    id: track.id,
+                    title: track.title,
+                    file_path: track.file_path,
+                    bitrate: track.bitrate,
+                    artist_id: track.artist_id,
+                    album_id: track.album_id,
+                    _stats_image: track.image_url || null,
+                },
+                track.album_title || album || '',
+                track.artist_name || artist || '',
+            );
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed, will try streaming fallback:', e);
+    }
+
+    // 2. Library miss — fall back to streaming via the enhanced-search streamer.
+    if (typeof showLoadingOverlay === 'function') {
+        showLoadingOverlay(`Searching for ${title}...`);
+    }
+    try {
+        const streamResp = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album,
+                duration_ms: 0,
+            }),
+        });
+        const streamData = await streamResp.json();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+
+        if (streamData.success && streamData.result) {
+            if (typeof startStream === 'function') {
+                await startStream(streamData.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(streamData.error || 'Track not found in library or any source', 'error');
+        }
+    } catch (e) {
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        showToast('Failed to play track', 'error');
+        console.error('Stream fallback failed:', e);
+    }
+}
+
 async function _loadArtistTopTracks(artistName) {
     const sidebar = document.getElementById('artist-hero-sidebar');
     const container = document.getElementById('hero-top-tracks');
@@ -1576,7 +1640,7 @@ async function _loadArtistTopTracks(artistName) {
                         const playBtn = e.target.closest('.hero-top-track-play');
                         if (playBtn) {
                             e.stopPropagation();
-                            playStatsTrack(playBtn.dataset.track, playBtn.dataset.artist, '');
+                            playTrackByMetadata(playBtn.dataset.track, playBtn.dataset.artist, '');
                             return;
                         }
                         const dlBtn = e.target.closest('.hero-top-track-download');
@@ -1632,7 +1696,7 @@ async function _loadArtistTopTracks(artistName) {
             const btn = e.target.closest('.hero-top-track-play');
             if (btn) {
                 e.stopPropagation();
-                playStatsTrack(btn.dataset.track, btn.dataset.artist, '');
+                playTrackByMetadata(btn.dataset.track, btn.dataset.artist, '');
             }
         };
         sidebar.style.display = '';
@@ -7972,6 +8036,45 @@ async function playLibraryTrack(track, albumTitle, artistName) {
     if (!track.file_path) {
         showToast('No file available for this track', 'error');
         return;
+    }
+
+    // Library tracks have authoritative metadata in the SoulSync DB —
+    // any title / artist / album the caller passes in is downstream of
+    // whatever modal triggered playback and may carry noise like the
+    // ``<source_id>||<display>`` filename prefix from a Prowlarr result.
+    // When the caller has a track.id, fetch the canonical row from
+    // resolve-track and overwrite the caller-supplied fields with the
+    // DB values. Falls back silently to the caller-supplied values on
+    // any error so we never lose the play action over a metadata fetch.
+    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+        try {
+            const _dbResp = await fetch('/api/stats/resolve-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: track.title || track.name,
+                    artist: artistName || track.artist_name || '',
+                }),
+            });
+            const _dbData = await _dbResp.json();
+            if (_dbData && _dbData.success && _dbData.track) {
+                const _row = _dbData.track;
+                track = {
+                    ...track,
+                    id: _row.id ?? track.id,
+                    title: _row.title || track.title,
+                    file_path: _row.file_path || track.file_path,
+                    bitrate: _row.bitrate ?? track.bitrate,
+                    artist_id: _row.artist_id ?? track.artist_id,
+                    album_id: _row.album_id ?? track.album_id,
+                    _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
+                };
+                if (_row.album_title) albumTitle = _row.album_title;
+                if (_row.artist_name) artistName = _row.artist_name;
+            }
+        } catch (_dbErr) {
+            console.debug('library track DB refresh skipped:', _dbErr);
+        }
     }
 
     try {

@@ -67,6 +67,11 @@ let deezerPlaylistStates = {};
 let deezerArlPlaylists = [];
 let deezerArlPlaylistsLoaded = false;
 
+// --- Qobuz Playlist State Management (mirrors Tidal — github issue #677) ---
+let qobuzPlaylists = [];
+let qobuzPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
+let qobuzPlaylistsLoaded = false;
+
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
 let beatportContentState = {
@@ -515,6 +520,7 @@ function handleServiceStatusUpdate(data) {
     const isSoulsyncStandalone = data.media_server?.type === 'soulsync';
     _isSoulsyncStandalone = isSoulsyncStandalone;
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
+        if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
         if (isSoulsyncStandalone) {
             btn.dataset.hiddenByStandalone = '1';
             btn.style.display = 'none';

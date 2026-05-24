@@ -198,6 +198,37 @@ def test_reload_instances_with_no_args_reloads_every_source():
     assert b.reload_called is True
 
 
+def test_reload_settings_refreshes_registry_plugins(monkeypatch):
+    """Settings saves should refresh plugins that cache config at init.
+
+    Prowlarr-backed torrent / usenet clients keep a ProwlarrClient
+    instance, so without this hook newly-saved indexer settings only
+    took effect after process restart.
+    """
+
+    class _ReloadSettingsClient(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.reload_calls = 0
+
+        def reload_settings(self):
+            self.reload_calls += 1
+
+    torrent = _ReloadSettingsClient()
+    usenet = _ReloadSettingsClient()
+    orch = _build_orchestrator(torrent=torrent, usenet=usenet)
+
+    monkeypatch.setattr(
+        'core.download_orchestrator.config_manager.get',
+        lambda _key, default=None: default,
+    )
+
+    orch.reload_settings()
+
+    assert torrent.reload_calls == 1
+    assert usenet.reload_calls == 1
+
+
 # ---------------------------------------------------------------------------
 # Singleton factory (matches Cin's get_metadata_engine pattern)
 # ---------------------------------------------------------------------------

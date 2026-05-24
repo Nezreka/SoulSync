@@ -217,7 +217,12 @@ def staging_hints(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
 def staging_suggestions() -> tuple[Dict[str, Any], int]:
     """Return cached import suggestions and readiness state."""
     cache = get_import_suggestions_cache()
-    return {"success": True, "suggestions": cache["suggestions"], "ready": cache["built"]}, 200
+    return {
+        "success": True,
+        "suggestions": cache["suggestions"],
+        "ready": cache["built"],
+        "primary_source": _get_primary_source(),
+    }, 200
 
 
 def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12) -> tuple[Dict[str, Any], int]:
@@ -228,11 +233,12 @@ def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12) -> t
             return {"success": False, "error": "Missing query parameter"}, 400
 
         limit = min(int(limit), 50)
-        if runtime.get_primary_source() == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
+        primary_source = runtime.get_primary_source()
+        if primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
             runtime.hydrabase_worker.enqueue(query, "albums")
 
         albums = runtime.search_import_albums(query, limit=limit)
-        return {"success": True, "albums": albums}, 200
+        return {"success": True, "albums": albums, "primary_source": primary_source}, 200
     except Exception as exc:
         runtime.logger.error("Error searching albums for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
@@ -362,11 +368,12 @@ def search_tracks(runtime: ImportRouteRuntime, query: str, limit: int = 10) -> t
             return {"success": False, "error": "Missing query parameter"}, 400
 
         limit = min(int(limit), 30)
-        if runtime.get_primary_source() == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
+        primary_source = runtime.get_primary_source()
+        if primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
             runtime.hydrabase_worker.enqueue(query, "tracks")
 
         tracks = runtime.search_import_tracks(query, limit=limit)
-        return {"success": True, "tracks": tracks}, 200
+        return {"success": True, "tracks": tracks, "primary_source": primary_source}, 200
     except Exception as exc:
         runtime.logger.error("Error searching tracks for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500

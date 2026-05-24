@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createShellBridge } from '@/test/shell-bridge';
+
 import type { ShellProfileContext } from './bridge';
 
-import { SHELL_PROFILE_CONTEXT_CHANGED_EVENT, bindWindowWebRouter, waitForShellContext } from './bridge';
+import {
+  SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
+  bindWindowWebRouter,
+  waitForShellContext,
+} from './bridge';
 
 describe('waitForShellContext', () => {
   beforeEach(() => {
@@ -10,16 +16,7 @@ describe('waitForShellContext', () => {
   });
 
   it('resolves immediately when the shell already has a profile', async () => {
-    window.SoulSyncWebShellBridge = {
-      getProfileHomePage: vi.fn(() => 'discover'),
-      isPageAllowed: vi.fn(() => true),
-      activateLegacyPath: vi.fn(),
-      getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
-      resolveLegacyPath: vi.fn(() => 'issues'),
-      setActivePageChrome: vi.fn(),
-      cancelSimilarArtistsLoad: vi.fn(),
-      showReactHost: vi.fn(),
-    } as NonNullable<typeof window.SoulSyncWebShellBridge>;
+    window.SoulSyncWebShellBridge = createShellBridge();
 
     await expect(waitForShellContext()).resolves.toEqual({
       bridge: window.SoulSyncWebShellBridge,
@@ -32,16 +29,9 @@ describe('waitForShellContext', () => {
 
   it('waits for the legacy shell to publish profile context', async () => {
     const getCurrentProfileContext = vi.fn<() => ShellProfileContext | null>(() => null);
-    window.SoulSyncWebShellBridge = {
-      getProfileHomePage: vi.fn(() => 'discover'),
-      isPageAllowed: vi.fn(() => true),
-      activateLegacyPath: vi.fn(),
+    window.SoulSyncWebShellBridge = createShellBridge({
       getCurrentProfileContext,
-      resolveLegacyPath: vi.fn(() => 'issues'),
-      setActivePageChrome: vi.fn(),
-      cancelSimilarArtistsLoad: vi.fn(),
-      showReactHost: vi.fn(),
-    } as NonNullable<typeof window.SoulSyncWebShellBridge>;
+    });
 
     const contextPromise = waitForShellContext();
 
@@ -96,7 +86,9 @@ describe('bindWindowWebRouter', () => {
 
     bindWindowWebRouter({ navigate } as never);
 
-    await expect(window.SoulSyncWebRouter?.navigateToPage('artist-detail', {} as never)).resolves.toBe(false);
+    await expect(
+      window.SoulSyncWebRouter?.navigateToPage('artist-detail', {} as never),
+    ).resolves.toBe(false);
     expect(navigate).not.toHaveBeenCalled();
   });
 });

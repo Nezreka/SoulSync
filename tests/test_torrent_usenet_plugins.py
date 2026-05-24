@@ -381,6 +381,34 @@ def test_usenet_is_configured_requires_both_sides() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_usenet_reload_settings_refreshes_cached_prowlarr_config(monkeypatch) -> None:
+    """Settings saves must update the plugin's held ProwlarrClient.
+
+    The active usenet adapter is rebuilt from config on each call, but
+    ProwlarrClient is cached inside the plugin. This is the path that
+    used to require a process restart after entering Prowlarr settings.
+    """
+    settings = {
+        'prowlarr.url': '',
+        'prowlarr.api_key': '',
+    }
+    monkeypatch.setattr(
+        'core.prowlarr_client.config_manager.get',
+        lambda key, default=None: settings.get(key, default),
+    )
+
+    plugin = UsenetDownloadPlugin()
+    assert plugin._prowlarr.is_configured() is False
+
+    settings.update({
+        'prowlarr.url': 'http://prowlarr:9696',
+        'prowlarr.api_key': 'secret',
+    })
+    plugin.reload_settings()
+
+    assert plugin._prowlarr.is_configured() is True
+
+
 def test_plugins_conform_to_protocol() -> None:
     from core.download_plugins.base import DownloadSourcePlugin
     assert isinstance(TorrentDownloadPlugin(), DownloadSourcePlugin)

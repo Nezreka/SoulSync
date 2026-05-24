@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.5.9"
+_SOULSYNC_BASE_VERSION = "2.6.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1586,6 +1586,7 @@ def _shutdown_runtime_components():
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
         (deezer_discovery_executor, "deezer discovery executor"),
+        (qobuz_discovery_executor, "qobuz discovery executor"),
         (spotify_public_discovery_executor, "spotify public discovery executor"),
         (youtube_discovery_executor, "youtube discovery executor"),
         (beatport_discovery_executor, "beatport discovery executor"),
@@ -8738,6 +8739,9 @@ def library_check_tracks():
                 file_ext = os.path.splitext(matched_db_track.file_path or '')[1].lstrip('.').upper() or None
                 owned_map[track_name] = {
                     "owned": True,
+                    "track_id": getattr(matched_db_track, 'id', None),
+                    "title": getattr(matched_db_track, 'title', track_name),
+                    "file_path": getattr(matched_db_track, 'file_path', None),
                     "format": file_ext,
                     "bitrate": matched_db_track.bitrate,
                     "album": getattr(matched_db_track, 'album_title', None)
@@ -21845,6 +21849,655 @@ def cancel_deezer_sync(playlist_id):
 
 
 # ===================================================================
+# QOBUZ PLAYLIST DISCOVERY API ENDPOINTS
+# ===================================================================
+#
+# Mirrors the Tidal + Deezer endpoint set for parity on the Sync page.
+# Qobuz playlists arrive from `core/qobuz_client.py` as dicts (matching
+# the Deezer client's shape), so the state + endpoint code follows the
+# Deezer template rather than Tidal's dataclass-based one. Github issue
+# #677.
+
+# Global state for Qobuz playlist discovery management
+qobuz_discovery_states = {}  # Key: playlist_id, Value: discovery state
+qobuz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="qobuz_discovery")
+
+
+def _get_qobuz_client_for_sync():
+    """Resolve the Qobuz client via the download orchestrator.
+
+    The orchestrator owns the canonical instance (same one Settings →
+    Connections authenticates against), so the Sync page tab always sees
+    fresh auth state without a second login flow.
+    """
+    if not download_orchestrator or not hasattr(download_orchestrator, 'client'):
+        return None
+    try:
+        return download_orchestrator.client("qobuz")
+    except Exception as exc:
+        logger.debug(f"Qobuz client lookup failed: {exc}")
+        return None
+
+
+@app.route('/api/qobuz/playlists', methods=['GET'])
+def get_qobuz_playlists():
+    """Fetches the authenticated user's Qobuz playlists (metadata only).
+
+    Tracks are fetched on demand by the per-playlist detail endpoint —
+    matches the Tidal + Deezer behaviour so the Sync page renderer can
+    treat all three services uniformly.
+    """
+    qobuz = _get_qobuz_client_for_sync()
+    if not qobuz or not qobuz.is_authenticated():
+        return jsonify({"error": "Qobuz not authenticated."}), 401
+
+    try:
+        playlists = qobuz.get_user_playlists()
+
+        playlist_data = []
+        for p in playlists:
+            playlist_data.append({
+                "id": p['id'],
+                "name": p['name'],
+                "owner": "You",
+                "track_count": p.get('track_count', 0),
+                "image_url": p.get('image_url') or None,
+                "description": p.get('description', ''),
+                "tracks": []
+            })
+
+        # Append virtual "Favorite Tracks" entry at the END (mirrors
+        # Tidal's COLLECTION_PLAYLIST_ID pattern — count only here, full
+        # fetch deferred to the per-playlist detail endpoint).
+        try:
+            from core.qobuz_client import QobuzClient as _QobuzClientTypeRef
+            favorites_count = qobuz.get_user_favorite_tracks_count()
+            if favorites_count > 0:
+                playlist_data.append({
+                    "id": qobuz.QOBUZ_FAVORITES_ID,
+                    "name": qobuz.QOBUZ_FAVORITES_NAME,
+                    "owner": "You",
+                    "track_count": favorites_count,
+                    "image_url": None,
+                    "description": qobuz.QOBUZ_FAVORITES_DESCRIPTION,
+                    "tracks": [],
+                })
+                logger.info(
+                    f"Added virtual '{qobuz.QOBUZ_FAVORITES_NAME}' playlist with {favorites_count} tracks (count only)"
+                )
+        except Exception as favorites_error:
+            logger.error(f"Failed to add Qobuz Favorite Tracks playlist: {favorites_error}")
+
+        logger.info(f"Loaded {len(playlist_data)} Qobuz playlists")
+        return jsonify(playlist_data)
+    except Exception as e:
+        logger.error(f"Error loading Qobuz playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/playlist/<playlist_id>', methods=['GET'])
+def get_qobuz_playlist_tracks(playlist_id):
+    """Fetches full track details for a specific Qobuz playlist."""
+    qobuz = _get_qobuz_client_for_sync()
+    if not qobuz or not qobuz.is_authenticated():
+        return jsonify({"error": "Qobuz not authenticated."}), 401
+
+    try:
+        logger.info(f"Getting full Qobuz playlist with tracks for: {playlist_id}")
+        full_playlist = qobuz.get_playlist(playlist_id)
+        if not full_playlist:
+            return jsonify({"error": "Playlist not found or unable to access."}), 404
+
+        tracks = full_playlist.get('tracks') or []
+        if not tracks:
+            return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
+
+        logger.info(f"Loaded {len(tracks)} tracks from Qobuz playlist: {full_playlist['name']}")
+
+        playlist_dict = {
+            'id': full_playlist['id'],
+            'name': full_playlist['name'],
+            'description': full_playlist.get('description', ''),
+            'owner': 'You',
+            'track_count': len(tracks),
+            'image_url': full_playlist.get('image_url') or None,
+            'tracks': tracks,
+        }
+        return jsonify(playlist_dict)
+    except Exception as e:
+        logger.error(f"Error getting Qobuz playlist tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/discovery/start/<playlist_id>', methods=['POST'])
+def start_qobuz_discovery(playlist_id):
+    """Start Spotify discovery process for a Qobuz playlist."""
+    try:
+        qobuz = _get_qobuz_client_for_sync()
+        if not qobuz or not qobuz.is_authenticated():
+            return jsonify({"error": "Qobuz not authenticated."}), 401
+
+        if playlist_id in qobuz_discovery_states:
+            existing_state = qobuz_discovery_states[playlist_id]
+            if existing_state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+
+            if not existing_state.get('playlist'):
+                playlist_data = qobuz.get_playlist(playlist_id)
+                if not playlist_data:
+                    return jsonify({"error": "Qobuz playlist not found"}), 404
+                existing_state['playlist'] = playlist_data
+
+            existing_state['phase'] = 'discovering'
+            existing_state['status'] = 'discovering'
+            existing_state['last_accessed'] = time.time()
+            state = existing_state
+        else:
+            playlist_data = qobuz.get_playlist(playlist_id)
+
+            if not playlist_data:
+                return jsonify({"error": "Qobuz playlist not found"}), 404
+
+            if not playlist_data.get('tracks'):
+                return jsonify({"error": "Playlist has no tracks"}), 400
+
+            state = {
+                'playlist': playlist_data,
+                'phase': 'discovering',
+                'status': 'discovering',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(playlist_data['tracks']),
+                'discovery_results': [],
+                'sync_playlist_id': None,
+                'converted_spotify_playlist_id': None,
+                'download_process_id': None,
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+                'discovery_future': None,
+                'sync_progress': {}
+            }
+            qobuz_discovery_states[playlist_id] = state
+
+        playlist_name = state['playlist']['name']
+        track_count = len(state['playlist']['tracks'])
+        add_activity_item("", "Qobuz Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+
+        qobuz_discovery_states[playlist_id]['_profile_id'] = get_current_profile_id()
+        future = qobuz_discovery_executor.submit(_run_qobuz_discovery_worker, playlist_id)
+        state['discovery_future'] = future
+
+        logger.info(f"Started Spotify discovery for Qobuz playlist: {playlist_name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        logger.error(f"Error starting Qobuz discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/discovery/status/<playlist_id>', methods=['GET'])
+def get_qobuz_discovery_status(playlist_id):
+    """Get real-time discovery status for a Qobuz playlist."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz discovery not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting Qobuz discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/discovery/update_match', methods=['POST'])
+def update_qobuz_discovery_match():
+    """Update a Qobuz discovery result with a manually selected Spotify track."""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # playlist_id
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        state = qobuz_discovery_states.get(identifier)
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        result['status'] = 'Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # Manual match from the fix modal — build rich spotify_data matching
+        # the normal discovery shape, clear wing-it flag since the user
+        # picked a real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
+        result['manual_match'] = True
+
+        if old_status != 'found' and old_status != 'Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        logger.info(f"Manual match updated: qobuz - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        try:
+            original_track = result.get('qobuz_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            original_artist = original_artists[0] if original_artists else ''
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            image_url = spotify_track.get('image_url') or ''
+            album_raw = spotify_track.get('album', '')
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
+                original_name, original_artist
+            )
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        logger.error(f"Error updating Qobuz discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/qobuz/playlists/states', methods=['GET'])
+def get_qobuz_playlist_states():
+    """Get all stored Qobuz playlist discovery states for frontend hydration."""
+    try:
+        states = []
+        current_time = time.time()
+
+        for playlist_id, state in qobuz_discovery_states.items():
+            state['last_accessed'] = current_time
+
+            state_info = {
+                'playlist_id': playlist_id,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'last_accessed': state['last_accessed']
+            }
+            states.append(state_info)
+
+        logger.info(f"Returning {len(states)} stored Qobuz playlist states for hydration")
+        return jsonify({"states": states})
+
+    except Exception as e:
+        logger.error(f"Error getting Qobuz playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/state/<playlist_id>', methods=['GET'])
+def get_qobuz_playlist_state(playlist_id):
+    """Get specific Qobuz playlist state (detailed version)."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'playlist_id': playlist_id,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'last_accessed': state['last_accessed']
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting Qobuz playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/reset/<playlist_id>', methods=['POST'])
+def reset_qobuz_playlist(playlist_id):
+    """Reset Qobuz playlist to fresh phase (clear discovery/sync data)."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        state['phase'] = 'fresh'
+        state['status'] = 'fresh'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['download_process_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+
+        logger.info(f"Reset Qobuz playlist to fresh: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
+
+    except Exception as e:
+        logger.error(f"Error resetting Qobuz playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/delete/<playlist_id>', methods=['POST'])
+def delete_qobuz_playlist(playlist_id):
+    """Delete Qobuz playlist state completely."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        del qobuz_discovery_states[playlist_id]
+
+        logger.info(f"Deleted Qobuz playlist state: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist deleted"})
+
+    except Exception as e:
+        logger.error(f"Error deleting Qobuz playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/update_phase/<playlist_id>', methods=['POST'])
+def update_qobuz_playlist_phase(playlist_id):
+    """Update Qobuz playlist phase (used when modal closes to reset from download_complete to discovered)."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        data = request.get_json()
+        if not data or 'phase' not in data:
+            return jsonify({"error": "Phase not provided"}), 400
+
+        new_phase = data['phase']
+        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+
+        state = qobuz_discovery_states[playlist_id]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        if 'download_process_id' in data:
+            state['download_process_id'] = data['download_process_id']
+        if 'converted_spotify_playlist_id' in data:
+            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+
+        logger.info(f"Updated Qobuz playlist {playlist_id} phase: {old_phase} → {new_phase}")
+        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
+
+    except Exception as e:
+        logger.error(f"Error updating Qobuz playlist phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# Qobuz discovery worker logic lives in core/discovery/qobuz.py.
+from core.discovery import qobuz as _discovery_qobuz
+
+
+def _build_qobuz_discovery_deps():
+    """Build the QobuzDiscoveryDeps bundle from web_server.py globals on each call."""
+    return _discovery_qobuz.QobuzDiscoveryDeps(
+        qobuz_discovery_states=qobuz_discovery_states,
+        spotify_client=spotify_client,
+        pause_enrichment_workers=_pause_enrichment_workers,
+        resume_enrichment_workers=_resume_enrichment_workers,
+        get_active_discovery_source=_get_active_discovery_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_discovery_cache_key=_get_discovery_cache_key,
+        get_database=get_database,
+        validate_discovery_cache_artist=_validate_discovery_cache_artist,
+        search_spotify_for_tidal_track=_search_spotify_for_tidal_track,
+        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        add_activity_item=add_activity_item,
+        sync_discovery_results_to_mirrored=_sync_discovery_results_to_mirrored,
+    )
+
+
+def _run_qobuz_discovery_worker(playlist_id):
+    return _discovery_qobuz.run_qobuz_discovery_worker(playlist_id, _build_qobuz_discovery_deps())
+
+
+def convert_qobuz_results_to_spotify_tracks(discovery_results):
+    """Convert Qobuz discovery results to Spotify tracks format for sync."""
+    spotify_tracks = []
+
+    for result in discovery_results:
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data.get('duration_ms', 0)
+            }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
+            spotify_tracks.append(track)
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
+    logger.info(f"Converted {len(spotify_tracks)} Qobuz matches to Spotify tracks for sync")
+    return spotify_tracks
+
+
+# ===================================================================
+# QOBUZ SYNC API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/qobuz/sync/start/<playlist_id>', methods=['POST'])
+def start_qobuz_sync(playlist_id):
+    """Start sync process for a Qobuz playlist using discovered Spotify tracks."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
+            return jsonify({"error": "Qobuz playlist not ready for sync"}), 400
+
+        spotify_tracks = convert_qobuz_results_to_spotify_tracks(state['discovery_results'])
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        sync_playlist_id = f"qobuz_{playlist_id}"
+        playlist_name = state['playlist']['name']
+
+        add_activity_item("", "Qobuz Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': playlist_name,
+            'tracks': spotify_tracks
+        }
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        playlist_image_url = state['playlist'].get('image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
+        active_sync_workers[sync_playlist_id] = future
+
+        logger.info(f"Started Qobuz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        logger.error(f"Error starting Qobuz sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/sync/status/<playlist_id>', methods=['GET'])
+def get_qobuz_sync_status(playlist_id):
+    """Get sync status for a Qobuz playlist."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            playlist_name = state['playlist']['name']
+            add_activity_item("", "Sync Complete", f"Qobuz playlist '{playlist_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'
+            playlist_name = state['playlist']['name']
+            add_activity_item("", "Sync Failed", f"Qobuz playlist '{playlist_name}' sync failed", "Now")
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting Qobuz sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/qobuz/sync/cancel/<playlist_id>', methods=['POST'])
+def cancel_qobuz_sync(playlist_id):
+    """Cancel sync for a Qobuz playlist."""
+    try:
+        if playlist_id not in qobuz_discovery_states:
+            return jsonify({"error": "Qobuz playlist not found"}), 404
+
+        state = qobuz_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id:
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        return jsonify({"success": True, "message": "Qobuz sync cancelled"})
+
+    except Exception as e:
+        logger.error(f"Error cancelling Qobuz sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
 # SPOTIFY PUBLIC PLAYLIST DISCOVERY API ENDPOINTS
 # ===================================================================
 
@@ -24315,9 +24968,10 @@ def select_profile():
                 return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
         session['profile_id'] = profile_id
-        # If PIN was just validated, also mark launch PIN as verified
-        # so the subsequent page reload doesn't ask again
-        if pin:
+        # If the admin PIN was just validated, also mark launch PIN as
+        # verified so the subsequent page reload doesn't ask again. A
+        # non-admin profile PIN must not unlock the admin launch lock.
+        if pin and profile_id == 1:
             session['launch_pin_verified'] = True
         return jsonify({'success': True, 'profile': profile})
     except Exception as e:
@@ -24402,12 +25056,16 @@ def reset_pin_via_credential():
 
         # Credential verified — clear PIN for the requested profile (default: admin)
         database = get_database()
-        target_profile = data.get('profile_id', 1)
+        try:
+            target_profile = int(data.get('profile_id', 1))
+        except (TypeError, ValueError):
+            target_profile = 1
         database.update_profile(target_profile, pin_hash=None)
         # If clearing admin PIN, also disable launch lock
         if target_profile == 1:
             config_manager.set('security.require_pin_on_launch', False)
-        session['launch_pin_verified'] = True
+        if target_profile == 1:
+            session['launch_pin_verified'] = True
 
         return jsonify({'success': True, 'message': 'PIN cleared. You can set a new PIN in Settings.'})
     except Exception as e:
@@ -33159,6 +33817,101 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/lyrics/fetch', methods=['POST'])
+def fetch_lyrics_endpoint():
+    """Fetch lyrics for the now-playing media player.
+
+    Body: ``{title, artist, album?, duration?}``. Returns
+    ``{success, synced, plain, source}`` where ``synced`` is an LRC
+    string with ``[mm:ss.xx] line`` timestamps (or None) and ``plain``
+    is the untimestamped text (or None). ``source`` is the lookup
+    strategy that hit (``exact`` / ``search`` / ``sidecar``).
+
+    Tries the local ``.lrc`` / ``.txt`` sidecar first when a
+    ``file_path`` is supplied — already-downloaded tracks should not
+    bounce LRClib on every play. Falls through to LRClib's exact-
+    match endpoint when title+artist+album+duration are all available,
+    then to its generic search endpoint.
+    """
+    try:
+        data = request.get_json() or {}
+        title = (data.get('title') or '').strip()
+        artist = (data.get('artist') or '').strip()
+        album = (data.get('album') or '').strip() or None
+        try:
+            duration = int(data.get('duration') or 0) or None
+        except (TypeError, ValueError):
+            duration = None
+        file_path = data.get('file_path') or None
+
+        if not title or not artist:
+            return jsonify({'success': False, 'error': 'title and artist required',
+                            'synced': None, 'plain': None, 'source': None}), 400
+
+        # 1. Sidecar — fastest, no network. The post-processing flow
+        #    drops .lrc / .txt next to the audio for every successful
+        #    enrichment, so existing downloads almost always have one.
+        if file_path:
+            try:
+                import os as _os
+                stem, _ = _os.path.splitext(file_path)
+                lrc_path = stem + '.lrc'
+                txt_path = stem + '.txt'
+                if _os.path.exists(lrc_path):
+                    with open(lrc_path, 'r', encoding='utf-8') as fh:
+                        body = fh.read().strip()
+                    if body:
+                        return jsonify({'success': True, 'synced': body,
+                                        'plain': None, 'source': 'sidecar'})
+                if _os.path.exists(txt_path):
+                    with open(txt_path, 'r', encoding='utf-8') as fh:
+                        body = fh.read().strip()
+                    if body:
+                        return jsonify({'success': True, 'synced': None,
+                                        'plain': body, 'source': 'sidecar'})
+            except Exception as sidecar_err:
+                logger.debug("lyrics sidecar read skipped: %s", sidecar_err)
+
+        # 2. LRClib network lookup via the shared client instance.
+        from core.lyrics_client import lyrics_client as _lyrics_client
+        api = getattr(_lyrics_client, 'api', None)
+        if api is None:
+            return jsonify({'success': False, 'error': 'lrclib unavailable',
+                            'synced': None, 'plain': None, 'source': None}), 200
+
+        result = None
+        # Exact-match endpoint requires all four fields. LRClib's API
+        # will 404 on any miss; treat as soft failure and fall through
+        # to the search endpoint.
+        if album and duration:
+            try:
+                result = api.get_lyrics(track_name=title, artist_name=artist,
+                                        album_name=album, duration=duration)
+            except Exception as exact_err:
+                logger.debug("lrclib exact lookup failed: %s", exact_err)
+
+        if result is None:
+            try:
+                hits = api.search_lyrics(track_name=title, artist_name=artist)
+                if hits:
+                    result = hits[0]
+            except Exception as search_err:
+                logger.debug("lrclib search lookup failed: %s", search_err)
+
+        if result is None:
+            return jsonify({'success': False, 'error': 'no lyrics found',
+                            'synced': None, 'plain': None, 'source': None})
+
+        synced = getattr(result, 'synced_lyrics', None) or None
+        plain = getattr(result, 'plain_lyrics', None) or None
+        return jsonify({'success': bool(synced or plain), 'synced': synced,
+                        'plain': plain, 'source': 'lrclib'})
+    except Exception as e:
+        logger.error("lyrics fetch failed: %s", e)
+        return jsonify({'success': False, 'error': str(e),
+                        'synced': None, 'plain': None, 'source': None}), 500
+
+
 @app.route('/api/stats/resolve-track', methods=['POST'])
 def stats_resolve_track():
     """Resolve a track by title+artist to get its file_path for playback."""
@@ -34519,6 +35272,7 @@ def _emit_discovery_progress_loop():
     """Push discovery progress to subscribed rooms every 1 second."""
     platform_states = {
         'tidal': lambda: tidal_discovery_states,
+        'qobuz': lambda: qobuz_discovery_states,
         'deezer': lambda: deezer_discovery_states,
         'youtube': lambda: youtube_playlist_states,
         'beatport': lambda: beatport_chart_states,

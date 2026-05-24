@@ -711,6 +711,249 @@ class QobuzClient(DownloadSourcePlugin):
             logger.error(f"Error getting Qobuz track {track_id}: {e}")
             return None
 
+    # ===================== Playlists & Favorites =====================
+    #
+    # Qobuz playlist sync surface — mirrors the Tidal client contract
+    # (see core/tidal_client.py:629 + :1227) so the Sync page's
+    # per-service handlers can render Qobuz playlists in the same
+    # discovery / mirror flow. Returns normalized dicts rather than
+    # dataclasses to match the rest of this client's idiom.
+    #
+    # Favorite Tracks ride on the same `get_playlist()` entry point via
+    # the virtual ID below — same pattern as Tidal's COLLECTION_PLAYLIST_ID
+    # so sync-services.js can treat favorites as just another playlist
+    # card without per-service special-casing.
+    QOBUZ_FAVORITES_ID = "qobuz-favorites"
+    QOBUZ_FAVORITES_NAME = "Favorite Tracks"
+    QOBUZ_FAVORITES_DESCRIPTION = "Your favorited tracks on Qobuz"
+
+    # Page size for paginated playlist + favorite listings. Qobuz caps at
+    # 500 per page; 100 is a safe middle ground for responsiveness.
+    _PLAYLIST_PAGE_SIZE = 100
+
+    def _normalize_qobuz_playlist(self, p: Dict) -> Dict:
+        """Project a Qobuz playlist dict into the shape the Sync page expects."""
+        image = p.get('images', []) or []
+        image_url = image[0] if image else (p.get('image_rectangle', [None])[0] if p.get('image_rectangle') else None)
+        if not image_url:
+            image_url = p.get('image', '') or ''
+        return {
+            'id': str(p.get('id', '')),
+            'name': p.get('name', 'Unknown Playlist'),
+            'description': p.get('description', '') or '',
+            'public': bool(p.get('is_public', False)),
+            'track_count': int(p.get('tracks_count', 0) or 0),
+            'image_url': image_url,
+            'external_urls': {'qobuz': f"https://play.qobuz.com/playlist/{p.get('id', '')}"} if p.get('id') else {},
+        }
+
+    def _normalize_qobuz_track(self, t: Dict) -> Dict:
+        """Project a Qobuz track dict into the shape the Sync page expects."""
+        performer = t.get('performer') or {}
+        album = t.get('album') or {}
+        album_artist = album.get('artist') or {}
+
+        # Artist names — Qobuz can stash the artist on performer, album.artist,
+        # or composer depending on the track. Prefer performer, fall back to
+        # album artist, then composer, then "Unknown Artist".
+        artist_name = (
+            performer.get('name')
+            or album_artist.get('name')
+            or (t.get('composer') or {}).get('name')
+            or 'Unknown Artist'
+        )
+
+        album_image = album.get('image') or {}
+        image_url = album_image.get('large') or album_image.get('small') or album_image.get('thumbnail') or ''
+
+        return {
+            'id': str(t.get('id', '')),
+            'name': t.get('title', '') or '',
+            'artists': [artist_name],
+            'album': album.get('title', '') or '',
+            'duration_ms': int(t.get('duration', 0) or 0) * 1000,
+            'image_url': image_url,
+            'external_urls': {'qobuz': f"https://play.qobuz.com/track/{t.get('id', '')}"} if t.get('id') else {},
+            'explicit': bool(t.get('parental_warning', False)),
+        }
+
+    def get_user_playlists(self) -> List[Dict[str, Any]]:
+        """Fetch the authenticated user's Qobuz playlists.
+
+        Returns metadata only (no tracks) — track lists are fetched
+        on-demand via `get_playlist()` when the user selects one.
+        Matches the Tidal `get_user_playlists_metadata_only` contract
+        so the Sync page renderer can treat both services uniformly.
+        """
+        if not self.is_authenticated():
+            logger.warning("Qobuz not authenticated — cannot list playlists")
+            return []
+
+        playlists: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            data = self._api_request('playlist/getUserPlaylists', {
+                'limit': self._PLAYLIST_PAGE_SIZE,
+                'offset': offset,
+            })
+            if not data:
+                break
+
+            container = data.get('playlists') or {}
+            items = container.get('items', []) or []
+            if not items:
+                break
+
+            for raw in items:
+                try:
+                    playlists.append(self._normalize_qobuz_playlist(raw))
+                except Exception as exc:
+                    logger.debug(f"Skipping malformed Qobuz playlist entry: {exc}")
+
+            total = int(container.get('total', len(playlists)) or len(playlists))
+            offset += len(items)
+            if offset >= total or len(items) < self._PLAYLIST_PAGE_SIZE:
+                break
+
+        logger.info(f"Retrieved {len(playlists)} Qobuz user playlists")
+        return playlists
+
+    def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a Qobuz playlist with its full tracklist.
+
+        Recognizes the virtual ``qobuz-favorites`` ID and dispatches to
+        ``get_user_favorite_tracks`` so the Sync page can treat
+        favorites as just another playlist card (same pattern as
+        Tidal's ``tidal-favorites``).
+        """
+        if not self.is_authenticated():
+            logger.warning("Qobuz not authenticated — cannot fetch playlist")
+            return None
+
+        if str(playlist_id) == self.QOBUZ_FAVORITES_ID:
+            tracks = self.get_user_favorite_tracks()
+            return {
+                'id': self.QOBUZ_FAVORITES_ID,
+                'name': self.QOBUZ_FAVORITES_NAME,
+                'description': self.QOBUZ_FAVORITES_DESCRIPTION,
+                'public': False,
+                'track_count': len(tracks),
+                'image_url': '',
+                'external_urls': {},
+                'tracks': tracks,
+            }
+
+        # Paginate tracks ourselves — Qobuz's playlist/get only returns
+        # the first ~50 tracks even with limit=500 on some accounts.
+        tracks: List[Dict[str, Any]] = []
+        offset = 0
+        playlist_meta: Optional[Dict] = None
+        while True:
+            data = self._api_request('playlist/get', {
+                'playlist_id': playlist_id,
+                'extra': 'tracks',
+                'limit': self._PLAYLIST_PAGE_SIZE,
+                'offset': offset,
+            })
+            if not data:
+                break
+
+            if playlist_meta is None:
+                playlist_meta = data
+
+            track_container = data.get('tracks') or {}
+            items = track_container.get('items', []) or []
+            if not items:
+                break
+
+            for raw in items:
+                try:
+                    tracks.append(self._normalize_qobuz_track(raw))
+                except Exception as exc:
+                    logger.debug(f"Skipping malformed Qobuz playlist track: {exc}")
+
+            total = int(track_container.get('total', len(tracks)) or len(tracks))
+            offset += len(items)
+            if offset >= total or len(items) < self._PLAYLIST_PAGE_SIZE:
+                break
+
+        if playlist_meta is None:
+            logger.warning(f"Qobuz playlist {playlist_id} not found")
+            return None
+
+        normalized = self._normalize_qobuz_playlist(playlist_meta)
+        normalized['tracks'] = tracks
+        normalized['track_count'] = len(tracks)
+        logger.info(f"Retrieved Qobuz playlist '{normalized['name']}' with {len(tracks)} tracks")
+        return normalized
+
+    def get_user_favorite_tracks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Fetch the authenticated user's favorited tracks.
+
+        Mirrors ``TidalClient.get_collection_tracks`` — the Sync page's
+        Favorite Tracks card pulls from here on click. By default this
+        fetches the full favorites collection so the card count and the
+        discovered track list cannot silently diverge. Pass ``limit`` for
+        explicit capped callers.
+        """
+        if not self.is_authenticated():
+            logger.warning("Qobuz not authenticated — cannot list favorite tracks")
+            return []
+
+        tracks: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            page_size = self._PLAYLIST_PAGE_SIZE if limit is None else min(self._PLAYLIST_PAGE_SIZE, limit - len(tracks))
+            if page_size <= 0:
+                break
+
+            data = self._api_request('favorite/getUserFavorites', {
+                'type': 'tracks',
+                'limit': page_size,
+                'offset': offset,
+            })
+            if not data:
+                break
+
+            container = data.get('tracks') or {}
+            items = container.get('items', []) or []
+            if not items:
+                break
+
+            for raw in items:
+                try:
+                    tracks.append(self._normalize_qobuz_track(raw))
+                except Exception as exc:
+                    logger.debug(f"Skipping malformed Qobuz favorite track: {exc}")
+
+            total = int(container.get('total', len(tracks)) or len(tracks))
+            offset += len(items)
+            if offset >= total or len(items) < page_size:
+                break
+            if limit is not None and len(tracks) >= limit:
+                break
+
+        logger.info(f"Retrieved {len(tracks)} Qobuz favorite tracks")
+        return tracks
+
+    def get_user_favorite_tracks_count(self) -> int:
+        """Cheap track-count lookup for the Favorite Tracks card metadata.
+
+        Mirrors ``TidalClient.get_collection_tracks_count`` — avoids
+        fetching the full list just to populate the card's track-count
+        chip on the Sync page.
+        """
+        if not self.is_authenticated():
+            return 0
+        data = self._api_request('favorite/getUserFavorites', {
+            'type': 'tracks',
+            'limit': 1,
+            'offset': 0,
+        })
+        if not data:
+            return 0
+        return int((data.get('tracks') or {}).get('total', 0) or 0)
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """
         Search Qobuz for tracks (async, Soulseek-compatible interface).

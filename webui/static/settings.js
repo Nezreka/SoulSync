@@ -600,6 +600,7 @@ const HYBRID_SOURCES = [
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
+const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
 let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
@@ -625,6 +626,13 @@ function buildHybridSourceList() {
         const enabled = _hybridSourceEnabled[srcId] !== false;
         const isInOrder = _hybridSourceOrder.includes(srcId);
         const priorityNum = isInOrder && enabled ? _hybridSourceOrder.indexOf(srcId) + 1 : '';
+        const canOwnAlbum = enabled && priorityNum === 1 && ALBUM_LEVEL_HYBRID_SOURCES.has(srcId);
+        const sourceLevel = canOwnAlbum ? 'Album-level' : 'Track-level';
+        const sourceLevelClass = canOwnAlbum ? 'album' : 'track';
+        const sourceLevelTitle = canOwnAlbum
+            ? 'This first source can download a whole album release before per-track fallback.'
+            : 'This source runs as per-track fallback in the current hybrid order.';
+        const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
 
         const item = document.createElement('div');
         item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
@@ -641,6 +649,7 @@ function buildHybridSourceList() {
                 : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
             }
             <span class="hybrid-source-name">${src.name}</span>
+            ${sourceLevelBadge}
             <span class="hybrid-source-priority">${priorityNum}</span>
             <label class="hybrid-source-toggle">
                 <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">

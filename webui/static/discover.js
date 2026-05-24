@@ -6841,7 +6841,7 @@ function _renderByltTrackCard(t) {
     return `
         <div class="discover-card">
             <div class="discover-card-image">
-                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
             </div>
             <div class="discover-card-title">${_esc(t.name)}</div>
             <div class="discover-card-artist">${_esc(t.artist)}</div>

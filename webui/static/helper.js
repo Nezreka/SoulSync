@@ -1632,7 +1632,7 @@ const HELPER_CONTENT = {
 
     // ─── STATS PAGE ──────────────────────────────────────────────────
 
-    '.stats-container': {
+    '#stats-container': {
         title: 'Listening Stats',
         description: 'Analytics dashboard showing your listening activity, top artists/albums/tracks, genre breakdown, library health, and storage usage. Data syncs from your media server.',
     },
@@ -3413,8 +3413,15 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.0': [
+        { date: 'May 24, 2026 — 2.6.0 release' },
+        { title: 'Qobuz playlist sync', desc: 'new Qobuz tab on the Sync page. Connect Qobuz in Settings → Connections, hit Refresh on the tab, and your Qobuz playlists + Favorite Tracks show up alongside Tidal and Deezer. clicks run the same discovery → sync → download flow as the other sources.', page: 'sync' },
+        { title: 'Import search: show when results came from the fallback source', desc: 'if you picked MusicBrainz (or Discogs / iTunes / etc.) as your primary metadata source but the Import album search ended up serving Deezer cards, you had no idea — the chain silently fell through when the primary returned nothing. now each card shows a small "via Deezer" label when the source differs from your primary, and a banner above the grid spells it out when all results came from the fallback. backend behavior unchanged.' },
+    ],
     '2.5.9': [
         { date: 'May 21, 2026 — 2.5.9 release' },
+        { title: 'Now-playing modal: lyrics panel', desc: 'new lyrics panel below the player controls in the expanded now-playing modal. fetches from LRClib via /api/lyrics/fetch, but prefers the local .lrc / .txt sidecar files SoulSync drops next to your audio during post-processing so downloaded tracks show lyrics instantly with zero network. synced LRC (timestamped) highlights the active line and auto-scrolls it into the middle of the viewport on every audio timeupdate; plain text renders without highlighting. status chip shows whether the result came back Synced or Plain. panel is collapsed by default — click the Lyrics header to expand. cached per track so revisiting a track doesn\'t refetch.' },
+        { title: 'Now-playing modal: View Artist closes the modal first', desc: 'tapping View Artist on the expanded media player now closes the now-playing modal before navigating, so the artist page is actually visible instead of sitting under a modal you\'d have to manually dismiss. click is a no-op when no artist_id is attached to the current track.' },
         { title: 'Torrent and Usenet release downloads', desc: 'torrent and usenet are now real download sources backed by Prowlarr plus your configured downloader client. album downloads use a release-first staging flow so SoulSync downloads one release, watches live progress, then imports the matching tracks from the staged files. hybrid mode keeps torrent / usenet out of album batches, but still lets them participate for playlist singles and wishlist tracks.' },
         { title: 'Fix: HiFi public instance compatibility', desc: 'HiFi instance probing now understands both supported manifest shapes: the newer /trackManifests-style flow and the public hifi-api /track/ legacy flow. instances that can search and return a playable HLS manifest are no longer mislabeled as Search only. browser-openable pages can still be offline from the API side, so HTTP 502 / Offline labels are still shown honestly.' },
         { title: 'Fix: Jellyfin full refresh imports tracks on older databases', desc: 'full refresh could import artists and albums but fail every Jellyfin track on upgraded databases that were missing newer media columns. startup repair now adds the missing tracks.file_size and albums.api_track_count columns before refresh work runs, so old databases can accept new Jellyfin track rows again.' },
@@ -3492,16 +3499,28 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "2.5.9 Release Stability Pass",
-        description: "this release ties together the new release-based download sources and a set of fixes from real user reports: HiFi instance detection, Jellyfin full refreshes, transient SQLite disk I/O failures, and wrong-artist Album Completeness fills.",
+        title: "Qobuz Playlist Sync",
+        description: "Qobuz joins Tidal and Deezer as a first-class playlist sync source on the Sync page. Browse your Qobuz playlists and Favorite Tracks, run them through the same discovery flow as Tidal, sync the resulting Spotify-matched tracks, and queue downloads — same multi-step pipeline you already know.",
+        features: [
+            "new Qobuz tab on the Sync page, listed between Deezer and Deezer Link",
+            "lists your Qobuz user playlists plus a Favorite Tracks entry (same virtual-playlist treatment Tidal gets)",
+            "click any card to fire discovery (Spotify-preferred, your primary metadata fallback otherwise), then sync or download just like Tidal / Deezer playlists",
+            "uses the Qobuz auth token you already configured for downloads — no extra connection step",
+        ],
+        usage_note: "Sync → Qobuz → 🔄 Refresh",
+    },
+    {
+        title: "Earlier in v2.5",
+        description: "highlights from the 2.5.x cycle that landed just before 2.6.0: new release-based download sources, HiFi instance probing, Jellyfin full-refresh repairs, transient SQLite retries, and tighter Album Completeness artist matching.",
         features: [
             "Torrent and Usenet are now available as Prowlarr-backed download sources with release staging, live progress, and source-aware history labels",
             "HiFi instances are probed by actually checking whether they can return a playable manifest, including legacy public hifi-api instances",
             "Jellyfin full refresh repairs older media databases before importing tracks, so stale schemas no longer drop every track row",
             "Cache maintenance and full refresh retry transient SQLite disk I/O errors instead of failing the whole job on the first attempt",
             "Album Completeness rejects same-title releases from the wrong artist before importing anything",
+            "Import album search now labels each card with the source that served it and warns when results came from a fallback instead of your primary",
         ],
-        usage_note: "version 2.5.9 focuses on safer matching and making the new release-based sources usable without disturbing existing source flows",
+        usage_note: "browse the What's New panel for the full 2.5.x changelog",
     },
     {
         title: "Torrent and Usenet Are Now Live Download Sources",
@@ -3887,7 +3906,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.5.9';
+    return versions[0] || '2.6.0';
 }
 
 function openWhatsNew() {
