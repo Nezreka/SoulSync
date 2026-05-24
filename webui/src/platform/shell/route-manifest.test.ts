@@ -18,7 +18,9 @@ describe('shellRouteManifest', () => {
     expect(resolveShellPageFromPath('/watchlist')).toBe('watchlist');
     expect(resolveShellPageFromPath('/active-downloads')).toBe('active-downloads');
     expect(resolveShellPageFromPath('/artist-detail')).toBeNull();
-    expect(resolveShellPageFromPath('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')).toBe('artist-detail');
+    expect(resolveShellPageFromPath('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')).toBe(
+      'artist-detail',
+    );
     expect(resolveShellPageFromPath('/artists')).toBeNull();
   });
 

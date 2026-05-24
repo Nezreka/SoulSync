@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { type DragEvent, type KeyboardEvent, useState } from 'react';
 import clsx from 'clsx';
+import { type DragEvent, type KeyboardEvent, useState } from 'react';
 
 import { Button, TextInput } from '@/components/form/form';
+import { Notice } from '@/components/primitives';
 
 import type { ImportAlbumResult } from '../-import.types';
 
@@ -15,6 +16,8 @@ import {
 import {
   getDisplayedMatchFile,
   getEffectiveAlbumMatches,
+  getImportSourceBadgeText,
+  getImportSourceFallbackBanner,
   getTrackDisplayInfo,
   getUnmatchedStagingFiles,
   IMPORT_PLACEHOLDER_IMAGE,
@@ -47,6 +50,7 @@ function useAlbumImportViewModel() {
     albumResults,
     albumSearchError,
     albumSearchLoading,
+    albumSearchLookupSource,
     autoGroupFilePaths,
     clearAutoGroupFilePaths,
     matchOverrides,
@@ -60,6 +64,7 @@ function useAlbumImportViewModel() {
     setAlbumSearchContext,
     setAlbumSearchError,
     setAlbumSearchLoading,
+    setAlbumSearchLookupSource,
     setMatchOverrides,
     setSelectedAlbum,
   } = useAlbumImportWorkflow();
@@ -68,7 +73,7 @@ function useAlbumImportViewModel() {
     setDragOverTrack(null);
     setTapSelectedChip(null);
     resetAlbumWorkflow();
-    refreshStaging();
+    void refreshStaging();
   };
 
   const runAlbumSearch = async (query: string, filePaths: string[] | null = null) => {
@@ -80,6 +85,7 @@ function useAlbumImportViewModel() {
     try {
       const payload = await searchImportAlbums(trimmed);
       setAlbumResults(payload.albums ?? []);
+      setAlbumSearchLookupSource(payload.primary_source ?? null);
     } catch (error) {
       setAlbumSearchError(getErrorMessage(error));
     } finally {
@@ -94,6 +100,8 @@ function useAlbumImportViewModel() {
     setAlbumMatchLoading(true);
 
     try {
+      // Pass the source that returned this result row so matching keeps using the
+      // same provider even if the search fell back from the lookup source.
       const payload = await matchImportAlbum({
         albumId: album.id,
         source: album.source,
@@ -165,6 +173,7 @@ function useAlbumImportViewModel() {
     albumResults,
     albumSearchError,
     albumSearchLoading,
+    albumSearchLookupSource,
     dragOverTrack,
     groups: groupsQuery.data?.groups ?? [],
     matchOverrides,
@@ -200,6 +209,7 @@ function useAlbumImportViewModel() {
     stagingFiles,
     suggestions: suggestionsQuery.data?.suggestions ?? [],
     suggestionsReady: suggestionsQuery.data?.ready ?? true,
+    suggestionsLookupSource: suggestionsQuery.data?.primary_source ?? null,
     tapSelectedChip,
   };
 }
@@ -221,6 +231,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
     albumResults,
     albumSearchError,
     albumSearchLoading,
+    albumSearchLookupSource,
     groups,
     onAlbumQueryChange,
     onBackToSearch,
@@ -230,13 +241,25 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
     selectedAlbum,
     suggestions,
     suggestionsReady,
+    suggestionsLookupSource,
   } = viewModel;
 
   const showingMatch = selectedAlbum || albumMatchLoading || albumMatchError || albumMatch;
+  const suggestionsFallbackBanner = getImportSourceFallbackBanner(
+    suggestions,
+    suggestionsLookupSource,
+  );
+  const albumResultsFallbackBanner = getImportSourceFallbackBanner(
+    albumResults,
+    albumSearchLookupSource,
+  );
 
   return (
     <>
-      <div id="import-page-album-search-section" className={clsx({ [styles.hidden]: showingMatch })}>
+      <div
+        id="import-page-album-search-section"
+        className={clsx({ [styles.hidden]: showingMatch })}
+      >
         {albumResults === null && (
           <>
             {groups.length > 0 && (
@@ -266,12 +289,16 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
 
             <div className={styles.importPageSuggestions} id="import-page-suggestions">
               <div className={styles.importPageSectionLabel}>Suggested from your import folder</div>
+              {suggestionsFallbackBanner ? (
+                <Notice tone="warning">{suggestionsFallbackBanner}</Notice>
+              ) : null}
               <div className={styles.importPageAlbumGrid} id="import-page-suggestions-grid">
                 {suggestions.length > 0 ? (
                   suggestions.map((album) => (
                     <AlbumCard
                       key={`${album.source || 'source'}-${album.id}`}
                       album={album}
+                      lookupSource={suggestionsLookupSource}
                       onSelect={onSelectAlbum}
                     />
                   ))
@@ -310,11 +337,16 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
           </Button>
         </div>
 
+        {albumResultsFallbackBanner ? (
+          <Notice tone="warning">{albumResultsFallbackBanner}</Notice>
+        ) : null}
         <div className={styles.importPageAlbumGrid} id="import-page-album-results">
           {albumSearchLoading ? (
             <div className={styles.importPageEmptyState}>Searching...</div>
           ) : albumSearchError ? (
-            <div className={styles.importPageEmptyState}>Error: {albumSearchError}</div>
+            <Notice tone="danger" role="alert">
+              Error: {albumSearchError}
+            </Notice>
           ) : albumResults?.length === 0 ? (
             <div className={styles.importPageEmptyState}>No albums found</div>
           ) : (
@@ -322,6 +354,7 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
               <AlbumCard
                 key={`${album.source || 'source'}-${album.id}`}
                 album={album}
+                lookupSource={albumSearchLookupSource}
                 onSelect={onSelectAlbum}
               />
             ))
@@ -329,11 +362,16 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
         </div>
       </div>
 
-      <div id="import-page-album-match-section" className={clsx({ [styles.hidden]: !showingMatch })}>
+      <div
+        id="import-page-album-match-section"
+        className={clsx({ [styles.hidden]: !showingMatch })}
+      >
         {albumMatchLoading ? (
           <div className={styles.importPageEmptyState}>Matching files to tracklist...</div>
         ) : albumMatchError ? (
-          <div className={styles.importPageEmptyState}>Error: {albumMatchError}</div>
+          <Notice tone="danger" role="alert">
+            Error: {albumMatchError}
+          </Notice>
         ) : albumMatch?.album ? (
           <AlbumMatchPanel viewModel={viewModel} />
         ) : (
@@ -348,13 +386,17 @@ function AlbumImportPanelContent({ viewModel }: { viewModel: AlbumImportViewMode
 
 function AlbumCard({
   album,
+  lookupSource,
   onSelect,
 }: {
   album: ImportAlbumResult;
+  lookupSource: string | null;
   onSelect: (album: ImportAlbumResult) => void;
 }) {
+  const resultSourceBadge = getImportSourceBadgeText(album.source, lookupSource);
+
   return (
-    <button className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
+    <button type="button" className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
       <img
         src={album.image_url || IMPORT_PLACEHOLDER_IMAGE}
         alt={album.name}
@@ -370,6 +412,9 @@ function AlbumCard({
       <div className={styles.importPageAlbumCardMeta}>
         {album.total_tracks || 0} tracks · {album.release_date?.substring(0, 4) || ''}
       </div>
+      {resultSourceBadge ? (
+        <div className={styles.importPageAlbumCardSource}>{resultSourceBadge}</div>
+      ) : null}
     </button>
   );
 }
@@ -407,7 +452,9 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
   return albumMatchLoading ? (
     <div className={styles.importPageEmptyState}>Matching files to tracklist...</div>
   ) : albumMatchError ? (
-    <div className={styles.importPageEmptyState}>Error: {albumMatchError}</div>
+    <Notice tone="danger" role="alert">
+      Error: {albumMatchError}
+    </Notice>
   ) : albumMatch?.album ? (
     <>
       <div className={styles.importPageAlbumHero} id="import-page-album-hero">
@@ -474,9 +521,11 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
             >
               <span className={styles.importPageMatchNum}>{trackInfo.displayTrackNumber}</span>
               <span className={styles.importPageMatchTrack}>{trackInfo.name}</span>
-              <span className={clsx(styles.importPageMatchFile, {
-                [styles.hasFile]: file,
-              })}>
+              <span
+                className={clsx(styles.importPageMatchFile, {
+                  [styles.hasFile]: file,
+                })}
+              >
                 {file ? (
                   <>
                     <span className={styles.importPageMatchFileName}>{file.filename}</span>

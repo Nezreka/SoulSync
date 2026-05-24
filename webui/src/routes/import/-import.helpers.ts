@@ -11,6 +11,19 @@ import type {
 
 export const IMPORT_PLACEHOLDER_IMAGE = '/static/placeholder.png';
 
+const IMPORT_SOURCE_LABELS: Record<string, string> = {
+  amazon: 'Amazon Music',
+  deezer: 'Deezer',
+  discogs: 'Discogs',
+  hydrabase: 'Hydrabase',
+  itunes: 'Apple Music',
+  musicbrainz: 'MusicBrainz',
+  playlist: 'Playlist',
+  soulseek: 'Basic Search',
+  spotify: 'Spotify',
+  youtube_videos: 'Music Videos',
+};
+
 export function getStagingFileKey(file: ImportStagingFile): string {
   return file.full_path;
 }
@@ -25,6 +38,46 @@ export function getStagingStatsText(files: ImportStagingFile[]): string {
   const totalSize = files.reduce((sum, file) => sum + (file.size || 0), 0);
   const fileLabel = `${files.length} file${files.length === 1 ? '' : 's'}`;
   return totalSize ? `${fileLabel} - ${formatImportBytes(totalSize)}` : fileLabel;
+}
+
+export function getImportSourceLabel(source: string | null | undefined): string {
+  if (!source) return '';
+  return IMPORT_SOURCE_LABELS[source.toLowerCase()] || source;
+}
+
+/**
+ * Label a fallback result row so it is obvious which provider actually returned it.
+ */
+export function getImportSourceBadgeText(
+  resultSource: string | null | undefined,
+  lookupSource: string | null | undefined,
+): string {
+  if (!resultSource || !lookupSource) return '';
+  if (resultSource.toLowerCase() === lookupSource.toLowerCase()) return '';
+  return `via ${getImportSourceLabel(resultSource)}`;
+}
+
+/**
+ * Banner for a whole result set that came from a fallback provider rather than the lookup source.
+ */
+export function getImportSourceFallbackBanner(
+  results: Array<{ source: string }> | null | undefined,
+  lookupSource: string | null | undefined,
+): string {
+  if (!lookupSource || !results?.length) return '';
+  const normalizedLookupSource = lookupSource.toLowerCase();
+  if (
+    !results.every(
+      (result) => result.source && result.source.toLowerCase() !== normalizedLookupSource,
+    )
+  ) {
+    return '';
+  }
+
+  const resultSource = results[0]?.source;
+  if (!resultSource) return '';
+
+  return `Showing ${getImportSourceLabel(resultSource)} results - not from your primary source (${getImportSourceLabel(lookupSource)}).`;
 }
 
 export function getTrackDisplayInfo(match: ImportAlbumMatch, index: number) {
