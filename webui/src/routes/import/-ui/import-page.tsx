@@ -140,7 +140,8 @@ function ImportProcessingQueue() {
 function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
   const statusText = getQueueStatusText(entry);
   const statusClass = clsx({
-    [styles.error]: entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0),
+    [styles.error]:
+      entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0),
     [styles.done]: entry.status === 'done',
   });
 

@@ -53,7 +53,8 @@ export interface ImportAlbumResult {
   id: string;
   name: string;
   artist: string;
-  source?: string | null;
+  /** Provider that returned this result row. */
+  source: string;
   image_url?: string | null;
   total_tracks?: number | null;
   release_date?: string | null;
@@ -63,6 +64,8 @@ export interface ImportAlbumSearchPayload {
   success: boolean;
   albums?: ImportAlbumResult[];
   suggestions?: ImportAlbumResult[];
+  /** Provider used to seed the lookup chain for this response. */
+  primary_source?: string | null;
   ready?: boolean;
   error?: string;
 }
@@ -72,7 +75,8 @@ export interface ImportTrackResult {
   name: string;
   artist: string;
   album?: string | null;
-  source?: string | null;
+  /** Provider that returned this result row. */
+  source: string;
   image_url?: string | null;
   duration_ms?: number | null;
 }
@@ -80,6 +84,8 @@ export interface ImportTrackResult {
 export interface ImportTrackSearchPayload {
   success: boolean;
   tracks?: ImportTrackResult[];
+  /** Provider used to seed the lookup chain for this response. */
+  primary_source?: string | null;
   error?: string;
 }
 
@@ -87,7 +93,8 @@ export interface ImportAlbum {
   id?: string | number | null;
   name: string;
   artist: string;
-  source?: string | null;
+  /** Provider used to resolve this selected album. */
+  source: string;
   image_url?: string | null;
   total_tracks?: number | null;
   release_date?: string | null;

@@ -237,6 +237,13 @@
   margin-top: 4px;
 }
 
+.importPageAlbumCardSource {
+  font-size: 10px;
+  color: rgba(255, 200, 100, 0.75);
+  margin-top: 2px;
+  font-style: italic;
+}
+
 /* Album hero (selected album) */
 .importPageAlbumHero {
   display: flex;
@@ -639,11 +646,11 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-  .importPageSingleResultSelect {
-    padding: 4px 12px;
-    background: rgba(var(--accent-light-rgb), 0.15);
-    border: 1px solid rgba(var(--accent-light-rgb), 0.3);
-    border-radius: 6px;
+.importPageSingleResultSelect {
+  padding: 4px 12px;
+  background: rgba(var(--accent-light-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-light-rgb), 0.3);
+  border-radius: 6px;
   color: rgb(var(--accent-light-rgb));
   font-size: 11px;
   font-weight: 600;
@@ -651,14 +658,14 @@
   flex-shrink: 0;
 }
 
-  .importPageSingleResultSelect:hover {
-    background: rgba(var(--accent-light-rgb), 0.25);
-  }
+.importPageSingleResultSelect:hover {
+  background: rgba(var(--accent-light-rgb), 0.25);
+}
 
-  /* Empty state */
-  .importPageEmptyState {
-    text-align: center;
-    padding: 60px 20px;
+/* Empty state */
+.importPageEmptyState {
+  text-align: center;
+  padding: 60px 20px;
   color: rgba(255, 255, 255, 0.3);
   font-size: 14px;
 }
@@ -821,8 +828,8 @@
   .importPageMatchRow {
     grid-template-columns: 28px minmax(0, 1fr) auto;
     grid-template-areas:
-      "num track track"
-      "num file unmatch";
+      'num track track'
+      'num file unmatch';
     gap: 6px 8px;
     align-items: center;
   }
@@ -853,8 +860,8 @@
   .importPageSingleItem {
     grid-template-columns: 28px minmax(0, 1fr) auto;
     grid-template-areas:
-      "checkbox info actions"
-      "search search search";
+      'checkbox info actions'
+      'search search search';
     align-items: start;
     gap: 8px;
   }

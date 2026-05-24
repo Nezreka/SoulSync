@@ -2,13 +2,13 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createAppQueryClient } from '@/app/query-client';
+import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createShellBridge } from '@/test/shell-bridge';
 
-import { createAppQueryClient } from '@/app/query-client';
-import { AppRouterProvider, createAppRouter } from '@/app/router';
-
 import type { ImportStagingFile } from './-import.types';
+
 import { resetImportWorkflowStore } from './-import.store';
 
 function renderImportRoute(initialEntries = ['/import']) {
@@ -86,6 +86,7 @@ describe('import route', () => {
         return HttpResponse.json({
           success: true,
           ready: true,
+          primary_source: 'spotify',
           suggestions: [
             {
               id: 'album-1',
@@ -101,6 +102,7 @@ describe('import route', () => {
       http.get('/api/import/search/albums', () => {
         return HttpResponse.json({
           success: true,
+          primary_source: 'spotify',
           albums: [
             {
               id: 'album-1',
@@ -192,11 +194,17 @@ describe('import route', () => {
     await waitFor(() => expect(screen.getByTestId('import-page')).toBeInTheDocument());
     expect(await screen.findByText('Import Music')).toBeInTheDocument();
     expect(screen.getByText('Import: /music/Staging')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Showing Deezer results - not from your primary source (Spotify).'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('via Deezer')).toBeInTheDocument();
     await waitFor(() => expect(history.location.pathname).toBe('/import/album'));
     await waitFor(() =>
       expect(getFetchUrls().some((url) => url.includes('/api/import/staging/groups'))).toBe(true),
     );
-    expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(true);
+    expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(
+      true,
+    );
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('import');
     expect(window.SoulSyncWebShellBridge?.setActivePageChrome).toHaveBeenCalledWith('import');
   });
@@ -263,6 +271,40 @@ describe('import route', () => {
       album_name: 'Album A',
       album_artist: 'Artist A',
     });
+  });
+
+  it('surfaces the served source when album search falls back', async () => {
+    server.use(
+      http.get('/api/import/search/albums', () => {
+        return HttpResponse.json({
+          success: true,
+          primary_source: 'spotify',
+          albums: [
+            {
+              id: 'album-2',
+              name: 'Album A',
+              artist: 'Artist A',
+              source: 'musicbrainz',
+              total_tracks: 1,
+              release_date: '2026-01-01',
+            },
+          ],
+        });
+      }),
+    );
+
+    renderImportRoute();
+
+    const searchInput = await screen.findByPlaceholderText('Search for an album...');
+    fireEvent.change(searchInput, { target: { value: 'Album A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText(
+        'Showing MusicBrainz results - not from your primary source (Spotify).',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('via MusicBrainz')).toBeInTheDocument();
   });
 
   it('renders auto-import results from route search state', async () => {

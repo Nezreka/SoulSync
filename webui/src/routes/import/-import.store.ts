@@ -10,6 +10,7 @@ import type {
   ImportStagingFile,
   ImportTrackResult,
 } from './-import.types';
+
 import { getStagingFileKey } from './-import.helpers';
 
 export type SingleSearchState = {
@@ -33,6 +34,8 @@ function createInitialWorkflowState() {
     albumResults: null as ImportAlbumResult[] | null,
     albumSearchError: null as string | null,
     albumSearchLoading: false,
+    // Lookup source used to seed the album search. Result rows still carry their own `source`.
+    albumSearchLookupSource: null as string | null,
     autoGroupFilePaths: null as string[] | null,
     selectedAlbum: null as ImportAlbumResult | null,
     albumMatch: null as ImportAlbumMatchPayload | null,
@@ -82,6 +85,7 @@ export const useImportWorkflowStore = create(
         albumResults: null,
         albumSearchError: null,
         albumSearchLoading: false,
+        albumSearchLookupSource: null,
         autoGroupFilePaths: null,
         selectedAlbum: null,
         albumMatch: null,
@@ -94,12 +98,15 @@ export const useImportWorkflowStore = create(
     setAlbumResults: (albumResults: ImportAlbumResult[] | null) => set({ albumResults }),
     setAlbumSearchError: (albumSearchError: string | null) => set({ albumSearchError }),
     setAlbumSearchLoading: (albumSearchLoading: boolean) => set({ albumSearchLoading }),
+    setAlbumSearchLookupSource: (albumSearchLookupSource: string | null) =>
+      set({ albumSearchLookupSource }),
     setAlbumSearchContext: (albumQuery: string, autoGroupFilePaths: string[] | null) => {
       set({
         albumQuery,
         albumSearchLoading: true,
         albumSearchError: null,
         albumResults: null,
+        albumSearchLookupSource: null,
         selectedAlbum: null,
         albumMatch: null,
         autoGroupFilePaths,
@@ -219,6 +226,7 @@ export function useAlbumImportWorkflow() {
       albumResults: state.albumResults,
       albumSearchError: state.albumSearchError,
       albumSearchLoading: state.albumSearchLoading,
+      albumSearchLookupSource: state.albumSearchLookupSource,
       autoGroupFilePaths: state.autoGroupFilePaths,
       clearAutoGroupFilePaths: state.clearAutoGroupFilePaths,
       matchOverrides: state.matchOverrides,
@@ -232,6 +240,7 @@ export function useAlbumImportWorkflow() {
       setAlbumSearchContext: state.setAlbumSearchContext,
       setAlbumSearchError: state.setAlbumSearchError,
       setAlbumSearchLoading: state.setAlbumSearchLoading,
+      setAlbumSearchLookupSource: state.setAlbumSearchLookupSource,
       setMatchOverrides: state.setMatchOverrides,
       setSelectedAlbum: state.setSelectedAlbum,
     })),
