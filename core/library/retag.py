@@ -37,7 +37,7 @@ import os
 import traceback
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,13 @@ class RetagDeps:
     _get_retag_state: Callable[[], dict]
     _set_retag_state: Callable[[dict], None]
     get_database: Callable[[], Any]
+    # Discord report (Netti93) — retag was clearing the LYRICS / USLT
+    # tag without rewriting it, while the download pipeline calls
+    # `generate_lrc_file` after enrichment to refetch + embed lyrics.
+    # Injected here so retag mirrors the same post-enrichment step.
+    # Optional for backward compat with any test caller that builds
+    # RetagDeps without the new field — empty default no-ops the call.
+    generate_lrc_file: Optional[Callable] = None
 
     @property
     def retag_state(self) -> dict:
@@ -229,6 +236,20 @@ def execute_retag(group_id, album_id, deps: RetagDeps):
                 logger.info(f"[Retag] Re-tagged: '{track_title}'")
             except Exception as meta_err:
                 logger.error(f"[Retag] Metadata write failed for '{track_title}': {meta_err}")
+
+            # Discord report (Netti93) — `enhance_file_metadata` clears
+            # ALL tags (incl. USLT lyrics) and rewrites only the source
+            # metadata. The download pipeline calls `generate_lrc_file`
+            # after enrichment to refetch + embed lyrics — retag was
+            # missing that step and dropped the LYRICS tag with no
+            # rewrite. Mirroring the download path's post-enrichment
+            # step. Same args, same `lrclib_enabled` config gate, same
+            # idempotency (skip when sidecar already present).
+            if deps.generate_lrc_file:
+                try:
+                    deps.generate_lrc_file(current_file_path, context, new_artist, album_info)
+                except Exception as lrc_err:
+                    logger.debug("[Retag] generate_lrc_file failed for '%s': %s", track_title, lrc_err)
 
             # Compute new path and move if different
             file_ext = os.path.splitext(current_file_path)[1]

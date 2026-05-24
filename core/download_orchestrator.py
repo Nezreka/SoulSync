@@ -104,6 +104,31 @@ class DownloadOrchestrator:
             deezer_dl.reconnect(deezer_arl)
             deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
+        # Reload Amazon quality preference (T2Tunes needs no reconnect — public proxy)
+        amazon = self.client('amazon')
+        if amazon:
+            quality = config_manager.get('amazon_download.quality', 'flac')
+            amazon._quality = quality
+            amazon._allow_fallback = config_manager.get('amazon_download.allow_fallback', True)
+            if hasattr(amazon, '_client') and amazon._client:
+                amazon._client.preferred_codec = quality
+
+        # Let registry-backed plugins refresh any config they cache at
+        # construction time. This covers Prowlarr-backed torrent / usenet
+        # clients without rebuilding the registry and losing active downloads.
+        for name, client in self.registry.all_plugins():
+            if not hasattr(client, 'reload_settings'):
+                continue
+            try:
+                client.reload_settings()
+                logger.info("%s client settings reloaded", self.registry.display_name(name))
+            except Exception as exc:
+                logger.warning(
+                    "%s client settings reload failed: %s",
+                    self.registry.display_name(name),
+                    exc,
+                )
+
         # Reload download path for all clients that cache it.
         # Soulseek owns the path config and is reloaded above; every
         # other source mirrors that path so files all land in one
@@ -277,11 +302,25 @@ class DownloadOrchestrator:
             chain = ['soulseek']
         return chain
 
-    async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = None, progress_callback=None,
+                     exclude_sources=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search for tracks using configured source(s). Single-source
         modes route directly; hybrid mode delegates to
-        ``engine.search_with_fallback`` which tries the chain in order."""
+        ``engine.search_with_fallback`` which tries the chain in order.
+
+        ``exclude_sources`` (optional) is an iterable of source names
+        the caller wants filtered out of the hybrid chain. Used by the
+        per-track download worker to skip torrent / usenet for album-
+        context batches — those sources are release-level and don't
+        score meaningfully on per-track titles; the album-bundle flow
+        on the master worker handles them separately when they're the
+        single active source."""
         if self.mode != 'hybrid':
+            # Single-source mode is opt-in; honour the user's choice even
+            # if it's torrent/usenet on an album batch (the master worker
+            # routes those through the album-bundle flow before per-track
+            # tasks ever fire, so search() being called here would be a
+            # non-album / wishlist / basic-search use case).
             client = self._client(self.mode)
             if not client:
                 logger.error(f"{self.registry.display_name(self.mode)} client not available (failed to initialize)")
@@ -290,6 +329,19 @@ class DownloadOrchestrator:
             return await client.search(query, timeout, progress_callback)
 
         chain = self._resolve_source_chain()
+        if exclude_sources:
+            blocked = {s.lower() for s in exclude_sources if s}
+            filtered = [s for s in chain if s.lower() not in blocked]
+            if filtered != chain:
+                logger.info(
+                    "Hybrid search: excluding %s for this query (chain %s -> %s)",
+                    sorted(blocked & {s.lower() for s in chain}),
+                    " → ".join(chain), " → ".join(filtered) if filtered else "(empty)",
+                )
+            chain = filtered
+        if not chain:
+            logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
+            return [], []
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
         return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
@@ -319,7 +371,7 @@ class DownloadOrchestrator:
             return None
 
         # 2. Filter and validate results
-        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
+        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
         is_streaming = tracks[0].username in _streaming_sources if tracks else False
 
         if is_streaming and expected_track:

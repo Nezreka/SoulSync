@@ -128,27 +128,45 @@ class MusicBrainzClient:
             return []
     
     @rate_limited
-    def search_release(self, album_name: str, artist_name: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_release(self, album_name: str, artist_name: Optional[str] = None,
+                       limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
         """
-        Search for releases (albums) by name
-        
+        Search for releases (albums) by name.
+
         Args:
             album_name: Name of the album to search for
             artist_name: Optional artist name to narrow search
             limit: Maximum number of results to return
-            
+            strict: When True (default), builds a phrase-match Lucene query
+                against the `release` and `artist` fields — correct for
+                enrichment flows where exact name+artist are known. When
+                False, sends a bare query (album + artist joined) so MB
+                hits alias / sortname indexes and folds diacritics,
+                dramatically improving recall for user-facing fuzzy
+                lookups (e.g. the manual Fix popup).
+
         Returns:
             List of release results
         """
         try:
-            # Escape quotes and backslashes for Lucene query
-            safe_album = album_name.replace('\\', '\\\\').replace('"', '\\"')
-            query = f'release:"{safe_album}"'
-            
-            if artist_name:
-                safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
-                query += f' AND artist:"{safe_artist}"'
-            
+            if strict:
+                # Escape quotes and backslashes for Lucene query
+                safe_album = album_name.replace('\\', '\\\\').replace('"', '\\"')
+                query = f'release:"{safe_album}"'
+
+                if artist_name:
+                    safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
+                    query += f' AND artist:"{safe_artist}"'
+            else:
+                # Bare query — MB tokenizes against title + artist credit +
+                # alias + sortname indexes together with diacritic folding.
+                # Recovers cases like "Bjork" → "Björk" that strict phrase
+                # queries miss.
+                parts = [album_name]
+                if artist_name:
+                    parts.append(artist_name)
+                query = ' '.join(p for p in parts if p)
+
             params = {
                 'query': query,
                 'fmt': 'json',
@@ -173,27 +191,44 @@ class MusicBrainzClient:
             return []
     
     @rate_limited
-    def search_recording(self, track_name: str, artist_name: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_recording(self, track_name: str, artist_name: Optional[str] = None,
+                         limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
         """
-        Search for recordings (tracks) by name
-        
+        Search for recordings (tracks) by name.
+
         Args:
             track_name: Name of the track to search for
             artist_name: Optional artist name to narrow search
             limit: Maximum number of results to return
-            
+            strict: When True (default), builds a phrase-match Lucene query
+                against the `recording` and `artist` fields — correct for
+                enrichment flows where exact name+artist are known. When
+                False, sends a bare query (track + artist joined) so MB
+                hits alias / sortname indexes and folds diacritics. The
+                bare path also avoids the AND-clause that kills recall
+                when either side mis-matches (e.g. "Bjork" vs canonical
+                "Björk", or a track title with bracketed suffix like
+                "(Live)" that strict phrase match rejects).
+
         Returns:
             List of recording results
         """
         try:
-            # Escape quotes and backslashes for Lucene query
-            safe_track = track_name.replace('\\', '\\\\').replace('"', '\\"')
-            query = f'recording:"{safe_track}"'
-            
-            if artist_name:
-                safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
-                query += f' AND artist:"{safe_artist}"'
-            
+            if strict:
+                # Escape quotes and backslashes for Lucene query
+                safe_track = track_name.replace('\\', '\\\\').replace('"', '\\"')
+                query = f'recording:"{safe_track}"'
+
+                if artist_name:
+                    safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
+                    query += f' AND artist:"{safe_artist}"'
+            else:
+                # Bare query — see search_release for rationale.
+                parts = [track_name]
+                if artist_name:
+                    parts.append(artist_name)
+                query = ' '.join(p for p in parts if p)
+
             params = {
                 'query': query,
                 'fmt': 'json',

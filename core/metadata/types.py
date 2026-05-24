@@ -333,7 +333,52 @@ class Album:
 
     @classmethod
     def from_musicbrainz_dict(cls, raw: Dict[str, Any]) -> 'Album':
-        """MusicBrainz ``/release/{mbid}`` response shape (release, not release-group)."""
+        """MusicBrainz album shape.
+
+        Accepts both raw ``/release/{mbid}`` responses and the normalized
+        MusicBrainz search adapter shape used by app-facing metadata clients.
+        """
+        if raw.get('name') and not raw.get('title'):
+            artists = raw.get('artists') or []
+            artist_names = []
+            primary_artist_id = ''
+            for artist in artists:
+                if isinstance(artist, dict):
+                    name = _str(artist.get('name'))
+                    if name:
+                        artist_names.append(name)
+                    if not primary_artist_id and artist.get('id'):
+                        primary_artist_id = _str(artist['id'])
+                else:
+                    name = _str(artist)
+                    if name:
+                        artist_names.append(name)
+
+            images = raw.get('images') or []
+            image_url = ''
+            if images and isinstance(images[0], dict):
+                image_url = _str(images[0].get('url'))
+            image_url = image_url or _str(raw.get('image_url'))
+
+            external_ids = {}
+            if raw.get('id'):
+                external_ids['musicbrainz'] = _str(raw['id'])
+
+            return cls(
+                id=_str(raw.get('id')),
+                name=_str(raw.get('name')),
+                artists=artist_names or ['Unknown Artist'],
+                release_date=_str(raw.get('release_date')),
+                total_tracks=_int(raw.get('total_tracks')),
+                album_type=_str(raw.get('album_type'), default='album') or 'album',
+                image_url=image_url or None,
+                artist_id=primary_artist_id or None,
+                genres=list(raw.get('genres') or []),
+                source='musicbrainz',
+                external_ids=external_ids,
+                external_urls=dict(raw.get('external_urls') or {}),
+            )
+
         artist_credit = raw.get('artist-credit') or []
         artist_names = []
         primary_artist_id = ''
@@ -355,10 +400,16 @@ class Album:
         if raw.get('barcode'):
             external_ids['barcode'] = _str(raw['barcode'])
 
-        # MB `release-group` carries the album-level type (album/single/ep)
+        # MB `release-group` carries the album-level type (album/single/ep/
+        # compilation/other/broadcast). Centralized mapper handles the
+        # full vocabulary including 'other' / 'broadcast' (issue #650 —
+        # music videos and one-off releases) so this projection matches
+        # the search-adapter projection in `core/musicbrainz_search.py`.
+        from core.metadata.release_type import map_release_group_type
         rg = raw.get('release-group') or {}
-        primary_type = _str(rg.get('primary-type'), default='Album').lower()
-        album_type = {'single': 'single', 'ep': 'ep'}.get(primary_type, 'album')
+        primary_type = _str(rg.get('primary-type'), default='Album')
+        secondary_types = rg.get('secondary-types') or []
+        album_type = map_release_group_type(primary_type, secondary_types)
         if rg.get('id'):
             external_ids['musicbrainz_release_group'] = _str(rg['id'])
 

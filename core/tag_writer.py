@@ -299,18 +299,31 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             elif isinstance(genres, str):
                 genre_str = genres
 
+        # Multi-value artist support — issue #587. Caller can pass
+        # `artists_list` (per-track list of contributor names) and the
+        # writer respects the user's `metadata_enhancement.tags.write_multi_artist`
+        # config the same way the post-download enrichment pipeline does.
+        # When the setting is on AND the list has >1 entry:
+        #   - ID3 keeps TPE1 as the joined display string (already in `artist`)
+        #     and writes a separate TXXX:Artists frame with the list
+        #   - Vorbis writes an `artists` multi-value key alongside `artist`
+        #   - MP4 writes \xa9ART as the list when on, single string when off
+        # When OFF or the list is empty/single — same single-string write
+        # as before. Backward compatible for callers that don't pass it.
+        artists_list = _resolve_artists_list_for_write(db_data)
+
         if isinstance(audio.tags, ID3):
             written = _write_id3(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm)
+                                 disc_num, bpm, artists_list=artists_list)
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             written = _write_vorbis(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
-                                    disc_num, bpm)
+                                    disc_num, bpm, artists_list=artists_list)
         elif isinstance(audio, MP4):
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm)
+                                 disc_num, bpm, artists_list=artists_list)
 
         # Embed cover art if requested
         if embed_cover:
@@ -343,8 +356,43 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
 
 # ── Format-specific writers ──
 
+
+def _resolve_artists_list_for_write(db_data: Dict[str, Any]) -> Optional[List[str]]:
+    """Pull a multi-value artists list from db_data when caller supplied one.
+
+    Accepts either ``artists_list`` (list of names) or ``artists`` (same
+    shape — kept for symmetry with the post-process pipeline's
+    ``_artists_list`` field). Drops empty / non-string entries. Returns
+    ``None`` when no list was supplied so format writers can branch on
+    "single-string only" vs "multi-value too".
+    """
+    raw = db_data.get('artists_list') or db_data.get('artists') or db_data.get('_artists_list')
+    if not raw:
+        return None
+    if not isinstance(raw, (list, tuple)):
+        return None
+    cleaned = []
+    for entry in raw:
+        if isinstance(entry, str):
+            text = entry.strip()
+            if text:
+                cleaned.append(text)
+    return cleaned or None
+
+
+def _multi_artist_write_enabled() -> bool:
+    """Read the same config flag the enrichment pipeline reads, so the
+    repair-path retag respects the user's choice."""
+    try:
+        from config.settings import config_manager
+        return bool(config_manager.get('metadata_enhancement.tags.write_multi_artist', False))
+    except Exception:
+        return False
+
+
 def _write_id3(audio, title, artist, album_artist, album, year, genre,
-               track_num, total_tracks, disc_num, bpm) -> List[str]:
+               track_num, total_tracks, disc_num, bpm,
+               artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
     if title:
         audio.tags.delall('TIT2')
@@ -354,6 +402,16 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         audio.tags.delall('TPE1')
         audio.tags.add(TPE1(encoding=3, text=[artist]))
         written.append('artist')
+        # TPE1 stays as the joined display string. When the caller
+        # supplied a multi-value list AND the user has the
+        # write_multi_artist setting on, ALSO write the per-artist
+        # list to a TXXX:Artists frame (Picard convention). Mirrors
+        # the post-download enrichment writer at
+        # core/metadata/enrichment.py.
+        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
+            audio.tags.delall('TXXX:Artists')
+            audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(artists_list)))
+            written.append('artists_multi')
     if album_artist:
         audio.tags.delall('TPE2')
         audio.tags.add(TPE2(encoding=3, text=[album_artist]))
@@ -387,7 +445,8 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
 
 
 def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
-                  track_num, total_tracks, disc_num, bpm) -> List[str]:
+                  track_num, total_tracks, disc_num, bpm,
+                  artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
     if title:
         audio['title'] = [title]
@@ -395,6 +454,13 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
     if artist:
         audio['artist'] = [artist]
         written.append('artist')
+        # Vorbis-style multi-value: write the per-artist list to the
+        # `artists` key (separate from `artist`, picard convention) when
+        # the caller supplied a list AND the user has multi-value write
+        # enabled. Mirrors enrichment.py.
+        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
+            audio['artists'] = list(artists_list)
+            written.append('artists_multi')
     if album_artist:
         audio['albumartist'] = [album_artist]
         written.append('album_artist')
@@ -421,14 +487,24 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
 
 
 def _write_mp4(audio, title, artist, album_artist, album, year, genre,
-               track_num, total_tracks, disc_num, bpm) -> List[str]:
+               track_num, total_tracks, disc_num, bpm,
+               artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
     if title:
         audio['\xa9nam'] = [title]
         written.append('title')
     if artist:
-        audio['\xa9ART'] = [artist]
-        written.append('artist')
+        # MP4 \xa9ART can carry a list directly. When caller supplied
+        # a multi-value list AND user has multi-value write enabled,
+        # write the list. Otherwise single-string. Mirrors enrichment.py
+        # MP4 path.
+        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
+            audio['\xa9ART'] = list(artists_list)
+            written.append('artist')
+            written.append('artists_multi')
+        else:
+            audio['\xa9ART'] = [artist]
+            written.append('artist')
     if album_artist:
         audio['aART'] = [album_artist]
         written.append('album_artist')

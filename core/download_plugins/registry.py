@@ -38,7 +38,10 @@ from core.download_plugins.base import DownloadSourcePlugin
 # than the legacy module-top imports here. Importing everything at
 # registry-load time pins the bindings the same way the legacy
 # orchestrator did.
+from core.amazon_download_client import AmazonDownloadClient
 from core.deezer_download_client import DeezerDownloadClient
+from core.download_plugins.torrent import TorrentDownloadPlugin
+from core.download_plugins.usenet import UsenetDownloadPlugin
 from core.hifi_client import HiFiClient
 from core.lidarr_download_client import LidarrDownloadClient
 from core.qobuz_client import QobuzClient
@@ -176,6 +179,7 @@ def build_default_registry() -> DownloadPluginRegistry:
     """
     registry = DownloadPluginRegistry()
 
+    registry.register(PluginSpec(name='amazon',    factory=AmazonDownloadClient,   display_name='Amazon Music'))
     registry.register(PluginSpec(name='soulseek',  factory=SoulseekClient,         display_name='Soulseek'))
     registry.register(PluginSpec(name='youtube',   factory=YouTubeClient,          display_name='YouTube'))
     registry.register(PluginSpec(name='tidal',     factory=TidalDownloadClient,    display_name='Tidal'))
@@ -188,5 +192,7 @@ def build_default_registry() -> DownloadPluginRegistry:
                                  aliases=('deezer_dl',)))
     registry.register(PluginSpec(name='lidarr',    factory=LidarrDownloadClient,   display_name='Lidarr'))
     registry.register(PluginSpec(name='soundcloud',factory=SoundcloudClient,       display_name='SoundCloud'))
+    registry.register(PluginSpec(name='torrent',   factory=TorrentDownloadPlugin,  display_name='Torrent (Prowlarr)'))
+    registry.register(PluginSpec(name='usenet',    factory=UsenetDownloadPlugin,   display_name='Usenet (Prowlarr)'))
 
     return registry

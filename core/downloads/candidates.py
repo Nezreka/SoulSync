@@ -63,8 +63,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
     Attempts to download with fallback candidate logic (matches GUI's retry_parallel_download_with_fallback).
     Returns True if successful, False if all candidates fail.
     """
-    # Sort candidates by confidence (best first)
-    candidates.sort(key=lambda r: r.confidence, reverse=True)
+    # Sort candidates by match confidence first, then peer quality. Upstream
+    # Soulseek validation already considers peer speed/slots/queue when scores
+    # are close; preserve that signal here instead of flattening ties back to
+    # arbitrary slskd response order.
+    candidates.sort(
+        key=lambda r: (
+            getattr(r, 'confidence', 0) or 0,
+            getattr(r, 'quality_score', 0) or 0,
+            getattr(r, 'upload_speed', 0) or 0,
+            -(getattr(r, 'queue_length', 0) or 0),
+            getattr(r, 'free_upload_slots', 0) or 0,
+            getattr(r, 'size', 0) or 0,
+        ),
+        reverse=True,
+    )
     
     with tasks_lock:
         task = download_tasks.get(task_id)
@@ -235,7 +248,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
 
                         # 1. Try track_info (from frontend, has album track data)
                         tn = track_info.get('track_number', 0) if isinstance(track_info, dict) else 0
-                        dn = track_info.get('disc_number', 1) if isinstance(track_info, dict) else 1
+                        dn = (track_info.get('disc_number') or 1) if isinstance(track_info, dict) else 1
                         if tn and tn > 0:
                             enhanced_payload['track_number'] = tn
                             enhanced_payload['disc_number'] = dn
@@ -255,7 +268,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                                 detailed_track = deps.spotify_client.get_track_details(track.id)
                                 if detailed_track and detailed_track.get('track_number'):
                                     enhanced_payload['track_number'] = detailed_track['track_number']
-                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
+                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number') or 1
                                     got_track_number = True
                                     logger.info(f"[Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
 
@@ -330,6 +343,10 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                             logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
+                                logger.info(
+                                    f"[CancelTrigger:candidates.worker_cancelled_during_download] "
+                                    f"download_id={download_id} username={username} task_id={task_id}"
+                                )
                                 deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
                                 logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:

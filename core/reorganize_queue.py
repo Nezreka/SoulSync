@@ -66,6 +66,10 @@ class QueueItem:
     artist_name: str                    # captured at enqueue time for UI display
     source: Optional[str]               # the user's per-modal pick (None = auto)
     enqueued_at: float
+    # 'api' (default) = query metadata source per album_data IDs.
+    # 'tags'          = read each file's embedded tags as the source
+    #                   of truth (issue #592). Zero API calls.
+    metadata_source: str = 'api'
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -91,6 +95,7 @@ class QueueItem:
             'artist_id': self.artist_id,
             'artist_name': self.artist_name,
             'source': self.source,
+            'metadata_source': self.metadata_source,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -155,6 +160,7 @@ class ReorganizeQueue:
         artist_id: Optional[str],
         artist_name: str,
         source: Optional[str] = None,
+        metadata_source: str = 'api',
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -183,6 +189,7 @@ class ReorganizeQueue:
                 artist_name=artist_name,
                 source=source,
                 enqueued_at=time.time(),
+                metadata_source=metadata_source or 'api',
             )
             self._items.append(item)
             position = sum(1 for i in self._items if i.status == 'queued')
@@ -190,7 +197,8 @@ class ReorganizeQueue:
             self._cond.notify_all()
             logger.info(
                 f"[Queue] Enqueued '{album_title}' (album_id={album_id}, "
-                f"queue_id={item.queue_id}, position={position}, source={source or 'auto'})"
+                f"queue_id={item.queue_id}, position={position}, "
+                f"source={source or 'auto'}, metadata={item.metadata_source})"
             )
             return {
                 'queued': True,
@@ -240,6 +248,7 @@ class ReorganizeQueue:
                     artist_name=raw.get('artist_name') or 'Unknown Artist',
                     source=raw.get('source'),
                     enqueued_at=time.time(),
+                    metadata_source=raw.get('metadata_source') or 'api',
                 )
                 self._items.append(item)
                 enqueued += 1

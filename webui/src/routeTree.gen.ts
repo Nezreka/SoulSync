@@ -10,12 +10,19 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatsRouteRoute = StatsRouteRouteImport.update({
+  id: '/stats',
+  path: '/stats',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesRouteRoute = IssuesRouteRouteImport.update({
@@ -28,35 +35,54 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
+  id: '/artist-detail/$source/$id',
+  path: '/artist-detail/$source/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/issues': typeof IssuesRouteRoute
+  '/stats': typeof StatsRouteRoute
   '/$': typeof SplatRoute
+  '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/issues' | '/$'
+  fullPaths: '/' | '/issues' | '/stats' | '/$' | '/artist-detail/$source/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/issues' | '/$'
-  id: '__root__' | '/' | '/issues' | '/$'
+  to: '/' | '/issues' | '/stats' | '/$' | '/artist-detail/$source/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/issues'
+    | '/stats'
+    | '/$'
+    | '/artist-detail/$source/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   IssuesRouteRoute: typeof IssuesRouteRoute
+  StatsRouteRoute: typeof StatsRouteRoute
   SplatRoute: typeof SplatRoute
+  ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -66,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/$'
       fullPath: '/$'
       preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/issues': {
@@ -82,13 +115,22 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/artist-detail/$source/$id': {
+      id: '/artist-detail/$source/$id'
+      path: '/artist-detail/$source/$id'
+      fullPath: '/artist-detail/$source/$id'
+      preLoaderRoute: typeof ArtistDetailSourceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   IssuesRouteRoute: IssuesRouteRoute,
+  StatsRouteRoute: StatsRouteRoute,
   SplatRoute: SplatRoute,
+  ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

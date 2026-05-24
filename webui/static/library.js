@@ -218,6 +218,7 @@ function displayLibraryArtists(artists) {
         // Ignore clicks on badge icons (they open external links / toggle watchlist)
         const badge = e.target.closest('.source-card-icon');
         if (badge) {
+            e.preventDefault();
             e.stopPropagation();
             const url = badge.dataset.url;
             if (url) { window.open(url, '_blank'); return; }
@@ -232,10 +233,6 @@ function displayLibraryArtists(artists) {
                 }
             }
             return;
-        }
-        const card = e.target.closest('.library-artist-card');
-        if (card) {
-            navigateToArtistDetail(card.dataset.artistId, card.dataset.artistName);
         }
     };
 }
@@ -259,6 +256,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
     if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     if (artist.discogs_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs', url: `https://www.discogs.com/artist/${artist.discogs_id}` });
+    if (artist.amazon_id) badges.push({ logo: AMAZON_LOGO_URL, fb: 'AMZ', title: 'Amazon Music', url: null });
     if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
@@ -298,14 +296,14 @@ function buildLibraryArtistCardHTML(artist, index) {
     // Track stats
     const trackStat = artist.track_count > 0 ? `<span class="library-artist-stat">${artist.track_count} track${artist.track_count !== 1 ? 's' : ''}</span>` : '';
 
-    return `<div class="library-artist-card" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both">
+    return `<a class="library-artist-card" href="${buildArtistDetailPath(artist.id)}" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;display:block;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both;text-decoration:none;color:inherit;">
         ${badgeContainerHTML}
         ${imageHTML}
         <div class="library-artist-info">
             <h3 class="library-artist-name" title="${_esc(artist.name)}">${_esc(artist.name)}</h3>
             <div class="library-artist-stats">${trackStat}</div>
         </div>
-    </div>`;
+    </a>`;
 }
 
 function updateLibraryPagination(pagination) {
@@ -682,16 +680,31 @@ async function toggleLibraryCardWatchlist(btn, artist) {
 // ===============================================
 
 // Artist detail page state
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
+// Stack of origins for the back-button label. Each entry: {type:'page', pageId}
+// or {type:'artist', name}. Pushed on forward navigation, popped on back.
+// Separate from browser history — only used for the label display.
+let _artistDetailLabelStack = [];
+let _artistDetailGoingBack = false;
+
 let artistDetailPageState = {
     isInitialized: false,
     currentArtistId: null,
     currentArtistName: null,
     currentArtistSource: null,
-    // Stack of origins captured by navigateToArtistDetail for the back button.
-    // Each entry is either {type:'page', pageId} or {type:'artist', id, name, source}
-    // so chained navigation (Search → A → similar B → similar C) walks back one
-    // step at a time instead of jumping straight to Search.
-    originStack: [],
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -709,7 +722,6 @@ function clearArtistDetailPageState() {
     artistDetailPageState.currentArtistId = null;
     artistDetailPageState.currentArtistName = null;
     artistDetailPageState.currentArtistSource = null;
-    artistDetailPageState.originStack = [];
 }
 
 if (typeof window !== 'undefined') {
@@ -785,59 +797,43 @@ if (typeof window !== 'undefined') {
 }
 
 
-// Friendly labels for the dynamic "← Back to X" button on the artist-detail page.
-// Page id (the value of currentPage) -> button label.
-const _ARTIST_DETAIL_BACK_LABELS = {
-    library: 'Back to Library',
-    search: 'Back to Search',
-    discover: 'Back to Discover',
-    watchlist: 'Back to Watchlist',
-    wishlist: 'Back to Wishlist',
-    stats: 'Back to Stats',
-    'playlist-explorer': 'Back to Explorer',
-    automations: 'Back to Automations',
-    dashboard: 'Back to Dashboard',
-    sync: 'Back to Sync',
-    'active-downloads': 'Back to Downloads',
-};
-
 function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
+    const normalizedSource = sourceOverride || null;
+
+    // Skip reload if already on this exact artist/source (prevents double-fetch
+    // when the router fires activateLegacyPath after navigating to an
+    // /artist-detail/:source/:id URL).
+    if (artistId &&
+            String(artistId) === String(artistDetailPageState.currentArtistId) &&
+            String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
+        if (currentPage !== 'artist-detail') {
+            navigateToPage('artist-detail', {
+                artistId,
+                artistSource: normalizedSource,
+                skipRouteChange: options.skipRouteChange === true
+            });
+        }
+        return;
+    }
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
-    // Capture the current location on the origin stack BEFORE navigateToPage
-    // flips currentPage. The back button walks this stack one step at a time,
-    // so a chain like Search → A → similar B → similar C steps back through
-    // C → B → A → Search instead of jumping straight home. `skipOriginPush`
-    // lets the back button re-enter a prior artist without re-pushing.
-    if (!options.skipOriginPush) {
-        // Fresh entry (from a non-artist page) starts a new chain; any stale
-        // entries from a prior artist-detail visit are dropped.
+    // Maintain the label stack. Back navigations pop; forward navigations push.
+    // Only treat the flag as a back-nav signal when we're still on artist-detail —
+    // if history.back() landed on a non-artist page first, the flag is stale.
+    if (_artistDetailGoingBack && currentPage === 'artist-detail') {
+        _artistDetailLabelStack.pop();
+        _artistDetailGoingBack = false;
+    } else {
+        _artistDetailGoingBack = false; // clear any stale flag
         if (currentPage !== 'artist-detail') {
-            artistDetailPageState.originStack = [];
+            _artistDetailLabelStack = []; // fresh chain from a non-artist page
         }
-
-        let entry;
-        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistId) {
-            entry = {
-                type: 'artist',
-                id: artistDetailPageState.currentArtistId,
-                name: artistDetailPageState.currentArtistName,
-                source: artistDetailPageState.currentArtistSource,
-            };
+        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
+            _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });
         } else {
             const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
                 ? currentPage : 'library';
-            entry = { type: 'page', pageId };
-        }
-
-        // Avoid pushing a duplicate top entry on repeated clicks of the same target.
-        const top = artistDetailPageState.originStack[artistDetailPageState.originStack.length - 1];
-        const isDuplicate = top && top.type === entry.type && (
-            (entry.type === 'page' && top.pageId === entry.pageId) ||
-            (entry.type === 'artist' && String(top.id) === String(entry.id))
-        );
-        if (!isDuplicate) {
-            artistDetailPageState.originStack.push(entry);
+            _artistDetailLabelStack.push({ type: 'page', pageId });
         }
     }
 
@@ -855,7 +851,7 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     // Store current artist info and reset enhanced view state
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
-    artistDetailPageState.currentArtistSource = sourceOverride || null;
+    artistDetailPageState.currentArtistSource = normalizedSource;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
     artistDetailPageState.selectedTracks = new Set();
@@ -884,15 +880,18 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     if (bulkBar) bulkBar.classList.remove('visible');
 
     // Navigate to artist detail page
-    navigateToPage('artist-detail');
-
-    // Update back-button label to reflect where the next pop will land.
-    _updateArtistDetailBackButtonLabel();
+    navigateToPage('artist-detail', {
+        artistId,
+        artistSource: normalizedSource,
+        skipRouteChange: options.skipRouteChange === true
+    });
 
     // Initialize if needed and load data
     if (!artistDetailPageState.isInitialized) {
         initializeArtistDetailPage();
     }
+
+    _updateArtistDetailBackButtonLabel();
 
     // Load artist data
     loadArtistDetailData(artistId, artistName);
@@ -901,11 +900,12 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
 function _updateArtistDetailBackButtonLabel() {
     const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
     if (!backBtnLabel) return;
-    const stack = artistDetailPageState.originStack || [];
-    const top = stack[stack.length - 1];
+    const top = _artistDetailLabelStack[_artistDetailLabelStack.length - 1];
     if (!top) {
-        backBtnLabel.textContent = `← ${_ARTIST_DETAIL_BACK_LABELS.library}`;
-    } else if (top.type === 'artist') {
+        backBtnLabel.textContent = '← Back';
+        return;
+    }
+    if (top.type === 'artist') {
         backBtnLabel.textContent = `← Back to ${top.name}`;
     } else {
         const friendly = _ARTIST_DETAIL_BACK_LABELS[top.pageId] || _ARTIST_DETAIL_BACK_LABELS.library;
@@ -916,9 +916,8 @@ function _updateArtistDetailBackButtonLabel() {
 function initializeArtistDetailPage() {
     console.log("🔧 Initializing Artist Detail page...");
 
-    // Initialize back button — pops the origin stack one step at a time so a
-    // chain like Search → A → B → C walks back through C → B → A → Search
-    // instead of jumping straight to the original entry page.
+    // Initialize back button — use browser history when possible, with a
+    // simple library fallback if the user lands here without in-app history.
     const backBtn = document.getElementById("artist-detail-back-btn");
     if (backBtn) {
         backBtn.addEventListener("click", () => {
@@ -928,28 +927,16 @@ function initializeArtistDetailPage() {
                 artistDetailPageState.completionController = null;
             }
 
-            const stack = artistDetailPageState.originStack || [];
-            if (stack.length > 0) {
-                const target = stack.pop();
-                if (target.type === 'artist') {
-                    // Re-enter a prior artist in the chain without re-pushing,
-                    // so the stack keeps shrinking as the user steps back.
-                    navigateToArtistDetail(target.id, target.name, target.source, { skipOriginPush: true });
-                    return;
-                }
-                // target.type === 'page' — fully exit the artist-detail chain
-                artistDetailPageState.currentArtistId = null;
-                artistDetailPageState.currentArtistName = null;
-                artistDetailPageState.originStack = [];
-                navigateToPage(target.pageId);
+            if (window.history.length > 1) {
+                _artistDetailGoingBack = true;
+                window.history.back();
                 return;
             }
 
-            // No history — default to library
-            artistDetailPageState.currentArtistId = null;
-            artistDetailPageState.currentArtistName = null;
-            artistDetailPageState.originStack = [];
-            navigateToPage('library');
+            // No history — fall back to recorded origin page or library
+            const top = _artistDetailLabelStack.pop();
+            _updateArtistDetailBackButtonLabel();
+            navigateToPage(top?.type === 'page' ? (top.pageId || 'library') : 'library');
         });
     }
 
@@ -1019,6 +1006,17 @@ async function loadArtistDetailData(artistId, artistName) {
             throw new Error(data.error || 'Failed to load artist data');
         }
 
+        const isSourceOnlyArtist = !data.artist?.server_source;
+        if (isSourceOnlyArtist && data.discography) {
+            for (const bucket of ['albums', 'eps', 'singles']) {
+                for (const release of (data.discography[bucket] || [])) {
+                    if (release.owned === null || typeof release.owned === 'undefined') {
+                        release.owned = false;
+                    }
+                }
+            }
+        }
+
         console.log(`✅ Loaded artist detail data:`, data);
 
         // Hide loading and show all content
@@ -1044,6 +1042,15 @@ async function loadArtistDetailData(artistId, artistName) {
             artistDetailPageState.currentArtistId = data.artist.id;
         }
 
+        // Backfill name from API response — URL-driven navigation passes '' for the
+        // name so the label stack has real names when the user clicks a similar artist.
+        if (data.artist?.name && !artistDetailPageState.currentArtistName) {
+            artistDetailPageState.currentArtistName = data.artist.name;
+            if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
+                _updateSidebarLibraryBreadcrumb();
+            }
+        }
+
         // Keep the resolved metadata source for album-track lookups.
         artistDetailPageState.currentArtistSource = data.discography?.source || data.artist?.source || null;
 
@@ -1054,7 +1061,7 @@ async function loadArtistDetailData(artistId, artistName) {
         renderArtistEnrichmentCoverage(data.enrichment_coverage);
 
         // Start streaming ownership checks if we have Spotify discography with checking state
-        if (data.discography && data.discography.albums) {
+        if (!isSourceOnlyArtist && data.discography && data.discography.albums) {
             const hasChecking = [...(data.discography.albums || []), ...(data.discography.eps || []), ...(data.discography.singles || [])]
                 .some(r => r.owned === null);
             if (hasChecking) {
@@ -1068,7 +1075,9 @@ async function loadArtistDetailData(artistId, artistName) {
         // Use currentArtistId (not the closure arg) because the library-upgrade
         // branch above may have rewritten it from the source ID to the library PK,
         // and /api/library/artist/<id>/quality-analysis only works on library PKs.
-        checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
+        if (!isSourceOnlyArtist) {
+            checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
+        }
 
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);
@@ -1128,6 +1137,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
+        if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -1228,6 +1238,9 @@ function populateArtistDetailPage(data) {
     // MusicMap name lookup). Fire-and-forget — the function handles its own
     // loading state and errors.
     if (artist && artist.name && typeof loadSimilarArtists === 'function') {
+        if (typeof cancelSimilarArtistsLoad === 'function') {
+            cancelSimilarArtistsLoad();
+        }
         loadSimilarArtists(artist.name);
     }
 }
@@ -1312,15 +1325,34 @@ function updateArtistHeaderStats(albumCount, trackCount) {
     console.log("📊 Using new hero section instead of old header stats");
 }
 
+function _isUsableArtistHeroImageUrl(url) {
+    return typeof url === 'string' && url.trim() !== '' && url !== 'null';
+}
+
+function _getArtistHeroReleaseImage(discography) {
+    for (const bucket of ['albums', 'eps', 'singles']) {
+        for (const release of (discography?.[bucket] || [])) {
+            if (_isUsableArtistHeroImageUrl(release?.image_url)) {
+                return release.image_url;
+            }
+        }
+    }
+    return '';
+}
+
 function updateArtistHeroSection(artist, discography) {
     console.log("🖼️ Updating artist hero section");
+
+    const artistImageUrl = _isUsableArtistHeroImageUrl(artist.image_url) ? artist.image_url : '';
+    const releaseImageUrl = _getArtistHeroReleaseImage(discography);
+    const primaryHeroImageUrl = artistImageUrl || releaseImageUrl;
 
     // Blurred background image (inline-Artists hero treatment) — set whenever
     // we have an image_url; falls back to clearing the bg if not.
     const heroBg = document.getElementById("artist-detail-hero-bg");
     if (heroBg) {
-        if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
-            heroBg.style.backgroundImage = `url('${artist.image_url}')`;
+        if (primaryHeroImageUrl) {
+            heroBg.style.backgroundImage = `url('${primaryHeroImageUrl}')`;
         } else {
             heroBg.style.backgroundImage = '';
         }
@@ -1337,9 +1369,11 @@ function updateArtistHeroSection(artist, discography) {
     console.log(`   - Image element:`, imageElement);
     console.log(`   - Fallback element:`, fallbackElement);
 
-    if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
-        console.log(`✅ Setting image src to: ${artist.image_url}`);
-        imageElement.src = artist.image_url;
+    if (primaryHeroImageUrl) {
+        console.log(`✅ Setting image src to: ${primaryHeroImageUrl}`);
+        imageElement.dataset.triedDeezer = '';
+        imageElement.dataset.triedReleaseFallback = artistImageUrl ? '' : 'true';
+        imageElement.src = primaryHeroImageUrl;
         imageElement.alt = artist.name;
         imageElement.style.display = "block";
         if (fallbackElement) {
@@ -1351,11 +1385,14 @@ function updateArtistHeroSection(artist, discography) {
         };
 
         imageElement.onerror = () => {
-            console.error(`❌ Failed to load artist image: ${artist.image_url}`);
-            // Try Deezer fallback before emoji
+            console.error(`❌ Failed to load artist image: ${imageElement.src}`);
+            // Try Deezer fallback, then release art, before the generic icon.
             if (artist.deezer_id && !imageElement.dataset.triedDeezer) {
                 imageElement.dataset.triedDeezer = 'true';
                 imageElement.src = `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
+            } else if (releaseImageUrl && imageElement.src !== releaseImageUrl && !imageElement.dataset.triedReleaseFallback) {
+                imageElement.dataset.triedReleaseFallback = 'true';
+                imageElement.src = releaseImageUrl;
             } else {
                 imageElement.style.display = "none";
                 if (fallbackElement) {
@@ -1475,6 +1512,70 @@ const _TOP_TRACKS_SOURCE_LABELS = {
     lastfm: 'Popular on Last.fm',
 };
 
+async function playTrackByMetadata(title, artist, album = '') {
+    // 1. Try the library first — fastest and best quality if owned.
+    try {
+        const resp = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist }),
+        });
+        const data = await resp.json();
+        if (data.success && data.track) {
+            const track = data.track;
+            playLibraryTrack(
+                {
+                    id: track.id,
+                    title: track.title,
+                    file_path: track.file_path,
+                    bitrate: track.bitrate,
+                    artist_id: track.artist_id,
+                    album_id: track.album_id,
+                    _stats_image: track.image_url || null,
+                },
+                track.album_title || album || '',
+                track.artist_name || artist || '',
+            );
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed, will try streaming fallback:', e);
+    }
+
+    // 2. Library miss — fall back to streaming via the enhanced-search streamer.
+    if (typeof showLoadingOverlay === 'function') {
+        showLoadingOverlay(`Searching for ${title}...`);
+    }
+    try {
+        const streamResp = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album,
+                duration_ms: 0,
+            }),
+        });
+        const streamData = await streamResp.json();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+
+        if (streamData.success && streamData.result) {
+            if (typeof startStream === 'function') {
+                await startStream(streamData.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(streamData.error || 'Track not found in library or any source', 'error');
+        }
+    } catch (e) {
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        showToast('Failed to play track', 'error');
+        console.error('Stream fallback failed:', e);
+    }
+}
+
 async function _loadArtistTopTracks(artistName) {
     const sidebar = document.getElementById('artist-hero-sidebar');
     const container = document.getElementById('hero-top-tracks');
@@ -1539,7 +1640,7 @@ async function _loadArtistTopTracks(artistName) {
                         const playBtn = e.target.closest('.hero-top-track-play');
                         if (playBtn) {
                             e.stopPropagation();
-                            playStatsTrack(playBtn.dataset.track, playBtn.dataset.artist, '');
+                            playTrackByMetadata(playBtn.dataset.track, playBtn.dataset.artist, '');
                             return;
                         }
                         const dlBtn = e.target.closest('.hero-top-track-download');
@@ -1595,7 +1696,7 @@ async function _loadArtistTopTracks(artistName) {
             const btn = e.target.closest('.hero-top-track-play');
             if (btn) {
                 e.stopPropagation();
-                playStatsTrack(btn.dataset.track, btn.dataset.artist, '');
+                playTrackByMetadata(btn.dataset.track, btn.dataset.artist, '');
             }
         };
         sidebar.style.display = '';
@@ -2959,6 +3060,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_url', label: 'Genius', svc: 'genius' },
         { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
         { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
+        { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
     ];
     idSources.forEach(src => {
         if (artist[src.key]) {
@@ -3094,6 +3196,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
         { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
         { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusServices.forEach(s => {
         const status = artist[s.key];
@@ -3354,9 +3457,25 @@ function toggleAlbumExpand(albumId) {
                 inner.appendChild(renderAlbumMetaRow(album));
                 inner.appendChild(renderTrackTable(album));
                 inner.dataset.rendered = 'true';
+                ensureEnhancedAlbumCanonicalTracks(album).then(updated => {
+                    if (!updated || !artistDetailPageState.expandedAlbums.has(albumId)) return;
+                    rerenderEnhancedAlbumPanel(album.id);
+                });
             }
         }
     }
+}
+
+function rerenderEnhancedAlbumPanel(albumId) {
+    const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+    const inner = panel?.querySelector('.enhanced-tracks-panel-inner');
+    const album = findEnhancedAlbum(albumId);
+    if (!inner || !album) return;
+    inner.innerHTML = '';
+    inner.appendChild(renderExpandedAlbumHeader(album));
+    inner.appendChild(renderAlbumMetaRow(album));
+    inner.appendChild(renderTrackTable(album));
+    inner.dataset.rendered = 'true';
 }
 
 function findEnhancedAlbum(albumId) {
@@ -3404,8 +3523,21 @@ function renderExpandedAlbumHeader(album) {
 
     const details = [];
     if (album.year) details.push(String(album.year));
-    const trackCount = album.tracks ? album.tracks.length : 0;
-    details.push(`${trackCount} track${trackCount !== 1 ? 's' : ''}`);
+    const ownedTrackCount = album.tracks ? album.tracks.length : 0;
+    const visibleTrackRows = _getEnhancedAlbumTrackRows(album);
+    const expectedTrackCount = Math.max(
+        ownedTrackCount,
+        visibleTrackRows.length,
+        Number(album.api_track_count || album.track_count || 0)
+    );
+    const missingCount = visibleTrackRows.filter(t => t._missingExpected).length;
+    if (album._canonicalTracksLoading) details.push('checking tracklist');
+    if (expectedTrackCount > ownedTrackCount) {
+        details.push(`${ownedTrackCount}/${expectedTrackCount} tracks`);
+    } else {
+        details.push(`${ownedTrackCount} track${ownedTrackCount !== 1 ? 's' : ''}`);
+    }
+    if (missingCount > 0) details.push(`${missingCount} missing`);
     let durMs = 0;
     (album.tracks || []).forEach(t => { durMs += (t.duration || 0); });
     if (durMs > 0) details.push(formatDurationMs(durMs));
@@ -3462,6 +3594,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
     ];
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -3639,20 +3772,167 @@ function renderAlbumMetaRow(album) {
     return row;
 }
 
+function _trackSlotKey(track) {
+    const disc = Number(track.disc_number || track.expected_disc_number || 1);
+    const num = Number(track.track_number || track.expected_track_number || 0);
+    return `${disc}:${num}`;
+}
+
+function _normalizeExpectedMissingTrack(source, album) {
+    const title = source.title || source.name || `Track ${source.track_number || '?'}`;
+    const sourceTrackId = source.track_id || source.id || source.source_track_id || '';
+    const hasActionableContext = !!(
+        title &&
+        source.track_number &&
+        (sourceTrackId || source.spotify_track_id || source.deezer_id || source.itunes_track_id || source.musicbrainz_recording_id)
+    );
+    return {
+        id: `missing-${album.id}-${source.disc_number || 1}-${source.track_number || ''}`,
+        title,
+        track_number: source.track_number || source.position || '',
+        disc_number: source.disc_number || 1,
+        duration: source.duration || source.duration_ms || 0,
+        spotify_track_id: source.spotify_track_id || (source.source === 'spotify' ? sourceTrackId : ''),
+        deezer_id: source.deezer_id || (source.source === 'deezer' ? sourceTrackId : ''),
+        itunes_track_id: source.itunes_track_id || (source.source === 'itunes' ? sourceTrackId : ''),
+        musicbrainz_recording_id: source.musicbrainz_recording_id || (source.source === 'musicbrainz' ? sourceTrackId : ''),
+        source: source.source || source.metadata_source || '',
+        track_id: sourceTrackId,
+        album_id: source.album_id || source.source_album_id || '',
+        artists: source.artists || source.artist_names || [],
+        _hasActionableContext: hasActionableContext,
+        _missingExpected: true,
+        _sourceTrack: source,
+    };
+}
+
+function _getEnhancedAlbumCanonicalSource(album) {
+    const priority = [
+        ['spotify', 'spotify_album_id'],
+        ['deezer', 'deezer_id'],
+        ['itunes', 'itunes_album_id'],
+        ['musicbrainz', 'musicbrainz_release_id'],
+        ['discogs', 'discogs_id'],
+        ['tidal', 'tidal_id'],
+        ['qobuz', 'qobuz_id'],
+    ];
+    for (const [source, key] of priority) {
+        if (album[key]) return { source, id: album[key] };
+    }
+    return null;
+}
+
+async function ensureEnhancedAlbumCanonicalTracks(album) {
+    if (!album || album._canonicalTracksLoaded || album._canonicalTracksLoading) return false;
+
+    const canonicalSource = _getEnhancedAlbumCanonicalSource(album);
+    if (!canonicalSource) {
+        album._canonicalTracksLoaded = true;
+        return false;
+    }
+
+    album._canonicalTracksLoading = true;
+    try {
+        const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+        const params = new URLSearchParams({
+            name: album.title || '',
+            artist: artistName,
+            source: canonicalSource.source,
+        });
+        const response = await fetch(`/api/album/${encodeURIComponent(canonicalSource.id)}/tracks?${params}`);
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to load canonical tracklist');
+        }
+
+        const canonicalTracks = Array.isArray(data.tracks) ? data.tracks : [];
+        album.canonical_tracks = canonicalTracks.map((track, index) => ({
+            ...track,
+            title: track.title || track.name || `Track ${track.track_number || index + 1}`,
+            name: track.name || track.title || `Track ${track.track_number || index + 1}`,
+            track_number: track.track_number || index + 1,
+            disc_number: track.disc_number || 1,
+            duration: track.duration || track.duration_ms || 0,
+            source: data.source || canonicalSource.source,
+            track_id: track.id || track.track_id || '',
+            id: track.id || track.track_id || `${canonicalSource.source}:${canonicalSource.id}:${track.disc_number || 1}:${track.track_number || index + 1}`,
+        }));
+        album.api_track_count = Math.max(Number(album.api_track_count || 0), album.canonical_tracks.length);
+        album.missing_tracks = _deriveEnhancedMissingTracks(album, album.canonical_tracks);
+        album._canonicalTracksLoaded = true;
+        return true;
+    } catch (error) {
+        album._canonicalTracksError = error.message;
+        album._canonicalTracksLoaded = true;
+        console.debug('Failed to load canonical album tracks:', album.title, error);
+        return false;
+    } finally {
+        album._canonicalTracksLoading = false;
+    }
+}
+
+function _deriveEnhancedMissingTracks(album, canonicalTracks) {
+    const occupiedSlots = new Set();
+    (album.tracks || []).forEach(track => {
+        const key = _trackSlotKey(track);
+        if (key !== '1:0') occupiedSlots.add(key);
+    });
+    return (canonicalTracks || [])
+        .map(track => ({
+            ...track,
+            name: track.name || track.title,
+            duration_ms: track.duration_ms || track.duration || 0,
+        }))
+        .filter(track => {
+            const key = _trackSlotKey(track);
+            const normalized = _normalizeExpectedMissingTrack(track, album);
+            return key !== '1:0' && normalized._hasActionableContext && !occupiedSlots.has(key);
+        });
+}
+
+function _getEnhancedAlbumTrackRows(album) {
+    const ownedTracks = Array.isArray(album.tracks) ? album.tracks : [];
+    const rowsBySlot = new Map();
+    ownedTracks.forEach(track => {
+        const key = _trackSlotKey(track);
+        rowsBySlot.set(key === '1:0' ? `owned:${track.id}` : key, track);
+    });
+
+    const explicitMissing = Array.isArray(album.missing_tracks) ? album.missing_tracks : [];
+    explicitMissing.forEach(missing => {
+        const row = _normalizeExpectedMissingTrack(missing, album);
+        const key = _trackSlotKey(row);
+        if (row._hasActionableContext && !rowsBySlot.has(key)) rowsBySlot.set(key, row);
+    });
+
+    return Array.from(rowsBySlot.values()).sort((a, b) => {
+        const discDelta = Number(a.disc_number || 1) - Number(b.disc_number || 1);
+        if (discDelta !== 0) return discDelta;
+        const trackDelta = Number(a.track_number || 0) - Number(b.track_number || 0);
+        if (trackDelta !== 0) return trackDelta;
+        return String(a.title || '').localeCompare(String(b.title || ''));
+    });
+}
+
 function _buildTrackRow(track, album, admin) {
     const tr = document.createElement('tr');
     tr.dataset.trackId = track.id;
     tr.dataset.albumId = album.id;
+    tr._enhancedTrack = track;
+    tr._enhancedAlbum = album;
+    if (track._missingExpected) tr.classList.add('enhanced-missing-track-row');
     if (artistDetailPageState.selectedTracks.has(String(track.id))) tr.classList.add('selected');
 
     // Checkbox (admin only)
     if (admin) {
         const cbTd = document.createElement('td');
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'enhanced-track-checkbox';
-        cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
-        cbTd.appendChild(cb);
+        if (!track._missingExpected) {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'enhanced-track-checkbox';
+            cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
+            cbTd.appendChild(cb);
+        }
         tr.appendChild(cbTd);
     }
 
@@ -3661,7 +3941,7 @@ function _buildTrackRow(track, album, admin) {
     playTd.className = 'col-play';
     const playBtn = document.createElement('button');
     playBtn.className = 'enhanced-play-btn';
-    playBtn.innerHTML = '&#9654;';
+    playBtn.innerHTML = track._missingExpected ? '&mdash;' : '&#9654;';
     playBtn.title = track.file_path ? 'Play track' : 'No file available';
     if (!track.file_path) playBtn.disabled = true;
     playTd.appendChild(playBtn);
@@ -3683,6 +3963,13 @@ function _buildTrackRow(track, album, admin) {
     const titleTd = document.createElement('td');
     titleTd.className = 'col-title' + (admin ? ' editable' : '');
     titleTd.textContent = track.title || 'Unknown';
+    if (track._missingExpected) {
+        titleTd.classList.remove('editable');
+        const status = document.createElement('span');
+        status.className = 'enhanced-missing-track-badge';
+        status.textContent = 'Missing';
+        titleTd.appendChild(status);
+    }
     tr.appendChild(titleTd);
 
     // Duration
@@ -3694,12 +3981,16 @@ function _buildTrackRow(track, album, admin) {
     // Format
     const fmtTd = document.createElement('td');
     fmtTd.className = 'col-format';
-    const format = extractFormat(track.file_path);
-    const fmtSpan = document.createElement('span');
-    const fmtClass = format === 'FLAC' ? 'flac' : (format === 'MP3' ? 'mp3' : 'other');
-    fmtSpan.className = `enhanced-format-badge ${fmtClass}`;
-    fmtSpan.textContent = format;
-    fmtTd.appendChild(fmtSpan);
+    if (track._missingExpected) {
+        fmtTd.textContent = '-';
+    } else {
+        const format = extractFormat(track.file_path);
+        const fmtSpan = document.createElement('span');
+        const fmtClass = format === 'FLAC' ? 'flac' : (format === 'MP3' ? 'mp3' : 'other');
+        fmtSpan.className = `enhanced-format-badge ${fmtClass}`;
+        fmtSpan.textContent = format;
+        fmtTd.appendChild(fmtSpan);
+    }
     tr.appendChild(fmtTd);
 
     // Bitrate
@@ -3722,7 +4013,9 @@ function _buildTrackRow(track, album, admin) {
     const pathTd = document.createElement('td');
     pathTd.className = 'col-path';
     const filePath = track.file_path || '-';
-    const fileName = filePath !== '-' ? filePath.split(/[\\/]/).pop() : '-';
+    const fileName = track._missingExpected
+        ? 'Missing from library'
+        : (filePath !== '-' ? filePath.split(/[\\/]/).pop() : '-');
     pathTd.textContent = fileName;
     pathTd.title = filePath;
     tr.appendChild(pathTd);
@@ -3756,7 +4049,7 @@ function _buildTrackRow(track, album, admin) {
     // Add to Queue button
     const queueTd = document.createElement('td');
     queueTd.className = 'col-queue';
-    if (track.file_path) {
+    if (!track._missingExpected && track.file_path) {
         const queueBtn = document.createElement('button');
         queueBtn.className = 'enhanced-queue-btn';
         queueBtn.innerHTML = '&#43;';
@@ -3769,7 +4062,7 @@ function _buildTrackRow(track, album, admin) {
         // Write Tags button (admin only)
         const tagTd = document.createElement('td');
         tagTd.className = 'col-writetag';
-        if (track.file_path) {
+        if (track.file_path && !track._missingExpected) {
             const tagBtn = document.createElement('button');
             tagBtn.className = 'enhanced-write-tag-btn';
             tagBtn.innerHTML = '&#9998;';
@@ -3784,26 +4077,42 @@ function _buildTrackRow(track, album, admin) {
         }
         tr.appendChild(tagTd);
 
-        // Track actions cell — source info, redownload, delete (admin only)
+        // Track actions cell: source info, redownload, delete, or missing-track actions.
         const actionsTd = document.createElement('td');
         actionsTd.className = 'col-track-actions';
-        actionsTd.innerHTML = `
-            <div class="enhanced-track-actions-group">
-                <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
-                <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
-                <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
-            </div>
-        `;
+        if (track._missingExpected) {
+            actionsTd.innerHTML = `
+                <div class="enhanced-track-actions-group visible">
+                    <button class="enhanced-missing-manage-btn" data-action="manage-missing" title="Manage this missing album track">Manage</button>
+                </div>
+            `;
+        } else {
+            actionsTd.innerHTML = `
+                <div class="enhanced-track-actions-group">
+                    <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
+                    <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
+                    <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
+                </div>
+            `;
+        }
         tr.appendChild(actionsTd);
     } else {
         // Report Issue button per track (non-admin)
         const reportTd = document.createElement('td');
         reportTd.className = 'col-report';
-        const reportBtn = document.createElement('button');
-        reportBtn.className = 'enhanced-track-report-btn';
-        reportBtn.innerHTML = '&#9873;';
-        reportBtn.title = 'Report issue with this track';
-        reportTd.appendChild(reportBtn);
+        if (track._missingExpected) {
+            const manageBtn = document.createElement('button');
+            manageBtn.className = 'enhanced-missing-manage-btn';
+            manageBtn.textContent = 'Manage';
+            manageBtn.dataset.action = 'manage-missing';
+            reportTd.appendChild(manageBtn);
+        } else {
+            const reportBtn = document.createElement('button');
+            reportBtn.className = 'enhanced-track-report-btn';
+            reportBtn.innerHTML = '&#9873;';
+            reportBtn.title = 'Report issue with this track';
+            reportTd.appendChild(reportBtn);
+        }
         tr.appendChild(reportTd);
     }
 
@@ -3821,6 +4130,14 @@ function _buildTrackRow(track, album, admin) {
 }
 
 function _getTrackDataFromRow(tr) {
+    if (tr._enhancedTrack && tr._enhancedAlbum) {
+        return {
+            track: tr._enhancedTrack,
+            album: tr._enhancedAlbum,
+            trackId: tr._enhancedTrack.id,
+            albumId: tr._enhancedAlbum.id
+        };
+    }
     const trackId = tr.dataset.trackId;
     const albumId = tr.dataset.albumId;
     const album = findEnhancedAlbum(albumId);
@@ -3866,6 +4183,13 @@ function _attachTableDelegation(table, album) {
         const info = _getTrackDataFromRow(tr);
         if (!info) return;
         const { track, trackId } = info;
+
+        const manageAction = target.closest('.enhanced-missing-manage-btn');
+        if (manageAction && track._missingExpected) {
+            e.stopPropagation();
+            openMissingTrackManageModal(track, album);
+            return;
+        }
 
         // Checkbox
         if (target.classList.contains('enhanced-track-checkbox')) {
@@ -4060,7 +4384,7 @@ function _rebuildTbody(table, album) {
     const admin = isEnhancedAdmin();
     const oldTbody = table.querySelector('tbody');
     const newTbody = document.createElement('tbody');
-    (album.tracks || []).forEach(track => {
+    _getEnhancedAlbumTrackRows(album).forEach(track => {
         newTbody.appendChild(_buildTrackRow(track, album, admin));
     });
     if (oldTbody) table.replaceChild(newTbody, oldTbody);
@@ -4069,13 +4393,13 @@ function _rebuildTbody(table, album) {
 
 function renderTrackTable(album) {
     const wrapper = document.createElement('div');
-    const tracks = album.tracks || [];
 
     // Re-apply stored sort order if any
     const activeSort = artistDetailPageState.enhancedTrackSort[album.id];
     if (activeSort) {
         sortEnhancedTracks(album, activeSort.field, activeSort.ascending);
     }
+    const tracks = _getEnhancedAlbumTrackRows(album);
 
     if (tracks.length === 0) {
         wrapper.innerHTML = '<div class="enhanced-no-tracks">No tracks in database</div>';
@@ -4335,8 +4659,8 @@ async function showTrackSourceInfo(track, anchorEl) {
             return;
         }
 
-        const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer: '💜' };
-        const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer: 'Deezer' };
+        const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer: '💜', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', auto_import: '📥', staging: '📥', torrent: '🧲', usenet: '📰' };
+        const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer: 'Deezer', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', auto_import: 'Auto-Import', staging: 'Staging', torrent: 'Torrent', usenet: 'Usenet' };
 
         const dl = data.downloads[0]; // Most recent download
         const icon = serviceIcons[dl.source_service] || '📦';
@@ -4666,8 +4990,8 @@ async function _streamRedownloadSources(overlay, track, metadata) {
     const startBtn = document.getElementById('redownload-start-btn');
     if (!columnsEl) return;
 
-    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡' };
-    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto' };
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', torrent: '🧲', usenet: '📰' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', torrent: 'Torrent', usenet: 'Usenet' };
 
     let allCandidates = [];
     let firstResult = true;
@@ -4789,8 +5113,8 @@ async function _streamRedownloadSources(overlay, track, metadata) {
 
 /* _renderRedownloadStep2 removed — replaced by _streamRedownloadSources above */
 if (false) {
-    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡' };
-    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto' };
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', torrent: '🧲', usenet: '📰' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', torrent: 'Torrent', usenet: 'Usenet' };
 
     // Group candidates by source service
     const grouped = {};
@@ -5124,6 +5448,14 @@ function getServiceUrl(service, entityType, id) {
             artist: `https://www.qobuz.com/artist/${id}`,
             album: `https://www.qobuz.com/album/${id}`,
             track: `https://www.qobuz.com/track/${id}`,
+        },
+        discogs: {
+            artist: `https://www.discogs.com/artist/${id}`,
+            album: `https://www.discogs.com/release/${id}`,
+        },
+        amazon: {
+            album: `https://music.amazon.com/albums/${id}`,
+            track: `https://music.amazon.com/tracks/${id}`,
         },
     };
     return urls[service] && urls[service][entityType] || null;
@@ -5564,7 +5896,8 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
 
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
-        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius'
+        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
     };
 
     const overlay = document.createElement('div');
@@ -5769,6 +6102,397 @@ async function applyManualMatch(entityType, entityId, service, serviceId, artist
     } catch (error) {
         showToast(`Match failed: ${error.message}`, 'error');
     }
+}
+
+async function wishlistEnhancedMissingTrack(track, album, downloadNow = false) {
+    if (!track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be wishlisted or downloaded.', 'error');
+        return;
+    }
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const artist = {
+        id: artistDetailPageState.enhancedData?.artist?.id || artistDetailPageState.currentArtistId || '',
+        name: artistName,
+        image_url: artistDetailPageState.enhancedData?.artist?.thumb_url || getArtistImageFromPage() || '',
+    };
+    const albumData = {
+        id: album.id,
+        name: album.title || 'Unknown Album',
+        title: album.title || 'Unknown Album',
+        image_url: album.thumb_url || '',
+        release_date: album.year ? `${album.year}-01-01` : '',
+        album_type: album.record_type || 'album',
+        total_tracks: Number(album.api_track_count || album.track_count || album.tracks?.length || 1),
+    };
+    const wishlistTrack = {
+        id: track.spotify_track_id || track.deezer_id || track.itunes_track_id || track.musicbrainz_recording_id || track.id,
+        name: track.title || `Track ${track.track_number || ''}`,
+        title: track.title || `Track ${track.track_number || ''}`,
+        artists: [{ name: artistName }],
+        duration_ms: track.duration || 0,
+        track_number: track.track_number || 1,
+        disc_number: track.disc_number || 1,
+        album: albumData,
+    };
+
+    if (typeof openAddToWishlistModal !== 'function') {
+        showToast('Wishlist modal is not available on this page', 'error');
+        return;
+    }
+
+    await openAddToWishlistModal(albumData, artist, [wishlistTrack], albumData.album_type, { [wishlistTrack.name]: false });
+    if (downloadNow && typeof handleWishlistDownloadNow === 'function') {
+        setTimeout(() => handleWishlistDownloadNow(), 150);
+    }
+}
+
+function openMissingTrackManageModal(track, album) {
+    if (track._missingExpected && !track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be managed.', 'error');
+        return;
+    }
+
+    const existing = document.getElementById('enhanced-missing-manage-overlay');
+    if (existing) existing.remove();
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const overlay = document.createElement('div');
+    overlay.id = 'enhanced-missing-manage-overlay';
+    overlay.className = 'modal-overlay';
+    let isImporting = false;
+    overlay.onclick = (e) => { if (e.target === overlay && !isImporting) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal enhanced-missing-manage-modal';
+    modal.innerHTML = `
+        <div class="confirm-modal-header">
+            <h2>Manage Missing Track</h2>
+            <button class="confirm-modal-close" type="button">&times;</button>
+        </div>
+        <div class="confirm-modal-body enhanced-missing-manage-body">
+            <div class="enhanced-missing-manage-target">
+                <div class="enhanced-have-target-label">Missing album slot</div>
+                <div class="enhanced-have-target-title">#${escapeHtml(String(track.track_number || '?'))} ${escapeHtml(track.title || 'Unknown Track')}</div>
+                <div class="enhanced-have-target-meta">${escapeHtml(artistName)} &middot; ${escapeHtml(album.title || '')}</div>
+            </div>
+            <div class="enhanced-missing-manage-options">
+                <button class="enhanced-missing-option primary" data-action="library">
+                    <span class="enhanced-missing-option-icon">+</span>
+                    <span>
+                        <span class="enhanced-missing-option-title">Add to Library</span>
+                        <span class="enhanced-missing-option-desc">Open the normal library-add flow with this exact track context.</span>
+                    </span>
+                </button>
+                <button class="enhanced-missing-option" data-action="have">
+                    <span class="enhanced-missing-option-icon">OK</span>
+                    <span>
+                        <span class="enhanced-missing-option-title">I Have This</span>
+                        <span class="enhanced-missing-option-desc">Copy an existing file and process it into this album slot. The original stays untouched.</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+        <div class="confirm-modal-actions">
+            <button class="modal-button modal-button--secondary" type="button" data-action="cancel">Cancel</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.confirm-modal-close').onclick = close;
+    modal.querySelector('[data-action="cancel"]').onclick = close;
+    modal.querySelectorAll('.enhanced-missing-option').forEach(button => {
+        button.onclick = async () => {
+            const action = button.dataset.action;
+            close();
+            if (action === 'library') {
+                await wishlistEnhancedMissingTrack(track, album, false);
+            } else if (action === 'have') {
+                openHaveMissingTrackModal(track, album);
+            }
+        };
+    });
+}
+
+function openHaveMissingTrackModal(track, album) {
+    if (track._missingExpected && !track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be imported.', 'error');
+        return;
+    }
+    const existing = document.getElementById('enhanced-have-track-overlay');
+    if (existing) existing.remove();
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const overlay = document.createElement('div');
+    overlay.id = 'enhanced-have-track-overlay';
+    overlay.className = 'modal-overlay';
+    let isImporting = false;
+    overlay.onclick = (e) => { if (e.target === overlay && !isImporting) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'enhanced-manual-match-modal enhanced-have-track-modal';
+    modal.innerHTML = `
+        <div class="enhanced-bulk-modal-header">
+            <div>
+                <h3>I Have This Track</h3>
+                <div class="enhanced-have-subtitle">Use an existing file as the source audio. SoulSync will copy it into this album.</div>
+            </div>
+            <button class="enhanced-bulk-modal-close" type="button">&times;</button>
+        </div>
+        <div class="enhanced-have-target">
+            <div class="enhanced-have-target-label">Missing album slot</div>
+            <div class="enhanced-have-target-title">#${escapeHtml(String(track.track_number || '?'))} ${escapeHtml(track.title || 'Unknown Track')}</div>
+            <div class="enhanced-have-target-meta">${escapeHtml(artistName)} &middot; ${escapeHtml(album.title || '')}</div>
+        </div>
+        <div class="enhanced-match-search-row">
+            <input class="enhanced-match-search-input" id="enhanced-have-track-search" type="text" value="${escapeHtml(`${track.title || ''} ${artistName}`.trim())}" placeholder="Search your library...">
+            <button class="enhanced-enrich-btn" id="enhanced-have-track-search-btn" type="button">Search</button>
+        </div>
+        <div class="enhanced-match-results" id="enhanced-have-track-results">
+            <div class="enhanced-match-results-hint">Searching your library...</div>
+        </div>
+        <div class="enhanced-have-selected" id="enhanced-have-selected" hidden>
+            <span>Selected</span>
+            <strong></strong>
+        </div>
+        <div class="enhanced-have-note">The selected file stays in its current album/folder. SoulSync copies it, writes the missing track's tags, and places the copy in this album.</div>
+        <div class="enhanced-have-import-status" id="enhanced-have-import-status" hidden>
+            <div class="enhanced-have-import-status-top">
+                <span class="enhanced-have-import-spinner"></span>
+                <span class="enhanced-have-import-title">Preparing import...</span>
+                <span class="enhanced-have-import-time">0s</span>
+            </div>
+            <div class="enhanced-have-import-detail">Waiting to start.</div>
+        </div>
+        <div class="enhanced-bulk-modal-footer">
+            <button class="enhanced-bulk-btn secondary" type="button" id="enhanced-have-cancel">Cancel</button>
+            <button class="enhanced-bulk-btn primary" type="button" id="enhanced-have-confirm" disabled>Import Track</button>
+        </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    let selectedTrackId = null;
+    let selectedTrackSummary = '';
+    let importTimer = null;
+    const searchResultsById = new Map();
+    const searchInput = modal.querySelector('#enhanced-have-track-search');
+    const resultsEl = modal.querySelector('#enhanced-have-track-results');
+    const selectedEl = modal.querySelector('#enhanced-have-selected');
+    const selectedText = selectedEl.querySelector('strong');
+    const confirmBtn = modal.querySelector('#enhanced-have-confirm');
+    const cancelBtn = modal.querySelector('#enhanced-have-cancel');
+    const closeBtn = modal.querySelector('.enhanced-bulk-modal-close');
+    const searchBtn = modal.querySelector('#enhanced-have-track-search-btn');
+    const statusEl = modal.querySelector('#enhanced-have-import-status');
+    const statusTitle = statusEl.querySelector('.enhanced-have-import-title');
+    const statusDetail = statusEl.querySelector('.enhanced-have-import-detail');
+    const statusTime = statusEl.querySelector('.enhanced-have-import-time');
+
+    const close = () => {
+        if (isImporting) return;
+        if (importTimer) clearInterval(importTimer);
+        overlay.remove();
+    };
+    closeBtn.onclick = close;
+    cancelBtn.onclick = close;
+    searchBtn.onclick = () => runSearch();
+    searchInput.onkeydown = (e) => { if (e.key === 'Enter' && !isImporting) runSearch(); };
+
+    function selectResultRow(row) {
+        if (isImporting || !row) return;
+        const trackId = row.dataset.trackId;
+        const result = searchResultsById.get(String(trackId));
+        if (!trackId || !result) return;
+        resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(r => {
+            r.classList.remove('selected');
+            r.setAttribute('aria-pressed', 'false');
+        });
+        row.classList.add('selected');
+        row.setAttribute('aria-pressed', 'true');
+        selectedTrackId = trackId;
+        selectedTrackSummary = `${result.title || 'Unknown'}${result.album_title ? ` from ${result.album_title}` : ''}`;
+        selectedText.textContent = selectedTrackSummary;
+        selectedEl.hidden = false;
+        confirmBtn.disabled = false;
+    }
+
+    resultsEl.addEventListener('click', (event) => {
+        const row = event.target.closest('.enhanced-have-result-row');
+        if (!row || !resultsEl.contains(row)) return;
+        event.preventDefault();
+        selectResultRow(row);
+    });
+
+    resultsEl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const row = event.target.closest('.enhanced-have-result-row');
+        if (!row) return;
+        event.preventDefault();
+        selectResultRow(row);
+    });
+
+    function setImportStatus(title, detail, tone = 'working') {
+        statusEl.hidden = false;
+        statusEl.classList.toggle('error', tone === 'error');
+        statusEl.classList.toggle('success', tone === 'success');
+        statusTitle.textContent = title;
+        statusDetail.textContent = detail;
+    }
+
+    function startImportTimer() {
+        const start = Date.now();
+        const stages = [
+            { after: 0, text: 'Copying selected file into staging.' },
+            { after: 4, text: 'Verifying audio and writing the missing track tags.' },
+            { after: 10, text: 'Post-processing can take a moment for FLAC files, lyrics, ReplayGain, and metadata.' },
+            { after: 20, text: 'Still working. Waiting for the backend to finish and return the refreshed library row.' },
+        ];
+        if (importTimer) clearInterval(importTimer);
+        importTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - start) / 1000);
+            statusTime.textContent = `${elapsed}s`;
+            const stage = [...stages].reverse().find(item => elapsed >= item.after);
+            if (stage) statusDetail.textContent = stage.text;
+        }, 250);
+    }
+
+    async function runSearch() {
+        const query = searchInput.value.trim();
+        if (!query) {
+            resultsEl.innerHTML = '<div class="enhanced-match-results-hint">Enter a title or artist to search.</div>';
+            return;
+        }
+        selectedTrackId = null;
+        selectedTrackSummary = '';
+        selectedEl.hidden = true;
+        confirmBtn.disabled = true;
+        resultsEl.innerHTML = '<div class="enhanced-loading">Searching...</div>';
+        searchResultsById.clear();
+        try {
+            const res = await fetch(`/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=12`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Search failed');
+            const tracks = data.tracks || [];
+            if (tracks.length === 0) {
+                resultsEl.innerHTML = '<div class="enhanced-match-results-hint">No library tracks found. Try a different search.</div>';
+                return;
+            }
+            resultsEl.innerHTML = '';
+            tracks.forEach(result => {
+                if (!result.id) return;
+                searchResultsById.set(String(result.id), result);
+                const row = document.createElement('div');
+                row.className = 'enhanced-have-result-row';
+                row.dataset.trackId = String(result.id);
+                row.setAttribute('role', 'button');
+                row.setAttribute('tabindex', '0');
+                row.setAttribute('aria-pressed', 'false');
+                const fileName = result.file_path ? result.file_path.split(/[\\/]/).pop() : 'No file path';
+                row.innerHTML = `
+                    <span class="enhanced-have-radio"></span>
+                    <span class="enhanced-have-result-main">
+                        <span class="enhanced-have-result-title">${escapeHtml(result.title || 'Unknown')}</span>
+                        <span class="enhanced-have-result-meta">${escapeHtml(result.artist_name || '')}${result.album_title ? ` &middot; ${escapeHtml(result.album_title)}` : ''}</span>
+                        <span class="enhanced-have-result-file">${escapeHtml(fileName)}</span>
+                    </span>
+                    <span class="enhanced-have-result-side">
+                        ${result.duration ? `<span>${formatDurationMs(result.duration)}</span>` : ''}
+                        ${result.bitrate ? `<span>${result.bitrate} kbps</span>` : ''}
+                    </span>
+                `;
+                resultsEl.appendChild(row);
+            });
+        } catch (error) {
+            resultsEl.innerHTML = `<div class="enhanced-match-results-hint" style="color:#ff6b6b;">Error: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    confirmBtn.onclick = async () => {
+        if (!selectedTrackId) return;
+        isImporting = true;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Importing...';
+        cancelBtn.disabled = true;
+        closeBtn.disabled = true;
+        searchBtn.disabled = true;
+        searchInput.disabled = true;
+        resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(row => {
+            row.setAttribute('aria-disabled', 'true');
+            row.classList.add('disabled');
+        });
+        setImportStatus(
+            'Importing selected file',
+            selectedTrackSummary ? `Using ${selectedTrackSummary}.` : 'Using the selected library track.'
+        );
+        startImportTimer();
+        try {
+            const sourceTrack = track._sourceTrack || track;
+            const expectedTrack = {
+                title: track.title || sourceTrack.title || sourceTrack.name || '',
+                name: track.title || sourceTrack.title || sourceTrack.name || '',
+                track_number: track.track_number || sourceTrack.track_number,
+                disc_number: track.disc_number || sourceTrack.disc_number || 1,
+                duration: track.duration || sourceTrack.duration || sourceTrack.duration_ms || 0,
+                duration_ms: track.duration || sourceTrack.duration_ms || sourceTrack.duration || 0,
+                source: track.source || sourceTrack.source || '',
+                track_id: track.track_id || sourceTrack.track_id || sourceTrack.id || '',
+                id: track.track_id || sourceTrack.track_id || sourceTrack.id || '',
+                album_id: track.album_id || sourceTrack.album_id || '',
+                spotify_track_id: track.spotify_track_id || sourceTrack.spotify_track_id || '',
+                deezer_id: track.deezer_id || sourceTrack.deezer_id || '',
+                itunes_track_id: track.itunes_track_id || sourceTrack.itunes_track_id || '',
+                musicbrainz_recording_id: track.musicbrainz_recording_id || sourceTrack.musicbrainz_recording_id || '',
+                artists: track.artists || sourceTrack.artists || [artistName],
+            };
+            const discs = (album.canonical_tracks || album.tracks || []).map(t => Number(t.disc_number || 1));
+            const res = await fetch(`/api/library/album/${album.id}/import-existing-track`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_track_id: selectedTrackId,
+                    expected_track: expectedTrack,
+                    album_source_id: album.spotify_album_id || album.deezer_id || album.itunes_album_id || album.musicbrainz_release_id || album.discogs_id || album.tidal_id || album.qobuz_id || '',
+                    total_discs: Math.max(1, ...discs),
+                }),
+            });
+            setImportStatus('Finalizing import', 'Backend finished. Refreshing the enhanced library view...');
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Failed to import track');
+            if (importTimer) clearInterval(importTimer);
+            statusTime.textContent = statusTime.textContent || 'done';
+            setImportStatus('Import complete', 'The copied file is now being shown in this album.', 'success');
+            showToast('Track imported. Original file was left untouched.', 'success');
+            if (data.updated_data && data.updated_data.success) {
+                artistDetailPageState.enhancedData = data.updated_data;
+                _rebuildAlbumMap();
+                renderEnhancedView();
+            } else if (artistDetailPageState.currentArtistId) {
+                await loadEnhancedViewData(artistDetailPageState.currentArtistId);
+            }
+            setTimeout(() => overlay.remove(), 650);
+        } catch (error) {
+            if (importTimer) clearInterval(importTimer);
+            isImporting = false;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Import Track';
+            cancelBtn.disabled = false;
+            closeBtn.disabled = false;
+            searchBtn.disabled = false;
+            searchInput.disabled = false;
+            resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(row => {
+                row.setAttribute('aria-disabled', 'false');
+                row.classList.remove('disabled');
+            });
+            setImportStatus('Import failed', error.message, 'error');
+            showToast(`Import failed: ${error.message}`, 'error');
+        }
+    };
+
+    searchInput.focus();
+    runSearch();
 }
 
 // ---- Enrichment ----
@@ -6418,10 +7142,24 @@ async function showReorganizeModal(albumId) {
 
     let html = '<div class="reorganize-content">';
 
+    // Metadata MODE picker — API call (default) vs read embedded tags.
+    // Tag-mode (#592) trusts the user's enriched library and issues
+    // zero API calls.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
     // Metadata source picker — populated from /reorganize/sources.
     // Empty value = use configured primary (with fallback chain).
     // Specific source = strict mode, that source only.
-    html += '<div class="reorganize-source-section">';
+    // Hidden when mode = 'tags' since the source picker is irrelevant
+    // (tags are read straight off the file).
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read the album\'s tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6445,6 +7183,21 @@ async function showReorganizeModal(albumId) {
 
     // Populate source picker after the modal mounts
     setTimeout(() => _populateReorganizeSources(_reorganizeAlbumId), 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
+}
+
+function _onReorganizeModeChange() {
+    const mode = document.getElementById('reorganize-mode-select')?.value || 'api';
+    const srcSection = document.getElementById('reorganize-source-section');
+    if (srcSection) srcSection.style.display = (mode === 'tags') ? 'none' : '';
+    try { localStorage.setItem('soulsync-reorganize-mode', mode); } catch (e) {}
 }
 
 async function _populateReorganizeSources(albumId) {
@@ -6496,10 +7249,11 @@ async function loadReorganizePreview() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) {
@@ -6596,10 +7350,11 @@ async function executeReorganize() {
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
@@ -6690,10 +7445,21 @@ async function _showReorganizeAllModal() {
 
     let html = '<div class="reorganize-content">';
 
-    // Source picker — applies to ALL albums in this run. Albums without
-    // an ID for the chosen source will be skipped at the backend with
-    // a clear status. Auto = use configured primary with fallback chain.
+    // Mode picker — applies to ALL albums.
     html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Source picker — applies to ALL albums in this run. Hidden when
+    // mode = 'tags'. Albums without an ID for the chosen source will
+    // be skipped at the backend with a clear status. Auto = use
+    // configured primary with fallback chain.
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
     html += '<label class="reorganize-label">Metadata Source (applies to all albums)</label>';
     html += '<div class="reorganize-template-hint">Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads.</div>';
     html += '<select id="reorganize-source-select" class="reorganize-template-input">';
@@ -6743,6 +7509,14 @@ async function _showReorganizeAllModal() {
             console.error('Failed to load reorganize sources:', err);
         }
     }, 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
 }
 
 async function _executeReorganizeAll() {
@@ -6766,14 +7540,15 @@ async function _executeReorganizeAll() {
     const overlay = document.getElementById('reorganize-overlay');
     if (overlay) overlay.classList.add('hidden');
 
-    // One source pick applies to every album in the batch.
+    // One source + mode pick applies to every album in the batch.
     const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+    const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
 
     try {
         const resp = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource }),
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode }),
         });
         const result = await resp.json();
         if (!result.success) throw new Error(result.error || 'Queue request failed');
@@ -7263,6 +8038,45 @@ async function playLibraryTrack(track, albumTitle, artistName) {
         return;
     }
 
+    // Library tracks have authoritative metadata in the SoulSync DB —
+    // any title / artist / album the caller passes in is downstream of
+    // whatever modal triggered playback and may carry noise like the
+    // ``<source_id>||<display>`` filename prefix from a Prowlarr result.
+    // When the caller has a track.id, fetch the canonical row from
+    // resolve-track and overwrite the caller-supplied fields with the
+    // DB values. Falls back silently to the caller-supplied values on
+    // any error so we never lose the play action over a metadata fetch.
+    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+        try {
+            const _dbResp = await fetch('/api/stats/resolve-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: track.title || track.name,
+                    artist: artistName || track.artist_name || '',
+                }),
+            });
+            const _dbData = await _dbResp.json();
+            if (_dbData && _dbData.success && _dbData.track) {
+                const _row = _dbData.track;
+                track = {
+                    ...track,
+                    id: _row.id ?? track.id,
+                    title: _row.title || track.title,
+                    file_path: _row.file_path || track.file_path,
+                    bitrate: _row.bitrate ?? track.bitrate,
+                    artist_id: _row.artist_id ?? track.artist_id,
+                    album_id: _row.album_id ?? track.album_id,
+                    _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
+                };
+                if (_row.album_title) albumTitle = _row.album_title;
+                if (_row.artist_name) artistName = _row.artist_name;
+            }
+        } catch (_dbErr) {
+            console.debug('library track DB refresh skipped:', _dbErr);
+        }
+    }
+
     try {
         // Stop any current playback first
         if (audioPlayer && !audioPlayer.paused) {
@@ -7542,6 +8356,259 @@ async function updateLibraryWatchlistButtonStatus(artistId) {
         }
     } catch (error) {
         console.warn('Failed to check library watchlist status:', error);
+    }
+}
+
+// ── Manual Library Match ──────────────────────────────────────────────────────
+
+let _mlmOverlay = null;
+let _mlmSelectedSource = null;
+let _mlmSelectedLibrary = null;
+let _mlmSourceTimer = null;
+let _mlmLibraryTimer = null;
+
+function openManualLibraryMatchTool(prefill) {
+    if (_mlmOverlay) _mlmOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'mlm-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) _mlmClose(); };
+
+    overlay.innerHTML = `
+        <div class="playlist-modal mlm-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>Manual Library Match</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-owner">Link source tracks to library tracks to stop re-downloads</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="_mlmClose()">&times;</span>
+            </div>
+
+            <div class="mlm-modal-body">
+                <div class="mlm-panels">
+                    <div class="mlm-panel source">
+                        <div class="server-col-header">
+                            <span class="server-col-icon">📋</span>
+                            Source Track
+                        </div>
+                        <div class="mlm-panel-search-wrap">
+                            <input class="mlm-search" id="mlm-source-search" placeholder="Search wishlist &amp; sync history&hellip;" oninput="_mlmSourceDebounce(this.value)">
+                        </div>
+                        <div class="server-col-scroll" id="mlm-source-results"><p class="mlm-hint">Type to search</p></div>
+                    </div>
+                    <div class="mlm-panel library">
+                        <div class="server-col-header">
+                            <span class="server-col-icon">🎵</span>
+                            Library Track
+                        </div>
+                        <div class="mlm-panel-search-wrap">
+                            <input class="mlm-search" id="mlm-library-search" placeholder="Search your library&hellip;" oninput="_mlmLibraryDebounce(this.value)">
+                        </div>
+                        <div class="server-col-scroll" id="mlm-library-results"><p class="mlm-hint">Type to search</p></div>
+                    </div>
+                </div>
+
+                <div class="mlm-existing-section">
+                    <div class="server-col-header mlm-matches-header">
+                        Existing Matches
+                        <span class="server-col-count" id="mlm-match-count"></span>
+                    </div>
+                    <div class="mlm-matches-wrap" id="mlm-matches-list"><p class="mlm-hint">Loading&hellip;</p></div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left">
+                    <span id="mlm-status" class="mlm-status-msg"></span>
+                </div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="_mlmClose()">Cancel</button>
+                    <button class="playlist-modal-btn playlist-modal-btn-primary" id="mlm-save-btn" disabled onclick="_mlmSaveMatch()">Save Match</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    _mlmOverlay = overlay;
+    _mlmSelectedSource = null;
+    _mlmSelectedLibrary = null;
+    _mlmUpdateSaveBtn();
+    _mlmLoadMatches();
+
+    if (prefill) {
+        const src = document.getElementById('mlm-source-search');
+        if (src) { src.value = prefill; _mlmSourceSearch(prefill); }
+    }
+}
+
+function _mlmClose() {
+    if (_mlmOverlay) { _mlmOverlay.remove(); _mlmOverlay = null; }
+    _mlmSelectedSource = null;
+    _mlmSelectedLibrary = null;
+}
+
+function _mlmSourceDebounce(q) {
+    clearTimeout(_mlmSourceTimer);
+    _mlmSourceTimer = setTimeout(() => _mlmSourceSearch(q), 300);
+}
+function _mlmLibraryDebounce(q) {
+    clearTimeout(_mlmLibraryTimer);
+    _mlmLibraryTimer = setTimeout(() => _mlmLibrarySearch(q), 300);
+}
+
+async function _mlmSourceSearch(q) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el) return;
+    if (!q.trim()) { el.innerHTML = '<p class="mlm-hint">Type to search</p>'; return; }
+    el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
+    try {
+        const res = await fetch(`/api/manual-library-matches/source-search?q=${encodeURIComponent(q)}&limit=15`);
+        const data = await res.json();
+        _mlmRenderSourceResults(data.tracks || []);
+    } catch (e) { el.innerHTML = '<p class="mlm-hint mlm-error">Search failed</p>'; }
+}
+
+async function _mlmLibrarySearch(q) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el) return;
+    if (!q.trim()) { el.innerHTML = '<p class="mlm-hint">Type to search</p>'; return; }
+    el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
+    try {
+        const res = await fetch(`/api/manual-library-matches/library-search?q=${encodeURIComponent(q)}&limit=15`);
+        const data = await res.json();
+        _mlmRenderLibraryResults(data.tracks || []);
+    } catch (e) { el.innerHTML = '<p class="mlm-hint mlm-error">Search failed</p>'; }
+}
+
+function _mlmEsc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _mlmRenderSourceResults(tracks) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el) return;
+    if (!tracks.length) { el.innerHTML = '<p class="mlm-hint">No results</p>'; return; }
+    el.innerHTML = tracks.map((t, i) => {
+        const sel = _mlmSelectedSource && _mlmSelectedSource.source_track_id === t.source_track_id ? 'mlm-row-selected' : '';
+        return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectSource(${i})">
+            <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
+            <div class="mlm-row-sub">${_mlmEsc(t.artist || '')}${t.album ? ' · ' + _mlmEsc(t.album) : ''}</div>
+            <div class="mlm-row-ctx">${_mlmEsc(t.context || t.source || '')}</div>
+        </div>`;
+    }).join('');
+    el._mlmTracks = tracks;
+}
+
+function _mlmRenderLibraryResults(tracks) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el) return;
+    if (!tracks.length) { el.innerHTML = '<p class="mlm-hint">No results</p>'; return; }
+    el.innerHTML = tracks.map((t, i) => {
+        const sel = _mlmSelectedLibrary && _mlmSelectedLibrary.id === t.id ? 'mlm-row-selected' : '';
+        const path = t.file_path ? t.file_path.split(/[/\\]/).pop() : '';
+        return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectLibrary(${i})">
+            <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
+            <div class="mlm-row-sub">${_mlmEsc(t.artist_name || '')}${t.album_title ? ' · ' + _mlmEsc(t.album_title) : ''}</div>
+            <div class="mlm-row-ctx">${_mlmEsc(path)}${t.bitrate ? ' · ' + t.bitrate + 'kbps' : ''}</div>
+        </div>`;
+    }).join('');
+    el._mlmTracks = tracks;
+}
+
+function _mlmSelectSource(idx) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el || !el._mlmTracks) return;
+    _mlmSelectedSource = el._mlmTracks[idx];
+    el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
+    _mlmUpdateSaveBtn();
+}
+
+function _mlmSelectLibrary(idx) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el || !el._mlmTracks) return;
+    _mlmSelectedLibrary = el._mlmTracks[idx];
+    el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
+    _mlmUpdateSaveBtn();
+}
+
+function _mlmUpdateSaveBtn() {
+    const btn = document.getElementById('mlm-save-btn');
+    if (btn) btn.disabled = !(_mlmSelectedSource && _mlmSelectedLibrary);
+}
+
+async function _mlmSaveMatch() {
+    if (!_mlmSelectedSource || !_mlmSelectedLibrary) return;
+    const status = document.getElementById('mlm-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+        const body = {
+            source: _mlmSelectedSource.source,
+            source_track_id: _mlmSelectedSource.source_track_id,
+            library_track_id: _mlmSelectedLibrary.id,
+            source_title: _mlmSelectedSource.title || '',
+            source_artist: _mlmSelectedSource.artist || '',
+            source_album: _mlmSelectedSource.album || '',
+            source_context_json: '',
+            server_source: '',
+        };
+        const res = await fetch('/api/manual-library-matches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (status) status.textContent = 'Saved!';
+            _mlmSelectedSource = null;
+            _mlmSelectedLibrary = null;
+            _mlmUpdateSaveBtn();
+            await _mlmLoadMatches();
+            setTimeout(() => { if (status) status.textContent = ''; }, 2000);
+        } else {
+            if (status) status.textContent = 'Error: ' + (data.error || 'unknown');
+        }
+    } catch (e) {
+        if (status) status.textContent = 'Network error';
+    }
+}
+
+async function _mlmLoadMatches() {
+    const el = document.getElementById('mlm-matches-list');
+    if (!el) return;
+    try {
+        const res = await fetch('/api/manual-library-matches');
+        const data = await res.json();
+        const matches = data.matches || [];
+        const countEl = document.getElementById('mlm-match-count');
+        if (countEl) countEl.textContent = matches.length;
+        if (!matches.length) {
+            el.innerHTML = '<p class="mlm-hint">No matches saved yet</p>';
+            return;
+        }
+        el.innerHTML = `<table class="mlm-matches-table">
+            <thead><tr><th>Source Track</th><th>Library Track</th><th>Source</th><th></th></tr></thead>
+            <tbody>${matches.map(m => `<tr>
+                <td><div class="mlm-row-title">${_mlmEsc(m.source_title || m.source_track_id)}</div><div class="mlm-row-sub">${_mlmEsc(m.source_artist || '')}</div></td>
+                <td><div class="mlm-row-title">${_mlmEsc(m.library_title || String(m.library_track_id))}</div><div class="mlm-row-sub">${_mlmEsc(m.library_artist || '')}</div></td>
+                <td><span class="mlm-source-badge">${_mlmEsc(m.source)}</span></td>
+                <td><button class="mlm-remove-btn" onclick="_mlmDeleteMatch(${m.id})" title="Remove match">&#x2715;</button></td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        el.innerHTML = '<p class="mlm-hint mlm-error">Failed to load matches</p>';
+    }
+}
+
+async function _mlmDeleteMatch(id) {
+    try {
+        await fetch(`/api/manual-library-matches/${id}`, { method: 'DELETE' });
+        await _mlmLoadMatches();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to remove match', 'error');
     }
 }
 

@@ -64,10 +64,11 @@ function _wingItAction(urlHash, action) {
         const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
         const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isLB = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isDeezer = state.is_deezer_playlist;
-        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
         if (!tracks.length) {
             showToast('No tracks available for Wing It', 'error');
@@ -347,10 +348,11 @@ async function _wingItFromModal(urlHash) {
     const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
     const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
     const isTidal = state.is_tidal_playlist;
+    const isQobuz = state.is_qobuz_playlist;
     const isLB = state.is_listenbrainz_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isDeezer = state.is_deezer_playlist;
-    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
     if (!tracks.length) {
         showToast('No tracks available for Wing It', 'error');
@@ -501,7 +503,10 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     const heroContext = isDiscoverAlbum && album && artist ? {
         type: 'album',
         artist: {
+            ...artist,
             name: artist.name,
+            id: artist.id || artist.artist_id || null,
+            source: artist.source || album.source || null,
             image_url: artist.image_url || null
         },
         album: {
@@ -579,7 +584,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                                    onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
@@ -628,13 +633,6 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
-}
-
-function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, playlistId) {
-    if (!artistName) return;
-    // Close the download modal
-    if (playlistId) closeDownloadMissingModal(playlistId);
-    navigateToArtistDetail(artistId || artistName, artistName, source || null);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -1508,46 +1506,54 @@ async function selectWishlistCategory(category) {
                 // Sort tracks by track number
                 albumData.tracks.sort((a, b) => a.trackNumber - b.trackNumber);
 
-                const tracksListHTML = albumData.tracks.map(track => `
+                const tracksListHTML = albumData.tracks.map(track => {
+                    const safeTrackId = escapeHtml(track.spotifyTrackId || '');
+                    const safeTrackName = escapeHtml(track.name || 'Unknown Track');
+                    return `
                     <div class="wishlist-album-track wishlist-track-item">
                         <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${track.spotifyTrackId}">
+                                   data-track-id="${safeTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
-                        <span class="wishlist-album-track-name">${track.name}</span>
-                        <button class="wishlist-delete-btn wishlist-delete-btn-small" data-track-id="${track.spotifyTrackId}" title="Remove from wishlist">
+                        <span class="wishlist-album-track-name">${safeTrackName}</span>
+                        <button class="wishlist-delete-btn wishlist-delete-btn-small" data-track-id="${safeTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
-                `).join('');
+                `;
+                }).join('');
 
                 // Handle missing album images with a placeholder
+                const safeAlbumId = escapeHtml(albumId);
+                const safeAlbumName = escapeHtml(albumData.albumName || 'Unknown Album');
+                const safeArtistName = escapeHtml(albumData.artistName || 'Unknown Artist');
+                const safeAlbumImage = escapeHtml(albumData.albumImage || '').replace(/'/g, '&#39;');
                 const albumImageStyle = albumData.albumImage
-                    ? `background-image: url('${albumData.albumImage}')`
+                    ? `background-image: url('${safeAlbumImage}')`
                     : `background: linear-gradient(135deg, rgba(30, 30, 30, 0.9) 0%, rgba(50, 50, 50, 0.9) 100%); display: flex; align-items: center; justify-content: center; font-size: 40px;`;
                 const albumImageContent = albumData.albumImage ? '' : '<span style="opacity: 0.3;">💿</span>';
 
                 albumsHTML += `
                     <div class="wishlist-album-card">
-                        <div class="wishlist-album-header" data-album-id="${albumId}">
+                        <div class="wishlist-album-header" data-album-id="${safeAlbumId}">
                             <label class="wishlist-checkbox-wrapper">
                                 <input type="checkbox" class="wishlist-album-select-all-cb"
-                                       data-album-id="${albumId}">
+                                       data-album-id="${safeAlbumId}">
                                 <span class="wishlist-checkbox-custom"></span>
                             </label>
                             <div class="wishlist-album-image" style="${albumImageStyle}">${albumImageContent}</div>
                             <div class="wishlist-album-info">
-                                <div class="wishlist-album-name">${albumData.albumName}</div>
-                                <div class="wishlist-album-artist">${albumData.artistName}</div>
+                                <div class="wishlist-album-name">${safeAlbumName}</div>
+                                <div class="wishlist-album-artist">${safeArtistName}</div>
                                 <div class="wishlist-album-track-count">${albumData.tracks.length} track${albumData.tracks.length !== 1 ? 's' : ''}</div>
                             </div>
-                            <button class="wishlist-delete-btn wishlist-delete-album-btn" data-album-id="${albumId}" title="Remove all tracks from album">
+                            <button class="wishlist-delete-btn wishlist-delete-album-btn" data-album-id="${safeAlbumId}" title="Remove all tracks from album">
                                 🗑️
                             </button>
                             <div class="wishlist-album-expand-icon" id="expand-icon-${albumId}">▼</div>
                         </div>
-                        <div class="wishlist-album-tracks" id="tracks-${albumId}" style="display: none;">
+                        <div class="wishlist-album-tracks" id="tracks-${safeAlbumId}" style="display: none;">
                             ${tracksListHTML}
                         </div>
                     </div>
@@ -1599,20 +1605,25 @@ async function selectWishlistCategory(category) {
 
                 const albumImage = spotifyData?.album?.images?.[0]?.url || '';
                 const spotifyTrackId = track.spotify_track_id || track.id || '';
+                const safeTrackId = escapeHtml(spotifyTrackId);
+                const safeTrackName = escapeHtml(trackName);
+                const safeArtistName = escapeHtml(artistName);
+                const safeAlbumName = escapeHtml(albumName);
+                const safeAlbumImage = escapeHtml(albumImage).replace(/'/g, '&#39;');
 
                 tracksHTML += `
                     <div class="playlist-track-item-with-image wishlist-track-item">
                         <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${spotifyTrackId}">
+                                   data-track-id="${safeTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
-                        <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
+                        <div class="playlist-track-image" style="background-image: url('${safeAlbumImage}')"></div>
                         <div class="playlist-track-info">
-                            <div class="playlist-track-name">${trackName}</div>
-                            <div class="playlist-track-artist">${artistName} • ${albumName}</div>
+                            <div class="playlist-track-name">${safeTrackName}</div>
+                            <div class="playlist-track-artist">${safeArtistName} • ${safeAlbumName}</div>
                         </div>
-                        <button class="wishlist-delete-btn" data-track-id="${spotifyTrackId}" title="Remove from wishlist">
+                        <button class="wishlist-delete-btn" data-track-id="${safeTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
@@ -2134,7 +2145,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -2478,6 +2489,7 @@ async function startMissingTracksProcess(playlistId) {
         const requestBody = {
             tracks: selectedTracks,
             force_download_all: forceDownloadAll || isWingIt,
+            ignore_manual_matches: forceDownloadAll,
             wing_it: isWingIt,
         };
 
@@ -2601,6 +2613,89 @@ function updateTrackAnalysisResults(playlistId, results) {
             matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
     }
+}
+
+function getModalTrackArtistName(track, fallbackArtist = '') {
+    const formatted = formatArtists(track?.artists);
+    if (formatted && formatted !== 'Unknown Artist') return formatted;
+    return track?.artist_name || track?.artist || fallbackArtist || formatted || '';
+}
+
+function getModalTrackAlbumTitle(track, process = null) {
+    if (track?.album) {
+        if (typeof track.album === 'string') return track.album;
+        if (track.album.name) return track.album.name;
+        if (track.album.title) return track.album.title;
+    }
+    if (process?.album) {
+        return process.album.name || process.album.title || '';
+    }
+    return '';
+}
+
+function renderModalTrackPlayButton(playlistId, trackIndex) {
+    return `<button class="modal-track-play-btn" onclick="event.stopPropagation(); playDownloadModalTrack('${escapeForInlineJs(playlistId)}', ${trackIndex})" title="Play track">&#9654;</button>`;
+}
+
+async function playTrackFromLibraryOrStream(track, albumTitle = '', artistName = '') {
+    const title = track?.title || track?.name || '';
+    if (!title) {
+        showToast('No track title available to play', 'error');
+        return;
+    }
+
+    if (track?.file_path && typeof playLibraryTrack === 'function') {
+        await playLibraryTrack({
+            id: track.id || track.track_id || null,
+            title,
+            file_path: track.file_path,
+            _stats_image: track._stats_image || track.album_thumb_url || null,
+            bitrate: track.bitrate,
+            artist_id: track.artist_id,
+            album_id: track.album_id
+        }, albumTitle, artistName);
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist: artistName })
+        });
+        const data = await res.json();
+        if (data.success && data.track && data.track.file_path && typeof playLibraryTrack === 'function') {
+            await playLibraryTrack({
+                ...data.track,
+                title: data.track.title || title,
+                _stats_image: data.track.album_thumb_url || data.track.artist_thumb_url || null
+            }, data.track.album_title || albumTitle, data.track.artist_name || artistName);
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed before stream fallback:', e);
+    }
+
+    if (typeof _gsPlayTrack === 'function') {
+        await _gsPlayTrack(title, artistName, albumTitle);
+    } else {
+        showToast('Playback is not available here', 'error');
+    }
+}
+
+async function playDownloadModalTrack(playlistId, trackIndex) {
+    const process = activeDownloadProcesses[playlistId];
+    const track = process?.tracks?.[trackIndex] || playlistTrackCache[playlistId]?.[trackIndex];
+    if (!track) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    await playTrackFromLibraryOrStream(
+        track,
+        getModalTrackAlbumTitle(track, process),
+        getModalTrackArtistName(track, process?.artist?.name || '')
+    );
 }
 
 
@@ -3247,12 +3342,115 @@ async function downloadCandidate(taskId, candidate, trackName) {
     }
 }
 
+async function approveQuarantineFromDownloadRow(button) {
+    const entryId = button?.dataset?.entryId || '';
+    if (!entryId) {
+        showToast('Open Quarantine to approve this file.', 'warning');
+        return;
+    }
+
+    const confirmed = await showConfirmDialog({
+        title: 'Approve Quarantined File',
+        message: 'Import this quarantined file and skip quarantine checks for this approved pass?',
+        confirmText: 'Approve & Import',
+        cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Approving...';
+    try {
+        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Approved quarantined file. Re-running post-processing.', 'success');
+        } else {
+            showToast(`Approve failed: ${data.error || 'Unknown error'}`, 'error');
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    } catch (error) {
+        showToast(`Approve failed: ${error.message}`, 'error');
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
 function closeCandidatesModal() {
     const overlay = document.getElementById('candidates-modal-overlay');
     if (overlay) {
         overlay.classList.remove('visible');
         setTimeout(() => overlay.remove(), 300);
     }
+}
+
+function _downloadModalBundleProgressPercent(bundle) {
+    if (!bundle) return 0;
+    const raw = bundle.progress_percent ?? bundle.progress ?? 0;
+    let progress = Number(raw);
+    if (!Number.isFinite(progress)) progress = 0;
+    if (progress <= 1) progress *= 100;
+    return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+function _downloadModalFormatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    const decimals = size >= 10 || unit === 0 ? 0 : 1;
+    return `${size.toFixed(decimals)} ${units[unit]}`;
+}
+
+function _downloadModalFormatSpeed(bytesPerSecond) {
+    const formatted = _downloadModalFormatBytes(bytesPerSecond);
+    return formatted ? `${formatted}/s` : '';
+}
+
+function _downloadModalSourceLabel(source) {
+    const labels = {
+        torrent: 'Torrent',
+        usenet: 'Usenet',
+        soulseek: 'Soulseek',
+        youtube: 'YouTube',
+        tidal: 'Tidal',
+        qobuz: 'Qobuz',
+        hifi: 'HiFi',
+        deezer_dl: 'Deezer',
+        amazon: 'Amazon',
+        lidarr: 'Lidarr',
+        soundcloud: 'SoundCloud'
+    };
+    const key = String(source || '').toLowerCase();
+    return labels[key] || (source ? String(source) : 'Release');
+}
+
+function _downloadModalBundleStateLabel(state) {
+    const labels = {
+        searching: 'searching for release',
+        downloading: 'downloading release',
+        staged: 'matching tracks',
+        failed: 'release failed'
+    };
+    const key = String(state || '').toLowerCase();
+    return labels[key] || (state ? String(state).replace(/_/g, ' ') : 'downloading release');
+}
+
+function _downloadModalBundleProgressText(bundle) {
+    const percent = _downloadModalBundleProgressPercent(bundle);
+    const source = _downloadModalSourceLabel(bundle && bundle.source);
+    const state = _downloadModalBundleStateLabel(bundle && bundle.state);
+    const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    const speed = _downloadModalFormatSpeed(bundle && bundle.speed);
+    const size = _downloadModalFormatBytes(bundle && bundle.size);
+    const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
+    return `${source} ${state} ${percent}%${release}${detail}`;
 }
 
 function processModalStatusUpdate(playlistId, data) {
@@ -3302,6 +3500,33 @@ function processModalStatusUpdate(playlistId, data) {
 
             // Auto-save M3U file for playlists after analysis
             autoSavePlaylistM3U(playlistId);
+        }
+    } else if (data.phase === 'album_downloading') {
+        const analysisFill = document.getElementById(`analysis-progress-fill-${playlistId}`);
+        const analysisText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        if (analysisFill) analysisFill.style.width = '100%';
+        if (analysisText) analysisText.textContent = 'Analysis complete!';
+
+        const bundle = data.album_bundle || {};
+        const percent = _downloadModalBundleProgressPercent(bundle);
+        const downloadFill = document.getElementById(`download-progress-fill-${playlistId}`);
+        const downloadText = document.getElementById(`download-progress-text-${playlistId}`);
+        if (downloadFill) downloadFill.style.width = `${percent}%`;
+        if (downloadText) {
+            downloadText.textContent = _downloadModalBundleProgressText(bundle);
+            downloadText.title = 'SoulSync downloads one album release first, then matches the selected tracks from the staged files.';
+        }
+
+        const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+        if (modal) {
+            modal.querySelectorAll('[id^="download-"]').forEach(statusEl => {
+                if (!statusEl.id.startsWith(`download-${playlistId}-`)) return;
+                if (!statusEl.textContent || statusEl.textContent === '-' || statusEl.textContent.includes('Pending')) {
+                    statusEl.textContent = 'Waiting for release';
+                    statusEl.classList.add('album-bundle-waiting');
+                    statusEl.title = 'The album release is downloading first. Tracks will move to processing once SoulSync can match files from it.';
+                }
+            });
         }
     } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
         console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
@@ -3371,6 +3596,7 @@ function processModalStatusUpdate(playlistId, data) {
             const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
 
             let statusText = '';
+            let isQuarantinedTask = false;
             // V2 SYSTEM: Handle UI state override for cancelling tasks
             if (isV2Task && uiState === 'cancelling' && task.status !== 'cancelled') {
                 statusText = '🔄 Cancelling...';
@@ -3382,7 +3608,19 @@ function processModalStatusUpdate(playlistId, data) {
                     case 'post_processing': statusText = '⌛ Processing...'; break;
                     case 'completed': statusText = '✅ Completed'; completedCount++; break;
                     case 'not_found': statusText = '🔇 Not Found'; notFoundCount++; break;
-                    case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
+                    case 'failed': {
+                        // Distinguish quarantine outcomes from generic
+                        // failures — the file is recoverable, not lost.
+                        const _em = (task.error_message || '').toLowerCase();
+                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quarantin')) {
+                            isQuarantinedTask = true;
+                            statusText = '🛡️ Quarantined';
+                        } else {
+                            statusText = '❌ Failed';
+                        }
+                        failedOrCancelledCount++;
+                        break;
+                    }
                     case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                     default: statusText = `⚪ ${task.status}`; break;
                 }
@@ -3422,6 +3660,13 @@ function processModalStatusUpdate(playlistId, data) {
                     // Create V2 cancel button for all active tasks
                     const onclickHandler = isV2Task ? 'cancelTrackDownloadV2' : 'cancelTrackDownload';
                     actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="${onclickHandler}('${playlistId}', ${task.track_index})">×</button>`;
+                }
+            } else if (actionsEl && task.status === 'failed' && isQuarantinedTask && task.quarantine_entry_id) {
+                const entryId = escapeHtml(task.quarantine_entry_id);
+                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" title="Approve quarantined file">Approve</button>`;
+                const approveBtn = actionsEl.querySelector('.approve-quarantine-inline-btn');
+                if (approveBtn) {
+                    approveBtn.addEventListener('click', () => approveQuarantineFromDownloadRow(approveBtn));
                 }
             } else if (actionsEl && ['completed', 'failed', 'cancelled', 'not_found', 'post_processing'].includes(task.status)) {
                 actionsEl.innerHTML = '-'; // No actions available for terminal or processing states
@@ -3521,12 +3766,9 @@ function processModalStatusUpdate(playlistId, data) {
                 setTimeout(() => loadServerPlaylists(), 2000);
             }
 
-            // Auto-close wishlist modal when completed (for auto-processing)
+            // Keep visible wishlist results open so failed tracks can be reviewed.
             if (playlistId === 'wishlist') {
-                console.log('🔄 [Auto-Wishlist] Auto-closing completed wishlist modal to enable next cycle');
-                setTimeout(() => {
-                    closeDownloadMissingModal(playlistId);
-                }, 3000); // 3-second delay to show completion message
+                console.log('[Wishlist] Leaving completed wishlist modal open for failed-track review');
             }
 
             // Check if any other processes still need polling
@@ -5594,13 +5836,13 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', true)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></div>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 
     if (artists.length) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
-        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true" data-artist-name="${_escAttr(a.name)}"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += artists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, activeSrc || null) : '#'}" onclick="_gsDeactivate()" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true" data-artist-name="${_escAttr(a.name)}"` : ''} style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></a>`).join('');
         h += '</div>';
     }
 
@@ -5672,13 +5914,6 @@ async function _gsLazyLoadArtistImages() {
             }
         } catch (e) { /* ignore */ }
     }
-}
-
-function _gsClickArtist(id, name, isLibrary) {
-    _gsDeactivate();
-    const activeSource = _gsController && _gsController.state.activeSource;
-    const source = isLibrary ? null : (activeSource || null);
-    navigateToArtistDetail(id, name, source);
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
@@ -6296,4 +6531,3 @@ const additionalStyles = `
 document.head.insertAdjacentHTML('beforeend', additionalStyles);
 
 // ============================================================================
-

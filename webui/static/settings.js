@@ -71,8 +71,7 @@ function _isMetadataSourceSelectable(source) {
 
 function _metadataSourceFallback(source) {
     if (source === 'spotify') return 'deezer';
-    if (source === 'discogs') return 'itunes';
-    return 'itunes';
+    return 'deezer';
 }
 
 function focusServiceSettingsSection(service, message) {
@@ -100,7 +99,7 @@ function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
     const select = document.getElementById('metadata-fallback-source');
     if (!select) return false;
 
-    const selectedSource = select.value || 'itunes';
+    const selectedSource = select.value || 'deezer';
     if (_isMetadataSourceSelectable(selectedSource)) {
         select.dataset.lastValidSource = selectedSource;
         return false;
@@ -595,12 +594,16 @@ const HYBRID_SOURCES = [
     { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
+    { id: 'amazon', name: 'Amazon Music', icon: null, emoji: '🛒' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
     { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
+    { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
+    { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
+const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -623,6 +626,13 @@ function buildHybridSourceList() {
         const enabled = _hybridSourceEnabled[srcId] !== false;
         const isInOrder = _hybridSourceOrder.includes(srcId);
         const priorityNum = isInOrder && enabled ? _hybridSourceOrder.indexOf(srcId) + 1 : '';
+        const canOwnAlbum = enabled && priorityNum === 1 && ALBUM_LEVEL_HYBRID_SOURCES.has(srcId);
+        const sourceLevel = canOwnAlbum ? 'Album-level' : 'Track-level';
+        const sourceLevelClass = canOwnAlbum ? 'album' : 'track';
+        const sourceLevelTitle = canOwnAlbum
+            ? 'This first source can download a whole album release before per-track fallback.'
+            : 'This source runs as per-track fallback in the current hybrid order.';
+        const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
 
         const item = document.createElement('div');
         item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
@@ -639,6 +649,7 @@ function buildHybridSourceList() {
                 : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
             }
             <span class="hybrid-source-name">${src.name}</span>
+            ${sourceLevelBadge}
             <span class="hybrid-source-priority">${priorityNum}</span>
             <label class="hybrid-source-toggle">
                 <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">
@@ -892,7 +903,7 @@ async function loadSettingsData() {
         document.getElementById('discogs-token').value = settings.discogs?.token || '';
 
         // Populate Metadata source setting
-        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'itunes';
+        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'deezer';
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -942,8 +953,41 @@ async function loadSettingsData() {
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
+        document.getElementById('amazon-quality').value = settings.amazon_download?.quality || 'flac';
+        document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
+        const _prowUrl = document.getElementById('prowlarr-url');
+        const _prowKey = document.getElementById('prowlarr-api-key');
+        const _prowIds = document.getElementById('prowlarr-indexer-ids');
+        if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
+        if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
+        if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
+        const _tcType = document.getElementById('torrent-client-type');
+        const _tcUrl = document.getElementById('torrent-client-url');
+        const _tcUser = document.getElementById('torrent-client-username');
+        const _tcPass = document.getElementById('torrent-client-password');
+        const _tcCat = document.getElementById('torrent-client-category');
+        const _tcPath = document.getElementById('torrent-client-save-path');
+        if (_tcType) _tcType.value = settings.torrent_client?.type || 'qbittorrent';
+        if (_tcUrl) _tcUrl.value = settings.torrent_client?.url || '';
+        if (_tcUser) _tcUser.value = settings.torrent_client?.username || '';
+        if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
+        if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
+        if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        const _ucType = document.getElementById('usenet-client-type');
+        const _ucUrl = document.getElementById('usenet-client-url');
+        const _ucKey = document.getElementById('usenet-client-api-key');
+        const _ucUser = document.getElementById('usenet-client-username');
+        const _ucPass = document.getElementById('usenet-client-password');
+        const _ucCat = document.getElementById('usenet-client-category');
+        if (_ucType) _ucType.value = settings.usenet_client?.type || 'sabnzbd';
+        if (_ucUrl) _ucUrl.value = settings.usenet_client?.url || '';
+        if (_ucKey) _ucKey.value = settings.usenet_client?.api_key || '';
+        if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
+        if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
+        if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -970,6 +1014,7 @@ async function loadSettingsData() {
         document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
+        document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -1476,6 +1521,7 @@ function updateDownloadSourceUI() {
     const youtubeContainer = document.getElementById('youtube-settings-container');
     const hifiContainer = document.getElementById('hifi-download-settings-container');
     const deezerDlContainer = document.getElementById('deezer-download-settings-container');
+    const amazonContainer = document.getElementById('amazon-download-settings-container');
     const lidarrContainer = document.getElementById('lidarr-download-settings-container');
     const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
@@ -1498,8 +1544,14 @@ function updateDownloadSourceUI() {
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
     if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
+    if (amazonContainer) amazonContainer.style.display = activeSources.has('amazon') ? 'block' : 'none';
     if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
     if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
+    const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
+    if (prowlarrRedirect) {
+        const showProwlarr = activeSources.has('torrent') || activeSources.has('usenet');
+        prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
+    }
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -1518,6 +1570,9 @@ function updateDownloadSourceUI() {
     if (activeSources.has('hifi')) {
         testHiFiConnection();
     }
+    if (activeSources.has('amazon')) {
+        testAmazonConnection();
+    }
     if (activeSources.has('soundcloud')) {
         testSoundcloudConnection();
     }
@@ -1534,6 +1589,7 @@ function updateHybridSecondaryOptions() {
         { value: 'qobuz', label: 'Qobuz' },
         { value: 'hifi', label: 'HiFi' },
         { value: 'deezer_dl', label: 'Deezer' },
+        { value: 'amazon', label: 'Amazon Music' },
         { value: 'lidarr', label: 'Lidarr' },
         { value: 'soundcloud', label: 'SoundCloud' },
     ];
@@ -2553,16 +2609,16 @@ async function saveSettings(quiet = false) {
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
     const discogsTokenInput = document.getElementById('discogs-token');
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
-    let metadataSource = metadataSourceSelect?.value || 'itunes';
+    let metadataSource = metadataSourceSelect?.value || 'deezer';
     const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
-        metadataSource = 'deezer';
+        metadataSource = _metadataSourceFallback('spotify');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
-            showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+            showToast('Spotify is disconnected, so the primary metadata source was switched.', 'warning');
         }
     } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
-        metadataSource = 'itunes';
+        metadataSource = _metadataSourceFallback('discogs');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
@@ -2674,9 +2730,34 @@ async function saveSettings(quiet = false) {
             arl: document.getElementById('deezer-download-arl').value || '',
             allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
+        amazon_download: {
+            quality: document.getElementById('amazon-quality').value || 'flac',
+            allow_fallback: document.getElementById('amazon-allow-fallback').checked,
+        },
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
+        },
+        prowlarr: {
+            url: document.getElementById('prowlarr-url')?.value || '',
+            api_key: document.getElementById('prowlarr-api-key')?.value || '',
+            indexer_ids: document.getElementById('prowlarr-indexer-ids')?.value || '',
+        },
+        torrent_client: {
+            type: document.getElementById('torrent-client-type')?.value || 'qbittorrent',
+            url: document.getElementById('torrent-client-url')?.value || '',
+            username: document.getElementById('torrent-client-username')?.value || '',
+            password: document.getElementById('torrent-client-password')?.value || '',
+            category: document.getElementById('torrent-client-category')?.value || 'soulsync',
+            save_path: document.getElementById('torrent-client-save-path')?.value || '',
+        },
+        usenet_client: {
+            type: document.getElementById('usenet-client-type')?.value || 'sabnzbd',
+            url: document.getElementById('usenet-client-url')?.value || '',
+            api_key: document.getElementById('usenet-client-api-key')?.value || '',
+            username: document.getElementById('usenet-client-username')?.value || '',
+            password: document.getElementById('usenet-client-password')?.value || '',
+            category: document.getElementById('usenet-client-category')?.value || 'soulsync',
         },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
@@ -2747,6 +2828,7 @@ async function saveSettings(quiet = false) {
         },
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
+            duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
         },
         library: {
             music_paths: collectMusicPaths(),
@@ -3516,6 +3598,160 @@ async function testLidarrConnection() {
     }
 }
 
+function _setIndStatusDot(dotId, state) {
+    const dot = document.getElementById(dotId);
+    if (!dot) return;
+    dot.classList.remove('ind-status-dot-unknown', 'ind-status-dot-connected', 'ind-status-dot-error');
+    if (state === 'connected') {
+        dot.classList.add('ind-status-dot-connected');
+        dot.title = 'Connected';
+    } else if (state === 'error') {
+        dot.classList.add('ind-status-dot-error');
+        dot.title = 'Connection failed';
+    } else {
+        dot.classList.add('ind-status-dot-unknown');
+        dot.title = 'Not tested';
+    }
+}
+
+async function testProwlarrConnection() {
+    const statusEl = document.getElementById('prowlarr-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'prowlarr' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('prowlarr-status-dot', 'connected');
+            loadProwlarrIndexers();
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('prowlarr-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('prowlarr-status-dot', 'error');
+    }
+}
+
+function updateUsenetClientUI() {
+    const type = document.getElementById('usenet-client-type')?.value || 'sabnzbd';
+    const apikeyGroup = document.getElementById('usenet-apikey-group');
+    const userGroup = document.getElementById('usenet-username-group');
+    const passGroup = document.getElementById('usenet-password-group');
+    if (type === 'sabnzbd') {
+        if (apikeyGroup) apikeyGroup.style.display = '';
+        if (userGroup) userGroup.style.display = 'none';
+        if (passGroup) passGroup.style.display = 'none';
+    } else {
+        if (apikeyGroup) apikeyGroup.style.display = 'none';
+        if (userGroup) userGroup.style.display = '';
+        if (passGroup) passGroup.style.display = '';
+    }
+}
+
+async function testUsenetClientConnection() {
+    const statusEl = document.getElementById('usenet-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'usenet_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('usenet-client-status-dot', 'connected');
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('usenet-client-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('usenet-client-status-dot', 'error');
+    }
+}
+
+async function testTorrentClientConnection() {
+    const statusEl = document.getElementById('torrent-client-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'torrent_client' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = data.message || 'Connected';
+            statusEl.style.color = '#4caf50';
+            _setIndStatusDot('torrent-client-status-dot', 'connected');
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
+            _setIndStatusDot('torrent-client-status-dot', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+        _setIndStatusDot('torrent-client-status-dot', 'error');
+    }
+}
+
+async function loadProwlarrIndexers() {
+    const listEl = document.getElementById('prowlarr-indexer-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<em>Loading…</em>';
+    try {
+        const resp = await fetch('/api/prowlarr/indexers');
+        const data = await resp.json();
+        if (!data.success) {
+            listEl.innerHTML = `<em style="color:#f44336;">${data.error || 'Prowlarr not configured.'}</em>`;
+            return;
+        }
+        if (!data.indexers || data.indexers.length === 0) {
+            listEl.innerHTML = '<em>No indexers configured in Prowlarr yet. Add some in Prowlarr → Indexers.</em>';
+            return;
+        }
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const rows = data.indexers.map(idx => {
+            const protoClass = idx.protocol === 'usenet' ? 'ind-indexer-card-proto-usenet' : 'ind-indexer-card-proto-torrent';
+            const protoLabel = idx.protocol === 'usenet' ? 'Usenet' : 'Torrent';
+            const privacyHTML = idx.privacy ? `<span class="ind-indexer-card-privacy">${esc(idx.privacy)}</span>` : '';
+            const disabledClass = idx.enable ? '' : ' ind-indexer-card-disabled';
+            return `<div class="ind-indexer-card${disabledClass}">
+                <span class="ind-indexer-card-id">#${esc(idx.id)}</span>
+                <span class="ind-indexer-card-name">${esc(idx.name)}</span>
+                ${privacyHTML}
+                <span class="ind-indexer-card-proto ${protoClass}">${protoLabel}</span>
+            </div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (e) {
+        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${e.message}</em>`;
+    }
+}
+
 async function loadHiFiInstances() {
     const listEl = document.getElementById('hifi-instances-list');
     if (!listEl) return;
@@ -3752,6 +3988,27 @@ async function testDeezerDownloadConnection() {
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testAmazonConnection() {
+    const statusEl = document.getElementById('amazon-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        const resp = await fetch('/api/amazon/test-connection');
+        const data = await resp.json();
+        if (data.connected) {
+            statusEl.textContent = '✓ Connected — T2Tunes up';
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = '✗ ' + (data.error || 'T2Tunes unreachable');
+            statusEl.style.color = '#f44336';
+        }
+    } catch (e) {
+        statusEl.textContent = '✗ Connection error';
         statusEl.style.color = '#f44336';
     }
 }

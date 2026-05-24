@@ -87,8 +87,10 @@ class StatusDeps:
 # Streaming sources the engine fallback applies to. Soulseek goes through
 # slskd's live_transfers path and must NOT hit the engine fallback.
 _STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud',
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
+    'torrent', 'usenet',
 ))
+_RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
 # Keep these in sync with the engine plugins' state strings.
 _ENGINE_FAILURE_STATES = ('Errored', 'Failed', 'Rejected', 'TimedOut', 'Aborted')
@@ -136,20 +138,11 @@ def _apply_engine_state_fallback(
 
     Mutates ``task`` in place (status / error_message) the same way the
     Soulseek branch does, so the next status poll sees the new state.
-    Submits post-processing on terminal success and fires
-    ``on_download_completed`` on terminal failure to free the worker
-    slot.
+    Submits post-processing on terminal success. Manual-pick failures
+    are completed here; automatic failures keep the existing retry path
+    in charge.
     """
     if deps.download_orchestrator is None or deps.run_async is None:
-        return
-    if task.get('status') in ('completed', 'failed', 'cancelled', 'not_found', 'post_processing'):
-        return
-    # Scope this fallback to user-initiated manual picks. Auto attempts
-    # already flow through the live_transfers_lookup IF branch (the engine
-    # pre-populates non-Soulseek records via get_all_downloads), and on
-    # failure the monitor's existing retry path picks the next candidate.
-    # Marking auto attempts failed here would short-circuit that fallback.
-    if not task.get('_user_manual_pick'):
         return
     download_id = task.get('download_id')
     if not download_id:
@@ -157,6 +150,17 @@ def _apply_engine_state_fallback(
     ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
     username = task.get('username') or ti.get('username')
     if username not in _STREAMING_SOURCE_NAMES:
+        return
+    manual_pick = bool(task.get('_user_manual_pick'))
+    if not manual_pick and username not in _RELEASE_SOURCE_NAMES:
+        return
+    release_source = username in _RELEASE_SOURCE_NAMES
+    terminal_status = task.get('status') in ('completed', 'failed', 'cancelled', 'not_found', 'post_processing')
+    if terminal_status and not (
+        release_source
+        and task.get('status') in ('failed', 'not_found')
+        and download_id
+    ):
         return
 
     try:
@@ -189,6 +193,14 @@ def _apply_engine_state_fallback(
         return
 
     if any(s in state_str for s in _ENGINE_FAILURE_STATES):
+        if not manual_pick:
+            task_status['status'] = task.get('status', 'downloading')
+            task_status['progress'] = _engine_progress_pct(record)
+            logger.info(
+                "[Engine Fallback] Task %s engine reports '%s' for auto %s attempt; leaving retry handling to monitor",
+                task_id, state_str, username,
+            )
+            return
         if task['status'] != 'failed':
             task['status'] = 'failed'
             err = getattr(record, 'error_message', None) or getattr(record, 'error', None) or ''
@@ -247,6 +259,9 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
         "playlist_id": batch.get('playlist_id'),  # Include playlist_id for rehydration
         "playlist_name": batch.get('playlist_name'),  # Include playlist_name for reference
     }
+    album_bundle = _build_album_bundle_status(batch)
+    if album_bundle:
+        response_data['album_bundle'] = album_bundle
 
     if response_data["phase"] == 'analysis':
         response_data['analysis_progress'] = {
@@ -312,11 +327,23 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
                 'playlist_id': task.get('playlist_id'),      # For V2 system identification
                 'error_message': task.get('error_message'),  # Surface failure reasons to UI
+                'quarantine_entry_id': task.get('quarantine_entry_id'),
                 'has_candidates': bool(task.get('cached_candidates')),  # Whether search found results (for clickable review)
             }
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             task_filename = task.get('filename') or _ti.get('filename')
             task_username = task.get('username') or _ti.get('username')
+            if (
+                task_username in _RELEASE_SOURCE_NAMES
+                and task['status'] not in ['completed', 'cancelled', 'post_processing']
+                and task.get('download_id')
+            ):
+                _apply_engine_state_fallback(
+                    task_id, task, task_status, batch_id, deps,
+                )
+                batch_tasks.append(task_status)
+                continue
+
             if task_filename and task_username:
                 lookup_key = deps.make_context_key(task_username, task_filename)
 
@@ -609,7 +636,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
         for bid, batch in download_batches.items():
             queue = batch.get('queue', [])
             statuses = [download_tasks[tid]['status'] for tid in queue if tid in download_tasks]
-            batch_summaries.append({
+            summary = {
                 'batch_id': bid,
                 'playlist_id': batch.get('playlist_id', ''),
                 'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
@@ -620,7 +647,11 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
                 'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
                 'queued': sum(1 for s in statuses if s in ('queued', 'pending')),
-            })
+            }
+            album_bundle = _build_album_bundle_status(batch)
+            if album_bundle:
+                summary['album_bundle'] = album_bundle
+            batch_summaries.append(summary)
 
     return {
         'success': True,
@@ -629,3 +660,38 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
         'batches': batch_summaries,
         'timestamp': time.time(),
     }
+
+
+def _build_album_bundle_status(batch: dict) -> dict:
+    """Return public batch-level status for torrent/Usenet album-bundle work."""
+    state = batch.get('album_bundle_state')
+    if not state:
+        return {}
+
+    status = {
+        'state': state,
+        'source': batch.get('album_bundle_source'),
+        'release': batch.get('album_bundle_release'),
+        'progress': batch.get('album_bundle_progress'),
+        'progress_percent': _album_bundle_progress_percent(
+            batch.get('album_bundle_progress')
+        ),
+        'speed': batch.get('album_bundle_speed'),
+        'downloaded': batch.get('album_bundle_downloaded'),
+        'size': batch.get('album_bundle_size'),
+        'seeders': batch.get('album_bundle_seeders'),
+        'grabs': batch.get('album_bundle_grabs'),
+        'count': batch.get('album_bundle_count'),
+    }
+    return {key: value for key, value in status.items() if value is not None}
+
+
+def _album_bundle_progress_percent(value: Any) -> int:
+    try:
+        progress = float(value)
+    except (TypeError, ValueError):
+        return 0
+
+    if progress <= 1:
+        progress *= 100
+    return max(0, min(100, int(round(progress))))

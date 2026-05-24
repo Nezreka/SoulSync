@@ -428,54 +428,52 @@ class MusicBrainzService:
             return []
 
         # Tier 3: live MB lookup. Search → fetch by MBID → cache.
-        try:
-            results = self.mb_client.search_artist(artist_name, limit=3)
-        except Exception as e:
-            logger.debug("lookup_artist_aliases: search_artist(%r) raised: %s", artist_name, e)
-            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
-            return []
-
-        if not results:
-            self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
-            return []
-
-        # Score each result: combined of name-similarity + MB's own
-        # relevance. Score range 0.0-1.0.
-        scored = []
-        for result in results:
-            mb_name = result.get('name', '')
-            mb_score = result.get('score', 0)
-            sim = self._calculate_similarity(artist_name, mb_name)
-            combined = (sim * 0.7) + (mb_score / 100 * 0.3)
-            mbid = result.get('id')
-            if mbid:
-                scored.append((combined, mbid))
+        # Issue #586 — strict search queries `artist:"..."` only and
+        # MISSES alias / sortname indexes. When MB's canonical name is
+        # the non-Latin form (e.g. `Дмитрий Яблонский`), the user's
+        # Latin input ("Dmitry Yablonsky") finds nothing under strict.
+        # Fall back to non-strict (bare query, hits alias + sortname
+        # indexes) when strict returns empty OR all results fail the
+        # trust gate.
+        scored = self._search_and_score_artists(artist_name, strict=True)
+        if not scored or self._best_score(scored) < 0.85:
+            non_strict = self._search_and_score_artists(artist_name, strict=False)
+            if non_strict and (not scored or self._best_score(non_strict) > self._best_score(scored)):
+                scored = non_strict
 
         if not scored:
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
         scored.sort(key=lambda x: -x[0])
-        best_score, best_mbid = scored[0]
+        best_score, best_mbid, best_mb_score = scored[0]
 
-        # Strict trust threshold: real matches for distinctive cross-
-        # script artists (the user-reported case) score >= 0.95.
-        # Anything below 0.85 is ambiguous and not worth the false-
-        # positive risk of pulling in aliases for the wrong artist.
-        if best_score < 0.85:
+        # Trust gate. Two ways to pass:
+        #   1. Combined score >= 0.85 (the historical strict bar that
+        #      catches same-script matches)
+        #   2. MB's OWN score is very high (>= 95) AND the result is
+        #      unambiguous (top result clearly leads). Bridges the
+        #      cross-script case where local similarity is near zero
+        #      ("Dmitry Yablonsky" vs "Дмитрий Яблонский" sim ~0)
+        #      but MB's index found a high-confidence match.
+        passes_combined = best_score >= 0.85
+        passes_mb_only = best_mb_score >= 95 and (
+            len(scored) < 2 or (scored[0][2] - scored[1][2]) >= 5
+        )
+        if not (passes_combined or passes_mb_only):
             logger.debug(
                 "lookup_artist_aliases: best match for %r below trust "
-                "threshold (score=%.2f)", artist_name, best_score,
+                "threshold (combined=%.2f, mb_score=%d)",
+                artist_name, best_score, best_mb_score,
             )
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
         # Ambiguity detection: when 2+ results both score high (within
-        # 0.1 of the best), the search hit multiple distinct artists
-        # with similar names ("John Smith" returning 10 different
-        # John Smiths all at score 100). Pulling aliases for one of
-        # them could produce wrong matches. Skip + cache empty.
-        if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < 0.1:
+        # 0.1 of the best combined), the search hit multiple distinct
+        # artists with similar names. Pulling aliases for one could
+        # produce wrong matches. Skip + cache empty.
+        if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < 0.1 and not passes_mb_only:
             logger.debug(
                 "lookup_artist_aliases: ambiguous match for %r — top "
                 "two results within 0.1 (%.2f / %.2f). Skipping alias lookup.",
@@ -491,6 +489,40 @@ class MusicBrainzService:
         )
         return aliases
 
+    def _search_and_score_artists(self, artist_name: str, strict: bool):
+        """Search MB for an artist and score each result.
+
+        Returns a list of (combined_score, mbid, raw_mb_score) tuples.
+        Combined score: 70% local similarity + 30% MB's own relevance
+        score (0..1). raw_mb_score preserved separately so the trust
+        gate can prefer high-MB-score results in cross-script cases
+        where local similarity is near zero.
+
+        Returns empty list on any failure.
+        """
+        try:
+            results = self.mb_client.search_artist(artist_name, limit=3, strict=strict)
+        except Exception as e:
+            logger.debug(
+                "lookup_artist_aliases: search_artist(%r, strict=%s) raised: %s",
+                artist_name, strict, e,
+            )
+            return []
+        scored = []
+        for result in results or []:
+            mb_name = result.get('name', '')
+            mb_score = result.get('score', 0)
+            sim = self._calculate_similarity(artist_name, mb_name)
+            combined = (sim * 0.7) + (mb_score / 100 * 0.3)
+            mbid = result.get('id')
+            if mbid:
+                scored.append((combined, mbid, mb_score))
+        return scored
+
+    @staticmethod
+    def _best_score(scored):
+        return max((s[0] for s in scored), default=0.0) if scored else 0.0
+
     def fetch_artist_aliases(self, mbid: str) -> list:
         """Fetch the alias list for an artist from MusicBrainz.
 
@@ -498,6 +530,14 @@ class MusicBrainzService:
         artist's name are stored as `aliases` on the MusicBrainz
         artist record. Pull them so SoulSync can recognise that
         `澤野弘之` and `Hiroyuki Sawano` refer to the same artist.
+
+        Issue #586 — for some artists MB's CANONICAL `name` is the
+        non-Latin spelling (e.g. `Дмитрий Яблонский`) while the
+        Latin spelling lives in `aliases` — but the inverse also
+        happens, where the Latin canonical name has the Cyrillic in
+        aliases. Either way the canonical `name` and `sort-name` are
+        themselves valid alternate spellings for matching purposes,
+        so include them alongside the explicit alias entries.
 
         Returns the deduplicated list of alias `name` strings. Returns
         empty list (NOT None) on any failure — caller should treat
@@ -514,24 +554,38 @@ class MusicBrainzService:
             return []
         if not data:
             return []
-        raw_aliases = data.get('aliases') or []
+
+        seen = set()
+        cleaned = []
+
+        def _add(value):
+            if not isinstance(value, str):
+                return
+            text = value.strip()
+            if not text:
+                return
+            key = text.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            cleaned.append(text)
+
+        # Canonical name + sort-name treated as aliases for matching —
+        # they're the strongest cross-script bridge when MB's
+        # canonical spelling differs from the user's input.
+        _add(data.get('name'))
+        _add(data.get('sort-name'))
+
         # MB returns each alias as a dict with `name`, `sort-name`,
         # `locale`, `primary`, `type`, etc. We only care about the
         # display name — that's what `actual` artist strings will
-        # match against.
-        seen = set()
-        cleaned = []
-        for entry in raw_aliases:
+        # match against. Also pull alias sort-name when present
+        # (some entries have a different sortable form).
+        for entry in data.get('aliases') or []:
             if not isinstance(entry, dict):
                 continue
-            name = (entry.get('name') or '').strip()
-            if not name:
-                continue
-            key = name.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            cleaned.append(name)
+            _add(entry.get('name'))
+            _add(entry.get('sort-name'))
         return cleaned
 
     def update_artist_aliases(self, artist_id: int, aliases: list) -> None:

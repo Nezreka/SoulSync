@@ -34,7 +34,8 @@ def _shape_check(items, allowed_types):
 
 _FIELD_TYPES = {
     'number', 'select', 'time', 'multi_select', 'checkbox', 'text',
-    'mirrored_playlist_select', 'signal_input', 'script_select',
+    'mirrored_playlist_select', 'personalized_playlist_select',
+    'signal_input', 'script_select',
 }
 
 

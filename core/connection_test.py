@@ -191,6 +191,12 @@ def run_service_test(service, test_config):
                     'tidal': "Tidal download source ready.",
                     'qobuz': "Qobuz download source ready.",
                     'hifi': "HiFi download source ready.",
+                    'deezer_dl': "Deezer download source ready.",
+                    'amazon': "Amazon download source ready.",
+                    'lidarr': "Lidarr download source ready.",
+                    'soundcloud': "SoundCloud download source ready.",
+                    'torrent': "Torrent download source ready.",
+                    'usenet': "Usenet download source ready.",
                     'hybrid': "Download sources ready (Hybrid mode)."
                 }
                 message = mode_messages.get(download_mode, "Download source connected.")
@@ -203,6 +209,12 @@ def run_service_test(service, test_config):
                     'tidal': "Tidal download source not available. Check authentication.",
                     'qobuz': "Qobuz download source not available. Check authentication.",
                     'hifi': "HiFi download source not available. Public API instances may be down.",
+                    'deezer_dl': "Deezer download source not available. Check authentication.",
+                    'amazon': "Amazon download source not available.",
+                    'lidarr': "Lidarr download source not available. Check Lidarr URL and API key.",
+                    'soundcloud': "SoundCloud download source not available.",
+                    'torrent': "Torrent download source not available. Check Prowlarr and torrent client settings.",
+                    'usenet': "Usenet download source not available. Check Prowlarr and usenet client settings.",
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
                 error = mode_errors.get(download_mode, "Download source connection failed.")
@@ -305,6 +317,61 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "usenet_client":
+            client_type = (config_manager.get('usenet_client.type', '') or '').strip().lower()
+            url = config_manager.get('usenet_client.url', '')
+            if not url:
+                return False, "Usenet client URL is required."
+            if not client_type:
+                return False, "Pick a usenet client (SABnzbd or NZBGet)."
+            try:
+                from core.usenet_clients import adapter_for_type as _usenet_adapter_for_type
+                adapter = _usenet_adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown usenet client type: {client_type}"
+                if not adapter.is_configured():
+                    if client_type == "sabnzbd":
+                        return False, "SABnzbd needs both URL and API key."
+                    return False, "NZBGet needs URL, username, and password."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Usenet client connection error: {str(e)}"
+        elif service == "torrent_client":
+            client_type = (config_manager.get('torrent_client.type', '') or '').strip().lower()
+            url = config_manager.get('torrent_client.url', '')
+            if not url:
+                return False, "Torrent client URL is required."
+            if not client_type:
+                return False, "Pick a torrent client (qBittorrent, Transmission, or Deluge)."
+            try:
+                from core.torrent_clients import adapter_for_type
+                adapter = adapter_for_type(client_type)
+                if adapter is None:
+                    return False, f"Unknown torrent client type: {client_type}"
+                if not adapter.is_configured():
+                    return False, "Torrent client missing required credentials."
+                if run_async(adapter.check_connection()):
+                    return True, f"Connected to {client_type}"
+                return False, f"{client_type} probe failed — check URL, credentials, and that the client is running."
+            except Exception as e:
+                return False, f"Torrent client connection error: {str(e)}"
+        elif service == "prowlarr":
+            url = config_manager.get('prowlarr.url', '')
+            api_key = config_manager.get('prowlarr.api_key', '')
+            if not url or not api_key:
+                return False, "Prowlarr URL and API key are required."
+            try:
+                import requests as _req
+                resp = _req.get(f"{url.rstrip('/')}/api/v1/system/status",
+                                headers={'X-Api-Key': api_key}, timeout=10)
+                if resp.ok:
+                    version = resp.json().get('version', '?')
+                    return True, f"Connected to Prowlarr v{version}"
+                return False, f"Prowlarr returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Prowlarr connection error: {str(e)}"
         elif service == "lidarr" or service == "lidarr_download":
             url = config_manager.get('lidarr_download.url', '')
             api_key = config_manager.get('lidarr_download.api_key', '')
@@ -379,6 +446,16 @@ def run_service_test(service, test_config):
                 return False, "Hydrabase not connected. Configure URL + API key and click Connect."
             except Exception as e:
                 return False, f"Hydrabase connection error: {str(e)}"
+        elif service == "musicbrainz":
+            try:
+                from core.metadata.registry import get_musicbrainz_client
+                mb = get_musicbrainz_client()
+                results = mb.search_artists("radiohead", limit=1)
+                if results:
+                    return True, "MusicBrainz reachable"
+                return False, "MusicBrainz returned no results — may be rate-limited or unreachable."
+            except Exception as e:
+                return False, f"MusicBrainz connection error: {str(e)}"
         elif service == "soundcloud":
             # Anonymous SoundCloud has no auth, so "test" really means
             # "is yt-dlp installed and can it reach SoundCloud right now."

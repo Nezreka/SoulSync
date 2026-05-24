@@ -23,6 +23,7 @@ from core.imports.context import (
     get_source_tag_names,
     normalize_import_context,
 )
+from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
 from core.metadata.common import (
@@ -180,6 +181,27 @@ def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
 
     norm = lambda s: re.sub(r"[^a-z0-9 ]", "", re.sub(r"\(.*?\)", "", s).lower()).strip()
     return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
+
+
+def _normalize_release_date_tag(value: Any) -> str:
+    """Return a tag-safe release date without inventing missing precision."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    # Source APIs commonly return ISO timestamps. Audio DATE/TDRC tags should
+    # receive only the date precision the source actually provided.
+    raw = raw.split("T", 1)[0].strip()
+    match = re.match(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$", raw)
+    if not match:
+        return ""
+
+    year, month, day = match.groups()
+    if day:
+        return f"{year}-{month}-{day}"
+    if month:
+        return f"{year}-{month}"
+    return year
 
 
 def _collect_source_ids(metadata: dict, cfg) -> dict:
@@ -907,17 +929,13 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     else:
         logger.warning("Metadata: Using original title as fallback: '%s'", metadata["title"])
 
-    artists = original_search.get("artists")
-    if isinstance(artists, list) and artists:
-        all_artists = []
-        for artist_item in artists:
-            if isinstance(artist_item, dict) and artist_item.get("name"):
-                all_artists.append(artist_item["name"])
-            elif isinstance(artist_item, str):
-                all_artists.append(artist_item)
-            else:
-                all_artists.append(str(artist_item))
-
+    # Resolve canonical artists list. Soulseek matched-download contexts
+    # only carry `original_search.artist` (singular string) — the full
+    # contributors list lives on `track_info` (the matched Spotify/etc
+    # track object). Deezer-direct contexts populate `original_search.artists`
+    # directly. Pure helper handles all three shapes.
+    all_artists = resolve_track_artists(original_search, track_info, artist_dict)
+    if all_artists:
         # Deezer upgrade path: Deezer's `/search` endpoint only returns
         # the primary artist for each track. The full contributors
         # array (feat., remix collaborators, producers credited as
@@ -1061,7 +1079,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     metadata["disc_number"] = disc_num if disc_num is not None else 1
 
     if album_ctx and album_ctx.get("release_date"):
-        metadata["date"] = album_ctx["release_date"][:4]
+        release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
+        if release_date:
+            metadata["date"] = release_date
 
     genres = artist_dict.get("genres") or []
     if genres:
@@ -1080,11 +1100,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         metadata["album_art_url"] = album_image
 
     logger.info(
-        "[Metadata Summary] title='%s' | artist='%s' | album_artist='%s' | album='%s' | track=%s/%s | disc=%s",
+        "[Metadata Summary] title='%s' | artist='%s' | album_artist='%s' | album='%s' | date=%s | track=%s/%s | disc=%s",
         metadata.get("title"),
         metadata.get("artist"),
         metadata.get("album_artist"),
         metadata.get("album"),
+        metadata.get("date", ""),
         metadata.get("track_number"),
         metadata.get("total_tracks"),
         metadata.get("disc_number"),

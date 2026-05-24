@@ -707,7 +707,8 @@ class SeasonalDiscoveryService:
                         artist_name,
                         album_cover_url,
                         release_date,
-                        popularity
+                        popularity,
+                        source
                     FROM seasonal_albums
                     WHERE season_key = ? AND source = ?
                     ORDER BY popularity DESC, album_name ASC

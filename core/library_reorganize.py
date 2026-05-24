@@ -549,16 +549,138 @@ def load_album_and_tracks(db, album_id):
                 pass
 
 
+def _plan_from_tags(
+    album_data: dict,
+    tracks: List[dict],
+    resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]],
+) -> dict:
+    """Tag-mode planner: build per-track ``api_track`` shapes from each
+    file's own embedded metadata instead of a live source API call.
+
+    Per-track behavior:
+    - File missing on disk → unmatched with reason.
+    - Tags missing essentials (title / artist / album) → unmatched
+      with reason.
+    - Otherwise matched with the per-file extracted ``api_track`` and
+      a per-file ``api_album``. The plan stores the FIRST matched
+      track's album dict on the top-level ``api_album`` field for
+      backward compatibility with downstream callers; downstream
+      consumers that need the per-track album shape read it off
+      ``items[i]['api_album']``.
+
+    Returns the same status / source / api_album / total_discs / items
+    shape as :func:`plan_album_reorganize`. ``source`` is the literal
+    string ``'tags'`` so callers can distinguish from API sources."""
+    if resolve_file_path_fn is None:
+        # Without the file-path resolver we can't read anything off
+        # disk. Return an unmatched plan so callers surface a clear
+        # error instead of silently returning empty.
+        reason = 'Tag-mode reorganize requires the file path resolver.'
+        return {
+            'status': 'no_source_id', 'source': None, 'api_album': None,
+            'total_discs': 1,
+            'items': [{
+                'track': t, 'api_track': None, 'matched': False,
+                'reason': reason,
+            } for t in tracks],
+        }
+
+    from core.library.reorganize_tag_source import read_album_track_from_file
+
+    items: List[dict] = []
+    first_album_meta: Optional[dict] = None
+    max_disc = 1
+
+    for track in tracks:
+        db_path = track.get('file_path')
+        resolved = resolve_file_path_fn(db_path) if db_path else None
+        if not resolved:
+            items.append({
+                'track': track, 'api_track': None, 'api_album': None,
+                'matched': False,
+                'reason': 'File no longer exists on disk for this track.',
+            })
+            continue
+
+        album_meta, track_meta, err = read_album_track_from_file(resolved)
+        if err is not None or track_meta is None or album_meta is None:
+            items.append({
+                'track': track, 'api_track': None, 'api_album': None,
+                'matched': False,
+                'reason': err or 'Could not extract metadata from embedded tags.',
+            })
+            continue
+
+        if first_album_meta is None:
+            first_album_meta = album_meta
+        try:
+            disc = int(track_meta.get('disc_number') or 1)
+        except (TypeError, ValueError):
+            disc = 1
+        if disc > max_disc:
+            max_disc = disc
+        # Respect an explicit `totaldiscs` tag (or "1/2" disc-number
+        # form) so a partial-album reorganize (only disc 1 present
+        # locally) still routes into `Disc 1/` when the file's tags
+        # know there are 2 discs total.
+        try:
+            tagged_total = int(album_meta.get('total_discs') or 0)
+        except (TypeError, ValueError):
+            tagged_total = 0
+        if tagged_total > max_disc:
+            max_disc = tagged_total
+
+        items.append({
+            'track': track,
+            'api_track': track_meta,
+            'api_album': album_meta,
+            'matched': True,
+            'reason': None,
+        })
+
+    if not any(it['matched'] for it in items):
+        return {
+            'status': 'no_source_id',
+            'source': 'tags',
+            'api_album': None,
+            'total_discs': 1,
+            'items': items,
+        }
+
+    return {
+        'status': 'planned',
+        'source': 'tags',
+        'api_album': first_album_meta or {},
+        'total_discs': max_disc,
+        'items': items,
+    }
+
+
 def plan_album_reorganize(
     album_data: dict,
     tracks: List[dict],
     primary_source: Optional[str] = None,
     strict_source: bool = False,
+    metadata_source: str = 'api',
+    resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]] = None,
 ) -> dict:
     """Compute the per-track plan for an album reorganize without doing
     any file IO. Both the actual reorganize orchestrator and the preview
     endpoint share this so the preview is guaranteed to match what would
     happen on apply.
+
+    ``metadata_source``:
+        - ``'api'`` (default): query the configured metadata source(s)
+          for the canonical tracklist (existing behavior). Issues an
+          API call.
+        - ``'tags'``: read each file's embedded tags as the source of
+          truth (issue #592). Zero API calls; trusts the user's
+          enriched library.
+
+    When ``metadata_source='tags'``, ``resolve_file_path_fn`` MUST be
+    provided (the planner needs to read the actual files). The
+    ``primary_source`` and ``strict_source`` params are ignored in
+    tag mode.
 
     Returns:
         ``{'status': 'planned' | 'no_source_id' | 'no_tracks',
@@ -580,6 +702,9 @@ def plan_album_reorganize(
             'status': 'no_tracks', 'source': None, 'api_album': None,
             'total_discs': 1, 'items': [],
         }
+
+    if metadata_source == 'tags':
+        return _plan_from_tags(album_data, tracks, resolve_file_path_fn)
 
     if primary_source is None:
         try:
@@ -720,6 +845,7 @@ def preview_album_reorganize(
     build_final_path_fn: Callable,
     primary_source: Optional[str] = None,
     strict_source: bool = False,
+    metadata_source: str = 'api',
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -775,6 +901,8 @@ def preview_album_reorganize(
     plan = plan_album_reorganize(
         album_data, tracks,
         primary_source=primary_source, strict_source=strict_source,
+        metadata_source=metadata_source,
+        resolve_file_path_fn=resolve_file_path_fn,
     )
     artist_name = album_data.get('artist_name') or 'Unknown Artist'
     album_title = album_data.get('title') or 'Unknown Album'
@@ -836,8 +964,12 @@ def preview_album_reorganize(
         item['disc_number'] = int(api_track.get('disc_number') or 1)
         # Build the same context the orchestrator builds so the path
         # builder produces the same destination it would on apply.
+        # Tag-mode plan items carry per-item album metadata; fall back
+        # to the shared api_album in API mode (where every plan item
+        # shares the same one).
+        per_item_album = plan_item.get('api_album') or api_album
         context = _build_post_process_context(
-            api_album, api_track, artist_name, album_title, total_discs
+            per_item_album, api_track, artist_name, album_title, total_discs
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1034,13 +1166,18 @@ def _stage_track(ctx: _RunContext, track_id, title, resolved_src) -> Optional[st
     return staging_file
 
 
-def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file) -> Optional[str]:
+def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None) -> Optional[str]:
     """Build the per-track context, hand it to post-processing, and
     return the final on-disk path it produced. Returns None on any
     failure (exception, AcoustID rejection, internal skip); the caller
-    leaves the original file alone."""
+    leaves the original file alone.
+
+    ``per_item_api_album`` overrides ``ctx.api_album`` for this track —
+    used in tag-mode reorganize where each file may carry its own
+    embedded album metadata."""
+    api_album = per_item_api_album if per_item_api_album else ctx.api_album
     context = _build_post_process_context(
-        ctx.api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs
+        api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -1138,7 +1275,10 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
     if staging_file is None:
         return
 
-    new_path = _run_post_process_for_track(ctx, track_id, title, plan_item['api_track'], staging_file)
+    new_path = _run_post_process_for_track(
+        ctx, track_id, title, plan_item['api_track'], staging_file,
+        per_item_api_album=plan_item.get('api_album'),
+    )
     if new_path is None:
         return
 
@@ -1180,6 +1320,7 @@ def reorganize_album(
     primary_source: Optional[str] = None,
     strict_source: bool = False,
     stop_check: Optional[Callable[[], bool]] = None,
+    metadata_source: str = 'api',
 ) -> dict:
     """Run a single album through the post-processing pipeline.
 
@@ -1257,10 +1398,19 @@ def reorganize_album(
     plan = plan_album_reorganize(
         album_data, tracks,
         primary_source=primary_source, strict_source=strict_source,
+        metadata_source=metadata_source,
+        resolve_file_path_fn=resolve_file_path_fn,
     )
     if plan['status'] == 'no_source_id':
         summary['status'] = 'no_source_id'
-        if _is_unknown_artist(album_data.get('artist_name')) or _looks_like_album_id_title(album_data.get('title')):
+        summary['source'] = plan.get('source')  # 'tags' or None
+        if plan.get('source') == 'tags':
+            err_text = (
+                f"No tracks of '{album_data.get('title', '?')}' have readable "
+                "embedded tags (missing title / artist / album, or file unreadable). "
+                "Switch back to API mode or fix the embedded tags first."
+            )
+        elif _is_unknown_artist(album_data.get('artist_name')) or _looks_like_album_id_title(album_data.get('title')):
             err_text = (
                 f"Album '{album_data.get('title', '?')}' has placeholder metadata "
                 "(Unknown Artist or numeric title) — run the 'Fix Unknown Artists' "

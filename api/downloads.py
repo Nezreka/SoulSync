@@ -125,6 +125,9 @@ def register_routes(bp):
             if not soulseek:
                 return api_error("NOT_AVAILABLE", "Soulseek client not configured.", 503)
 
+            current_app.logger.info(
+                f"[CancelTrigger:api.public_cancel] download_id={download_id} username={username}"
+            )
             ok = run_async(soulseek.cancel_download(download_id, username, remove=True))
             if ok:
                 return api_success({"message": "Download cancelled."})

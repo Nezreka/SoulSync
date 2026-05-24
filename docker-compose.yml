@@ -48,6 +48,26 @@ services:
       # - /path/to/music-library:/host/music:rw
       # Optional: Mount your music library for Plex/Jellyfin/Navidrome access
       # - /path/to/your/music:/music:ro
+      #
+      # ─── Torrent / Usenet download sources (Prowlarr integration) ────────
+      # If you use the Torrent Only or Usenet Only download sources, SoulSync
+      # needs to read the files your torrent / usenet client downloads.
+      #
+      # EASIEST SETUP: point qBittorrent, SABnzbd / NZBGet, AND slskd at the
+      # SAME download folder. The ./downloads mount above is reused; nothing
+      # new to add here. Just configure each client's download path to
+      # /downloads (inside its own container) — files land in the same place
+      # SoulSync already reads from.
+      #
+      # SEPARATE FOLDERS (if you prefer): uncomment + edit these to point at
+      # the client's download folder. The in-container path must MATCH the
+      # save_path the client reports.
+      # - /path/to/qbittorrent/downloads:/downloads/torrents:rw
+      # - /path/to/sabnzbd/complete:/downloads/usenet:rw
+      # Then set the torrent client's save path to /downloads/torrents and
+      # SAB / NZBGet's complete folder to /downloads/usenet (or whatever
+      # in-container path you chose). Skip these if your downloader runs
+      # outside Docker and writes to a path already mounted above.
     extra_hosts:
       # Allow container to reach host services
       - "host.docker.internal:host-gateway"

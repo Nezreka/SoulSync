@@ -21,6 +21,7 @@
         { container: '.tidal-enrich-button-container',     color: [180, 180, 255] },
         { container: '.qobuz-enrich-button-container',     color: [1, 112, 239]  },
         { container: '.discogs-button-container',          color: [180, 180, 180] },
+        { container: '.amazon-enrich-button-container',    color: [255, 153, 0]  },
         { container: '.hydrabase-button-container',        color: [200, 200, 200] },
         { container: '.soulid-button-container',          color: [29, 185, 84], rainbow: true },
         { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true },

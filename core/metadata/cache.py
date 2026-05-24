@@ -8,6 +8,7 @@ Transparent to callers: check cache before API call, store after success.
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
@@ -48,6 +49,33 @@ class MetadataCache:
     def _get_db(self):
         from database.music_database import get_database
         return get_database()
+
+    @staticmethod
+    def _is_transient_sqlite_io_error(exc: Exception) -> bool:
+        return 'disk i/o error' in str(exc).lower()
+
+    def _run_maintenance_write(self, label: str, operation, default: int = 0) -> int:
+        """Run a maintenance write with one retry for transient SQLite I/O."""
+        for attempt in range(2):
+            try:
+                db = self._get_db()
+                conn = db._get_connection()
+                try:
+                    return operation(conn)
+                finally:
+                    conn.close()
+            except Exception as e:
+                if self._is_transient_sqlite_io_error(e) and attempt == 0:
+                    logger.warning(
+                        "%s hit transient SQLite disk I/O error; retrying once: %s",
+                        label,
+                        e,
+                    )
+                    time.sleep(0.25)
+                    continue
+                logger.error("%s error: %s", label, e)
+                return default
+        return default
 
     # ─── Entity Methods ───────────────────────────────────────────────
 
@@ -566,137 +594,113 @@ class MetadataCache:
 
     def evict_expired(self) -> int:
         """Delete entries that have exceeded their TTL. Returns count of evicted entries."""
-        try:
-            db = self._get_db()
-            conn = db._get_connection()
-            try:
-                cursor = conn.cursor()
+        def _operation(conn):
+            cursor = conn.cursor()
 
-                # Entities
-                cursor.execute("""
-                    DELETE FROM metadata_cache_entities
-                    WHERE julianday('now') - julianday(updated_at) > ttl_days
-                """)
-                entity_count = cursor.rowcount
+            # Entities
+            cursor.execute("""
+                DELETE FROM metadata_cache_entities
+                WHERE julianday('now') - julianday(updated_at) > ttl_days
+            """)
+            entity_count = cursor.rowcount
 
-                # Searches
-                cursor.execute("""
-                    DELETE FROM metadata_cache_searches
-                    WHERE julianday('now') - julianday(created_at) > ttl_days
-                """)
-                search_count = cursor.rowcount
+            # Searches
+            cursor.execute("""
+                DELETE FROM metadata_cache_searches
+                WHERE julianday('now') - julianday(created_at) > ttl_days
+            """)
+            search_count = cursor.rowcount
 
-                conn.commit()
-                total = entity_count + search_count
-                if total > 0:
-                    logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
-                return total
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.error(f"Cache eviction error: {e}")
-            return 0
+            conn.commit()
+            total = entity_count + search_count
+            if total > 0:
+                logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
+            return total
+
+        return self._run_maintenance_write("Cache eviction", _operation)
 
     def clean_junk_entities(self) -> int:
         """Delete cached entities with empty/placeholder names."""
-        try:
-            db = self._get_db()
-            conn = db._get_connection()
-            try:
-                cursor = conn.cursor()
-                junk_names = "', '".join(self._JUNK_NAMES - {''})  # exclude empty, handled separately
-                cursor.execute(f"""
-                    DELETE FROM metadata_cache_entities
-                    WHERE (name IS NULL
-                       OR TRIM(name) = ''
-                       OR LOWER(TRIM(name)) IN ('{junk_names}'))
-                      AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
-                      AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
-                """)
-                count = cursor.rowcount
-                conn.commit()
-                if count > 0:
-                    logger.info(f"Cleaned {count} junk entities from cache")
-                return count
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.error(f"Junk cleanup error: {e}")
-            return 0
+        def _operation(conn):
+            cursor = conn.cursor()
+            junk_names = "', '".join(self._JUNK_NAMES - {''})  # exclude empty, handled separately
+            cursor.execute(f"""
+                DELETE FROM metadata_cache_entities
+                WHERE (name IS NULL
+                   OR TRIM(name) = ''
+                   OR LOWER(TRIM(name)) IN ('{junk_names}'))
+                  AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
+                  AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
+            """)
+            count = cursor.rowcount
+            conn.commit()
+            if count > 0:
+                logger.info(f"Cleaned {count} junk entities from cache")
+            return count
+
+        return self._run_maintenance_write("Junk cleanup", _operation)
 
     def clean_orphaned_searches(self) -> int:
         """Delete search results where <50% of referenced entities still exist."""
-        try:
-            db = self._get_db()
-            conn = db._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, source, search_type, result_ids FROM metadata_cache_searches")
-                rows = cursor.fetchall()
+        def _operation(conn):
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, source, search_type, result_ids FROM metadata_cache_searches")
+            rows = cursor.fetchall()
 
-                dead_ids = []
-                for row in rows:
-                    try:
-                        result_ids = json.loads(row['result_ids'] or '[]')
-                    except (json.JSONDecodeError, TypeError):
-                        dead_ids.append(row['id'])
-                        continue
+            dead_ids = []
+            for row in rows:
+                try:
+                    result_ids = json.loads(row['result_ids'] or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    dead_ids.append(row['id'])
+                    continue
 
-                    if not result_ids:
-                        dead_ids.append(row['id'])
-                        continue
+                if not result_ids:
+                    dead_ids.append(row['id'])
+                    continue
 
-                    # Check how many referenced entities still exist
-                    placeholders = ','.join('?' * len(result_ids))
-                    cursor.execute(f"""
-                        SELECT COUNT(*) FROM metadata_cache_entities
-                        WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
-                    """, [row['source'], row['search_type']] + list(result_ids))
-                    found = cursor.fetchone()[0]
+                # Check how many referenced entities still exist
+                placeholders = ','.join('?' * len(result_ids))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM metadata_cache_entities
+                    WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
+                """, [row['source'], row['search_type']] + list(result_ids))
+                found = cursor.fetchone()[0]
 
-                    if found < len(result_ids) * 0.5:
-                        dead_ids.append(row['id'])
+                if found < len(result_ids) * 0.5:
+                    dead_ids.append(row['id'])
 
-                if dead_ids:
-                    # Delete in chunks to stay under SQLite variable limit
-                    for i in range(0, len(dead_ids), 400):
-                        chunk = dead_ids[i:i + 400]
-                        placeholders = ','.join('?' * len(chunk))
-                        cursor.execute(f"DELETE FROM metadata_cache_searches WHERE id IN ({placeholders})", chunk)
-                    conn.commit()
+            if dead_ids:
+                # Delete in chunks to stay under SQLite variable limit
+                for i in range(0, len(dead_ids), 400):
+                    chunk = dead_ids[i:i + 400]
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(f"DELETE FROM metadata_cache_searches WHERE id IN ({placeholders})", chunk)
+                conn.commit()
 
-                count = len(dead_ids)
-                if count > 0:
-                    logger.info(f"Cleaned {count} orphaned search results from cache")
-                return count
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.error(f"Orphan search cleanup error: {e}")
-            return 0
+            count = len(dead_ids)
+            if count > 0:
+                logger.info(f"Cleaned {count} orphaned search results from cache")
+            return count
+
+        return self._run_maintenance_write("Orphan search cleanup", _operation)
 
     def clean_stale_musicbrainz_nulls(self, max_age_days: int = 30) -> int:
         """Delete MusicBrainz cache entries where lookup found nothing (null MBID) and age > max_age_days."""
-        try:
-            db = self._get_db()
-            conn = db._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    DELETE FROM musicbrainz_cache
-                    WHERE musicbrainz_id IS NULL
-                      AND julianday('now') - julianday(last_updated) > ?
-                """, (max_age_days,))
-                count = cursor.rowcount
-                conn.commit()
-                if count > 0:
-                    logger.info(f"Cleaned {count} stale MusicBrainz null entries (>{max_age_days} days)")
-                return count
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.error(f"MusicBrainz null cleanup error: {e}")
-            return 0
+        def _operation(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM musicbrainz_cache
+                WHERE musicbrainz_id IS NULL
+                  AND julianday('now') - julianday(last_updated) > ?
+            """, (max_age_days,))
+            count = cursor.rowcount
+            conn.commit()
+            if count > 0:
+                logger.info(f"Cleaned {count} stale MusicBrainz null entries (>{max_age_days} days)")
+            return count
+
+        return self._run_maintenance_write("MusicBrainz null cleanup", _operation)
 
     def get_health_stats(self) -> dict:
         """Return cache health statistics for the repair dashboard.

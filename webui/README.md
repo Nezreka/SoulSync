@@ -79,6 +79,12 @@ webui/src/
   test/        Shared test utilities and setup helpers
 ```
 
+Migration planning docs live under `webui/docs/migration/`.
+
+- keep the high-level route backlog there
+- add one route-specific sketch per migration task
+- keep migration notes close to the WebUI code rather than the repo root
+
 ### Route Slices
 
 - Keep route-specific code inside `webui/src/routes/<route>/`.

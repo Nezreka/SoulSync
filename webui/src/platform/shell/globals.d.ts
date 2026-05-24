@@ -23,6 +23,8 @@ declare global {
         pageId: ShellPageId,
         options?: {
           replace?: boolean;
+          artistId?: string | number;
+          artistSource?: string | null;
         },
       ) => Promise<boolean>;
     };
@@ -33,7 +35,32 @@ declare global {
       resolveLegacyPath: (pathname: string) => ShellPageId | null;
       setActivePageChrome: (pageId: ShellPageId) => void;
       activateLegacyPath: (pathname: string) => void;
+      navigateToArtistDetail: (
+        artistId: string | number,
+        artistName: string,
+        sourceOverride?: string | null,
+        options?: {
+          skipRouteChange?: boolean;
+        },
+      ) => void;
+      cancelSimilarArtistsLoad: () => void;
       showReactHost: (pageId: ShellPageId) => void;
+      playLibraryTrack: (
+        track: {
+          id: string | number;
+          title: string;
+          file_path: string;
+          bitrate?: string | number | null;
+          artist_id?: string | number | null;
+          album_id?: string | number | null;
+          _stats_image?: string | null;
+        },
+        albumTitle: string,
+        artistName: string,
+      ) => void | Promise<void>;
+      startStream: (searchResult: Record<string, unknown>) => void | Promise<void>;
+      showLoadingOverlay: (message?: string) => void;
+      hideLoadingOverlay: () => void;
     };
   }
 }
