@@ -1,1 +1,1 @@
-export { Show } from './show';
+export * from './primitives';

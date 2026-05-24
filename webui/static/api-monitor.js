@@ -568,7 +568,7 @@ async function fetchAndUpdateSystemStats() {
 
         // Update all stat cards
         updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
-        updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed this session');
+        updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed downloads');
         updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
         updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
         updateStatCard('uptime-card', data.uptime, 'Application runtime');

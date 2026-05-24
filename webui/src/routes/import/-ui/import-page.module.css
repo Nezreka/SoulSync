@@ -1,0 +1,1825 @@
+.importPageContainer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+.importPageHeader {
+  margin-bottom: 20px;
+}
+
+.importPageTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.importPageTitle {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.3px;
+  font-family:
+    'SF Pro Display',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.importPageTitle > span {
+  background: linear-gradient(
+    90deg,
+    #ffffff 0%,
+    rgb(var(--accent-light-rgb)) 50%,
+    rgb(var(--accent-rgb)) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: page-title-shimmer 6s ease-in-out infinite;
+}
+
+.importPageStagingBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.importStagingPath {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importStagingStats {
+  color: rgb(var(--accent-light-rgb));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.importStagingRefreshAt {
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Tab Bar */
+.importPageTabBar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0;
+}
+
+.importPageTab {
+  padding: 10px 24px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: -1px;
+}
+
+.importPageTab:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.importPageTab.active {
+  color: rgb(var(--accent-light-rgb));
+  border-bottom-color: rgb(var(--accent-light-rgb));
+}
+
+.importPageTabContent {
+  display: none;
+}
+
+.importPageTabContent.active {
+  display: block;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Section labels */
+.importPageSectionLabel {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+/* Search bar */
+.importPageSearchBar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.importPageSearchInput {
+  flex: 1;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.importPageSearchInput:focus {
+  border-color: rgba(var(--accent-light-rgb), 0.5);
+}
+
+/* Album grid */
+.importPageAlbumGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.importPageAlbumCard {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  color: inherit;
+  font: inherit;
+}
+
+.importPageAutoGroups .importPageAlbumGrid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.importPageAutoGroupCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.importPageAutoGroupCount {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb, 29, 185, 84), 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.2em;
+}
+
+.importPageAutoGroupInfo {
+  min-width: 0;
+}
+
+.importPageAlbumCard:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(var(--accent-light-rgb), 0.3);
+  transform: translateY(-2px);
+}
+
+.importPageAlbumCard img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.importPageAlbumCardTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.importPageAlbumCardArtist {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageAlbumCardMeta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageAlbumCardDetail {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.36);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageAlbumCardSource {
+  font-size: 10px;
+  color: rgba(255, 200, 100, 0.75);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* Album hero (selected album) */
+.importPageAlbumHero {
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.importPageAlbumHero img {
+  width: 120px;
+  height: 120px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.importPageAlbumHeroInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.importPageAlbumHeroTitle {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.importPageAlbumHeroArtist {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+
+.importPageAlbumHeroMeta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* Match header */
+.importPageMatchHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.importPageMatchHeader h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.importPageMatchActions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Match list */
+.importPageMatchList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.importPageMatchRow {
+  display: grid;
+  grid-template-columns: 36px 1fr 1fr 36px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  min-height: 44px;
+  transition: all 0.2s;
+}
+
+.importPageMatchRow.dragOver {
+  background: rgba(var(--accent-light-rgb), 0.08);
+  border-color: rgba(var(--accent-light-rgb), 0.4);
+  box-shadow: 0 0 12px rgba(var(--accent-light-rgb), 0.15);
+}
+
+.importPageMatchRow.matched {
+  border-color: rgba(var(--accent-light-rgb), 0.2);
+}
+
+.importPageMatchNum {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+  font-weight: 500;
+}
+
+.importPageMatchTrack {
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageMatchFile {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.importPageMatchFile.hasFile {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.importPageMatchFileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importPageMatchConfidence {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(var(--accent-light-rgb), 0.15);
+  color: rgb(var(--accent-light-rgb));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.importPageMatchConfidence.low {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+}
+
+.importPageMatchDropZone {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
+  font-style: italic;
+}
+
+/* Unmatched file pool */
+.importPageUnmatchedPool {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.importPagePoolLabel {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.importPagePoolChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.importPageFileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: grab;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.importPageFileChip:active {
+  cursor: grabbing;
+}
+
+.importPageFileChip:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(var(--accent-light-rgb), 0.3);
+  color: #fff;
+}
+
+.importPageFileChip.selected {
+  background: rgba(var(--accent-light-rgb), 0.15);
+  border-color: rgba(var(--accent-light-rgb), 0.4);
+  color: rgb(var(--accent-light-rgb));
+}
+
+.importPagePoolEmpty {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.2);
+  font-style: italic;
+}
+
+/* Match footer */
+.importPageMatchFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.importPageMatchStats {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Singles */
+.importPageSinglesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.importPageSinglesActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.importPageSinglesList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.importPageSingleItem {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+
+.importPageSingleItem.matched {
+  border-color: rgba(var(--accent-light-rgb), 0.2);
+}
+
+.importPageSingleCheckboxWrap {
+  grid-column: 1;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.importPageSingleInfo {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.importPageSingleFilename {
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageSingleMeta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.importPageSingleMatchedInfo {
+  font-size: 12px;
+  color: rgb(var(--accent-light-rgb));
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.importPageSingleMatchedChange {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 11px;
+  text-decoration: underline;
+}
+
+.importPageSingleMatchedChange:hover {
+  color: #fff;
+}
+
+.importPageSingleActions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Inline search panel for singles */
+.importPageSingleSearchPanel {
+  grid-column: 1 / -1;
+  padding: 12px 0 4px 44px;
+}
+
+.importPageSingleSearchBar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.importPageSingleSearchInput {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+
+.importPageSingleSearchInput:focus {
+  border-color: rgba(var(--accent-light-rgb), 0.4);
+}
+
+.importPageSingleSearchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.importPageSingleResultItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.importPageSingleResultItem:hover {
+  background: rgba(var(--accent-light-rgb), 0.08);
+  border-color: rgba(var(--accent-light-rgb), 0.25);
+}
+
+.importPageSingleResultImg {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.importPageSingleResultInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.importPageSingleResultName {
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageSingleResultDetail {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.importPageSingleResultSelect {
+  padding: 4px 12px;
+  background: rgba(var(--accent-light-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-light-rgb), 0.3);
+  border-radius: 6px;
+  color: rgb(var(--accent-light-rgb));
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.importPageSingleResultSelect:hover {
+  background: rgba(var(--accent-light-rgb), 0.25);
+}
+
+/* Empty state */
+.importPageEmptyState {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 14px;
+}
+
+/* Suggestions */
+.importPageSuggestions {
+  margin-bottom: 24px;
+}
+
+/* Processing Queue */
+.importPageQueue {
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.importPageQueueHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.importPageQueueTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.importPageQueueList {
+  display: flex;
+  flex-direction: column;
+}
+
+.importPageQueueItem {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.importPageQueueItem:last-child {
+  border-bottom: none;
+}
+
+.importPageQueueArt {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.importPageQueueArtEmpty {
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.importPageFlexSpacer {
+  flex: 1;
+}
+
+.importPageQueueInfo {
+  min-width: 0;
+}
+
+.importPageQueueName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.importPageQueueDetail {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 2px;
+}
+
+.importPageQueueProgress {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.importPageQueueBar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.importPageQueueFill {
+  height: 100%;
+  background: rgb(var(--accent-light-rgb));
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.importPageQueueFill.error {
+  background: #ef4444;
+}
+
+.importPageQueueStatus {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: right;
+}
+
+.importPageQueueStatus.done {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.importPageQueueStatus.error {
+  color: #ef4444;
+}
+
+@media (max-width: 768px) {
+  .importPageFileChip,
+  .importPageMatchRow {
+    cursor: pointer;
+  }
+
+  .importPageContainer {
+    padding: 16px;
+  }
+
+  .importPageTitle {
+    font-size: 22px;
+  }
+
+  .importPageAlbumGrid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+  }
+
+  .importPageAlbumHero {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .importPageAlbumHero img {
+    width: 100px;
+    height: 100px;
+  }
+
+  .importPageMatchRow {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'num track track'
+      'num file unmatch';
+    gap: 6px 8px;
+    align-items: center;
+  }
+
+  .importPageMatchNum {
+    grid-area: num;
+  }
+
+  .importPageMatchTrack {
+    grid-area: track;
+  }
+
+  .importPageMatchFile {
+    grid-area: file;
+    min-width: 0;
+  }
+
+  .importPageSinglesHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .importPageSinglesActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .importPageSingleItem {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'checkbox info actions'
+      'search search search';
+    align-items: start;
+    gap: 8px;
+  }
+
+  .importPageSingleCheckboxWrap {
+    grid-area: checkbox;
+  }
+
+  .importPageSingleInfo {
+    grid-area: info;
+  }
+
+  .importPageSingleActions {
+    grid-area: actions;
+    justify-self: end;
+    align-self: start;
+  }
+
+  .importPageSingleSearchPanel {
+    grid-area: search;
+  }
+
+  .importPageSingleSearchPanel {
+    padding-left: 0;
+  }
+
+  .importPageStagingBar {
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+}
+.autoImportControls {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 16px;
+}
+
+.autoImportToggleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.autoImportToggleLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.autoImportSettingsRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.autoImportSetting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.autoImportConfidenceValue {
+  display: inline-block;
+  flex: 0 0 5ch;
+  width: 5ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.autoImportEmpty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 13px;
+}
+
+/* Result cards */
+.autoImportCard {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  transition: all 0.2s;
+}
+
+.autoImportCardTop {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.autoImportCard:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.autoImportCompleted {
+  border-left: 3px solid #4ade80;
+}
+.autoImportReview {
+  border-left: 3px solid #fbbf24;
+}
+.autoImportFailed {
+  border-left: 3px solid #f87171;
+}
+.autoImportProcessing {
+  border-left: 3px solid #60a5fa;
+}
+
+.autoImportCardArt {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.autoImportCardArtFallback {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
+.autoImportCardCenter {
+  flex: 1;
+  min-width: 0;
+}
+
+.autoImportCardAlbum {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autoImportCardArtist {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autoImportCardFolder {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.25);
+  margin-top: 2px;
+}
+
+.autoImportMatchInfo {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
+}
+
+.autoImportCardError {
+  font-size: 10px;
+  color: #f87171;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autoImportCardRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.autoImportConfidenceBar {
+  width: 60px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.autoImportConfidenceFill {
+  height: 100%;
+  border-radius: 2px;
+}
+.autoImportConfHigh {
+  background: #4ade80;
+}
+.autoImportConfMedium {
+  background: #fbbf24;
+}
+.autoImportConfLow {
+  background: #f87171;
+}
+
+.autoImportConfidenceText {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Live progress */
+.autoImportProgress {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.1);
+  border-radius: 8px;
+}
+
+.autoImportProgressText {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+
+.autoImportProgressBar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.autoImportProgressFill {
+  height: 100%;
+  background: rgba(var(--accent-rgb), 0.6);
+  border-radius: 2px;
+  width: 100%;
+  animation: adlPulse 1.5s ease-in-out infinite;
+}
+
+/* Filter pills */
+.autoImportFilters {
+  padding: 6px 0;
+  margin-bottom: 8px;
+}
+
+.autoImportCardMeta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 3px;
+}
+
+.autoImportMethodBadge {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.autoImportCardFolderPath {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.15);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Expandable track list */
+.autoImportTrackList {
+  display: none;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.autoImportTrackList.expanded {
+  display: block;
+}
+
+.autoImportTrackListHeader {
+  display: grid;
+  grid-template-columns: 1fr 1fr 50px;
+  gap: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.autoImportTrackRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 50px;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.autoImportTrackName {
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autoImportTrackFile {
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autoImportTrackConf {
+  text-align: right;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.autoImportTrackConf.autoImportConfHigh {
+  color: #4ade80;
+}
+.autoImportTrackConf.autoImportConfMedium {
+  color: #fbbf24;
+}
+.autoImportTrackConf.autoImportConfLow {
+  color: #f87171;
+}
+
+.autoImportStatusBadge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.autoImportBadgeCompleted {
+  background: rgba(74, 222, 128, 0.1);
+  color: #4ade80;
+}
+.autoImportBadgeReview {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+}
+.autoImportBadgeFailed {
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+}
+.autoImportBadgeNeutral {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.4);
+}
+.autoImportBadgeProcessing {
+  background: rgba(96, 165, 250, 0.12);
+  color: #60a5fa;
+  animation: auto-import-badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes auto-import-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.autoImportTrackRowActive {
+  background: rgba(96, 165, 250, 0.08);
+  border-left: 2px solid #60a5fa;
+  padding-left: 6px;
+  margin-left: -8px;
+  border-radius: 3px;
+}
+.autoImportTrackRowActive .autoImportTrackName {
+  color: #60a5fa;
+  font-weight: 600;
+}
+.autoImportTrackRowDone .autoImportTrackName,
+.autoImportTrackRowDone .autoImportTrackFile {
+  opacity: 0.4;
+}
+
+.autoImportActions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .autoImportCard {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .autoImportCardRight {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* Mobile import layout:
+   keep the page feeling like the legacy shell on phones by stacking
+   high-friction controls and letting cards breathe vertically. */
+@media (max-width: 768px) {
+  .importPageContainer {
+    padding: 16px 16px 20px;
+  }
+
+  .importPageHeader {
+    margin-bottom: 16px;
+  }
+
+  .importPageTitleRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .importPageTitle {
+    gap: 10px;
+    font-size: 22px;
+  }
+
+  .importPageTitle > img {
+    width: 24px;
+    height: 24px;
+  }
+
+  .importPageTitleRow > button,
+  .importPageSearchBar > button,
+  .importPageMatchActions > button,
+  .importPageMatchFooter > button,
+  .importPageQueueHeader > button,
+  .importPageSinglesActions > button,
+  .autoImportToggleRow > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .importPageStagingBar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+
+  .importStagingPath {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+
+  .importStagingStats,
+  .importStagingRefreshAt {
+    white-space: normal;
+  }
+
+  .importPageTabBar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .importPageTabBar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .importPageTab {
+    padding: 8px 14px;
+    white-space: nowrap;
+  }
+
+  .importPageSearchBar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  #import-page-album-search-input {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  #import-page-album-clear-btn {
+    flex: 0 0 auto;
+    min-height: 36px;
+  }
+
+  #import-page-album-clear-btn + button {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .importPageAlbumGrid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .importPageAutoGroups .importPageAlbumGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .importPageAlbumCard {
+    padding: 10px;
+  }
+
+  .importPageAlbumCard img {
+    margin-bottom: 6px;
+  }
+
+  .importPageAlbumCardTitle {
+    font-size: 12px;
+  }
+
+  .importPageAlbumCardArtist {
+    font-size: 10px;
+  }
+
+  .importPageAutoGroupCard {
+    gap: 10px;
+  }
+
+  .importPageAlbumHero {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .importPageAlbumHero img {
+    width: 96px;
+    height: 96px;
+  }
+
+  .importPageAlbumHeroTitle {
+    font-size: 20px;
+  }
+
+  .importPageAlbumHeroArtist {
+    font-size: 14px;
+  }
+
+  .importPageAlbumHeroInfo {
+    width: 100%;
+  }
+
+  .importPageMatchHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .importPageMatchHeader h3 {
+    font-size: 15px;
+  }
+
+  .importPageMatchActions {
+    flex-direction: column;
+  }
+
+  .importPageMatchRow {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'num track track'
+      'num file unmatch';
+    gap: 6px 8px;
+    align-items: center;
+    padding: 10px 12px;
+  }
+
+  .importPageMatchNum {
+    grid-area: num;
+  }
+
+  .importPageMatchTrack {
+    grid-area: track;
+    white-space: normal;
+  }
+
+  .importPageMatchFile {
+    grid-area: file;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .importPageMatchRow > :last-child {
+    grid-area: unmatch;
+    justify-self: end;
+  }
+
+  .importPageUnmatchedPool {
+    padding: 12px;
+  }
+
+  .importPagePoolChips {
+    gap: 6px;
+  }
+
+  .importPageMatchFooter {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .importPageMatchStats {
+    text-align: center;
+  }
+
+  .importPageSinglesHeader {
+    align-items: stretch;
+  }
+
+  .importPageSinglesActions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .importPageSingleItem {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'checkbox info actions'
+      'search search search';
+    align-items: start;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .importPageSingleCheckboxWrap {
+    margin-top: 0;
+  }
+
+  .importPageSingleActions {
+    grid-area: actions;
+    justify-self: end;
+    align-self: start;
+  }
+
+  .importPageSingleSearchPanel {
+    grid-area: search;
+    padding-left: 0;
+  }
+
+  .importPageSingleSearchBar {
+    flex-direction: column;
+  }
+
+  .importPageSingleSearchResults {
+    max-height: 260px;
+  }
+
+  .importPageSingleResultItem {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .importPageQueueHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .importPageQueueItem {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      'art info'
+      'art progress';
+    gap: 8px 10px;
+    align-items: start;
+    padding: 10px 12px;
+  }
+
+  .importPageQueueArt {
+    grid-area: art;
+  }
+
+  .importPageQueueInfo {
+    grid-area: info;
+  }
+
+  .importPageQueueProgress {
+    grid-area: progress;
+    width: 100%;
+  }
+
+  .importPageQueueStatus {
+    text-align: left;
+  }
+
+  .autoImportControls {
+    padding: 8px 0 12px;
+  }
+
+  .autoImportToggleRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .autoImportSettingsRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .autoImportSetting {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .autoImportConfidenceValue {
+    flex: 0 0 auto;
+  }
+
+  .autoImportFilters {
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .autoImportFilters .importPageFlexSpacer {
+    display: none;
+  }
+
+  .autoImportFilters > button {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+
+  .autoImportCard {
+    padding: 12px;
+  }
+
+  .autoImportCardTop {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-areas:
+      'art body'
+      'right right';
+    align-items: start;
+    gap: 10px 12px;
+  }
+
+  .autoImportCardLeft {
+    grid-area: art;
+  }
+
+  .autoImportCardCenter {
+    grid-area: body;
+    width: auto;
+  }
+
+  .autoImportCardAlbum,
+  .autoImportCardArtist,
+  .autoImportCardError,
+  .autoImportCardFolderPath {
+    white-space: normal;
+  }
+
+  .autoImportCardRight {
+    grid-area: right;
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .autoImportStatusBadge {
+    align-self: flex-start;
+  }
+
+  .autoImportConfidenceBar {
+    width: 100%;
+  }
+
+  .autoImportConfidenceText {
+    align-self: flex-start;
+  }
+
+  .autoImportActions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .autoImportActions > button {
+    width: 100%;
+  }
+
+  .autoImportCardMeta {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .autoImportCardFolderPath {
+    line-height: 1.35;
+  }
+
+  .autoImportTrackListHeader {
+    display: none;
+  }
+
+  .autoImportTrackList.expanded {
+    padding-top: 6px;
+  }
+
+  .autoImportTrackRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name conf'
+      'file conf';
+    gap: 2px 8px;
+    padding: 6px 0;
+  }
+
+  .autoImportTrackName {
+    grid-area: name;
+    white-space: normal;
+  }
+
+  .autoImportTrackFile {
+    grid-area: file;
+    white-space: normal;
+  }
+
+  .autoImportTrackConf {
+    grid-area: conf;
+    align-self: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .importPageContainer {
+    padding: 12px 12px 16px;
+  }
+
+  .importPageTitle {
+    font-size: 20px;
+  }
+
+  .importPageTitleRow > button,
+  .importPageMatchActions > button,
+  .importPageMatchFooter > button,
+  .importPageQueueHeader > button,
+  .importPageSinglesActions > button,
+  .autoImportToggleRow > button,
+  .autoImportFilters > button {
+    width: 100%;
+  }
+
+  #import-page-album-clear-btn + button {
+    width: 100%;
+  }
+
+  .autoImportFilters > button {
+    flex: 1 1 100%;
+  }
+
+  .importPageAlbumGrid {
+    gap: 8px;
+  }
+
+  .importPageAlbumHero {
+    padding: 14px;
+  }
+
+  .importPageAlbumHero img {
+    width: 88px;
+    height: 88px;
+  }
+
+  .importPageMatchRow,
+  .importPageSingleItem,
+  .importPageQueueItem {
+    padding: 10px;
+  }
+
+  .importPageSingleSearchResults {
+    max-height: 220px;
+  }
+
+  .importPageSingleResultItem {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .importPageSingleResultImg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .importPageSingleResultName {
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .importPageSingleResultDetail {
+    font-size: 11px;
+    white-space: normal;
+  }
+
+  .importPageSingleResultSelect {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+
+  .autoImportCard {
+    padding: 10px;
+  }
+
+  .autoImportCardTop {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 8px 10px;
+  }
+
+  .autoImportCardArt,
+  .autoImportCardArtFallback {
+    width: 48px;
+    height: 48px;
+  }
+
+  .autoImportConfidenceBar {
+    width: 100%;
+  }
+}

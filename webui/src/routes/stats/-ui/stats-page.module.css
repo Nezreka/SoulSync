@@ -364,15 +364,22 @@
   border: none;
   padding: 0;
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
   transition: transform 0.2s ease;
 }
 
-.statsArtistBubble:disabled {
+.statsArtistBubbleDisabled {
   cursor: default;
 }
 
 .statsArtistBubble:hover {
   transform: translateY(-3px);
+}
+
+.statsArtistBubbleDisabled:hover {
+  transform: none;
 }
 
 .statsBubbleImage {

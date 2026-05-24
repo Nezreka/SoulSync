@@ -1068,6 +1068,13 @@ def _get_batch_max_concurrent(is_album=False, source=None):
         mode = config_manager.get('download_source.mode', 'soulseek')
         if mode == 'soulseek':
             return 1
+        if mode == 'hybrid':
+            hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+            if isinstance(hybrid_order, str):
+                hybrid_order = [hybrid_order]
+            first_source = next((str(s).strip().lower() for s in hybrid_order if str(s).strip()), '')
+            if first_source == 'soulseek':
+                return 1
     return _get_max_concurrent()
 
 # --- Session Download Statistics ---
@@ -2557,9 +2564,16 @@ def _build_system_stats():
     active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
                            if batch_data.get('phase') == 'downloading'])
 
-    # Count finished downloads (completed this session) - use session counter like dashboard.py
-    with session_stats_lock:
-        finished_downloads = session_completed_downloads
+    # Count finished downloads from persistent history so the dashboard
+    # survives Docker/container restarts and streaming downloads that leave
+    # the in-memory task tracker after post-processing.
+    try:
+        persistent_finished = int(get_database().get_library_history_stats().get('downloads', 0) or 0)
+        with session_stats_lock:
+            finished_downloads = max(persistent_finished, session_completed_downloads)
+    except Exception:
+        with session_stats_lock:
+            finished_downloads = session_completed_downloads
 
     # Calculate total download speed from active soulseek transfers
     # Skip the slskd API call entirely when Soulseek is not the active download
@@ -16524,6 +16538,8 @@ def _get_staging_file_cache(batch_id):
                 'title': meta['title'] or '',
                 'artist': meta['albumartist'] or meta['artist'] or '',
                 'album': meta['album'] or '',
+                'track_number': meta.get('track_number'),
+                'disc_number': meta.get('disc_number'),
                 'extension': ext,
             })
 
@@ -16928,6 +16944,11 @@ def _build_status_deps():
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         on_download_completed=_on_download_completed,
+        get_persistent_download_history=lambda limit: get_database().get_library_history(
+            event_type='download',
+            page=1,
+            limit=limit,
+        )[0],
     )
 
 

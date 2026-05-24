@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
@@ -22,6 +23,7 @@ import {
   ISSUE_CATEGORY_META,
   parseSnapshot,
 } from '../-issues.helpers';
+import { Route } from '../route';
 import styles from './issue-detail-modal.module.css';
 
 export function IssueDetailModal({
@@ -213,9 +215,14 @@ export function IssueDetailModal({
       />
       <DialogBody>{renderIssueDetailContent()}</DialogBody>
       <DialogFooter>
-        <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
+        <Link
+          className={`${styles.modalLinkButton} ${styles.modalButtonSecondary}`}
+          replace
+          search={(prev) => ({ ...prev, issueId: undefined })}
+          to={Route.fullPath}
+        >
           Close
-        </Button>
+        </Link>
         {issue && (
           <>
             {statusButtons}

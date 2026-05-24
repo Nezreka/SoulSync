@@ -38,8 +38,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.imports.filename import extract_track_number_from_filename
-
 # `shutil` and `SequenceMatcher` are imported inline inside try_staging_match()
 # to keep the lift byte-identical with the original web_server.py function body.
 
@@ -59,6 +57,25 @@ def _coerce_positive_int(value: Any, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return coerced if coerced > 0 else default
+
+
+def _extract_explicit_track_number(filename: str) -> int:
+    """Extract a track number only when the filename visibly carries one."""
+    basename = os.path.splitext(os.path.basename(str(filename or '')))[0].strip()
+    if not basename:
+        return 0
+
+    match = re.match(r"^\d[\-\.](\d{1,2})\s*[\-\.]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        return num if 1 <= num <= 99 else 0
+
+    match = re.match(r"^\(?(\d{1,3})\)?\s*[\-\.)\]]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        return num if 1 <= num <= 999 else 0
+
+    return 0
 
 
 def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list[str]:
@@ -320,12 +337,24 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
         file_track_number = (
             _coerce_positive_int(best_match.get('track_number'), 0) or
-            extract_track_number_from_filename(best_match.get('full_path', ''))
+            _extract_explicit_track_number(best_match.get('full_path', ''))
         )
-        file_disc_number = _coerce_positive_int(best_match.get('disc_number'), 1)
+        file_disc_number = _coerce_positive_int(best_match.get('disc_number'), 0)
         if _private_album_bundle_staging:
-            track_number = file_track_number
-            disc_number = file_disc_number
+            track_number = (
+                file_track_number or
+                _coerce_positive_int(track_info.get('track_number'), 0) or
+                _coerce_positive_int(track_info.get('trackNumber'), 0) or
+                _coerce_positive_int(getattr(track, 'track_number', 0), 0) or
+                1
+            )
+            disc_number = (
+                file_disc_number or
+                _coerce_positive_int(track_info.get('disc_number'), 0) or
+                _coerce_positive_int(track_info.get('discNumber'), 0) or
+                _coerce_positive_int(getattr(track, 'disc_number', 0), 0) or
+                1
+            )
         else:
             track_number = (
                 _coerce_positive_int(track_info.get('track_number'), 0) or
@@ -337,7 +366,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 _coerce_positive_int(track_info.get('disc_number'), 0) or
                 _coerce_positive_int(track_info.get('discNumber'), 0) or
                 _coerce_positive_int(getattr(track, 'disc_number', 0), 0) or
-                file_disc_number
+                file_disc_number or
+                1
             )
         track_info['track_number'] = track_number
         track_info['disc_number'] = disc_number

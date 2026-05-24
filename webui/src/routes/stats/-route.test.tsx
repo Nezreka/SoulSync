@@ -117,14 +117,29 @@ describe('stats route', () => {
     await waitFor(() => expect(history.location.search).toContain('range=30d'));
   });
 
-  it('hands artist detail navigation directly to the shell bridge', async () => {
-    renderStatsRoute();
+  it('links artist names to the artist-detail route', async () => {
+    const { history } = renderStatsRoute();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Artist A' }));
+    const bubbleLink = await screen.findByRole('link', {
+      name: 'Open artist detail for Artist A',
+    });
+    expect(bubbleLink).toHaveAttribute('href', '/artist-detail/library/7');
 
-    expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
-      7,
-      'Artist A',
+    const rankedLink = screen.getByRole('link', { name: 'Artist A' });
+    expect(rankedLink).toHaveAttribute('href', '/artist-detail/library/7');
+
+    fireEvent.click(bubbleLink);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/library/7'));
+    await waitFor(() =>
+      expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).toHaveBeenCalledWith(
+        '7',
+        '',
+        null,
+        {
+          skipRouteChange: true,
+        },
+      ),
     );
   });
 

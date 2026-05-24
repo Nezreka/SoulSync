@@ -56,6 +56,12 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "release_date": album.release_date,
                     "total_tracks": album.total_tracks,
                     "album_type": album.album_type,
+                    "format": getattr(album, "format", None),
+                    "country": getattr(album, "country", None),
+                    "status": getattr(album, "status", None),
+                    "label": getattr(album, "label", None),
+                    "disambiguation": getattr(album, "disambiguation", None),
+                    "release_group_id": getattr(album, "release_group_id", None),
                     "external_urls": album.external_urls or {},
                 })
         except Exception as e:

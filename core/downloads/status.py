@@ -24,6 +24,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 from core.runtime_state import (
@@ -82,6 +83,7 @@ class StatusDeps:
     download_orchestrator: Any = None
     run_async: Optional[Callable] = None
     on_download_completed: Optional[Callable[[str, str, bool], None]] = None
+    get_persistent_download_history: Optional[Callable[[int], list[dict]]] = None
 
 
 # Streaming sources the engine fallback applies to. Soulseek goes through
@@ -536,6 +538,69 @@ _STATUS_PRIORITY = {
     'not_found': 6, 'failed': 7, 'cancelled': 8,
 }
 
+_PERSISTENT_HISTORY_TAIL_LIMIT = 50
+
+
+def _normalize_identity_part(value: Any) -> str:
+    return str(value or '').strip().casefold()
+
+
+def _download_identity(title: Any, artist: Any, album: Any) -> tuple[str, str, str]:
+    return (
+        _normalize_identity_part(title),
+        _normalize_identity_part(artist),
+        _normalize_identity_part(album),
+    )
+
+
+def _history_timestamp(value: Any) -> float:
+    if not value:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    try:
+        # SQLite CURRENT_TIMESTAMP uses "YYYY-MM-DD HH:MM:SS".
+        return datetime.fromisoformat(text.replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        try:
+            return datetime.strptime(text[:19], '%Y-%m-%d %H:%M:%S').timestamp()
+        except ValueError:
+            return 0.0
+
+
+def _build_history_download_item(entry: dict) -> dict:
+    history_id = entry.get('id') or entry.get('history_id') or ''
+    title = entry.get('title') or entry.get('source_track_title') or ''
+    artist = entry.get('artist_name') or entry.get('source_artist') or ''
+    album = entry.get('album_name') or ''
+    created_at = entry.get('created_at') or entry.get('completed_at') or ''
+    source = entry.get('download_source') or ''
+    return {
+        'task_id': f'history-{history_id}' if history_id else f'history-{title}-{created_at}',
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'artwork': entry.get('thumb_url') or '',
+        'status': 'completed',
+        'progress': 100,
+        'error': None,
+        'batch_id': '',
+        'batch_name': source,
+        'batch_source': source,
+        'playlist_id': '',
+        'track_index': 0,
+        'batch_total': 1,
+        'timestamp': _history_timestamp(created_at),
+        'created_at': created_at,
+        'priority': _STATUS_PRIORITY['completed'],
+        'quality': entry.get('quality') or '',
+        'file_path': entry.get('file_path') or '',
+        'is_persistent_history': True,
+    }
+
 
 def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
     """Flat list of every task across batches, sorted active-first then by recency.
@@ -543,6 +608,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
     Powers /api/downloads/all for the centralized Downloads page.
     """
     items = []
+    live_identities = set()
     with tasks_lock:
         for task_id, task in download_tasks.items():
             track_info = task.get('track_info') or {}
@@ -589,6 +655,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                             artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
 
             status = task.get('status', 'queued')
+            live_identities.add(_download_identity(title, artist, album))
             # Determine download progress percentage
             progress = 0
             if status == 'completed':
@@ -625,7 +692,28 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'batch_total': len(batch.get('queue', [])),
                 'timestamp': task.get('status_change_time', 0),
                 'priority': _STATUS_PRIORITY.get(status, 9),
+                'is_persistent_history': False,
             })
+
+    if deps.get_persistent_download_history is not None and len(items) < limit:
+        history_limit = min(limit - len(items), _PERSISTENT_HISTORY_TAIL_LIMIT)
+        try:
+            history_entries = deps.get_persistent_download_history(history_limit) or []
+        except Exception as exc:
+            logger.debug("[Downloads] persistent history lookup failed: %s", exc)
+            history_entries = []
+
+        appended_history = 0
+        for entry in history_entries:
+            if len(items) >= limit or appended_history >= history_limit:
+                break
+            item = _build_history_download_item(entry)
+            identity = _download_identity(item.get('title'), item.get('artist'), item.get('album'))
+            if identity in live_identities:
+                continue
+            items.append(item)
+            live_identities.add(identity)
+            appended_history += 1
 
     # Sort: active first (by priority), then by timestamp desc within each group
     items.sort(key=lambda x: (x['priority'], -x['timestamp']))

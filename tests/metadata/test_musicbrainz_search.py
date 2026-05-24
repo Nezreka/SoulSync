@@ -429,6 +429,58 @@ def test_search_albums_text_path_filters_by_score():
     assert 'Bad' not in titles
 
 
+def test_search_albums_text_path_keeps_release_variants():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_release.return_value = [
+        {'id': 'rel-clean', 'title': 'Shock Value', 'score': 100,
+         'date': '2007-04-03', 'country': 'US', 'status': 'Official',
+         'disambiguation': 'clean',
+         'media': [{'format': 'CD', 'track-count': 17}],
+         'release-group': {'id': 'rg-shock', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'Timbaland'}]},
+        {'id': 'rel-explicit', 'title': 'Shock Value', 'score': 100,
+         'date': '2007-04-03', 'country': 'US', 'status': 'Official',
+         'disambiguation': 'explicit',
+         'media': [{'format': 'CD', 'track-count': 18}],
+         'release-group': {'id': 'rg-shock', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'Timbaland'}]},
+    ]
+
+    albums = client.search_albums('Timbaland - Shock Value', limit=10)
+
+    assert [a.id for a in albums] == ['rel-clean', 'rel-explicit']
+    assert [a.total_tracks for a in albums] == [17, 18]
+    assert albums[1].disambiguation == 'explicit'
+
+
+def test_search_albums_title_hint_expands_release_group_to_releases():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Spiderbait', 'artist-spiderbait', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-tonight', 'title': 'Tonight Alright', 'primary-type': 'Album',
+         'first-release-date': '2004-03-29', 'secondary-types': []},
+    ]
+    client._client.browse_release_group_releases.return_value = [
+        {'id': 'rel-cd', 'title': 'Tonight Alright', 'date': '2004-03-29',
+         'country': 'AU', 'status': 'Official',
+         'media': [{'format': 'CD', 'track-count': 12}],
+         'artist-credit': [{'name': 'Spiderbait'}]},
+        {'id': 'rel-vinyl', 'title': 'Tonight Alright', 'date': '2024-07-26',
+         'country': 'AU', 'status': 'Official',
+         'media': [{'format': '12\" Vinyl', 'track-count': 13}],
+         'artist-credit': [{'name': 'Spiderbait'}]},
+    ]
+
+    albums = client.search_albums('Spiderbait Tonight Alright', limit=10)
+
+    client._client.browse_release_group_releases.assert_called_once_with('rg-tonight', limit=25)
+    assert [a.id for a in albums] == ['rel-cd', 'rel-vinyl']
+    assert [a.total_tracks for a in albums] == [12, 13]
+    assert albums[0].format == 'CD'
+
+
 # ---------------------------------------------------------------------------
 # Track search — routing
 # ---------------------------------------------------------------------------
