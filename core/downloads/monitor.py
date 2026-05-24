@@ -34,6 +34,32 @@ _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
 download_orchestrator = None
+_RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
+
+
+def _download_id_key(download_id):
+    return f"download_id::{download_id}" if download_id else None
+
+
+def _is_release_task(task):
+    ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+    username = task.get('username') or ti.get('username')
+    return username in _RELEASE_SOURCE_NAMES
+
+
+def _lookup_live_info(task, live_transfers_lookup):
+    ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+    download_id = task.get('download_id')
+    if _is_release_task(task):
+        by_id = live_transfers_lookup.get(_download_id_key(download_id))
+        if by_id:
+            return by_id
+
+    task_filename = task.get('filename') or ti.get('filename')
+    task_username = task.get('username') or ti.get('username')
+    if not task_filename or not task_username:
+        return None
+    return live_transfers_lookup.get(_make_context_key(task_username, task_filename))
 
 
 def init(
@@ -139,55 +165,64 @@ class WebUIDownloadMonitor:
 
                 for task_id in download_batches[batch_id].get('queue', []):
                     task = download_tasks.get(task_id)
-                    if not task or task['status'] not in ['downloading', 'queued']:
+                    if not task:
+                        continue
+                    release_recoverable = (
+                        _is_release_task(task)
+                        and task.get('download_id')
+                        and task.get('status') in ['failed', 'not_found']
+                    )
+                    if task['status'] not in ['downloading', 'queued'] and not release_recoverable:
                         continue
 
                     # Check for timeouts and errors - retries handled directly in _should_retry_task
                     # If _should_retry_task returns True, it means retries were exhausted
-                    retry_exhausted = self._should_retry_task(task_id, task, live_transfers_lookup, current_time, deferred_ops)
+                    retry_exhausted = False
+                    if not release_recoverable:
+                        retry_exhausted = self._should_retry_task(task_id, task, live_transfers_lookup, current_time, deferred_ops)
                     # Collect exhausted tasks to handle outside lock (prevents deadlock)
                     if retry_exhausted:
                         exhausted_tasks.append((batch_id, task_id))
 
-                    # ENHANCED: Check for successful completions (especially YouTube)
-                    task_filename = task.get('filename') or task.get('track_info', {}).get('filename')
-                    task_username = task.get('username') or task.get('track_info', {}).get('username')
+                    # ENHANCED: Check for successful completions (especially YouTube).
+                    # Release-style sources can report a completed audio file
+                    # name that differs from the original indexer URL/title
+                    # stored on the task, so prefer the stable download_id.
+                    live_info = _lookup_live_info(task, live_transfers_lookup)
 
-                    if task_filename and task_username:
-                        lookup_key = _make_context_key(task_username, task_filename)
-                        live_info = live_transfers_lookup.get(lookup_key)
-
-                        if live_info:
-                            state = live_info.get('state', '')
-                            # Trigger post-processing if download is completed successfully
-                            # slskd uses compound states like 'Completed, Succeeded' - use substring matching
-                            # Must exclude error states first (matching _build_batch_status_data's prioritized checking)
-                            has_error = ('Errored' in state or 'Failed' in state or 'Rejected' in state or 'TimedOut' in state)
-                            has_completion = ('Completed' in state or 'Succeeded' in state)
-                            # Verify bytes actually transferred before trusting state string.
-                            # slskd can report "Completed" before the full file is flushed to disk,
-                            # or on connection drops that leave a partial file.
-                            if has_completion and not has_error:
-                                expected_size = live_info.get('size', 0)
-                                transferred = live_info.get('bytesTransferred', 0)
-                                if expected_size > 0 and transferred < expected_size:
-                                    if not task.get('_incomplete_warned'):
-                                        logger.debug(f"Monitor: {task_id} state={state} but bytes incomplete ({transferred}/{expected_size}) — waiting")
-                                        task['_incomplete_warned'] = True
-                                    continue
-                            if has_completion and not has_error and task['status'] == 'downloading':
-                                task.pop('_incomplete_warned', None)
-                                # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
-                                # don't depend on browser polling to trigger post-processing.
-                                # Previously, post-processing was only submitted by _build_batch_status_data
-                                # (called from browser-polled endpoints), meaning closing the browser
-                                # left tasks stuck in 'downloading' forever.
-                                task['status'] = 'post_processing'
-                                task['status_change_time'] = current_time
-                                logger.info(f"Monitor detected completed download for {task_id} ({state}) - submitting post-processing")
-                                # Collect for handling outside the lock to prevent deadlock.
-                                # _on_download_completed acquires tasks_lock which is non-reentrant.
-                                completed_tasks.append((batch_id, task_id))
+                    if live_info:
+                        state = live_info.get('state', '')
+                        # Trigger post-processing if download is completed successfully
+                        # slskd uses compound states like 'Completed, Succeeded' - use substring matching
+                        # Must exclude error states first (matching _build_batch_status_data's prioritized checking)
+                        has_error = ('Errored' in state or 'Failed' in state or 'Rejected' in state or 'TimedOut' in state)
+                        has_completion = ('Completed' in state or 'Succeeded' in state)
+                        # Verify bytes actually transferred before trusting state string.
+                        # slskd can report "Completed" before the full file is flushed to disk,
+                        # or on connection drops that leave a partial file.
+                        if has_completion and not has_error:
+                            expected_size = live_info.get('size', 0)
+                            transferred = live_info.get('bytesTransferred', 0)
+                            if expected_size > 0 and transferred < expected_size:
+                                if not task.get('_incomplete_warned'):
+                                    logger.debug("Monitor: %s state=%s but bytes incomplete (%s/%s) - waiting", task_id, state, transferred, expected_size)
+                                    task['_incomplete_warned'] = True
+                                continue
+                        if has_completion and not has_error and (
+                            task['status'] == 'downloading' or release_recoverable
+                        ):
+                            task.pop('_incomplete_warned', None)
+                            # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
+                            # don't depend on browser polling to trigger post-processing.
+                            # Previously, post-processing was only submitted by _build_batch_status_data
+                            # (called from browser-polled endpoints), meaning closing the browser
+                            # left tasks stuck in 'downloading' forever.
+                            task['status'] = 'post_processing'
+                            task['status_change_time'] = current_time
+                            logger.info(f"Monitor detected completed download for {task_id} ({state}) - submitting post-processing")
+                            # Collect for handling outside the lock to prevent deadlock.
+                            # _on_download_completed acquires tasks_lock which is non-reentrant.
+                            completed_tasks.append((batch_id, task_id))
 
         # ---- All work below runs WITHOUT tasks_lock held ----
         if globals().get('IS_SHUTTING_DOWN', False) or not self.monitoring:
@@ -197,8 +232,21 @@ class WebUIDownloadMonitor:
         for op in deferred_ops:
             try:
                 if op[0] == 'cancel_download':
-                    _, download_id, username = op
-                    logger.debug(f"[Deferred] Cancelling download: {download_id} from {username}")
+                    # Issue #648 diagnostic — `op` now carries a trigger
+                    # label (4-tuple, was 3-tuple) so the next log dump
+                    # tells us WHICH path in `_should_retry_task` is
+                    # firing for users seeing "Tidal downloads failed to
+                    # start" mass-cancels. Label format pinned in commit
+                    # message for grep-ability.
+                    if len(op) >= 4:
+                        _, download_id, username, trigger = op[0], op[1], op[2], op[3]
+                    else:
+                        _, download_id, username = op
+                        trigger = 'unlabeled'
+                    logger.info(
+                        f"[CancelTrigger:monitor.{trigger}] download_id={download_id} "
+                        f"username={username}"
+                    )
                     run_async(download_orchestrator.cancel_download(download_id, username, remove=True))
                     logger.debug(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
@@ -214,18 +262,28 @@ class WebUIDownloadMonitor:
             except Exception as e:
                 logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
-        # Handle completed downloads outside the lock to prevent deadlock
-        # (_on_download_completed acquires tasks_lock internally)
+        # Handle completed transfers outside the lock. The transfer engine's
+        # "complete" state only means the remote download finished; the
+        # post-processing worker still has to find, verify, tag, and move the
+        # file before it can report real batch success or failure.
         for batch_id, task_id in completed_tasks:
             try:
                 # Submit post-processing worker (file move, tagging, AcoustID verification)
                 # This makes batch downloads fully independent of browser polling.
                 logger.info(f"[Monitor] Submitting post-processing worker for task {task_id}")
                 missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
-                # Chain to next download in the batch queue
-                _on_download_completed(batch_id, task_id, success=True)
             except Exception as e:
                 logger.error(f"[Monitor] Error handling completed task {task_id}: {e}")
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = f'Post-processing could not be scheduled: {e}'
+                try:
+                    _on_download_completed(batch_id, task_id, success=False)
+                except Exception as completion_error:
+                    logger.error(
+                        f"[Monitor] Error marking failed post-processing submit for task {task_id}: {completion_error}"
+                    )
         # Handle exhausted retry tasks outside the lock to prevent deadlock
         for batch_id, task_id in exhausted_tasks:
             try:
@@ -285,7 +343,7 @@ class WebUIDownloadMonitor:
                 for download in all_downloads:
                     key = _make_context_key(download.username, download.filename)
                     # Convert DownloadStatus to transfer dict format for monitor compatibility
-                    live_transfers[key] = {
+                    transfer_row = {
                         'id': download.id,
                         'filename': download.filename,
                         'username': download.username,
@@ -295,6 +353,10 @@ class WebUIDownloadMonitor:
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
                     }
+                    live_transfers[key] = transfer_row
+                    id_key = _download_id_key(download.id)
+                    if id_key:
+                        live_transfers[id_key] = transfer_row
             except Exception as yt_error:
                 logger.error(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
 
@@ -329,7 +391,7 @@ class WebUIDownloadMonitor:
             return False
 
         lookup_key = _make_context_key(task_username, task_filename)
-        live_info = live_transfers_lookup.get(lookup_key)
+        live_info = _lookup_live_info(task, live_transfers_lookup)
 
         if not live_info:
             # User-initiated manual pick — skip auto-retry. The status
@@ -353,7 +415,8 @@ class WebUIDownloadMonitor:
 
                     # Defer slskd cancel to outside the lock
                     if task_username and download_id:
-                        deferred_ops.append(('cancel_download', download_id, task_username))
+                        deferred_ops.append(('cancel_download', download_id, task_username,
+                                             'not_in_live_transfers_90s'))
 
                     # Mark current source as used (full filename to match worker format)
                     if task_username and task_filename:
@@ -424,7 +487,8 @@ class WebUIDownloadMonitor:
 
                 # Defer slskd cancel to outside the lock
                 if username and download_id:
-                    deferred_ops.append(('cancel_download', download_id, username))
+                    deferred_ops.append(('cancel_download', download_id, username,
+                                         'errored_state_retry'))
 
                 # Mark current source as used to prevent retry loops
                 # CRITICAL: Use full filename (not basename) to match worker's source_key format
@@ -527,7 +591,8 @@ class WebUIDownloadMonitor:
 
                         # Defer slskd cancel to outside the lock
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'queued_state_timeout'))
 
                         # UNIFIED RETRY LOGIC: Handle timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
@@ -615,7 +680,8 @@ class WebUIDownloadMonitor:
 
                         # Defer slskd cancel to outside the lock
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'stuck_at_0pct_timeout'))
 
                         # UNIFIED RETRY LOGIC: Handle 0% timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
@@ -704,7 +770,8 @@ class WebUIDownloadMonitor:
                         download_id = task.get('download_id')
 
                         if username and download_id:
-                            deferred_ops.append(('cancel_download', download_id, username))
+                            deferred_ops.append(('cancel_download', download_id, username,
+                                                 'unknown_state_no_progress_timeout'))
 
                         if username and filename:
                             used_sources = task.get('used_sources', set())

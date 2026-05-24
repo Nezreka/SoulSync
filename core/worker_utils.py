@@ -64,6 +64,17 @@ def set_album_api_track_count(cursor, album_id, count):
             (count, album_id),
         )
     except Exception as e:
+        if "api_track_count" in str(e) and "no such column" in str(e).lower():
+            try:
+                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
+                cursor.execute(
+                    "UPDATE albums SET api_track_count = ? WHERE id = ?",
+                    (count, album_id),
+                )
+                logger.info("Repaired missing api_track_count column while caching album track count")
+                return
+            except Exception as repair_error:
+                e = repair_error
         logger.warning(
             "Failed to cache api_track_count for album %s: %s", album_id, e
         )

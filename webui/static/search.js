@@ -317,11 +317,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'In Your Library',
                 badge: { text: 'Library', class: 'enh-badge-library' },
-                onClick: () => {
-                    console.log(`🎵 Opening library artist detail: ${artist.name} (ID: ${artist.id})`);
-                    hideDropdown();
-                    navigateToArtistDetail(artist.id, artist.name);
-                }
+                href: buildArtistDetailPath(artist.id),
             })
         );
 
@@ -337,12 +333,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                onClick: () => {
-                    const sourceOverride = searchController.state.activeSource;
-                    console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
-                    hideDropdown();
-                    navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
-                }
+                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null),
             })
         );
 
@@ -1184,6 +1175,14 @@ async function loadInitialData() {
             return;
         }
 
+        if (targetPage === 'artist-detail') {
+            const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
+            if (artistRoute && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(artistRoute.artistId, '', artistRoute.source);
+            }
+            return;
+        }
+
         // Always apply the target page to the legacy shell chrome.
         const router = getWebRouter();
         const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
@@ -1197,7 +1196,7 @@ async function loadInitialData() {
             return;
         }
 
-        navigateToPage(targetPage, { skipRouteChange: true, forceReload: true });
+        navigateToPage(targetPage, { forceReload: true });
     } catch (error) {
         console.error('Error loading initial data:', error);
     }

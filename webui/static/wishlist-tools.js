@@ -12,6 +12,9 @@ let currentDiscoveryFix = {
 
 // Store event handler reference to allow proper removal
 let discoveryFixEnterHandler = null;
+// Separate handler for the MBID-paste input — targets lookup-by-MBID
+// instead of fuzzy search so Enter does the obvious right thing per field.
+let discoveryFixMbidEnterHandler = null;
 
 /**
  * Open discovery fix modal for a specific track
@@ -113,10 +116,19 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         artist: artistInput.value
     });
 
+    // MBID input — separate ref because its Enter binding targets a
+    // different function (direct lookup vs fuzzy search). Optional: older
+    // modal markup that doesn't have the MBID row will get null here.
+    const mbidInput = fixModalOverlay.querySelector('#fix-modal-mbid-input');
+    if (mbidInput) mbidInput.value = '';
+
     // Remove old enter key handler if exists
     if (discoveryFixEnterHandler) {
         trackInput.removeEventListener('keypress', discoveryFixEnterHandler);
         artistInput.removeEventListener('keypress', discoveryFixEnterHandler);
+    }
+    if (discoveryFixMbidEnterHandler && mbidInput) {
+        mbidInput.removeEventListener('keypress', discoveryFixMbidEnterHandler);
     }
 
     // Add new enter key handler
@@ -125,6 +137,13 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     };
     trackInput.addEventListener('keypress', discoveryFixEnterHandler);
     artistInput.addEventListener('keypress', discoveryFixEnterHandler);
+
+    if (mbidInput) {
+        discoveryFixMbidEnterHandler = function (e) {
+            if (e.key === 'Enter') lookupDiscoveryFixByMbid();
+        };
+        mbidInput.addEventListener('keypress', discoveryFixMbidEnterHandler);
+    }
 
     // Show modal BEFORE auto-search so elements are visible
     fixModalOverlay.classList.remove('hidden');
@@ -195,12 +214,20 @@ async function searchDiscoveryFix() {
     }
     params.set('limit', '50');
 
-    // Use the user's active metadata source first, then fall back to others
+    // Use the user's active metadata source first, then fall back to others.
+    // MusicBrainz is included so users on MB-as-primary get MB queried first,
+    // and so MB is available as a fallback for fuzzy / niche / non-mainstream
+    // recordings that Spotify / Deezer / iTunes miss (different catalogues,
+    // different cover coverage). MB sits last by default because it's
+    // rate-limited to 1 req/sec — when it's the active primary the activeIdx
+    // reorder below moves it to the front. Discogs is intentionally absent —
+    // Discogs has no track-level search API (releases only).
     const activeSource = (currentMusicSourceName || 'Spotify').toLowerCase();
     const allSources = [
         { key: 'spotify', endpoint: '/api/spotify/search_tracks', label: 'Spotify' },
         { key: 'deezer', endpoint: '/api/deezer/search_tracks', label: 'Deezer' },
         { key: 'itunes', endpoint: '/api/itunes/search_tracks', label: 'iTunes' },
+        { key: 'musicbrainz', endpoint: '/api/musicbrainz/search_tracks', label: 'MusicBrainz' },
     ];
     // Put the active source first, keep others as fallbacks
     const activeIdx = allSources.findIndex(s => activeSource.includes(s.key));
@@ -235,6 +262,71 @@ async function searchDiscoveryFix() {
     } catch (error) {
         console.error('Search error:', error);
         resultsContainer.innerHTML = '<div class="error-message">❌ Search failed. Try again.</div>';
+    }
+}
+
+/**
+ * Look up a track directly by MusicBrainz recording MBID — bypasses fuzzy
+ * search entirely. Escape hatch for cases where the user knows the exact
+ * record (e.g. there are 10 same-title recordings from different sessions
+ * and auto-search keeps ranking the wrong one). Accepts full URLs
+ * (`https://musicbrainz.org/recording/<uuid>`) or bare UUIDs.
+ */
+async function lookupDiscoveryFixByMbid() {
+    if (!currentDiscoveryFix.identifier) {
+        console.error('No active fix modal context');
+        return;
+    }
+
+    const discoveryModal = document.getElementById(`youtube-discovery-modal-${currentDiscoveryFix.identifier}`);
+    if (!discoveryModal) return;
+    const fixModalOverlay = discoveryModal.querySelector('.discovery-fix-modal-overlay');
+    if (!fixModalOverlay) return;
+
+    const mbidInput = fixModalOverlay.querySelector('#fix-modal-mbid-input');
+    if (!mbidInput) return;
+
+    const mbid = parseMusicBrainzMbid(mbidInput.value);
+    const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
+
+    if (!mbid) {
+        if (resultsContainer) {
+            resultsContainer.innerHTML = '<div class="error-message">❌ Not a valid MusicBrainz recording URL or MBID. Paste a URL like https://musicbrainz.org/recording/&lt;uuid&gt; or the bare UUID.</div>';
+        }
+        showToast('Invalid MusicBrainz MBID', 'error');
+        return;
+    }
+
+    if (resultsContainer) {
+        resultsContainer.innerHTML = '<div class="loading">🔗 Looking up MusicBrainz recording...</div>';
+    }
+
+    try {
+        const response = await fetch(`/api/musicbrainz/recording/${encodeURIComponent(mbid)}`);
+        if (response.status === 404) {
+            if (resultsContainer) {
+                resultsContainer.innerHTML = '<div class="no-results">Recording not found on MusicBrainz. Double-check the MBID.</div>';
+            }
+            return;
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const track = await response.json();
+        if (!track || !track.id) {
+            if (resultsContainer) {
+                resultsContainer.innerHTML = '<div class="no-results">Recording not found on MusicBrainz.</div>';
+            }
+            return;
+        }
+        // Render as a single-result list — user still clicks to confirm,
+        // matching the existing search-result flow exactly.
+        renderDiscoveryFixResults([track], fixModalOverlay);
+    } catch (error) {
+        console.error('MBID lookup error:', error);
+        if (resultsContainer) {
+            resultsContainer.innerHTML = '<div class="error-message">❌ MBID lookup failed. Try again.</div>';
+        }
     }
 }
 
@@ -791,10 +883,16 @@ function generateWishlistTrackList(tracks, trackOwnership) {
         const badge = isOwned
             ? '<div class="wishlist-track-badge owned"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>'
             : '';
+        // Play button shows for every track. ``playWishlistModalTrack`` ->
+        // ``playTrackFromLibraryOrStream`` resolves a local file when one
+        // exists and falls back to the streaming source otherwise, matching
+        // the same pattern used by the download-missing modals elsewhere.
+        const playButton = `<button class="modal-track-play-btn wishlist-track-play-btn" onclick="event.stopPropagation(); playWishlistModalTrack(${index})" title="${isOwned ? 'Play from library' : 'Play (stream fallback)'}">&#9654;</button>`;
 
         return `
             <div class="wishlist-track-item ${ownershipClass}">
                 <div class="wishlist-track-number">${trackNumber}</div>
+                ${playButton}
                 <div class="wishlist-track-info">
                     <div class="wishlist-track-name">${trackName}</div>
                     <div class="wishlist-track-artists">${artistsString}</div>
@@ -981,6 +1079,25 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName 
             if (isOwned) {
                 ownedCount++;
                 item.classList.add('owned');
+                // Play button is rendered up front for every track now. Upgrade
+                // the tooltip + click handler once ownership confirms so the
+                // local-file path is used directly without the resolve-track
+                // round trip. Falls back to creating a fresh button if the
+                // initial render somehow skipped it (defensive — should not
+                // happen post-refactor).
+                let playBtn = item.querySelector('.wishlist-track-play-btn');
+                if (!playBtn) {
+                    playBtn = document.createElement('button');
+                    playBtn.className = 'modal-track-play-btn wishlist-track-play-btn';
+                    playBtn.innerHTML = '&#9654;';
+                    item.querySelector('.wishlist-track-number')?.after(playBtn);
+                }
+                playBtn.title = 'Play from library';
+                playBtn.onclick = null;
+                playBtn.addEventListener('click', event => {
+                    event.stopPropagation();
+                    playWishlistModalTrack(index, trackData);
+                });
                 // Add metadata line below track name
                 const trackInfo = item.querySelector('.wishlist-track-info');
                 if (trackInfo && (trackData.format || trackData.bitrate)) {
@@ -1068,6 +1185,35 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName 
     } catch (e) {
         console.warn('Could not load track ownership:', e);
     }
+}
+
+async function playWishlistModalTrack(index, ownershipData = null) {
+    if (!currentWishlistModalData || !currentWishlistModalData.tracks) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    const track = currentWishlistModalData.tracks[index];
+    if (!track) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    const trackData = ownershipData || {};
+    const playbackTrack = {
+        ...track,
+        id: trackData.track_id || track.id || null,
+        title: trackData.title || track.title || track.name,
+        file_path: trackData.file_path || track.file_path || null,
+        bitrate: trackData.bitrate || track.bitrate,
+        _stats_image: currentWishlistModalData.album?.image_url || currentWishlistModalData.album?.images?.[0]?.url || null
+    };
+
+    await playTrackFromLibraryOrStream(
+        playbackTrack,
+        trackData.album || currentWishlistModalData.album?.name || currentWishlistModalData.album?.title || '',
+        getModalTrackArtistName(track, currentWishlistModalData.artist?.name || '')
+    );
 }
 
 /**
@@ -3137,18 +3283,33 @@ function renderQuarantineEntry(entry) {
     const triggerLabel = triggerLabels[entry.trigger] || entry.trigger || 'Unknown';
     const triggerColor = triggerColors[entry.trigger] || '#888';
 
-    const id = escapeHtml(entry.id);
+    // Keep dynamic filenames/ids out of inline JS. Quarantine ids are derived
+    // from filenames, so quotes in the filename can break onclick attributes
+    // if they are interpolated as JS string literals.
+    const entryIdAttr = escapeHtml(String(entry.id || ''));
     const approveLabel = entry.has_full_context ? 'Approve' : 'Recover';
     const approveTitle = entry.has_full_context
-        ? 'Re-run post-processing with only the failing check skipped'
+        ? 'Re-run post-processing with quarantine checks skipped for this approved file'
         : 'Legacy entry — move to Staging, finish via Import flow';
     const approveCall = entry.has_full_context
-        ? `approveQuarantineEntry('${id}')`
-        : `recoverQuarantineEntry('${id}')`;
+        ? 'approveQuarantineEntryFromButton(this)'
+        : 'recoverQuarantineEntryFromButton(this)';
 
     const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
     const triggerBadge = `<span class="library-history-badge" style="border-color:${triggerColor};color:${triggerColor}">${escapeHtml(triggerLabel)}</span>`;
     const reasonDetail = `<div class="library-history-entry-source"><span class="lh-prov-label">Reason:</span> ${escapeHtml(entry.reason || 'Unknown')}</div>`;
+
+    // Issue #608 follow-up: show source uploader + original soulseek
+    // filename when the sidecar carried that context. Helps the user
+    // understand which uploader the bad file came from at a glance.
+    const sourceParts = [];
+    if (entry.source_username) {
+        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Source:</span> ${escapeHtml(entry.source_username)}</div>`);
+    }
+    if (entry.source_filename) {
+        sourceParts.push(`<div class="library-history-entry-source"><span class="lh-prov-label">Original filename:</span> ${escapeHtml(entry.source_filename)}</div>`);
+    }
+    const sourceDetail = sourceParts.join('');
 
     return `<div class="library-history-entry lh-expandable" onclick="this.classList.toggle('lh-expanded')">
         <div class="library-history-thumb-placeholder">🛡️</div>
@@ -3160,21 +3321,38 @@ function renderQuarantineEntry(entry) {
                 </div>
                 <div class="library-history-entry-badges">${triggerBadge}</div>
                 <div class="library-history-entry-time">${formatHistoryTime(entry.timestamp)}</div>
-                <button class="lh-audit-btn" title="${approveTitle}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
-                <button class="lh-audit-btn" title="Delete permanently" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntry('${id}')">Delete</button>
+                <button class="lh-audit-btn" title="${approveTitle}" data-entry-id="${entryIdAttr}" onclick="event.stopPropagation();${approveCall}">${approveLabel}</button>
+                <button class="lh-audit-btn" title="Delete permanently" data-entry-id="${entryIdAttr}" style="border-color:rgba(248,113,113,0.4);color:#f87171" onclick="event.stopPropagation();deleteQuarantineEntryFromButton(this)">Delete</button>
                 <span class="lh-expand-btn">&#x25BE;</span>
             </div>
             <div class="library-history-entry-details">
                 ${reasonDetail}
+                ${sourceDetail}
             </div>
         </div>
     </div>`;
 }
 
+function getQuarantineEntryIdFromButton(button) {
+    return button?.dataset?.entryId || '';
+}
+
+function approveQuarantineEntryFromButton(button) {
+    return approveQuarantineEntry(getQuarantineEntryIdFromButton(button));
+}
+
+function recoverQuarantineEntryFromButton(button) {
+    return recoverQuarantineEntry(getQuarantineEntryIdFromButton(button));
+}
+
+function deleteQuarantineEntryFromButton(button) {
+    return deleteQuarantineEntry(getQuarantineEntryIdFromButton(button));
+}
+
 async function approveQuarantineEntry(entryId) {
     const ok = await showConfirmDialog({
         title: 'Approve Quarantined File',
-        message: 'Re-run post-processing for this file with only the failing check skipped. The file will be tagged, lyrics generated, and moved into your library. Other quality gates (AcoustID + bit-depth) still run.',
+        message: 'Re-run post-processing for this file with quarantine checks skipped for this approved pass. The file will be tagged, lyrics generated, and moved into your library.',
         confirmText: 'Approve & Import',
         cancelText: 'Cancel',
     });
@@ -3282,7 +3460,7 @@ async function loadLibraryHistory() {
             const sc = data.stats?.source_counts || {};
             const srcEntries = Object.entries(sc).sort((a, b) => b[1] - a[1]);
             if (srcEntries.length > 0 && tab === 'download') {
-                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff' };
+                const _srcColors = { Soulseek: '#4caf50', Tidal: '#000', YouTube: '#ff0000', Qobuz: '#4285f4', HiFi: '#00bcd4', Deezer: '#a238ff', Lidarr: '#5dade2', Amazon: '#ff9900', SoundCloud: '#ff7700', Torrent: '#5dade2', Usenet: '#a78bfa', Staging: '#888', 'Auto-Import': '#888' };
                 sourceBar.innerHTML = srcEntries.map(([src, cnt]) =>
                     `<span class="history-source-chip" style="border-color:${_srcColors[src] || '#888'};color:${_srcColors[src] || '#888'}">${src}: ${cnt}</span>`
                 ).join('');
@@ -3325,7 +3503,10 @@ function renderHistoryEntry(entry) {
         const parts = [];
         if (entry.download_source) parts.push(entry.download_source);
         if (entry.quality) parts.push(entry.quality);
-        badge = parts.map(p => `<span class="library-history-badge download">${escapeHtml(p)}</span>`).join('');
+        badge = parts.map(p => {
+            const cls = String(p || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            return `<span class="library-history-badge download source-${escapeHtml(cls)}">${escapeHtml(p)}</span>`;
+        }).join('');
     } else if (entry.event_type === 'import' && entry.server_source) {
         const sourceName = { plex: 'Plex', jellyfin: 'Jellyfin', navidrome: 'Navidrome' }[entry.server_source] || entry.server_source;
         badge = `<span class="library-history-badge import">${escapeHtml(sourceName)}</span>`;

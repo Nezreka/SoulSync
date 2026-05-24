@@ -1992,6 +1992,29 @@ function generateDownloadModalHeroSection(context) {
             // Artist/album context - show artist + album images
             const artistImage = artist?.image_url || artist?.images?.[0]?.url;
             const albumImage = album?.image_url || album?.images?.[0]?.url;
+            const artistSource = artist?.source || album?.source || context.source || '';
+            const sourceKey = (artistSource || '').toString().toLowerCase();
+            const sourceIdFields = {
+                spotify: ['spotify_artist_id', 'id', 'artist_id'],
+                itunes: ['itunes_artist_id', 'artist_id', 'id'],
+                deezer: ['deezer_artist_id', 'deezer_id', 'artist_id', 'id'],
+                discogs: ['discogs_artist_id', 'discogs_id', 'artist_id', 'id'],
+                amazon: ['amazon_artist_id', 'amazon_id', 'artist_id', 'id'],
+                hydrabase: ['soul_id', 'hydrabase_artist_id', 'artist_id', 'id'],
+                musicbrainz: ['musicbrainz_id', 'artist_id', 'id'],
+            };
+            let detailArtistId = artist?.id || artist?.artist_id || '';
+            for (const field of (sourceIdFields[sourceKey] || ['artist_id', 'id'])) {
+                const candidate = artist?.[field];
+                if (candidate) {
+                    detailArtistId = candidate;
+                    break;
+                }
+            }
+            if (detailArtistId && String(detailArtistId).toLowerCase() === String(artist?.name || '').toLowerCase()) {
+                detailArtistId = '';
+            }
+            const artistHref = detailArtistId ? buildArtistDetailPath(detailArtistId, artistSource || null) : '#';
 
             // Use album image as background if available
             if (albumImage) {
@@ -2006,7 +2029,7 @@ function generateDownloadModalHeroSection(context) {
                     </div>
                     <div class="download-missing-modal-hero-metadata">
                         <h1 class="download-missing-modal-hero-title">${escapeHtml(album.name || 'Unknown Album')}</h1>
-                        <div class="download-missing-modal-hero-subtitle">by <a href="#" class="hero-artist-link" onclick="event.preventDefault();_navigateToArtistFromModal('${escapeHtml(artist.id || '')}','${escapeForInlineJs(artist.name || '')}','${escapeHtml(artist.image_url || '')}','${escapeHtml(artist.source || '')}','${escapeHtml(context.playlistId || '')}')">${escapeHtml(artist.name || 'Unknown Artist')}</a></div>
+                        <div class="download-missing-modal-hero-subtitle">by <a href="${artistHref}" class="hero-artist-link" onclick="closeDownloadMissingModal('${escapeForInlineJs(context.playlistId || '')}')" style="text-decoration:none;color:inherit;">${escapeHtml(artist.name || 'Unknown Artist')}</a></div>
                         <div class="download-missing-modal-hero-details">
                             <span class="download-missing-modal-hero-detail">${album.album_type || 'Album'}</span>
                             <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
@@ -2291,7 +2314,7 @@ async function openDownloadMissingModal(playlistId) {
                                                    onchange="updateTrackSelectionCount('${playlistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>

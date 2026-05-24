@@ -67,22 +67,28 @@ class OrphanFileDetectorJob(RepairJob):
                     suffix = '/'.join(parts[-depth:]).lower()
                     known_suffixes.add(suffix)
 
-            # Build title+artist sets for tag-based fallback matching
+            # Build title+artist sets for fallback matching. Include both
+            # track artist and album artist so Picard-style albumartist paths
+            # don't look orphaned when tracks have featured/guest artists.
             cursor.execute("""
-                SELECT t.title, ar.name FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
+                SELECT t.title, track_ar.name, album_ar.name FROM tracks t
+                LEFT JOIN artists track_ar ON track_ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists album_ar ON album_ar.id = al.artist_id
                 WHERE t.title IS NOT NULL AND t.title != ''
             """)
             for row in cursor.fetchall():
                 title = (row[0] or '').lower().strip()
-                artist = (row[1] or '').lower().strip()
                 if title:
-                    known_titles.add((title, artist))
-                    # Also store normalized version (stripped of feat., parentheticals, etc.)
-                    clean_t = _strip_extras(title)
-                    clean_a = _strip_extras(artist)
-                    if clean_t:
-                        known_titles_clean.add((clean_t, clean_a))
+                    for artist_value in (row[1], row[2]):
+                        artist = (artist_value or '').lower().strip()
+                        known_titles.add((title, artist))
+                        # Also store normalized version (stripped of feat.,
+                        # parentheticals, etc.)
+                        clean_t = _strip_extras(title)
+                        clean_a = _strip_extras(artist)
+                        if clean_t:
+                            known_titles_clean.add((clean_t, clean_a))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
@@ -144,14 +150,21 @@ class OrphanFileDetectorJob(RepairJob):
                     if audio:
                         file_title = ((audio.get('title') or [None])[0] or '').lower().strip()
                         file_artist = ((audio.get('artist') or [None])[0] or '').lower().strip()
+                        file_albumartist = (
+                            (audio.get('albumartist') or audio.get('album_artist') or [None])[0]
+                            or ''
+                        ).lower().strip()
                         if file_title:
+                            file_artists = [a for a in (file_artist, file_albumartist) if a]
+                            if not file_artists:
+                                file_artists = ['']
                             # Exact match first (fast path)
-                            if (file_title, file_artist) in known_titles:
+                            if any((file_title, artist) in known_titles for artist in file_artists):
                                 is_known = True
                             else:
                                 # Normalized match: strip (feat. X), [FLAC 16bit], etc.
                                 clean_title = _strip_extras(file_title)
-                                clean_artist = _strip_extras(file_artist)
+                                clean_artist = _strip_extras(file_artists[0])
                                 # Also try first artist only (handles "Gorillaz, Dennis Hopper" → "Gorillaz")
                                 first_artist = clean_artist.split(',')[0].strip() if clean_artist else ''
                                 if clean_title and (
@@ -159,6 +172,16 @@ class OrphanFileDetectorJob(RepairJob):
                                     (first_artist and (clean_title, first_artist) in known_titles_clean)
                                 ):
                                     is_known = True
+                                if clean_title and not is_known:
+                                    for artist in file_artists[1:]:
+                                        clean_artist = _strip_extras(artist)
+                                        first_artist = clean_artist.split(',')[0].strip() if clean_artist else ''
+                                        if (
+                                            (clean_title, clean_artist) in known_titles_clean or
+                                            (first_artist and (clean_title, first_artist) in known_titles_clean)
+                                        ):
+                                            is_known = True
+                                            break
                 except Exception as e:
                     logger.debug("tag-based orphan check: %s", e)
 

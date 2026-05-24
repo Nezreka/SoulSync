@@ -1821,6 +1821,11 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
             for (let k = 0; k < trackIndex; k++) {
                 if (_serverEditorState.tracks[k]?.server_track) serverPos++;
             }
+            // source_track carries source_track_id (Spotify ID) when this
+            // came from a mirrored playlist — the backend uses it to
+            // persist the Find & Add selection as a permanent match
+            // override so future syncs auto-pair without user action.
+            const srcTrack = track.source_track || {};
             response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/add-track`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1828,6 +1833,9 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
                     track_id: newTrackId,
                     playlist_name: _serverEditorState.playlistName,
                     position: serverPos,
+                    source_track_id: srcTrack.source_track_id || '',
+                    source_title: srcTrack.name || '',
+                    source_artist: srcTrack.artist || '',
                 })
             });
         }
@@ -2240,6 +2248,10 @@ function _updateDlNavBadge(count) {
             badge.classList.add('hidden');
         }
     }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
 }
 
 function _adlRender() {
@@ -2433,6 +2445,74 @@ function _adlEsc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function _adlBundleProgressPercent(bundle) {
+    if (!bundle) return 0;
+    const raw = bundle.progress_percent ?? bundle.progress ?? 0;
+    let progress = Number(raw);
+    if (!Number.isFinite(progress)) progress = 0;
+    if (progress <= 1) progress *= 100;
+    return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+function _adlFormatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    const decimals = size >= 10 || unit === 0 ? 0 : 1;
+    return `${size.toFixed(decimals)} ${units[unit]}`;
+}
+
+function _adlFormatSpeed(bytesPerSecond) {
+    const formatted = _adlFormatBytes(bytesPerSecond);
+    return formatted ? `${formatted}/s` : '';
+}
+
+function _adlSourceLabel(source) {
+    const labels = {
+        torrent: 'Torrent',
+        usenet: 'Usenet',
+        soulseek: 'Soulseek',
+        youtube: 'YouTube',
+        tidal: 'Tidal',
+        qobuz: 'Qobuz',
+        hifi: 'HiFi',
+        deezer_dl: 'Deezer',
+        amazon: 'Amazon',
+        lidarr: 'Lidarr',
+        soundcloud: 'SoundCloud'
+    };
+    const key = String(source || '').toLowerCase();
+    return labels[key] || (source ? String(source) : 'Release');
+}
+
+function _adlBundleStateLabel(state) {
+    const labels = {
+        searching: 'searching for release',
+        downloading: 'downloading release',
+        staged: 'matching tracks',
+        failed: 'release failed'
+    };
+    const key = String(state || '').toLowerCase();
+    return labels[key] || (state ? String(state).replace(/_/g, ' ') : 'downloading release');
+}
+
+function _adlBundleProgressText(bundle) {
+    const pct = _adlBundleProgressPercent(bundle);
+    const source = _adlSourceLabel(bundle && bundle.source);
+    const state = _adlBundleStateLabel(bundle && bundle.state);
+    const release = bundle && bundle.release ? ` - ${bundle.release}` : '';
+    const speed = _adlFormatSpeed(bundle && bundle.speed);
+    const size = _adlFormatBytes(bundle && bundle.size);
+    const detail = speed || size ? ` (${[speed, size].filter(Boolean).join(' of ')})` : '';
+    return `${source} ${state} ${pct}%${release}${detail}`;
+}
+
 async function adlClearCompleted() {
     try {
         const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
@@ -2492,12 +2572,16 @@ function _adlRenderBatchPanel() {
         const colorStyle = colorIdx >= 0 ? `border-left-color: rgba(var(--batch-color-${colorIdx}), 0.6)` : '';
         const isExpanded = _adlExpandedBatches.has(batch.batch_id);
         const isFiltered = _adlFilterBatchId === batch.batch_id;
+        const albumBundle = batch.album_bundle || null;
+        const bundleProgress = _adlBundleProgressPercent(albumBundle);
         const total = batch.total || 1;
         const done = batch.completed + batch.failed;
-        const pct = Math.round((done / total) * 100);
+        const pct = batch.phase === 'album_downloading'
+            ? bundleProgress
+            : Math.round((done / total) * 100);
         const hasFailed = batch.failed > 0;
         const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
-        const isActive = batch.phase === 'downloading' && batch.active > 0;
+        const isActive = (batch.phase === 'downloading' && batch.active > 0) || batch.phase === 'album_downloading';
 
         // Fade progress for completing batches
         let fadeStyle = '';
@@ -2519,6 +2603,9 @@ function _adlRenderBatchPanel() {
         let phaseIcon = '';
         if (batch.phase === 'analysis') {
             phaseText = 'Analyzing...';
+            phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
+        } else if (batch.phase === 'album_downloading') {
+            phaseText = _adlBundleProgressText(albumBundle);
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
@@ -2583,7 +2670,9 @@ function _adlRenderBatchPanel() {
                     </div>`;
                 }).join('');
             } else {
-                tracksHtml = '<div style="font-size:0.7rem;color:rgba(255,255,255,0.3);padding:4px 0">No tracks loaded</div>';
+                tracksHtml = batch.phase === 'album_downloading'
+                    ? '<div class="adl-batch-release-note">Downloading one release first. Track matching starts after staging.</div>'
+                    : '<div style="font-size:0.7rem;color:rgba(255,255,255,0.3);padding:4px 0">No tracks loaded</div>';
             }
         }
 

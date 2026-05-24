@@ -24,6 +24,19 @@ from core.wishlist_service import get_wishlist_service
 from core.matching_engine import MusicMatchingEngine
 from utils.logging_config import get_logger
 
+
+def _mark_personalized_kinds_stale(database, kinds, profile_id=1):
+    """Module-level helper so the inline call sites stay tiny.
+
+    Constructs a PersonalizedPlaylistManager with the minimal deps
+    needed for `mark_kinds_stale` (database access only — no generator
+    dispatch required) and flips the is_stale flag for matching rows.
+    Best-effort: any exception is swallowed by the caller's try/except
+    since stale-flagging is non-critical for the scan itself."""
+    from core.personalized.manager import PersonalizedPlaylistManager
+    mgr = PersonalizedPlaylistManager(database, deps=None)
+    return mgr.mark_kinds_stale(list(kinds), profile_id=profile_id)
+
 logger = get_logger("watchlist_scanner")
 
 # Rate limiting constants for watchlist operations
@@ -507,12 +520,8 @@ class WatchlistScanner:
         return list(get_source_priority(get_primary_source()))
 
     def _discovery_source_priority(self) -> List[str]:
-        """Return discovery sources in configured priority order.
-
-        Discovery pool writes only support Spotify, iTunes, and Deezer IDs, so
-        we filter the broader metadata priority list down to those sources.
-        """
-        return [source for source in self._watchlist_source_priority() if source in {'spotify', 'itunes', 'deezer'}]
+        """Return discovery sources in configured priority order."""
+        return [source for source in self._watchlist_source_priority() if source in {'spotify', 'itunes', 'deezer', 'musicbrainz'}]
 
     @staticmethod
     def _artist_id_attribute_for_source(source: str) -> Optional[str]:
@@ -522,6 +531,7 @@ class WatchlistScanner:
             'itunes': 'itunes_artist_id',
             'deezer': 'deezer_artist_id',
             'discogs': 'discogs_artist_id',
+            'musicbrainz': 'musicbrainz_artist_id',
         }.get(source)
 
     @staticmethod
@@ -531,6 +541,7 @@ class WatchlistScanner:
             'spotify': 'similar_artist_spotify_id',
             'itunes': 'similar_artist_itunes_id',
             'deezer': 'similar_artist_deezer_id',
+            'musicbrainz': 'similar_artist_musicbrainz_id',
         }.get(source)
 
     @staticmethod
@@ -561,6 +572,9 @@ class WatchlistScanner:
         elif source == 'discogs':
             self.database.update_watchlist_discogs_id(watchlist_artist.id, source_id)
             watchlist_artist.discogs_artist_id = source_id
+        elif source == 'musicbrainz':
+            self.database.update_watchlist_musicbrainz_id(watchlist_artist.id, source_id)
+            watchlist_artist.musicbrainz_artist_id = source_id
 
     def _resolve_watchlist_artist_source_id(self, watchlist_artist: WatchlistArtist, source: str, client: Any) -> Optional[str]:
         """Resolve the artist ID for an exact source, searching by name if needed."""
@@ -891,7 +905,7 @@ class WatchlistScanner:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
-                       deezer_artist_id, discogs_artist_id
+                       deezer_artist_id, discogs_artist_id, musicbrainz_artist_id
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (image_url IS NULL OR image_url = '' OR image_url = 'None'
                       OR image_url NOT LIKE 'http%')
@@ -946,7 +960,8 @@ class WatchlistScanner:
 
                 if img:
                     aid = (row['spotify_artist_id'] or row['itunes_artist_id']
-                           or row['deezer_artist_id'] or row['discogs_artist_id'])
+                           or row['deezer_artist_id'] or row['discogs_artist_id']
+                           or row['musicbrainz_artist_id'])
                     if aid:
                         self.database.update_watchlist_artist_image(aid, img)
                     else:
@@ -979,7 +994,7 @@ class WatchlistScanner:
         """
         # Per-artist metadata source override — if set, use that source first with fallback
         preferred = getattr(watchlist_artist, 'preferred_metadata_source', None)
-        if preferred and preferred in ('spotify', 'deezer', 'itunes', 'discogs'):
+        if preferred and preferred in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
             source_priority = list(get_source_priority(preferred))
         else:
             source_priority = self._watchlist_source_priority()
@@ -1151,7 +1166,7 @@ class WatchlistScanner:
         # Keep this as a plain source list; resolve the client right before each use.
         providers_to_backfill = [
             source for source in self._watchlist_source_priority()
-            if source in {'spotify', 'itunes', 'deezer', 'discogs'}
+            if source in {'spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz'}
         ]
 
         for provider in providers_to_backfill:
@@ -1208,6 +1223,7 @@ class WatchlistScanner:
                 or artist.itunes_artist_id
                 or artist.deezer_artist_id
                 or artist.discogs_artist_id
+                or getattr(artist, 'musicbrainz_artist_id', None)
                 or str(artist.id)
             )
 
@@ -1582,6 +1598,7 @@ class WatchlistScanner:
             'itunes': 'itunes_artist_id',
             'deezer': 'deezer_artist_id',
             'discogs': 'discogs_artist_id',
+            'musicbrainz': 'musicbrainz_artist_id',
         }.get(provider)
 
         if not id_attr:
@@ -1601,6 +1618,7 @@ class WatchlistScanner:
             'itunes': self._match_to_itunes,
             'deezer': self._match_to_deezer,
             'discogs': self._match_to_discogs,
+            'musicbrainz': self._match_to_musicbrainz,
         }.get(provider)
 
         update_fn = {
@@ -1608,6 +1626,7 @@ class WatchlistScanner:
             'itunes': self.database.update_watchlist_itunes_id,
             'deezer': self.database.update_watchlist_deezer_id,
             'discogs': self.database.update_watchlist_discogs_id,
+            'musicbrainz': self.database.update_watchlist_musicbrainz_id,
         }.get(provider)
 
         if not match_fn or not update_fn:
@@ -1765,6 +1784,17 @@ class WatchlistScanner:
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to Discogs: {e}")
+        return None
+
+    def _match_to_musicbrainz(self, artist_name: str) -> Optional[str]:
+        """Match artist name to MusicBrainz ID using fuzzy name comparison."""
+        try:
+            from core.metadata.registry import get_musicbrainz_client
+            client = get_musicbrainz_client()
+            results = client.search_artists(artist_name, limit=5)
+            return self._best_artist_match(results, artist_name)
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to MusicBrainz: {e}")
         return None
 
     def _get_lookback_period_setting(self) -> str:
@@ -2203,6 +2233,8 @@ class WatchlistScanner:
                 album_id = album.id
                 album_release_date = album.release_date
                 album_images = album.images if hasattr(album, 'images') else []
+                if not album_images and hasattr(album, 'image_url') and album.image_url:
+                    album_images = [{'url': album.image_url}]
                 album_type = album.album_type if hasattr(album, 'album_type') else 'album'
                 total_tracks = album.total_tracks if hasattr(album, 'total_tracks') else 0
                 album_artists = album.artists if hasattr(album, 'artists') else []
@@ -2359,6 +2391,7 @@ class WatchlistScanner:
                 'spotify': 'spotify_id',
                 'itunes': 'itunes_id',
                 'deezer': 'deezer_id',
+                'musicbrainz': 'musicbrainz_id',
             }
             searched_source_ids = {}
             available_sources = []
@@ -2390,6 +2423,7 @@ class WatchlistScanner:
                         'spotify_id': None,
                         'itunes_id': None,
                         'deezer_id': None,
+                        'musicbrainz_id': None,
                         'image_url': None,
                         'genres': [],
                         'popularity': 0,
@@ -2457,6 +2491,8 @@ class WatchlistScanner:
             return self.database.update_similar_artist_deezer_id(similar_artist_id, source_id)
         if source == 'itunes':
             return self.database.update_similar_artist_itunes_id(similar_artist_id, source_id)
+        if source == 'musicbrainz':
+            return self.database.update_similar_artist_musicbrainz_id(similar_artist_id, source_id)
         return False
 
     def _backfill_similar_artists_fallback_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
@@ -2467,7 +2503,7 @@ class WatchlistScanner:
         writable similar-artist ID columns. This keeps old cached rows usable
         when the active metadata provider changes.
         """
-        backfill_sources = [source for source in self._discovery_source_priority() if source in {'itunes', 'deezer'}]
+        backfill_sources = [source for source in self._discovery_source_priority() if source in {'itunes', 'deezer', 'musicbrainz'}]
         if not backfill_sources:
             logger.debug("No fallback metadata providers available for similar-artist backfill")
             return 0
@@ -2569,14 +2605,18 @@ class WatchlistScanner:
                         image_url=similar_artist.get('image_url'),
                         genres=similar_artist.get('genres'),
                         popularity=similar_artist.get('popularity', 0),
-                        similar_artist_deezer_id=similar_artist.get('deezer_id')
+                        similar_artist_deezer_id=similar_artist.get('deezer_id'),
+                        similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
                     )
 
                     if success:
                         stored_count += 1
-                        fallback_id = similar_artist.get('deezer_id') or similar_artist.get('itunes_id')
-                        fallback_label = 'Deezer' if similar_artist.get('deezer_id') else 'iTunes'
-                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify: {similar_artist.get('spotify_id')}, {fallback_label}: {fallback_id})")
+                        ids = ', '.join(
+                            f"{k}: {similar_artist.get(v)}"
+                            for k, v in [('Spotify', 'spotify_id'), ('iTunes', 'itunes_id'), ('Deezer', 'deezer_id'), ('MB', 'musicbrainz_id')]
+                            if similar_artist.get(v)
+                        )
+                        logger.debug(f"  #{rank}: {similar_artist['name']} ({ids})")
 
                 except Exception as e:
                     logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
@@ -2672,6 +2712,8 @@ class WatchlistScanner:
                             cache_callback = lambda found_id, artist_id=similar_artist.id: self.database.update_similar_artist_itunes_id(artist_id, found_id)
                         elif source == 'deezer':
                             cache_callback = lambda found_id, artist_id=similar_artist.id: self.database.update_similar_artist_deezer_id(artist_id, found_id)
+                        elif source == 'musicbrainz':
+                            cache_callback = lambda found_id, artist_id=similar_artist.id: self.database.update_similar_artist_musicbrainz_id(artist_id, found_id)
 
                         artist_id = self._resolve_artist_id_for_source(
                             source,
@@ -2807,7 +2849,7 @@ class WatchlistScanner:
                                         track_data['deezer_track_id'] = track.get('id')
                                         track_data['deezer_album_id'] = album_data.get('id')
                                         track_data['deezer_artist_id'] = selected_artist_id
-                                    else:
+                                    elif selected_source == 'itunes':
                                         track_data['itunes_track_id'] = track.get('id')
                                         track_data['itunes_album_id'] = album_data.get('id')
                                         track_data['itunes_artist_id'] = selected_artist_id
@@ -2941,7 +2983,7 @@ class WatchlistScanner:
                                         track_data['deezer_track_id'] = track.get('id')
                                         track_data['deezer_album_id'] = album_data.get('id')
                                         track_data['deezer_artist_id'] = artist_id_for_genres or ''
-                                    else:
+                                    elif db_source == 'itunes':
                                         track_data['itunes_track_id'] = track.get('id')
                                         track_data['itunes_album_id'] = album_data.get('id')
                                         track_data['itunes_artist_id'] = artist_id_for_genres or ''
@@ -2979,6 +3021,22 @@ class WatchlistScanner:
             # Update timestamp to mark when pool was last populated
             self.database.update_discovery_pool_timestamp(track_count=final_count, profile_id=profile_id)
             logger.info(f"Discovery pool now contains {final_count} total tracks (built over time)")
+
+            # Mark every personalized-playlist kind that draws from the
+            # discovery pool as stale so the playlist pipeline auto-
+            # regenerates snapshots on its next run. Without this the
+            # server playlists stay frozen even though the source pool
+            # just got fresh tracks. Best-effort — pool refresh succeeds
+            # even if the manager isn't wired (no personalized tables).
+            try:
+                _mark_personalized_kinds_stale(
+                    self.database,
+                    kinds=['hidden_gems', 'discovery_shuffle', 'popular_picks',
+                           'time_machine', 'genre_playlist', 'daily_mix'],
+                    profile_id=profile_id,
+                )
+            except Exception as e:  # noqa: BLE001 — never abort scan for staleness flag
+                logger.debug("Failed to mark personalized kinds stale: %s", e)
 
             # Cache recent albums for discovery page
             logger.info("Caching recent albums for discovery page...")
@@ -3147,7 +3205,7 @@ class WatchlistScanner:
                                         track_data['deezer_track_id'] = track['id']
                                         track_data['deezer_album_id'] = album_data['id']
                                         track_data['deezer_artist_id'] = selected_artist_id
-                                    else:
+                                    elif selected_source == 'itunes':
                                         track_data['itunes_track_id'] = track['id']
                                         track_data['itunes_album_id'] = album_data['id']
                                         track_data['itunes_artist_id'] = selected_artist_id
@@ -3322,6 +3380,8 @@ class WatchlistScanner:
                         selected_watchlist_id = artist.itunes_artist_id or artist_id
                     elif source == 'deezer':
                         selected_watchlist_id = getattr(artist, 'deezer_artist_id', None) or artist_id
+                    elif source == 'musicbrainz':
+                        selected_watchlist_id = artist_id
                     break
 
                 if not selected_source or not selected_artist_id or not selected_albums:
@@ -3355,6 +3415,8 @@ class WatchlistScanner:
                         cache_callback = lambda found_id, similar_id=artist.id: self.database.update_similar_artist_itunes_id(similar_id, found_id)
                     elif source == 'deezer':
                         cache_callback = lambda found_id, similar_id=artist.id: self.database.update_similar_artist_deezer_id(similar_id, found_id)
+                    elif source == 'musicbrainz':
+                        cache_callback = lambda found_id, similar_id=artist.id: self.database.update_similar_artist_musicbrainz_id(similar_id, found_id)
 
                     artist_id = self._resolve_artist_id_for_source(
                         source,
@@ -3386,6 +3448,8 @@ class WatchlistScanner:
                         selected_similar_id = artist.similar_artist_itunes_id or artist_id
                     elif source == 'deezer':
                         selected_similar_id = getattr(artist, 'similar_artist_deezer_id', None) or artist_id
+                    elif source == 'musicbrainz':
+                        selected_similar_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist_id
                     break
 
                 if not selected_source or not selected_artist_id or not selected_albums:
@@ -3660,6 +3724,14 @@ class WatchlistScanner:
                 playlist_key = f'release_radar_{source}'
                 self.database.save_curated_playlist(playlist_key, release_radar_tracks, profile_id=profile_id)
                 logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
+                # Flag personalized Fresh Tape snapshot as stale so the
+                # pipeline auto-regenerates it on the next run.
+                try:
+                    _mark_personalized_kinds_stale(
+                        self.database, kinds=['fresh_tape'], profile_id=profile_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Fresh Tape stale-flag failed: %s", e)
 
                 # 2. Curate Discovery Weekly - 50 tracks from discovery pool
                 logger.info(f"Curating Discovery Weekly for {source}...")
@@ -3735,6 +3807,12 @@ class WatchlistScanner:
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
+                try:
+                    _mark_personalized_kinds_stale(
+                        self.database, kinds=['archives'], profile_id=profile_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("Archives stale-flag failed: %s", e)
 
             # 3. "Because You Listen To" — personalized sections based on top played artists
             if profile['has_data']:

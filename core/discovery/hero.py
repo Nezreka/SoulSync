@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_current_profile_id() -> int:
-    """Mirror of web_server.get_current_profile_id — uses Flask g."""
+    """Mirror of web_server.get_current_profile_id — uses Flask g.
+
+    Catches RuntimeError too because reading `g` outside a request
+    context raises that (not AttributeError) — happens when this is
+    called from background threads (sync, automation, scanners)."""
     try:
         return g.profile_id
-    except AttributeError:
+    except (AttributeError, RuntimeError):
         return 1
 
 
@@ -92,6 +96,8 @@ def get_discover_hero():
                     artist_id = artist.spotify_artist_id
                 elif active_source == 'deezer':
                     artist_id = getattr(artist, 'deezer_artist_id', None) or artist.itunes_artist_id
+                elif active_source == 'musicbrainz':
+                    artist_id = getattr(artist, 'musicbrainz_artist_id', None) or artist.itunes_artist_id
                 else:
                     artist_id = artist.itunes_artist_id
                 if not artist_id:
@@ -121,7 +127,7 @@ def get_discover_hero():
         valid_artists = list(similar_artists)
 
         # FALLBACK: If no valid artists for fallback source, try to resolve IDs on-the-fly
-        if active_source in ('itunes', 'deezer') and not valid_artists:
+        if active_source in ('itunes', 'deezer', 'musicbrainz') and not valid_artists:
             logger.warning(f"[{active_source} Fallback] No artists with {active_source} IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
             resolved_count = 0
             for artist in similar_artists:
@@ -131,13 +137,20 @@ def get_discover_hero():
                     continue
                 # Try to resolve ID by name
                 try:
-                    search_results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                    resolve_client = itunes_client
+                    if active_source == 'musicbrainz':
+                        from core.metadata.registry import get_musicbrainz_client
+                        resolve_client = get_musicbrainz_client()
+                    search_results = resolve_client.search_artists(artist.similar_artist_name, limit=1)
                     if search_results and len(search_results) > 0:
                         resolved_id = search_results[0].id
                         # Cache the resolved ID for future use
                         if active_source == 'deezer':
                             database.update_similar_artist_deezer_id(artist.id, resolved_id)
                             artist.similar_artist_deezer_id = resolved_id
+                        elif active_source == 'musicbrainz':
+                            database.update_similar_artist_musicbrainz_id(artist.id, resolved_id)
+                            artist.similar_artist_musicbrainz_id = resolved_id
                         else:
                             database.update_similar_artist_itunes_id(artist.id, resolved_id)
                             artist.similar_artist_itunes_id = resolved_id
@@ -169,12 +182,15 @@ def get_discover_hero():
                 artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
             elif active_source == 'deezer':
                 artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
+            elif active_source == 'musicbrainz':
+                artist_id = getattr(artist, 'similar_artist_musicbrainz_id', None) or artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
             else:
                 artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
 
             artist_data = {
                 "spotify_artist_id": artist.similar_artist_spotify_id,
                 "itunes_artist_id": artist.similar_artist_itunes_id,
+                "musicbrainz_artist_id": getattr(artist, 'similar_artist_musicbrainz_id', None),
                 "artist_id": artist_id,
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
@@ -203,11 +219,19 @@ def get_discover_hero():
                                     artist.id, artist_data.get('image_url'),
                                     artist_data.get('genres'), artist_data.get('popularity')
                                 )
-                    elif active_source in ('itunes', 'deezer'):
-                        fb_artist_id = getattr(artist, 'similar_artist_deezer_id', None) if active_source == 'deezer' else None
-                        fb_artist_id = fb_artist_id or artist.similar_artist_itunes_id
+                    elif active_source in ('itunes', 'deezer', 'musicbrainz'):
+                        if active_source == 'deezer':
+                            fb_artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+                            fetch_client = itunes_client
+                        elif active_source == 'musicbrainz':
+                            fb_artist_id = getattr(artist, 'similar_artist_musicbrainz_id', None)
+                            from core.metadata.registry import get_musicbrainz_client
+                            fetch_client = get_musicbrainz_client()
+                        else:
+                            fb_artist_id = artist.similar_artist_itunes_id
+                            fetch_client = itunes_client
                         if fb_artist_id:
-                            fb_artist_data = itunes_client.get_artist(fb_artist_id)
+                            fb_artist_data = fetch_client.get_artist(fb_artist_id)
                             if fb_artist_data:
                                 artist_data['artist_name'] = fb_artist_data.get('name', artist.similar_artist_name)
                                 artist_data['image_url'] = fb_artist_data.get('images', [{}])[0].get('url') if fb_artist_data.get('images') else None

@@ -17,6 +17,7 @@ database/music_library.db-shm
 database/music_library.db-wal
 database/music_library.db.backup_*
 database/api_call_history.json
+storage/image_cache/
 logs/*.log
 logs/*.log.*
 

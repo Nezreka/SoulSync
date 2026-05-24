@@ -38,6 +38,10 @@ class _Candidate:
     title: str = "Song"
     artist: str = "Artist"
     album: str = "Album"
+    quality_score: float = 0.0
+    upload_speed: int = 0
+    queue_length: int = 0
+    free_upload_slots: int = 0
 
 
 @dataclass
@@ -413,3 +417,20 @@ def test_candidates_with_equal_confidence_both_tried():
     # First one wins — second never tried because download succeeded
     assert len(deps.download_orchestrator.download_calls) == 1
     assert deps.download_orchestrator.download_calls[0][1] == "a.flac"
+
+
+def test_equal_confidence_candidates_prefer_better_peer_quality():
+    """Equal-confidence Soulseek candidates use peer quality as the tiebreaker."""
+    deps = _build_deps()
+    _seed_task("t14")
+    candidates = [
+        _Candidate(filename="slow.flac", confidence=0.9, quality_score=0.8,
+                   upload_speed=100_000, queue_length=0, free_upload_slots=1),
+        _Candidate(filename="fast.flac", confidence=0.9, quality_score=1.0,
+                   upload_speed=5_000_000, queue_length=0, free_upload_slots=1),
+    ]
+    track = _Track()
+
+    dc.attempt_download_with_candidates("t14", candidates, track, batch_id=None, deps=deps)
+
+    assert deps.download_orchestrator.download_calls[0][1] == "fast.flac"

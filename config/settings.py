@@ -87,6 +87,10 @@ class ConfigManager:
         'soulseek.api_key',
         'deezer_download.arl',
         'lidarr_download.api_key',
+        'prowlarr.api_key',
+        'torrent_client.password',
+        'usenet_client.api_key',
+        'usenet_client.password',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -476,11 +480,19 @@ class ConfigManager:
                 "search_min_delay_seconds": 0,
             },
             "download_source": {
-                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid"
+                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid", "torrent", "usenet"
                 "hybrid_primary": "soulseek",  # Legacy: primary source for hybrid mode
                 "hybrid_secondary": "youtube",  # Legacy: fallback source for hybrid mode
                 "hybrid_order": [],  # Ordered list of sources for hybrid mode (overrides primary/secondary)
                 "stream_source": "youtube",  # Options: "youtube" (instant, default), "active" (use download source; falls back to youtube if soulseek)
+                # Album-bundle (torrent / usenet single-source) poll tuning.
+                # Downloader is polled every N seconds until the release
+                # lands; whole job aborts at the timeout. Defaults match
+                # the previous hard-coded constants. Users on slow private
+                # trackers / large box sets can extend the timeout without
+                # editing source.
+                "album_bundle_poll_interval_seconds": 2.0,
+                "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
@@ -519,6 +531,37 @@ class ConfigManager:
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
             },
+            # Prowlarr — indexer aggregator. Feeds the torrent / usenet
+            # download plugins. Not a standalone source.
+            "prowlarr": {
+                "url": "",
+                "api_key": "",
+                # Comma-separated list of indexer IDs to limit searches to.
+                # Empty = search all enabled indexers.
+                "indexer_ids": "",
+            },
+            # Torrent client — receives .torrent / magnet URIs from the
+            # torrent download plugin. ``type`` picks which adapter to
+            # instantiate (qbittorrent | transmission | deluge).
+            "torrent_client": {
+                "type": "qbittorrent",
+                "url": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
+                "save_path": "",
+            },
+            # Usenet client — receives .nzb URLs / payloads. ``type``
+            # picks the adapter (sabnzbd | nzbget). SABnzbd uses an
+            # API key; NZBGet uses username + password.
+            "usenet_client": {
+                "type": "sabnzbd",
+                "url": "",
+                "api_key": "",
+                "username": "",
+                "password": "",
+                "category": "soulsync",
+            },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
                 # added later, with credentials living under a "session" subkey
@@ -551,6 +594,13 @@ class ConfigManager:
             "database": {
                 "path": os.environ.get('DATABASE_PATH', 'database/music_library.db'),
                 "max_workers": 5
+            },
+            "image_cache": {
+                "enabled": True,
+                "path": "storage/image_cache",
+                "ttl_seconds": 2592000,
+                "failed_ttl_seconds": 21600,
+                "max_download_mb": 15
             },
             "metadata_enhancement": {
                 "enabled": True,

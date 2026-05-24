@@ -707,8 +707,19 @@ function showPinDialog(profile) {
     const dialog = document.getElementById('profile-pin-dialog');
     const avatar = document.getElementById('profile-pin-avatar');
     const nameEl = document.getElementById('profile-pin-name');
-    const input = document.getElementById('profile-pin-input');
     const errorEl = document.getElementById('profile-pin-error');
+    const oldInput = document.getElementById('profile-pin-input');
+    const oldSubmit = document.getElementById('profile-pin-submit');
+    const oldCancel = document.getElementById('profile-pin-cancel');
+
+    // Replace controls on every open so stale listeners from a previous
+    // profile cannot submit the new PIN against the old profile id.
+    const input = oldInput.cloneNode(true);
+    const submit = oldSubmit.cloneNode(true);
+    const cancel = oldCancel.cloneNode(true);
+    oldInput.parentNode.replaceChild(input, oldInput);
+    oldSubmit.parentNode.replaceChild(submit, oldSubmit);
+    oldCancel.parentNode.replaceChild(cancel, oldCancel);
 
     renderProfileAvatar(avatar, profile);
     nameEl.textContent = profile.name;
@@ -718,13 +729,12 @@ function showPinDialog(profile) {
     dialog.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
 
-    const submit = document.getElementById('profile-pin-submit');
-    const cancel = document.getElementById('profile-pin-cancel');
-
     const wasSwitching = !!currentProfile;
     const handleSubmit = async () => {
         const pin = input.value;
         if (!pin) return;
+        submit.disabled = true;
+        submit.textContent = 'Verifying...';
         try {
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
@@ -753,7 +763,8 @@ function showPinDialog(profile) {
             errorEl.textContent = 'Connection error';
             errorEl.style.display = '';
         }
-        cleanup();
+        submit.disabled = false;
+        submit.textContent = 'Submit';
     };
 
     const handleCancel = () => {
@@ -2125,15 +2136,9 @@ function initApp() {
 // ===============================
 
 function initializeNavigation() {
-    const navButtons = document.querySelectorAll('.nav-button');
-
-    navButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            const page = button.getAttribute('data-page');
-            navigateToPage(page);
-        });
-    });
-
+    // Sidebar navigation is now driven by native link navigation.
+    // Page activation and active-state styling are synchronized from the
+    // current URL by the shell bridge and route controllers.
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([
@@ -2150,12 +2155,39 @@ function _getPageFromPath() {
 
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     if (!path) return 'dashboard';
-    const basePage = path.split('/')[0];
+    const segs = path.split('/');
+    const basePage = segs[0];
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
-    if (basePage === 'artist-detail') return 'library';
     if (basePage === 'playlist-explorer') return 'library';
     return basePage;
+}
+
+function _normalizeArtistDetailSource(source) {
+    const value = (source || '').toString().trim().toLowerCase();
+    return value || 'library';
+}
+
+function buildArtistDetailPath(artistId, source = null) {
+    if (!artistId) {
+        throw new Error('artistId is required for artist-detail navigation');
+    }
+    const normalizedSource = _normalizeArtistDetailSource(source);
+    return '/artist-detail/' + encodeURIComponent(normalizedSource) + '/' + encodeURIComponent(String(artistId));
+}
+
+function parseArtistDetailPath(pathname = window.location.pathname) {
+    const segs = String(pathname || '').split('/').filter(Boolean);
+    if (segs[0] !== 'artist-detail' || segs.length < 3) return null;
+
+    const source = decodeURIComponent(segs[1] || '');
+    const artistId = decodeURIComponent(segs.slice(2).join('/'));
+    if (!source || !artistId) return null;
+
+    return {
+        artistId,
+        source: source.toLowerCase() === 'library' ? null : source,
+    };
 }
 
 // ===============================
@@ -2271,6 +2303,10 @@ function navigateToPage(pageId, options = {}) {
         return;
     }
 
+    if (pageId === 'artist-detail' && !options.artistId) {
+        return false;
+    }
+
     const router = getWebRouter();
     if (router && !options.skipRouteChange) {
         notifyPageWillChange(pageId);
@@ -2279,7 +2315,11 @@ function navigateToPage(pageId, options = {}) {
             showReactHost(pageId);
             setActivePageChrome(pageId);
         }
-        return router.navigateToPage(pageId, { replace: options.replace === true });
+        return router.navigateToPage(pageId, {
+            replace: options.replace === true,
+            artistId: options.artistId,
+            artistSource: options.artistSource,
+        });
     }
 
     // Fallback path for initial bootstrap or environments without TanStack routing.
@@ -2294,7 +2334,9 @@ function navigateToPage(pageId, options = {}) {
     }
 
     if (!options.skipPushState) {
-        const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;
+        const urlPath = pageId === 'dashboard' ? '/'
+            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource)
+            : '/' + pageId;
         if (window.location.pathname !== urlPath) {
             if (options.replace === true) {
                 history.replaceState({ page: pageId }, '', urlPath);
@@ -2341,7 +2383,10 @@ async function loadPageData(pageId) {
             case 'library':
                 // Check if we should return to artist detail view instead of list
                 if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    navigateToPage('artist-detail');
+                    navigateToPage('artist-detail', {
+                        artistId: artistDetailPageState.currentArtistId,
+                        artistSource: artistDetailPageState.currentArtistSource,
+                    });
                     if (!artistDetailPageState.isInitialized) {
                         initializeArtistDetailPage();
                         loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
@@ -2355,7 +2400,7 @@ async function loadPageData(pageId) {
                 }
                 break;
             case 'artist-detail':
-                // Artist detail page is handled separately by navigateToArtistDetail()
+                // Artist detail page is entered through the route handoff and legacy navigator.
                 break;
             case 'discover':
                 if (!discoverPageInitialized) {
@@ -2374,9 +2419,6 @@ async function loadPageData(pageId) {
                 await loadQualityProfile();
                 loadApiKeys();
                 loadBlacklistCount();
-                break;
-            case 'stats':
-                initializeStatsPage();
                 break;
             case 'import':
                 initializeImportPage();
@@ -2426,3 +2468,164 @@ async function loadPageData(pageId) {
         showToast(`Failed to load ${pageId} data`, 'error');
     }
 }
+
+// ---- Dashboard cursor-following accent blob (two-layer liquid) ----
+// Both layers lerp toward a target point: the cursor when it's hovering
+// any .dash-card, otherwise the grid center (idle resting position).
+// Core layer (--blob-x/y) follows faster, halo (--blob-x-soft/y-soft)
+// trails. Each card renders both layers and clips them to its own bounds
+// via overflow:hidden, so the blob spans the bento while gaps stay dark.
+// Disabled entirely when body.reduce-effects is set.
+(function initDashboardCursorBlob() {
+    let grid = null;
+    let cards = [];
+    let cardRects = [];               // cached rects, refreshed each frame
+    let targetX = 0, targetY = 0;
+    let coreX = 0, coreY = 0;
+    let softX = 0, softY = 0;
+    let rafId = 0;
+    let attached = false;
+    let centeredOnce = false;
+
+    const RECENTER_DELAY_MS = 1500;
+    let recenterTimer = 0;
+
+    const isReduced = () => document.body.classList.contains('reduce-effects');
+
+    const gridCenter = () => {
+        const r = grid.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    };
+
+    // Two-pass per frame: read all rects first (one layout flush), then
+    // write all CSS vars (no further reads). Avoids per-card layout thrash.
+    const tick = () => {
+        if (isReduced()) { rafId = 0; return; }
+
+        coreX += (targetX - coreX) * 0.040;
+        coreY += (targetY - coreY) * 0.040;
+        softX += (targetX - softX) * 0.022;
+        softY += (targetY - softY) * 0.022;
+
+        const n = cards.length;
+        if (cardRects.length !== n) cardRects.length = n;
+        for (let i = 0; i < n; i++) cardRects[i] = cards[i].getBoundingClientRect();
+        for (let i = 0; i < n; i++) {
+            const r = cardRects[i];
+            const s = cards[i].style;
+            s.setProperty('--blob-x',      (coreX - r.left) + 'px');
+            s.setProperty('--blob-y',      (coreY - r.top)  + 'px');
+            s.setProperty('--blob-x-soft', (softX - r.left) + 'px');
+            s.setProperty('--blob-y-soft', (softY - r.top)  + 'px');
+        }
+
+        const dx = Math.abs(targetX - softX) + Math.abs(targetX - coreX);
+        const dy = Math.abs(targetY - softY) + Math.abs(targetY - coreY);
+        if (dx + dy > 0.4) rafId = requestAnimationFrame(tick);
+        else rafId = 0;
+    };
+
+    const ensureLoop = () => {
+        if (!rafId && !isReduced()) rafId = requestAnimationFrame(tick);
+    };
+
+    const cancelRecenter = () => {
+        if (recenterTimer) { clearTimeout(recenterTimer); recenterTimer = 0; }
+    };
+    const recenterNow = () => {
+        recenterTimer = 0;
+        if (!grid) return;
+        const c = gridCenter();
+        targetX = c.x; targetY = c.y;
+        ensureLoop();
+    };
+    const scheduleRecenter = () => {
+        if (recenterTimer) return;
+        recenterTimer = setTimeout(recenterNow, RECENTER_DELAY_MS);
+    };
+
+    // Snap the blob to grid center the first time the grid becomes
+    // measurable (page may not be visible at DOMContentLoaded).
+    const snapToCenterIfReady = () => {
+        if (!grid || centeredOnce) return;
+        const r = grid.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;  // not visible yet
+        const c = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        targetX = coreX = softX = c.x;
+        targetY = coreY = softY = c.y;
+        centeredOnce = true;
+        ensureLoop();
+    };
+
+    function attach() {
+        if (attached) return;
+        grid = document.querySelector('.dash-grid');
+        if (!grid) return;
+        attached = true;
+        cards = Array.from(grid.querySelectorAll('.dash-card'));
+
+        snapToCenterIfReady();
+
+        grid.addEventListener('pointermove', (e) => {
+            if (isReduced()) return;
+            const onCard = e.target && e.target.closest && e.target.closest('.dash-card');
+            if (onCard) {
+                cancelRecenter();
+                targetX = e.clientX;
+                targetY = e.clientY;
+                ensureLoop();
+            } else {
+                scheduleRecenter();
+            }
+        });
+        grid.addEventListener('pointerleave', () => {
+            if (!isReduced()) scheduleRecenter();
+        });
+        window.addEventListener('resize', () => {
+            if (isReduced()) return;
+            // Idle: snap immediately. Active: respect the existing delay.
+            if (!recenterTimer) recenterNow();
+        });
+
+        // Re-resolve cards when active-downloads card toggles visibility.
+        const cardObserver = new MutationObserver(() => {
+            cards = Array.from(grid.querySelectorAll('.dash-card'));
+            ensureLoop();
+        });
+        cardObserver.observe(grid, { childList: true, subtree: false, attributes: true, attributeFilter: ['style', 'class'] });
+
+        // If the grid was hidden at attach time, snap once it becomes
+        // measurable (page navigation, tab switch).
+        if (!centeredOnce && 'IntersectionObserver' in window) {
+            const visObserver = new IntersectionObserver((entries) => {
+                for (const ent of entries) {
+                    if (ent.isIntersecting) { snapToCenterIfReady(); break; }
+                }
+            });
+            visObserver.observe(grid);
+        }
+
+        // React to reduce-effects toggle on body class.
+        const bodyObserver = new MutationObserver(() => {
+            if (isReduced()) {
+                cancelRecenter();
+                if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+            } else {
+                centeredOnce = false;
+                snapToCenterIfReady();
+            }
+        });
+        bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attach);
+    } else {
+        attach();
+    }
+    // Also retry on full load — covers late-mounted markup.
+    window.addEventListener('load', () => {
+        attach();
+        snapToCenterIfReady();
+    });
+})();

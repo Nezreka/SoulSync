@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import time
 import traceback
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -34,7 +36,7 @@ from core.imports.context import (
     get_import_original_search,
     normalize_import_context,
 )
-from core.imports.filename import extract_track_number_from_filename
+from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.metadata import enrichment as metadata_enrichment
 from core.runtime_state import (
     download_tasks,
@@ -44,6 +46,85 @@ from core.runtime_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_AUDIO_EXTENSIONS = {
+    '.flac', '.ape', '.wav', '.alac', '.dsf', '.dff', '.aiff', '.aif',
+    '.opus', '.ogg', '.m4a', '.aac', '.mp3', '.wma',
+}
+
+
+def _is_audio_file(path: str) -> bool:
+    return Path(str(path or '')).suffix.lower() in _AUDIO_EXTENSIONS
+
+
+def _reject_non_audio_found_file(found_file: Optional[str], file_location: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if found_file and not _is_audio_file(found_file):
+        logger.warning(
+            "[Post-Processing] Ignoring non-audio candidate found during file search: %s",
+            found_file,
+        )
+        return None, None
+    return found_file, file_location
+
+
+def _normalize_match_text(value: str) -> str:
+    return ''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
+
+
+def _release_audio_match_score(path: str, expected_title: str, expected_artist: str) -> float:
+    parsed = parse_filename_metadata(path)
+    parsed_title = parsed.get('title') or Path(path).stem
+    parsed_artist = parsed.get('artist') or ''
+    expected_title_norm = _normalize_match_text(expected_title)
+    parsed_title_norm = _normalize_match_text(parsed_title)
+    if expected_title_norm and (
+        expected_title_norm in parsed_title_norm or parsed_title_norm in expected_title_norm
+    ):
+        title_score = 1.0
+    else:
+        title_score = SequenceMatcher(
+            None,
+            expected_title_norm,
+            parsed_title_norm,
+        ).ratio()
+    if expected_artist and parsed_artist:
+        artist_score = SequenceMatcher(
+            None,
+            _normalize_match_text(expected_artist),
+            _normalize_match_text(parsed_artist),
+        ).ratio()
+        return (title_score * 0.75) + (artist_score * 0.25)
+    return title_score
+
+
+def _track_title_from_task(track_info: Any, context: Optional[dict]) -> str:
+    if isinstance(track_info, dict):
+        title = track_info.get('name') or track_info.get('title')
+        if title:
+            return str(title)
+    return get_import_clean_title(context or {}, default='')
+
+
+def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Optional[str]:
+    try:
+        src = Path(source_path)
+        if not src.exists() or not src.is_file():
+            return None
+        dest_dir = Path(transfer_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        if dest.exists():
+            stem, suffix = src.stem, src.suffix
+            counter = 1
+            while dest.exists():
+                dest = dest_dir / f"{stem}_release_{counter}{suffix}"
+                counter += 1
+        shutil.copy2(src, dest)
+        return str(dest)
+    except Exception as exc:
+        logger.warning("[Post-Processing] Could not copy release audio to transfer: %s", exc)
+        return None
 
 
 @dataclass
@@ -190,14 +271,71 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
         # but the actual file on disk is 'Title.mp3'. We must ask the client for the real path.
+        # Torrent/usenet also use opaque "url||display" filenames. Their completed
+        # job may contain a full release, so choose the best matching audio file
+        # and copy it to transfer before importing instead of moving the client's
+        # original completed download.
         if (task.get('username') == 'youtube' or '||' in str(task_filename)) and not found_file:
-            logger.info(f"[Post-Processing] Detected YouTube download task: {task_id}")
+            logger.info(f"[Post-Processing] Detected engine-backed download task: {task_id}")
             try:
                 # Query the download orchestrator for the status which contains the real file path
                 # CRITICAL FIX: Use the actual download_id designated by the client, not the internal task_id
                 actual_download_id = task.get('download_id') or task_id
                 status = deps.run_async(deps.download_orchestrator.get_download_status(actual_download_id))
-                if status and status.file_path:
+                if status and task.get('username') in ('torrent', 'usenet'):
+                    audio_files = list(getattr(status, 'audio_files', None) or [])
+                    if not audio_files and getattr(status, 'file_path', None):
+                        audio_files = [status.file_path]
+                    expected_title = _track_title_from_task(track_info, context)
+                    expected_artist = ''
+                    if isinstance(track_info, dict):
+                        artists = track_info.get('artists', [])
+                        if isinstance(artists, list) and artists:
+                            first_artist = artists[0]
+                            expected_artist = first_artist.get('name', '') if isinstance(first_artist, dict) else str(first_artist)
+                        elif isinstance(artists, str):
+                            expected_artist = artists
+                    if not expected_artist and context:
+                        artist_ctx = get_import_context_artist(context)
+                        expected_artist = artist_ctx.get('name', '') if isinstance(artist_ctx, dict) else ''
+
+                    scored_files = [
+                        (_release_audio_match_score(path, expected_title, expected_artist), path)
+                        for path in audio_files
+                        if _is_audio_file(path)
+                    ]
+                    scored_files.sort(reverse=True)
+                    if scored_files:
+                        best_score, best_path = scored_files[0]
+                        logger.info(
+                            "[Post-Processing] Best %s release file for '%s': %s (score %.2f)",
+                            task.get('username'), expected_title, best_path, best_score,
+                        )
+                        if best_score >= 0.80:
+                            copied_path = _copy_release_audio_to_transfer(best_path, transfer_dir)
+                            if copied_path:
+                                found_file = copied_path
+                                file_location = 'download'
+                                logger.info(
+                                    "[Post-Processing] Copied matched %s release file to transfer: %s",
+                                    task.get('username'), copied_path,
+                                )
+                        else:
+                            logger.warning(
+                                "[Post-Processing] No %s release file met match threshold for '%s' (best %.2f)",
+                                task.get('username'), expected_title, best_score,
+                            )
+                    if not found_file:
+                        with tasks_lock:
+                            if task_id in download_tasks:
+                                download_tasks[task_id]['status'] = 'failed'
+                                download_tasks[task_id]['error_message'] = (
+                                    f"No matching audio file found in {task.get('username')} release"
+                                )
+                        deps.on_download_completed(batch_id, task_id, False)
+                        return
+
+                if status and status.file_path and not found_file and task.get('username') not in ('torrent', 'usenet'):
                     real_path = status.file_path
                     if os.path.exists(real_path):
                         # Determine if it's in download or transfer directory
@@ -227,11 +365,12 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
                             logger.info(f"[Post-Processing] Resolved actual YouTube filename: {found_file} (Location: {file_location})")
                     else:
-                        logger.warning(f"[Post-Processing] YouTube status reported path but file missing: {real_path}")
+                        logger.warning(f"[Post-Processing] Engine status reported path but file missing: {real_path}")
                 else:
-                    logger.warning(f"[Post-Processing] YouTube status returned no file_path for task {task_id}")
+                    if not found_file:
+                        logger.warning(f"[Post-Processing] Engine status returned no file_path for task {task_id}")
             except Exception as e:
-                logger.error(f"[Post-Processing] Failed to retrieve YouTube task status: {e}")
+                logger.error(f"[Post-Processing] Failed to retrieve engine task status: {e}")
 
         _file_search_max_retries = 5
         for retry_count in range(_file_search_max_retries):
@@ -257,6 +396,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             # Strategy 1: Try with original filename in both downloads and transfer
             logger.info("[Post-Processing] Strategy 1: Searching with original filename...")
             found_file, file_location = deps.find_completed_file(download_dir, task_filename, transfer_dir)
+            found_file, file_location = _reject_non_audio_found_file(found_file, file_location)
 
             if found_file:
                 logger.info(f"[Post-Processing] Strategy 1 SUCCESS: Found file with original filename in {file_location}: {found_file}")
@@ -269,7 +409,11 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 found_result = deps.find_completed_file(transfer_dir, expected_final_filename)
                 if found_result and found_result[0]:
                     found_file, file_location = found_result[0], 'transfer'
-                    logger.info(f"[Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
+                    found_file, file_location = _reject_non_audio_found_file(found_file, file_location)
+                    if found_file:
+                        logger.info(f"[Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
+                    else:
+                        logger.error("[Post-Processing] Strategy 2 FAILED: Expected final filename resolved to a non-audio file")
                 else:
                     logger.error("[Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
             elif not expected_final_filename:

@@ -18,13 +18,14 @@ logger = get_logger("metadata.registry")
 
 MetadataClientFactory = Callable[[], Any]
 
-METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase")
+METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz")
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",
     "deezer": "Deezer",
     "discogs": "Discogs",
     "hydrabase": "Hydrabase",
+    "musicbrainz": "MusicBrainz",
 }
 
 _UNSET = object()
@@ -138,6 +139,22 @@ def _get_discogs_factory(client_factory: Optional[MetadataClientFactory]) -> Met
     from core.discogs_client import DiscogsClient
 
     return DiscogsClient
+
+
+def _get_amazon_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.amazon_client import AmazonClient
+
+    return AmazonClient
+
+
+def _get_musicbrainz_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.musicbrainz_search import MusicBrainzSearchClient
+
+    return MusicBrainzSearchClient
 
 
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
@@ -260,6 +277,30 @@ def get_discogs_client(
         return client
 
 
+def get_amazon_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached Amazon Music client."""
+    cache_key = "amazon"
+    factory = _get_amazon_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_musicbrainz_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached MusicBrainz primary source client."""
+    cache_key = "musicbrainz"
+    factory = _get_musicbrainz_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
 def is_hydrabase_enabled() -> bool:
     """Return True when Hydrabase is connected and app-enabled."""
     try:
@@ -288,24 +329,26 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
 
 def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] = None) -> str:
     """Return configured primary metadata source."""
-    source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    _default = METADATA_SOURCE_PRIORITY[0]
+    source = _get_config_value("metadata.fallback_source", _default) or _default
 
     if source == "spotify":
         try:
             spotify = get_spotify_client(client_factory=spotify_client_factory)
             if not spotify or not spotify.is_spotify_authenticated():
-                return "deezer"
+                return _default
         except Exception:
-            return "deezer"
+            return _default
 
     return source
 
 
 def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> str:
     """Return the active metadata source after Spotify is disconnected."""
-    source = configured_source if configured_source is not None else _get_config_value("metadata.fallback_source", "deezer")
-    source = source or "deezer"
-    return "deezer" if source == "spotify" else source
+    _default = METADATA_SOURCE_PRIORITY[0]
+    source = configured_source if configured_source is not None else _get_config_value("metadata.fallback_source", _default)
+    source = source or _default
+    return _default if source == "spotify" else source
 
 
 def get_metadata_source_label(source: str) -> str:
@@ -331,6 +374,8 @@ def get_primary_client(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
+    musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return client for configured primary source."""
     return get_client_for_source(
@@ -339,6 +384,8 @@ def get_primary_client(
         itunes_client_factory=itunes_client_factory,
         deezer_client_factory=deezer_client_factory,
         discogs_client_factory=discogs_client_factory,
+        amazon_client_factory=amazon_client_factory,
+        musicbrainz_client_factory=musicbrainz_client_factory,
     )
 
 
@@ -348,6 +395,8 @@ def get_primary_source_status(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
+    musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
@@ -361,6 +410,8 @@ def get_primary_source_status(
             itunes_client_factory=itunes_client_factory,
             deezer_client_factory=deezer_client_factory,
             discogs_client_factory=discogs_client_factory,
+            amazon_client_factory=amazon_client_factory,
+            musicbrainz_client_factory=musicbrainz_client_factory,
         )
         if source == "spotify":
             connected = bool(client and client.is_spotify_authenticated())
@@ -387,6 +438,8 @@ def get_client_for_source(
     itunes_client_factory: Optional[MetadataClientFactory] = None,
     deezer_client_factory: Optional[MetadataClientFactory] = None,
     discogs_client_factory: Optional[MetadataClientFactory] = None,
+    amazon_client_factory: Optional[MetadataClientFactory] = None,
+    musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
     if source == "spotify":
@@ -409,5 +462,11 @@ def get_client_for_source(
 
     if source == "itunes":
         return get_itunes_client(client_factory=itunes_client_factory)
+
+    if source == "amazon":
+        return get_amazon_client(client_factory=amazon_client_factory)
+
+    if source == "musicbrainz":
+        return get_musicbrainz_client(client_factory=musicbrainz_client_factory)
 
     return None

@@ -342,6 +342,31 @@ def test_album_from_musicbrainz_dict_release_group_type_overrides_default():
     assert Album.from_musicbrainz_dict(raw).album_type == 'single'
 
 
+def test_album_from_musicbrainz_dict_accepts_adapter_shape():
+    raw = {
+        'id': 'rg-or-release-mbid',
+        'name': 'Coffee Break',
+        'artists': [{'id': 'artist-mbid', 'name': 'Zeds Dead'}],
+        'release_date': '2011-07-12',
+        'total_tracks': 1,
+        'album_type': 'single',
+        'images': [{'url': 'https://cover.example/front.jpg'}],
+        'external_urls': {'musicbrainz': 'https://musicbrainz.org/release/rg-or-release-mbid'},
+    }
+
+    album = Album.from_musicbrainz_dict(raw)
+
+    assert album.id == 'rg-or-release-mbid'
+    assert album.name == 'Coffee Break'
+    assert album.artists == ['Zeds Dead']
+    assert album.artist_id == 'artist-mbid'
+    assert album.release_date == '2011-07-12'
+    assert album.total_tracks == 1
+    assert album.album_type == 'single'
+    assert album.image_url == 'https://cover.example/front.jpg'
+    assert album.external_ids['musicbrainz'] == 'rg-or-release-mbid'
+
+
 # ---------------------------------------------------------------------------
 # Qobuz
 # ---------------------------------------------------------------------------

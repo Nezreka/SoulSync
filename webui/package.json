@@ -20,6 +20,7 @@
     "ky": "^2.0.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "recharts": "^3.8.1",
     "zod": "^4.4.2"
   },
   "devDependencies": {

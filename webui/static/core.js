@@ -67,6 +67,11 @@ let deezerPlaylistStates = {};
 let deezerArlPlaylists = [];
 let deezerArlPlaylistsLoaded = false;
 
+// --- Qobuz Playlist State Management (mirrors Tidal — github issue #677) ---
+let qobuzPlaylists = [];
+let qobuzPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
+let qobuzPlaylistsLoaded = false;
+
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
 let beatportContentState = {
@@ -200,6 +205,13 @@ let artistsSearchTimeout = null;
 let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
 let similarArtistsController = null; // Track ongoing similar artists stream to cancel when navigating away
+
+function cancelSimilarArtistsLoad() {
+    if (similarArtistsController) {
+        similarArtistsController.abort();
+        similarArtistsController = null;
+    }
+}
 
 // --- Lazy Background Image Observer ---
 // Watches elements with data-bg-src, applies background-image when visible, unobserves after.
@@ -446,6 +458,7 @@ function initializeWebSocket() {
     socket.on('enrichment:genius-enrichment', (data) => updateGeniusEnrichmentStatusFromData(data));
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
+    socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
@@ -464,7 +477,13 @@ function initializeWebSocket() {
     // Phase 5 event listeners (sync/discovery progress + scans)
     socket.on('sync:progress', (data) => updateSyncProgressFromData(data));
     socket.on('discovery:progress', (data) => updateDiscoveryProgressFromData(data));
-    socket.on('scan:watchlist', (data) => updateWatchlistScanFromData(data));
+    socket.on('scan:watchlist', (data) => {
+        updateWatchlistScanFromData(data);
+        const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
+        if (watchlistBtn) {
+            watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
+        }
+    });
     socket.on('scan:media', (data) => updateMediaScanFromData(data));
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
@@ -501,6 +520,7 @@ function handleServiceStatusUpdate(data) {
     const isSoulsyncStandalone = data.media_server?.type === 'soulsync';
     _isSoulsyncStandalone = isSoulsyncStandalone;
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
+        if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
         if (isSoulsyncStandalone) {
             btn.dataset.hiddenByStandalone = '1';
             btn.style.display = 'none';
@@ -675,6 +695,7 @@ const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f
 const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
 const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
 const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
+const AMAZON_LOGO_URL = '/static/amazon.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---

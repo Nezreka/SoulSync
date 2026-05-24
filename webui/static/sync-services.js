@@ -1362,16 +1362,17 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     // Generate hero section with dynamic source detection (same as YouTube/Beatport)
     const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
-            virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
-                virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
-                    virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
-                        virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                                    virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                        virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                            virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                                'YouTube';
+            virtualPlaylistId.startsWith('qobuz_') ? 'Qobuz' :
+                virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
+                    virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
+                        virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
+                            virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                                    'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -1441,7 +1442,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                                                    onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
@@ -1487,6 +1488,933 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
+}
+
+
+// ===================================================================
+// QOBUZ PLAYLIST MANAGEMENT (mirrors Tidal — github issue #677)
+// ===================================================================
+//
+// Functional parity with the Tidal sync flow above. Backend at
+// /api/qobuz/* mirrors /api/tidal/* one-for-one, so the handler shape
+// is intentionally a direct port of the Tidal set. Per-card key in
+// CSS selectors is `qobuz-card-${id}` (no colon — same constraint as
+// Tidal: `:` parses as a CSS pseudo-class operator).
+
+async function loadQobuzPlaylists() {
+    const container = document.getElementById('qobuz-playlist-container');
+    const refreshBtn = document.getElementById('qobuz-refresh-btn');
+
+    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading Qobuz playlists...</div>`;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '🔄 Loading...';
+
+    try {
+        const response = await fetch('/api/qobuz/playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Qobuz playlists');
+        }
+
+        qobuzPlaylists = await response.json();
+        renderQobuzPlaylists();
+        qobuzPlaylistsLoaded = true;
+
+        console.log(`🎵 Loaded ${qobuzPlaylists.length} Qobuz playlists`);
+
+        // Auto-mirror Qobuz playlists in the background (same pattern as Tidal).
+        // Cards render instantly from metadata; tracks load per-playlist
+        // without blocking the UI.
+        for (const p of qobuzPlaylists) {
+            if (p.tracks && p.tracks.length > 0) {
+                mirrorPlaylist('qobuz', p.id, p.name, p.tracks.map(t => ({
+                    track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+                    album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+                    source_track_id: t.id || ''
+                })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                continue;
+            }
+            try {
+                const fullResp = await fetch(`/api/qobuz/playlist/${p.id}`);
+                if (fullResp.ok) {
+                    const fullData = await fullResp.json();
+                    if (fullData.tracks && fullData.tracks.length > 0) {
+                        p.tracks = fullData.tracks;
+                        p.track_count = fullData.tracks.length;
+                        const countEl = document.querySelector(`#qobuz-card-${p.id} .playlist-card-track-count`);
+                        if (countEl) countEl.textContent = `${fullData.tracks.length} tracks`;
+                        mirrorPlaylist('qobuz', p.id, p.name, fullData.tracks.map(t => ({
+                            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+                            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+                            source_track_id: t.id || ''
+                        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                    }
+                }
+            } catch (e) {
+                console.warn(`Failed to fetch tracks for Qobuz playlist ${p.name}: ${e.message}`);
+            }
+        }
+
+        await loadQobuzPlaylistStatesFromBackend();
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Qobuz playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+function renderQobuzPlaylists() {
+    const container = document.getElementById('qobuz-playlist-container');
+    if (qobuzPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">No Qobuz playlists found.</div>`;
+        return;
+    }
+
+    container.innerHTML = qobuzPlaylists.map(p => {
+        if (!qobuzPlaylistStates[p.id]) {
+            qobuzPlaylistStates[p.id] = {
+                phase: 'fresh',
+                playlist: p
+            };
+        }
+        return createQobuzCard(p);
+    }).join('');
+
+    qobuzPlaylists.forEach(p => {
+        const card = document.getElementById(`qobuz-card-${p.id}`);
+        if (card) {
+            card.addEventListener('click', () => handleQobuzCardClick(p.id));
+        }
+    });
+}
+
+function createQobuzCard(playlist) {
+    const state = qobuzPlaylistStates[playlist.id];
+    const phase = state.phase;
+
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
+
+    return `
+        <div class="youtube-playlist-card qobuz-playlist-card" id="qobuz-card-${playlist.id}">
+            <div class="playlist-card-icon">🎵</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">${playlist.track_count} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                <!-- Progress will be dynamically updated based on phase -->
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+async function handleQobuzCardClick(playlistId) {
+    const state = qobuzPlaylistStates[playlistId];
+    if (!state) {
+        console.error(`❌ [Card Click] No state found for Qobuz playlist: ${playlistId}`);
+        showToast('Playlist state not found - try refreshing the page', 'error');
+        return;
+    }
+    if (!state.playlist) {
+        console.error(`❌ [Card Click] No playlist data found for Qobuz playlist: ${playlistId}`);
+        showToast('Playlist data missing - try refreshing the page', 'error');
+        return;
+    }
+    if (!state.phase) state.phase = 'fresh';
+
+    console.log(`🎵 [Card Click] Qobuz card clicked: ${playlistId}, Phase: ${state.phase}`);
+
+    if (state.phase === 'fresh') {
+        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
+            console.log(`🎵 Fetching tracks for Qobuz playlist: ${state.playlist.name}`);
+            showLoadingOverlay(`Loading ${state.playlist.name}...`);
+            try {
+                const resp = await fetch(`/api/qobuz/playlist/${playlistId}`);
+                if (resp.ok) {
+                    const fullData = await resp.json();
+                    if (fullData.tracks && fullData.tracks.length > 0) {
+                        state.playlist.tracks = fullData.tracks.map(t => ({
+                            id: t.id, name: t.name, artists: t.artists || [],
+                            album: t.album || '', duration_ms: t.duration_ms || 0,
+                            track_number: t.track_number || 0
+                        }));
+                        const countEl = document.querySelector(`#qobuz-card-${playlistId} .playlist-card-track-count`);
+                        if (countEl) countEl.textContent = `${state.playlist.tracks.length} tracks`;
+                    }
+                }
+            } catch (e) {
+                console.error(`Failed to fetch Qobuz playlist tracks: ${e}`);
+                hideLoadingOverlay();
+            }
+        }
+
+        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
+            hideLoadingOverlay();
+            showToast('Could not load tracks for this playlist', 'error');
+            return;
+        }
+
+        hideLoadingOverlay();
+        console.log(`🎵 Ready with ${state.playlist.tracks.length} Qobuz tracks for discovery`);
+        openQobuzDiscoveryModal(playlistId, state.playlist);
+
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
+        console.log(`🎵 [Card Click] Opening Qobuz discovery modal for ${state.phase} phase`);
+
+        if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
+            try {
+                const stateResponse = await fetch(`/api/qobuz/state/${playlistId}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results) {
+                        state.discovery_results = fullState.discovery_results;
+                        state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
+                        state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
+                        qobuzPlaylistStates[playlistId] = { ...qobuzPlaylistStates[playlistId], ...state };
+                    }
+                }
+            } catch (error) {
+                console.error(`❌ [Card Click] Failed to fetch Qobuz discovery results: ${error}`);
+            }
+        }
+
+        openQobuzDiscoveryModal(playlistId, state.playlist);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        if (state.convertedSpotifyPlaylistId) {
+            if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'flex';
+                } else {
+                    await rehydrateQobuzDownloadModal(playlistId, state);
+                }
+            } else {
+                await rehydrateQobuzDownloadModal(playlistId, state);
+            }
+        } else {
+            if (state.discovery_results && state.discovery_results.length > 0) {
+                openQobuzDiscoveryModal(playlistId, state.playlist);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
+        }
+    }
+}
+
+async function rehydrateQobuzDownloadModal(playlistId, state) {
+    try {
+        if (!state || !state.playlist) {
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        if (!state.discovery_results) {
+            const stateResponse = await fetch(`/api/qobuz/state/${playlistId}`);
+            if (stateResponse.ok) {
+                const fullState = await stateResponse.json();
+                state.discovery_results = fullState.discovery_results;
+                state.convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                state.download_process_id = fullState.download_process_id;
+            } else {
+                showToast('Error loading playlist data', 'error');
+                return;
+            }
+        }
+
+        const spotifyTracks = [];
+        for (const result of state.discovery_results) {
+            if (result.spotify_data) spotifyTracks.push(result.spotify_data);
+        }
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const virtualPlaylistId = state.convertedSpotifyPlaylistId;
+        const playlistName = state.playlist.name;
+
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+
+        if (state.download_process_id) {
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = state.phase === 'download_complete' ? 'complete' : 'running';
+                process.batchId = state.download_process_id;
+
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+
+                if (state.phase === 'downloading') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    startModalDownloadPolling(virtualPlaylistId);
+                } else if (state.phase === 'download_complete') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    try {
+                        const response = await fetch(`/api/playlists/${state.download_process_id}/download_status`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.phase === 'complete' && data.tasks) {
+                                updateCompletedModalResults(virtualPlaylistId, data);
+                            }
+                        }
+                    } catch (error) {
+                        showToast('Could not load download results - modal may show incomplete data', 'warning', 3000);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`❌ Error rehydrating Qobuz download modal:`, error);
+        showToast('Error opening download modal', 'error');
+    }
+}
+
+function updateQobuzCardPhase(playlistId, phase) {
+    const state = qobuzPlaylistStates[playlistId];
+    if (!state) return;
+
+    state.phase = phase;
+
+    const card = document.getElementById(`qobuz-card-${playlistId}`);
+    if (card) {
+        const newCardHtml = createQobuzCard(state.playlist);
+        card.outerHTML = newCardHtml;
+
+        const newCard = document.getElementById(`qobuz-card-${playlistId}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleQobuzCardClick(playlistId));
+        }
+
+        if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+            setTimeout(() => {
+                updateQobuzCardSyncProgress(playlistId, state.lastSyncProgress);
+            }, 0);
+        }
+    }
+}
+
+async function openQobuzDiscoveryModal(playlistId, playlistData) {
+    console.log(`🎵 Opening Qobuz discovery modal: ${playlistData.name}`);
+    const fakeUrlHash = `qobuz_${playlistId}`;
+
+    const qobuzCardState = qobuzPlaylistStates[playlistId];
+    const isAlreadyDiscovered = qobuzCardState && (qobuzCardState.phase === 'discovered' || qobuzCardState.phase === 'syncing' || qobuzCardState.phase === 'sync_complete');
+    const isCurrentlyDiscovering = qobuzCardState && qobuzCardState.phase === 'discovering';
+
+    let transformedResults = [];
+    let actualMatches = 0;
+    if (isAlreadyDiscovered && qobuzCardState.discovery_results) {
+        transformedResults = qobuzCardState.discovery_results.map((result, index) => {
+            const isFound = result.status === 'found' ||
+                result.status === '✅ Found' ||
+                result.status === 'Found' ||
+                result.status_class === 'found' ||
+                result.spotify_data ||
+                result.spotify_track;
+            if (isFound) actualMatches++;
+
+            return {
+                index: index,
+                yt_track: result.qobuz_track ? result.qobuz_track.name : 'Unknown',
+                yt_artist: result.qobuz_track ? (result.qobuz_track.artists ? result.qobuz_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                status: isFound ? '✅ Found' : '❌ Not Found',
+                status_class: isFound ? 'found' : 'not-found',
+                spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                    (Array.isArray(result.spotify_data.artists)
+                        ? result.spotify_data.artists
+                            .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                            .filter(Boolean)
+                            .join(', ') || '-'
+                        : result.spotify_data.artists)
+                    : (result.spotify_artist || '-'),
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                spotify_data: result.spotify_data,
+                spotify_id: result.spotify_id,
+                manual_match: result.manual_match
+            };
+        });
+    }
+
+    const modalPhase = qobuzCardState ? qobuzCardState.phase : 'fresh';
+    youtubePlaylistStates[fakeUrlHash] = {
+        phase: modalPhase,
+        playlist: { name: playlistData.name, tracks: playlistData.tracks },
+        is_qobuz_playlist: true,
+        qobuz_playlist_id: playlistId,
+        discovery_progress: isAlreadyDiscovered ? 100 : 0,
+        spotify_matches: isAlreadyDiscovered ? actualMatches : 0,
+        spotifyMatches: isAlreadyDiscovered ? actualMatches : 0,
+        spotify_total: playlistData.tracks.length,
+        discovery_results: transformedResults,
+        discoveryResults: transformedResults,
+        discoveryProgress: isAlreadyDiscovered ? 100 : 0
+    };
+
+    if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        try {
+            const response = await fetch(`/api/qobuz/discovery/start/${playlistId}`, { method: 'POST' });
+            const result = await response.json();
+            if (result.error) {
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+                return;
+            }
+            qobuzPlaylistStates[playlistId].phase = 'discovering';
+            updateQobuzCardPhase(playlistId, 'discovering');
+            youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+            startQobuzDiscoveryPolling(fakeUrlHash, playlistId);
+        } catch (error) {
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+    } else if (isCurrentlyDiscovering) {
+        startQobuzDiscoveryPolling(fakeUrlHash, playlistId);
+    } else if (qobuzCardState && qobuzCardState.phase === 'syncing') {
+        startQobuzSyncPolling(fakeUrlHash);
+    }
+
+    openYouTubeDiscoveryModal(fakeUrlHash);
+}
+
+function startQobuzDiscoveryPolling(fakeUrlHash, playlistId) {
+    if (activeYouTubePollers[fakeUrlHash]) {
+        clearInterval(activeYouTubePollers[fakeUrlHash]);
+    }
+
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [playlistId] });
+        _discoveryProgressCallbacks[playlistId] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+                return;
+            }
+            const transformed = {
+                progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                complete: data.complete,
+                results: (data.results || []).map((r, i) => {
+                    const isWingIt = r.wing_it_fallback || r.status_class === 'wing-it';
+                    const isFound = !isWingIt && (r.status === 'found' || r.status === '✅ Found' || r.status === 'Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track);
+                    return {
+                        index: i, yt_track: r.qobuz_track ? r.qobuz_track.name : 'Unknown',
+                        yt_artist: r.qobuz_track ? (r.qobuz_track.artists ? r.qobuz_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
+                        status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists
+                            ? (Array.isArray(r.spotify_data.artists)
+                                ? (r.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : r.spotify_data.artists)
+                            : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
+                        wing_it_fallback: isWingIt
+                    };
+                })
+            };
+            const st = youtubePlaylistStates[fakeUrlHash];
+            if (st) {
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase;
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformed);
+            }
+            if (qobuzPlaylistStates[playlistId]) {
+                qobuzPlaylistStates[playlistId].phase = data.phase;
+                qobuzPlaylistStates[playlistId].discovery_results = data.results;
+                qobuzPlaylistStates[playlistId].spotify_matches = data.spotify_matches;
+                qobuzPlaylistStates[playlistId].discovery_progress = data.progress;
+                updateQobuzCardPhase(playlistId, data.phase);
+            }
+            updateQobuzCardProgress(playlistId, data);
+            if (data.complete) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+            }
+        };
+    }
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/qobuz/discovery/status/${playlistId}`);
+            const status = await response.json();
+            if (status.error) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+                return;
+            }
+
+            const transformedStatus = {
+                progress: status.progress,
+                spotify_matches: status.spotify_matches,
+                spotify_total: status.spotify_total,
+                complete: status.complete,
+                results: status.results.map((result, index) => {
+                    const isFound = result.status === 'found' ||
+                        result.status === '✅ Found' ||
+                        result.status === 'Found' ||
+                        result.status_class === 'found' ||
+                        result.spotify_data ||
+                        result.spotify_track;
+                    return {
+                        index: index,
+                        yt_track: result.qobuz_track ? result.qobuz_track.name : 'Unknown',
+                        yt_artist: result.qobuz_track ? (result.qobuz_track.artists ? result.qobuz_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found',
+                        status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists
+                            ? (Array.isArray(result.spotify_data.artists)
+                                ? (result.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : result.spotify_data.artists)
+                            : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data,
+                        spotify_id: result.spotify_id,
+                        manual_match: result.manual_match
+                    };
+                })
+            };
+
+            const state = youtubePlaylistStates[fakeUrlHash];
+            if (state) {
+                state.discovery_progress = status.progress;
+                state.discoveryProgress = status.progress;
+                state.spotify_matches = status.spotify_matches;
+                state.spotifyMatches = status.spotify_matches;
+                state.discovery_results = status.results;
+                state.discoveryResults = transformedStatus.results;
+                state.phase = status.phase;
+
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
+
+                if (qobuzPlaylistStates[playlistId]) {
+                    qobuzPlaylistStates[playlistId].phase = status.phase;
+                    qobuzPlaylistStates[playlistId].discovery_results = status.results;
+                    qobuzPlaylistStates[playlistId].spotify_matches = status.spotify_matches;
+                    qobuzPlaylistStates[playlistId].discovery_progress = status.progress;
+                    updateQobuzCardPhase(playlistId, status.phase);
+                }
+                updateQobuzCardProgress(playlistId, status);
+            }
+
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+            }
+        } catch (error) {
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[fakeUrlHash];
+        }
+    }, 1000);
+
+    activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+async function loadQobuzPlaylistStatesFromBackend() {
+    try {
+        const response = await fetch('/api/qobuz/playlists/states');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Qobuz playlist states');
+        }
+
+        const data = await response.json();
+        const states = data.states || [];
+        if (states.length === 0) return;
+
+        for (const stateInfo of states) {
+            await applyQobuzPlaylistState(stateInfo);
+        }
+
+        for (const stateInfo of states) {
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') &&
+                stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
+
+                const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    try {
+                        const playlistData = qobuzPlaylists.find(p => p.id === stateInfo.playlist_id);
+                        if (!playlistData) continue;
+
+                        const spotifyTracks = qobuzPlaylistStates[stateInfo.playlist_id]?.discovery_results
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForTidal(convertedPlaylistId, playlistData.name, spotifyTracks);
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = stateInfo.download_process_id;
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                startModalDownloadPolling(convertedPlaylistId);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error rehydrating Qobuz download modal for ${stateInfo.playlist_id}:`, error);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error loading Qobuz playlist states:', error);
+    }
+}
+
+async function applyQobuzPlaylistState(stateInfo) {
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
+
+    try {
+        const playlistData = qobuzPlaylists.find(p => p.id === playlist_id);
+        if (!playlistData) return;
+
+        if (!qobuzPlaylistStates[playlist_id]) {
+            qobuzPlaylistStates[playlist_id] = { playlist: playlistData, phase: 'fresh' };
+        }
+
+        qobuzPlaylistStates[playlist_id].phase = phase;
+        qobuzPlaylistStates[playlist_id].discovery_progress = discovery_progress;
+        qobuzPlaylistStates[playlist_id].spotify_matches = spotify_matches;
+        qobuzPlaylistStates[playlist_id].discovery_results = discovery_results;
+        qobuzPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
+        qobuzPlaylistStates[playlist_id].download_process_id = download_process_id;
+        qobuzPlaylistStates[playlist_id].playlist = playlistData;
+
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                const stateResponse = await fetch(`/api/qobuz/state/${playlist_id}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results && qobuzPlaylistStates[playlist_id]) {
+                        qobuzPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
+                        qobuzPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
+                        qobuzPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        qobuzPlaylistStates[playlist_id].convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                        qobuzPlaylistStates[playlist_id].download_process_id = fullState.download_process_id;
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ Error fetching full Qobuz discovery results for ${playlistData.name}:`, error.message);
+            }
+        }
+
+        updateQobuzCardPhase(playlist_id, phase);
+
+        if (phase === 'discovered' && qobuzPlaylistStates[playlist_id]) {
+            const progressInfo = {
+                spotify_total: playlistData.track_count || playlistData.tracks?.length || 0,
+                spotify_matches: qobuzPlaylistStates[playlist_id].spotify_matches || 0
+            };
+            updateQobuzCardProgress(playlist_id, progressInfo);
+        }
+
+        if (phase === 'discovering') {
+            const fakeUrlHash = `qobuz_${playlist_id}`;
+            startQobuzDiscoveryPolling(fakeUrlHash, playlist_id);
+        } else if (phase === 'syncing') {
+            const fakeUrlHash = `qobuz_${playlist_id}`;
+            startQobuzSyncPolling(fakeUrlHash);
+        }
+    } catch (error) {
+        console.error(`❌ Error applying Qobuz playlist state for ${playlist_id}:`, error);
+    }
+}
+
+function updateQobuzCardProgress(playlistId, progress) {
+    const state = qobuzPlaylistStates[playlistId];
+    if (!state) return;
+    const card = document.getElementById(`qobuz-card-${playlistId}`);
+    if (!card) return;
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+    const failed = total - matches;
+    const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
+
+    progressElement.textContent = `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
+    progressElement.classList.remove('hidden');
+}
+
+async function startQobuzPlaylistSync(urlHash) {
+    try {
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_qobuz_playlist) {
+            console.error('❌ Invalid Qobuz playlist state for sync');
+            return;
+        }
+
+        const playlistId = state.qobuz_playlist_id;
+        const response = await fetch(`/api/qobuz/sync/start/${playlistId}`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
+        updateQobuzCardPhase(playlistId, 'syncing');
+        updateQobuzModalButtons(urlHash, 'syncing');
+        startQobuzSyncPolling(urlHash, syncPlaylistId);
+        showToast('Qobuz playlist sync started!', 'success');
+    } catch (error) {
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startQobuzSyncPolling(urlHash, syncPlaylistId) {
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const state = youtubePlaylistStates[urlHash];
+    const playlistId = state.qobuz_playlist_id;
+    syncPlaylistId = syncPlaylistId || (state && state.syncPlaylistId);
+
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateQobuzCardSyncProgress(playlistId, progress);
+            updateQobuzModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (qobuzPlaylistStates[playlistId]) qobuzPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateQobuzCardPhase(playlistId, 'sync_complete');
+                updateQobuzModalButtons(urlHash, 'sync_complete');
+                showToast('Qobuz playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (qobuzPlaylistStates[playlistId]) qobuzPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateQobuzCardPhase(playlistId, 'discovered');
+                updateQobuzModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    const pollFunction = async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/qobuz/sync/status/${playlistId}`);
+            const status = await response.json();
+            if (status.error) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+            updateQobuzCardSyncProgress(playlistId, status.progress);
+            updateQobuzModalSyncProgress(urlHash, status.progress);
+
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (qobuzPlaylistStates[playlistId]) qobuzPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateQobuzCardPhase(playlistId, 'sync_complete');
+                updateQobuzModalButtons(urlHash, 'sync_complete');
+                showToast('Qobuz playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (qobuzPlaylistStates[playlistId]) qobuzPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateQobuzCardPhase(playlistId, 'discovered');
+                updateQobuzModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
+        }
+    };
+
+    if (!socketConnected) pollFunction();
+    const pollInterval = setInterval(pollFunction, 1000);
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelQobuzSync(urlHash) {
+    try {
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_qobuz_playlist) return;
+
+        const playlistId = state.qobuz_playlist_id;
+        const response = await fetch(`/api/qobuz/sync/cancel/${playlistId}`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+
+        const syncId = state && state.syncPlaylistId;
+        if (syncId && _syncProgressCallbacks[syncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncId] });
+            delete _syncProgressCallbacks[syncId];
+        }
+
+        updateQobuzCardPhase(playlistId, 'discovered');
+        updateQobuzModalButtons(urlHash, 'discovered');
+        showToast('Qobuz sync cancelled', 'info');
+    } catch (error) {
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateQobuzCardSyncProgress(playlistId, progress) {
+    const state = qobuzPlaylistStates[playlistId];
+    if (!state || !state.playlist || !progress) return;
+    state.lastSyncProgress = progress;
+
+    const card = document.getElementById(`qobuz-card-${playlistId}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
+}
+
+function updateQobuzModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`tidal-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+
+    const totalEl = document.getElementById(`tidal-total-${urlHash}`);
+    const matchedEl = document.getElementById(`tidal-matched-${urlHash}`);
+    const failedEl = document.getElementById(`tidal-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`tidal-percentage-${urlHash}`);
+
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+}
+
+function updateQobuzModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+async function startQobuzDownloadMissing(urlHash) {
+    try {
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_qobuz_playlist) return;
+
+        const discoveryResults = state.discoveryResults || state.discovery_results;
+        if (!discoveryResults) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+
+        const spotifyTracks = [];
+        for (const result of discoveryResults) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            } else if (result.spotify_track && result.status_class === 'found') {
+                const albumData = result.spotify_album || 'Unknown Album';
+                const albumObject = typeof albumData === 'object' && albumData !== null
+                    ? albumData
+                    : { name: typeof albumData === 'string' ? albumData : 'Unknown Album', album_type: 'album', images: [] };
+                spotifyTracks.push({
+                    id: result.spotify_id || 'unknown',
+                    name: result.spotify_track || 'Unknown Track',
+                    artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                    album: albumObject,
+                    duration_ms: 0
+                });
+            }
+        }
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const virtualPlaylistId = `qobuz_${state.qobuz_playlist_id}`;
+        const playlistName = state.playlist.name;
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) discoveryModal.classList.add('hidden');
+
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+    } catch (error) {
+        showToast(`Error starting downloads: ${error.message}`, 'error');
+    }
 }
 
 
@@ -2831,6 +3759,13 @@ function initializeSyncPage() {
     if (deezerArlRefreshBtn) {
         deezerArlRefreshBtn.removeEventListener('click', loadDeezerArlPlaylists);
         deezerArlRefreshBtn.addEventListener('click', loadDeezerArlPlaylists);
+    }
+
+    // Logic for the Qobuz refresh button
+    const qobuzRefreshBtn = document.getElementById('qobuz-refresh-btn');
+    if (qobuzRefreshBtn) {
+        qobuzRefreshBtn.removeEventListener('click', loadQobuzPlaylists);
+        qobuzRefreshBtn.addEventListener('click', loadQobuzPlaylists);
     }
 
     // Logic for the Deezer Link parse button
@@ -7288,6 +8223,8 @@ function openYouTubeDiscoveryModal(urlHash) {
             console.log('🔄 Resuming sync polling...');
             if (state.is_tidal_playlist) {
                 startTidalSyncPolling(urlHash);
+            } else if (state.is_qobuz_playlist) {
+                startQobuzSyncPolling(urlHash);
             } else if (state.is_deezer_playlist) {
                 startDeezerSyncPolling(urlHash);
             } else if (state.is_spotify_public_playlist) {
@@ -7301,8 +8238,9 @@ function openYouTubeDiscoveryModal(urlHash) {
             }
         }
     } else {
-        // Create new modal (support YouTube, Tidal, Deezer, Beatport, ListenBrainz, Spotify Public, and Mirrored)
+        // Create new modal (support YouTube, Tidal, Qobuz, Deezer, Beatport, ListenBrainz, Spotify Public, and Mirrored)
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
         const isSpotifyPublic = state.is_spotify_public_playlist;
         const isBeatport = state.is_beatport_playlist;
@@ -7313,18 +8251,20 @@ function openYouTubeDiscoveryModal(urlHash) {
             isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
                 isDeezer ? '🎵 Deezer Playlist Discovery' :
                     isTidal ? '🎵 Tidal Playlist Discovery' :
-                        isBeatport ? '🎵 Beatport Chart Discovery' :
-                            isLastfmRadio ? '📻 Last.fm Radio Discovery' :
-                                isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
-                                    '🎵 YouTube Playlist Discovery';
+                        isQobuz ? '🎵 Qobuz Playlist Discovery' :
+                            isBeatport ? '🎵 Beatport Chart Discovery' :
+                                isLastfmRadio ? '📻 Last.fm Radio Discovery' :
+                                    isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
+                                        '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
             isSpotifyPublic ? 'Spotify' :
                 isDeezer ? 'Deezer' :
                     isTidal ? 'Tidal' :
-                        isBeatport ? 'Beatport' :
-                            isLastfmRadio ? 'Last.fm' :
-                                isListenBrainz ? 'LB' :
-                                    'YT';
+                        isQobuz ? 'Qobuz' :
+                            isBeatport ? 'Beatport' :
+                                isLastfmRadio ? 'Last.fm' :
+                                    isListenBrainz ? 'LB' :
+                                        'YT';
 
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
@@ -7332,7 +8272,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic, isLastfmRadio)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic, isLastfmRadio, isQobuz)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -7414,6 +8354,19 @@ function openYouTubeDiscoveryModal(urlHash) {
                                             🔍 Search
                                         </button>
                                     </div>
+
+                                    <!-- MBID escape hatch: paste a MusicBrainz recording URL or UUID
+                                         to bypass fuzzy search and resolve directly to that record. -->
+                                    <div class="search-input-group" style="margin-top: 8px;">
+                                        <input type="text"
+                                               id="fix-modal-mbid-input"
+                                               placeholder="Or paste MusicBrainz recording URL / MBID"
+                                               class="fix-modal-input"
+                                               style="flex: 1;">
+                                        <button class="search-btn" onclick="lookupDiscoveryFixByMbid()">
+                                            🔗 Look up
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <!-- Search results -->
@@ -7465,6 +8418,8 @@ function openYouTubeDiscoveryModal(urlHash) {
             console.log('🔄 Modal opened in syncing phase - starting immediate polling...');
             if (state.is_tidal_playlist) {
                 startTidalSyncPolling(urlHash);
+            } else if (state.is_qobuz_playlist) {
+                startQobuzSyncPolling(urlHash);
             } else if (state.is_deezer_playlist) {
                 startDeezerSyncPolling(urlHash);
             } else if (state.is_spotify_public_playlist) {
@@ -7487,6 +8442,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 
     const isTidal = state && state.is_tidal_playlist;
+    const isQobuz = state && state.is_qobuz_playlist;
     const isDeezer = state && state.is_deezer_playlist;
     const isSpotifyPublic = state && state.is_spotify_public_playlist;
     const isBeatport = state && state.is_beatport_playlist;
@@ -7530,6 +8486,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isQobuz) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isDeezer) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
@@ -7547,6 +8505,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isQobuz) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isDeezer) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
@@ -7570,7 +8530,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button — reset and re-run discovery (only for sources with reset endpoints)
             if (isBeatport) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -7599,6 +8559,22 @@ function getModalActionButtons(urlHash, phase, state = null) {
             } else if (isTidal) {
                 return `
                     <button class="modal-btn modal-btn-danger" onclick="cancelTidalSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="tidal-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="tidal-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="tidal-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="tidal-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="tidal-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            } else if (isQobuz) {
+                // Qobuz reuses the tidal-* id namespace for the sync-status row
+                // because updateQobuzModalSyncProgress targets those exact IDs.
+                // Keeping the markup byte-identical to Tidal avoids a separate
+                // CSS pass; only the cancel handler differs.
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelQobuzSync('${urlHash}')">❌ Cancel Sync</button>
                     <div class="playlist-modal-sync-status" id="tidal-sync-status-${urlHash}" style="display: flex;">
                         <span class="sync-stat total-tracks">♪ <span id="tidal-total-${urlHash}">0</span></span>
                         <span class="sync-separator">/</span>
@@ -7667,6 +8643,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isQobuz) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
@@ -7682,6 +8660,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isQobuz) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
@@ -7694,7 +8674,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button (only for sources with reset endpoints)
             if (isBeatport) {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -7712,6 +8692,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isQobuz) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isDeezer) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
@@ -7728,6 +8710,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isQobuz) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isDeezer) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
@@ -7742,7 +8726,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button (only for sources with reset endpoints)
             if (isBeatport) {
                 dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
                 dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -7753,8 +8737,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false, isLastfmRadio = false) {
-    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))))));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false, isLastfmRadio = false, isQobuz = false) {
+    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isQobuz ? 'Qobuz' : (isTidal ? 'Tidal' : 'YouTube')))))));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -7786,12 +8770,13 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false, isLi
 
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
+    const isQobuz = state.is_qobuz_playlist;
     const isDeezer = state.is_deezer_playlist;
     const isSpotifyPublic = state.is_spotify_public_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isListenBrainz = state.is_listenbrainz_playlist;
     const isMirrored = state.is_mirrored_playlist;
-    const platform = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'spotify_public' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube')))));
+    const platform = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'spotify_public' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isQobuz ? 'qobuz' : (isBeatport ? 'beatport' : 'youtube'))))));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
@@ -7956,7 +8941,8 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
                     (state?.is_deezer_playlist ? 'deezer' :
                         (state?.is_listenbrainz_playlist ? 'listenbrainz' :
                             (state?.is_tidal_playlist ? 'tidal' :
-                                (state?.is_beatport_playlist ? 'beatport' : 'youtube')))));
+                                (state?.is_qobuz_playlist ? 'qobuz' :
+                                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'))))));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -8027,13 +9013,14 @@ function closeYouTubeDiscoveryModal(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (state) {
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
         const isSpotifyPublic = state.is_spotify_public_playlist;
         const isBeatport = state.is_beatport_playlist;
 
         // Reset to 'discovered' phase if modal is closed after completion (like Tidal does)
         if (state.phase === 'sync_complete' || state.phase === 'download_complete') {
-            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))} state after completion`);
+            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isQobuz ? 'Qobuz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))))} state after completion`);
 
             if (isSpotifyPublic) {
                 // Spotify Public: Extract url_hash and reset state
@@ -8127,6 +9114,37 @@ function closeYouTubeDiscoveryModal(urlHash) {
                         });
                     } catch (error) {
                         console.warn('⚠️ Error updating backend Tidal phase:', error);
+                    }
+                }
+            } else if (isQobuz) {
+                // Qobuz: same shape as Tidal — preserve discovery data,
+                // reset phase to 'discovered', push update to backend.
+                const qobuzPlaylistId = state.qobuz_playlist_id || null;
+                if (qobuzPlaylistId && qobuzPlaylistStates[qobuzPlaylistId]) {
+                    const preservedData = {
+                        playlist: qobuzPlaylistStates[qobuzPlaylistId].playlist,
+                        discovery_results: qobuzPlaylistStates[qobuzPlaylistId].discovery_results,
+                        spotify_matches: qobuzPlaylistStates[qobuzPlaylistId].spotify_matches,
+                        discovery_progress: qobuzPlaylistStates[qobuzPlaylistId].discovery_progress,
+                        convertedSpotifyPlaylistId: qobuzPlaylistStates[qobuzPlaylistId].convertedSpotifyPlaylistId
+                    };
+
+                    delete qobuzPlaylistStates[qobuzPlaylistId].download_process_id;
+                    delete qobuzPlaylistStates[qobuzPlaylistId].phase;
+
+                    Object.assign(qobuzPlaylistStates[qobuzPlaylistId], preservedData);
+                    qobuzPlaylistStates[qobuzPlaylistId].phase = 'discovered';
+
+                    updateQobuzCardPhase(qobuzPlaylistId, 'discovered');
+
+                    try {
+                        fetch(`/api/qobuz/update_phase/${qobuzPlaylistId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                    } catch (error) {
+                        console.warn('⚠️ Error updating backend Qobuz phase:', error);
                     }
                 }
             } else if (isBeatport) {
@@ -8440,6 +9458,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
 
         // Convert discovery results to a format compatible with the download modal
@@ -8476,7 +9495,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         }
 
         // Create a virtual playlist for the download system
-        const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isDeezer ? `deezer_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : `youtube_${urlHash}`)));
+        const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isDeezer ? `deezer_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : (isQobuz ? `qobuz_${urlHash}` : `youtube_${urlHash}`))));
         const playlistName = state.playlist.name;
 
         // Store reference for card navigation

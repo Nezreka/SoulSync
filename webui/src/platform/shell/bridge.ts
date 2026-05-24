@@ -1,5 +1,7 @@
 import type { AnyRouter } from '@tanstack/react-router';
 
+import type { ShellStatusPayload } from './status';
+
 import {
   getShellRouteByPageId,
   normalizeShellPath,
@@ -17,6 +19,7 @@ export interface ShellProfileContext {
 export interface ShellContext {
   bridge: ShellBridge;
   profile: ShellProfileContext;
+  status?: ShellStatusPayload | null;
 }
 
 export type ShellBridge = NonNullable<typeof window.SoulSyncWebShellBridge>;
@@ -88,11 +91,18 @@ export function bindWindowWebRouter(router: AnyRouter) {
     async navigateToPage(pageId, options) {
       const route = getShellRouteByPageId(pageId);
       if (!route) return false;
+      if (pageId === 'artist-detail' && !options?.artistId) {
+        return false;
+      }
 
-      await router.navigate({
-        href: route.path,
-        replace: options?.replace === true,
-      });
+      let href: `/${string}` = route.path;
+      if (pageId === 'artist-detail' && options?.artistId) {
+        const source = options.artistSource ? String(options.artistSource) : 'library';
+        href =
+          `/artist-detail/${encodeURIComponent(source)}/${encodeURIComponent(String(options.artistId))}` as `/${string}`;
+      }
+
+      await router.navigate({ href, replace: options?.replace === true });
       return true;
     },
   };

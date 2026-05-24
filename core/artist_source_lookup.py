@@ -25,7 +25,7 @@ logger = logging.getLogger("artist_source_lookup")
 
 
 SOURCE_ONLY_ARTIST_SOURCES = frozenset({
-    "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz",
+    "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz", "amazon",
 })
 
 
@@ -36,6 +36,7 @@ SOURCE_ID_FIELD = {
     "discogs": "discogs_id",
     "hydrabase": "soul_id",
     "musicbrainz": "musicbrainz_id",
+    "amazon": "amazon_id",
 }
 
 

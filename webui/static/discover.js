@@ -269,10 +269,9 @@ function displayDiscoverHeroArtist(artist) {
     if (discographyBtn && artistId) {
         discographyBtn.setAttribute('data-artist-id', artistId);
         discographyBtn.setAttribute('data-artist-name', artist.artist_name);
-        // Source the click handler will pass to navigateToArtistDetail. Without
-        // this, source-only hero artists (which is the typical case — they
-        // come from discover similar-artists, not the library) get looked up
-        // as library IDs and 404. Backend always includes artist.source.
+        discographyBtn.href = buildArtistDetailPath(artistId, artist.source || null);
+        // Keep the source on the link so source-only hero artists resolve to
+        // the correct artist-detail URL instead of being treated as library IDs.
         if (artist.source) discographyBtn.setAttribute('data-source', artist.source);
         else discographyBtn.removeAttribute('data-source');
         // Also store both IDs for cross-source operations
@@ -387,6 +386,7 @@ async function watchAllHeroArtists(btn) {
 
 // Cache for recommended artists data so reopening is instant
 let _recommendedArtistsCache = null;
+let _recommendedArtistsSource = null;
 
 async function openRecommendedArtistsModal() {
     let modal = document.getElementById('recommended-artists-modal');
@@ -404,7 +404,7 @@ async function openRecommendedArtistsModal() {
     // If cached, render instantly and refresh watchlist statuses
     if (_recommendedArtistsCache) {
         modal.style.display = 'flex';
-        renderRecommendedArtistsModal(modal, _recommendedArtistsCache);
+        renderRecommendedArtistsModal(modal, _recommendedArtistsCache, _recommendedArtistsSource);
         checkRecommendedWatchlistStatuses(_recommendedArtistsCache);
         return;
     }
@@ -444,13 +444,14 @@ async function openRecommendedArtistsModal() {
             return;
         }
 
-        // Render cards immediately with fallback images
-        _recommendedArtistsCache = data.artists;
-        renderRecommendedArtistsModal(modal, data.artists);
-
         // Phase 2: Enrich with images/genres progressively in batches of 50
         // Skip artists that already have cached metadata from the initial response
         const source = data.source || 'spotify';
+        // Render cards immediately with fallback images
+        _recommendedArtistsCache = data.artists;
+        _recommendedArtistsSource = source;
+        renderRecommendedArtistsModal(modal, data.artists, source);
+
         const idKey = source === 'spotify' ? 'spotify_artist_id' : source === 'deezer' ? 'deezer_artist_id' : 'itunes_artist_id';
         const allIds = data.artists
             .filter(a => !a.image_url)  // Only enrich artists without cached images
@@ -521,7 +522,7 @@ async function openRecommendedArtistsModal() {
     }
 }
 
-function renderRecommendedArtistsModal(modal, artists) {
+function renderRecommendedArtistsModal(modal, artists, source = null) {
     modal.innerHTML = `
         <div class="modal-container playlist-modal recommended-modal">
             <div class="playlist-modal-header">
@@ -555,30 +556,36 @@ function renderRecommendedArtistsModal(modal, artists) {
         const similarText = artist.occurrence_count > 1
             ? `Similar to ${artist.occurrence_count} in your watchlist`
             : 'Similar to an artist in your watchlist';
+                const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
                                  data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
-                                 data-artist-id="${artist.artist_id}">
+                                 data-artist-id="${artist.artist_id}"
+                                 data-artist-source="${escapeHtml(artistSource)}">
                                 <button class="recommended-card-watchlist-btn"
                                         data-artist-id="${artist.artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}">
                                     Add to Watchlist
                                 </button>
-                                <div class="recommended-card-image">
-                                    ${artist.image_url ? `
-                                        <img src="${artist.image_url}"
-                                             alt="${escapeHtml(artist.artist_name)}"
-                                             loading="lazy"
-                                             onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">
-                                    ` : `
-                                        <div class="recommended-card-image-fallback">🎤</div>
-                                    `}
-                                </div>
-                                <div class="recommended-card-info">
-                                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                                    <span class="recommended-card-similarity">${similarText}</span>
-                                    <div class="recommended-card-genres">${genreTags}</div>
-                                </div>
+                                <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+                                   onclick="closeRecommendedArtistsModal()"
+                                   style="display:block;text-decoration:none;color:inherit;">
+                                    <div class="recommended-card-image">
+                                        ${artist.image_url ? `
+                                            <img src="${artist.image_url}"
+                                                 alt="${escapeHtml(artist.artist_name)}"
+                                                 loading="lazy"
+                                                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">
+                                        ` : `
+                                            <div class="recommended-card-image-fallback">🎤</div>
+                                        `}
+                                    </div>
+                                    <div class="recommended-card-info">
+                                        <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
+                                        <span class="recommended-card-similarity">${similarText}</span>
+                                        <div class="recommended-card-genres">${genreTags}</div>
+                                    </div>
+                                </a>
                             </div>
                         `;
     }).join('')}
@@ -595,15 +602,6 @@ function renderRecommendedArtistsModal(modal, artists) {
             if (watchlistBtn) {
                 e.stopPropagation();
                 toggleRecommendedWatchlist(watchlistBtn);
-                return;
-            }
-
-            const card = e.target.closest('.recommended-artist-card');
-            if (card) {
-                const artistId = card.getAttribute('data-artist-id');
-                const nameEl = card.querySelector('.recommended-card-name');
-                const artistName = nameEl ? nameEl.textContent : '';
-                viewRecommendedArtistDiscography(artistId, artistName);
             }
         });
     }
@@ -734,11 +732,6 @@ async function checkRecommendedWatchlistStatuses(artists) {
     }
 }
 
-async function viewRecommendedArtistDiscography(artistId, artistName) {
-    closeRecommendedArtistsModal();
-    navigateToArtistDetail(artistId, artistName);
-}
-
 async function checkAllHeroWatchlistStatus() {
     const btn = document.getElementById('discover-hero-watch-all');
     if (!btn || !discoverHeroArtists || discoverHeroArtists.length === 0) return;
@@ -804,26 +797,6 @@ function jumpToDiscoverHeroSlide(index) {
     discoverHeroIndex = index;
     displayDiscoverHeroArtist(discoverHeroArtists[discoverHeroIndex]);
     updateDiscoverHeroIndicators();
-}
-
-async function viewDiscoverHeroDiscography() {
-    const button = document.getElementById('discover-hero-discography');
-    if (!button) return;
-
-    const artistId = button.getAttribute('data-artist-id');
-    const artistName = button.getAttribute('data-artist-name');
-    // Pass the source so /api/artist-detail knows to synthesize from that
-    // metadata provider instead of doing a local DB lookup. Hero similar
-    // artists are almost always source-only (not in the library).
-    const source = button.getAttribute('data-source') || null;
-
-    if (!artistId || !artistName) {
-        console.error('No artist data found for discography view');
-        return;
-    }
-
-    console.log(`🎵 Navigating to artist detail for: ${artistName} (source: ${source || 'library'})`);
-    navigateToArtistDetail(artistId, artistName, source);
 }
 
 function showDiscoverHeroEmpty() {
@@ -3940,6 +3913,35 @@ function hideSeasonalSections() {
     }
 }
 
+function _buildDiscoverArtistContext(source, artistName, sourceData = {}, albumData = {}) {
+    const normalizedSource = (source || '').toString().toLowerCase();
+    const albumArtist = Array.isArray(albumData.artists) ? albumData.artists[0] : null;
+    const activeSource = (source || sourceData.active_source || sourceData.source || '').toString().toLowerCase();
+    const context = {
+        ...sourceData,
+        id: sourceData.active_source_id || sourceData.artist_id || albumArtist?.id || '',
+        name: artistName || sourceData.artist_name || sourceData.name || albumArtist?.name || '',
+        source: normalizedSource || activeSource || '',
+        spotify_artist_id: sourceData.spotify_artist_id || sourceData.artist_spotify_id || ((normalizedSource || activeSource) === 'spotify' ? albumArtist?.id : '') || '',
+        itunes_artist_id: sourceData.itunes_artist_id || sourceData.artist_itunes_id || ((normalizedSource || activeSource) === 'itunes' ? albumArtist?.id : '') || '',
+        deezer_artist_id: sourceData.deezer_artist_id || sourceData.artist_deezer_id || sourceData.deezer_id || ((normalizedSource || activeSource) === 'deezer' ? albumArtist?.id : '') || '',
+        discogs_artist_id: sourceData.discogs_artist_id || sourceData.artist_discogs_id || sourceData.discogs_id || '',
+        amazon_artist_id: sourceData.amazon_artist_id || sourceData.artist_amazon_id || sourceData.amazon_id || '',
+        soul_id: sourceData.soul_id || sourceData.hydrabase_artist_id || '',
+    };
+
+    const sourceIdBySource = {
+        spotify: context.spotify_artist_id,
+        itunes: context.itunes_artist_id,
+        deezer: context.deezer_artist_id,
+        discogs: context.discogs_artist_id,
+        amazon: context.amazon_artist_id,
+        hydrabase: context.soul_id,
+    };
+    context.id = sourceIdBySource[normalizedSource || activeSource] || context.id;
+    return context;
+}
+
 async function openDownloadModalForSeasonalAlbum(albumIndex) {
     const album = discoverSeasonalAlbums[albumIndex];
     if (!album) {
@@ -3999,14 +4001,12 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
         const virtualPlaylistId = `seasonal_album_${albumId}`;
 
         // Pass proper artist/album context for album download (1 worker + source reuse)
-        const artistContext = {
-            name: album.artist_name,
-            source: source
-        };
+        const artistContext = _buildDiscoverArtistContext(source, album.artist_name, album, albumData);
 
         const albumContext = {
             id: albumData.id,
             name: albumData.name,
+            source: source,
             album_type: albumData.album_type || 'album',
             total_tracks: albumData.total_tracks || 0,
             release_date: albumData.release_date || '',
@@ -4354,6 +4354,31 @@ async function unblockDiscoveryArtist(id, name) {
 
 let _yourArtistsCtrl = null;
 
+function _pickArtistDetailSource(artist) {
+    if (!artist) return { id: '', source: '' };
+    const sourceFields = {
+        spotify: 'spotify_artist_id',
+        deezer: 'deezer_artist_id',
+        itunes: 'itunes_artist_id',
+        discogs: 'discogs_artist_id',
+        amazon: 'amazon_artist_id',
+        musicbrainz: 'musicbrainz_artist_id',
+        hydrabase: 'soul_id',
+    };
+    const active = String(artist.active_source || artist.source || '').toLowerCase();
+    const activeField = sourceFields[active];
+    if (activeField && artist[activeField]) {
+        return { id: String(artist[activeField]), source: active };
+    }
+    for (const [source, field] of Object.entries(sourceFields)) {
+        if (artist[field]) return { id: String(artist[field]), source };
+    }
+    if (artist.active_source_id && activeField) {
+        return { id: String(artist.active_source_id), source: active };
+    }
+    return { id: '', source: '' };
+}
+
 async function loadYourArtists() {
     if (!_yourArtistsCtrl) {
         _yourArtistsCtrl = createDiscoverSectionController({
@@ -4454,12 +4479,10 @@ function _renderYourArtistCard(artist) {
     ).join('');
 
     const watchlistClass = artist.on_watchlist ? 'active' : '';
-    const hasId = artist.active_source_id && artist.active_source_id !== '';
+    const detailSource = _pickArtistDetailSource(artist);
+    const hasId = detailSource.id && detailSource.id !== '';
 
-    // Navigate to Artists page (name click) — source artist id, needs inline view
-    const navAction = hasId
-        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(artist.active_source_id)}', '${escapeForInlineJs(artist.artist_name)}')`
-        : '';
+    const detailHref = hasId ? buildArtistDetailPath(detailSource.id, detailSource.source) : '';
 
     // Open info modal (card body click) — pass pool ID so we can look up all data
     const infoAction = hasId
@@ -4487,7 +4510,9 @@ function _renderYourArtistCard(artist) {
                 <div class="ya-card-info-row">
                     <div class="ya-origin-dots">${originDots}</div>
                 </div>
-                <div class="ya-card-name" ${navAction ? `onclick="${navAction}"` : ''}>${_esc(artist.artist_name)}</div>
+                ${hasId
+            ? `<a class="ya-card-name" href="${detailHref}" onclick="event.stopPropagation(); document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="display:block;text-decoration:none;color:inherit;">${_esc(artist.artist_name)}</a>`
+            : `<div class="ya-card-name">${_esc(artist.artist_name)}</div>`}
             </div>
         </div>
     `;
@@ -4637,10 +4662,10 @@ async function openYourArtistInfoModal(poolId) {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span>Explore</span>
                 </button>
-                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToArtistDetail('${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(pool.active_source || '')}' || null)">
+                <a class="ya-header-btn ya-viewall-btn" href="${buildArtistDetailPath(artistId, pool.active_source || null)}" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="text-decoration:none;color:inherit;">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-                </button>
+                </a>
             `;
         }
     } catch (err) {
@@ -6537,9 +6562,9 @@ function _artMapSetupInteraction(canvas) {
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); ${hasId ? `openYourArtistInfoModal_direct(${JSON.stringify(node).replace(/"/g, '&quot;')})` : ''}">
                 <span>&#9432;</span> Artist Info
             </div>
-            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); navigateToArtistDetail('${escapeForInlineJs(bestId)}', '${escapeForInlineJs(node.name)}', '${bestSource}' || null)">
+            <a class="artmap-ctx-item" href="${bestId ? buildArtistDetailPath(bestId, bestSource) : '#'}" onclick="_artMapHideContextMenu()" ${bestId ? '' : 'aria-disabled="true" style="pointer-events:none;opacity:0.5;text-decoration:none;color:inherit;"'}>
                 <span>&#128191;</span> View Discography
-            </div>
+            </a>
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(bestId)}','${bestSource}',null)">
                 <span>&#128065;</span> ${node.type === 'watchlist' ? 'On Watchlist' : 'Add to Watchlist'}
             </div>
@@ -6724,11 +6749,12 @@ async function openYourArtistInfoModal_direct(node) {
     let bestId = '', bestSource = '';
     // Check what the active source is
     const activeSource = window._yaActiveSource || 'spotify';
-    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
-        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id']
-            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id']
-                : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id'];
-    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs' };
+    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id', 'musicbrainz_id']
+            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id', 'musicbrainz_id']
+                : activeSource === 'musicbrainz' ? ['musicbrainz_id', 'spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
+                    : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id', 'musicbrainz_id'];
+    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs', musicbrainz_id: 'musicbrainz' };
     for (const key of sourceOrder) {
         if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
     }
@@ -6815,7 +6841,7 @@ function _renderByltTrackCard(t) {
     return `
         <div class="discover-card">
             <div class="discover-card-image">
-                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
             </div>
             <div class="discover-card-title">${_esc(t.name)}</div>
             <div class="discover-card-artist">${_esc(t.artist)}</div>
@@ -6955,7 +6981,7 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
                     duration_ms: track.duration_ms || 0, track_number: track.track_number || 0,
                 };
             });
-            const artistContext = { id: albumData.artists?.[0]?.id || '', name: artistName, source: resolvedSource };
+            const artistContext = _buildDiscoverArtistContext(resolvedSource, artistName, item, albumData);
             const albumContext = { id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album', total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '', images: albumData.images || [] };
             await openDownloadMissingModalForYouTube(`discover_cache_${resolvedId}`, albumData.name, spotifyTracks, artistContext, albumContext);
             hideLoadingOverlay();
@@ -7015,11 +7041,7 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
             };
         });
 
-        const artistContext = {
-            id: albumData.artists?.[0]?.id || '',
-            name: item.artist_name || albumData.artists?.[0]?.name || '',
-            source: source,
-        };
+        const artistContext = _buildDiscoverArtistContext(source, item.artist_name || albumData.artists?.[0]?.name || '', item, albumData);
         const albumContext = {
             id: albumData.id,
             name: albumData.name,
@@ -7220,9 +7242,9 @@ async function openGenreDeepDive(genre) {
                 // Always open on Artists page with discography — pass source for correct routing
                 const imgUrl = _esc(a.image_url || '');
                 const artSource = _esc(a.source || '');
-                const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToArtistDetail('${_esc(a.entity_id)}','${_esc(a.name)}','${artSource}' || null)"`;
+                const detailHref = a.entity_id ? buildArtistDetailPath(a.entity_id, a.source || null) : '#';
                 const srcClass = (a.source || '').toLowerCase();
-                return `<div class="genre-dive-artist" ${clickAction}>
+                return `<a class="genre-dive-artist" href="${detailHref}" onclick="document.getElementById('genre-deep-dive-modal').remove()" style="text-decoration:none;color:inherit;">
                             <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">
                                 ${!a.image_url ? '<span>🎤</span>' : ''}
                             </div>
@@ -7230,7 +7252,7 @@ async function openGenreDeepDive(genre) {
                             <div class="genre-dive-artist-name">${_esc(a.name)}</div>
                             ${a.followers ? `<div class="genre-dive-artist-meta">${_fmtNum(a.followers)} followers</div>` : ''}
                             ${a.library_id ? '<div class="genre-dive-artist-badge">In Library</div>' : ''}
-                        </div>`;
+                        </a>`;
             }).join('')}
                 </div>
             </div>`;
@@ -7939,11 +7961,7 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
         const virtualPlaylistId = `discover_album_${albumId}`;
 
         // CRITICAL FIX: Pass proper artist/album context for modal display
-        const artistContext = {
-            id: source === 'spotify' ? album.artist_spotify_id : source === 'deezer' ? album.artist_deezer_id : album.artist_itunes_id,
-            name: album.artist_name,
-            source: source
-        };
+        const artistContext = _buildDiscoverArtistContext(source, album.artist_name, album, albumData);
 
         const albumContext = {
             id: albumData.id,
@@ -8717,4 +8735,3 @@ if (document.readyState === 'loading') {
 }
 
 // ============================================================================
-

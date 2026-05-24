@@ -16,6 +16,7 @@ from enum import Enum
 from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
 from core.matching_engine import MusicMatchingEngine
+from core.matching.version_mismatch import is_acceptable_version_mismatch
 from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid.verification")
@@ -485,12 +486,33 @@ class AcoustIDVerification:
             expected_version = _detect_title_version(expected_track_name)
             matched_version = _detect_title_version(matched_title)
             if expected_version != matched_version:
-                msg = (
-                    f"Version mismatch: expected '{expected_track_name}' ({expected_version}) "
-                    f"but file is '{matched_title}' ({matched_version})"
-                )
-                logger.warning(f"AcoustID verification FAILED (version mismatch) - {msg}")
-                return VerificationResult.FAIL, msg
+                # Issue #607 (AfonsoG6): MusicBrainz often stores live
+                # recordings with bare titles ("Clarity") while the
+                # release entry carries the venue annotation ("Clarity
+                # (Live at Blossom Music Center, ...)"). The fingerprint
+                # correctly identifies the LIVE recording; only the
+                # title text is bare. Helper accepts the one-sided bare
+                # case when fingerprint + bare-title + artist all agree.
+                # Two-sided version mismatches (live vs remix etc) stay
+                # strict — those are genuinely different recordings.
+                if is_acceptable_version_mismatch(
+                    expected_version, matched_version,
+                    fingerprint_score=best_score,
+                    title_similarity=title_sim,
+                    artist_similarity=artist_sim,
+                ):
+                    logger.info(
+                        f"AcoustID version annotation differs (expected={expected_version}, "
+                        f"matched={matched_version}) but fingerprint+title+artist all match — "
+                        f"accepting (likely MB metadata gap on a live/version-annotated recording)"
+                    )
+                else:
+                    msg = (
+                        f"Version mismatch: expected '{expected_track_name}' ({expected_version}) "
+                        f"but file is '{matched_title}' ({matched_version})"
+                    )
+                    logger.warning(f"AcoustID verification FAILED (version mismatch) - {msg}")
+                    return VerificationResult.FAIL, msg
 
             # Step 5: Decide pass/fail based on similarity
             if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim >= ARTIST_MATCH_THRESHOLD:
@@ -593,12 +615,19 @@ class AcoustIDVerification:
             # downloading Mr. Morale: three tracks (Rich Interlude, Savior
             # Interlude, Savior) all received the wrong R.O.T.C audio file
             # because of this leak.
-            top = recordings[0]
-            top_title = top.get('title', '?') or ''
-            top_artist = top.get('artist', '?') or ''
+            # Use the BEST matching recording's strings here (not
+            # `recordings[0]`) so the failure message reports the same
+            # candidate the title/artist similarity scores came from.
+            # Issue #607 (AfonsoG6) example 1: the prior code mixed
+            # `recordings[0]`'s strings (which can be empty) with
+            # `best_rec`'s scores, producing nonsense reasons like
+            # "file identified as '' by '' (artist=100%)" when a later
+            # recording in the list scored well on artist.
+            display_title = matched_title or '?'
+            display_artist = matched_artist or '?'
             has_non_ascii = (
                 any(ord(c) > 127 for c in (expected_track_name or ''))
-                or any(ord(c) > 127 for c in top_title)
+                or any(ord(c) > 127 for c in display_title)
             )
             language_script_skip = (
                 best_score >= 0.95
@@ -618,18 +647,16 @@ class AcoustIDVerification:
                 )
                 msg = (
                     f"Title/artist mismatch but fingerprint confidence very high ({best_score:.2f}): "
-                    f"AcoustID='{top_title}' by '{top_artist}', "
+                    f"AcoustID='{display_title}' by '{display_artist}', "
                     f"expected '{expected_track_name}' by '{expected_artist_name}' — "
                     f"{reason}"
                 )
                 logger.info(f"AcoustID verification SKIPPED (high confidence) - {msg}")
                 return VerificationResult.SKIP, msg
 
-            # Low fingerprint score + no metadata match — file is likely wrong
-            # `top`, `top_title`, `top_artist` already resolved above for the
-            # skip-eligibility check.
+            # Low fingerprint score + no metadata match — file is likely wrong.
             msg = (
-                f"Audio mismatch: file identified as '{top_title}' by '{top_artist}', "
+                f"Audio mismatch: file identified as '{display_title}' by '{display_artist}', "
                 f"expected '{expected_track_name}' by '{expected_artist_name}' "
                 f"(title={title_sim:.0%}, artist={artist_sim:.0%})"
             )
