@@ -703,13 +703,17 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             logger.debug("[Downloads] persistent history lookup failed: %s", exc)
             history_entries = []
 
+        appended_history = 0
         for entry in history_entries:
+            if len(items) >= limit or appended_history >= history_limit:
+                break
             item = _build_history_download_item(entry)
             identity = _download_identity(item.get('title'), item.get('artist'), item.get('album'))
             if identity in live_identities:
                 continue
             items.append(item)
             live_identities.add(identity)
+            appended_history += 1
 
     # Sort: active first (by priority), then by timestamp desc within each group
     items.sort(key=lambda x: (x['priority'], -x['timestamp']))
