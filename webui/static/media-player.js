@@ -1383,6 +1383,54 @@ let npMediaSource = null;
 let npVizAnimFrame = null;
 let npVizInitialized = false;
 
+function npQueueHasNext() {
+    if (npQueue.length === 0) return false;
+    return npShuffleOn
+        ? npQueue.length > 1
+        : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all');
+}
+
+function npEnsureCurrentTrackInQueue() {
+    if (!currentTrack || !currentTrack.is_library || npQueue.length > 0) return;
+    npQueue.push({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album,
+        file_path: currentTrack.filename || currentTrack.file_path,
+        filename: currentTrack.filename || currentTrack.file_path,
+        is_library: true,
+        image_url: currentTrack.image_url,
+        id: currentTrack.id,
+        artist_id: currentTrack.artist_id,
+        album_id: currentTrack.album_id,
+        bitrate: currentTrack.bitrate,
+        sample_rate: currentTrack.sample_rate
+    });
+    npQueueIndex = 0;
+    renderNpQueue();
+    updateNpPrevNextButtons();
+}
+
+function npSetRadioMode(enabled, options = {}) {
+    const { toast = true, fetchIfNeeded = false } = options;
+    npRadioMode = Boolean(enabled);
+    const radioBtn = document.getElementById('np-radio-btn');
+    if (radioBtn) {
+        radioBtn.classList.toggle('active', npRadioMode);
+        radioBtn.setAttribute('aria-pressed', npRadioMode ? 'true' : 'false');
+        radioBtn.title = npRadioMode
+            ? 'Radio mode on - similar tracks will auto-queue'
+            : 'Radio mode - auto-add similar tracks';
+    }
+    if (toast) {
+        showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
+    }
+    if (npRadioMode && fetchIfNeeded && currentTrack && currentTrack.id && !npLoadingQueueItem && !npQueueHasNext()) {
+        npEnsureCurrentTrackInQueue();
+        npFetchRadioTracks();
+    }
+}
+
 function initExpandedPlayer() {
     const closeBtn = document.getElementById('np-close-btn');
     const overlay = document.getElementById('np-modal-overlay');
@@ -1462,40 +1510,9 @@ function initExpandedPlayer() {
     const radioBtn = document.getElementById('np-radio-btn');
     if (radioBtn) {
         radioBtn.addEventListener('click', () => {
-            npRadioMode = !npRadioMode;
-            radioBtn.classList.toggle('active', npRadioMode);
-            showToast(npRadioMode ? 'Radio mode on — similar tracks will auto-queue' : 'Radio mode off', 'success');
-            // Immediately fetch radio tracks if turned on while playing with empty/exhausted queue
-            if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
-                const hasNext = npQueue.length > 0 && (npShuffleOn
-                    ? npQueue.length > 1
-                    : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
-                if (!hasNext) {
-                    // Add current track to queue first so it appears as "now playing" in context
-                    if (npQueue.length === 0 && currentTrack.is_library) {
-                        npQueue.push({
-                            title: currentTrack.title,
-                            artist: currentTrack.artist,
-                            album: currentTrack.album,
-                            file_path: currentTrack.filename || currentTrack.file_path,
-                            filename: currentTrack.filename || currentTrack.file_path,
-                            is_library: true,
-                            image_url: currentTrack.image_url,
-                            id: currentTrack.id,
-                            artist_id: currentTrack.artist_id,
-                            album_id: currentTrack.album_id,
-                            bitrate: currentTrack.bitrate
-                        });
-                        npQueueIndex = 0;
-                        renderNpQueue();
-                        updateNpPrevNextButtons();
-                    }
-                    npFetchRadioTracks();
-                }
-            }
+            npSetRadioMode(!npRadioMode, { fetchIfNeeded: true });
         });
     }
-
     // Action link (Go to Artist)
     const gotoArtistBtn = document.getElementById('np-goto-artist');
     if (gotoArtistBtn) {

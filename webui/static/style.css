@@ -47281,26 +47281,56 @@ textarea.enhanced-meta-field-input {
 
 /* Radio mode button */
 .np-radio-btn {
-    background: none;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.35);
+    --np-radio-rgb: 79, 195, 247;
+    position: relative;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, rgba(var(--np-radio-rgb), 0.1), rgba(var(--np-radio-rgb), 0.025)),
+        rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(var(--np-radio-rgb), 0.22);
+    color: rgba(255, 255, 255, 0.62);
     font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 6px;
+    font-weight: 650;
+    line-height: 1;
+    padding: 7px 10px;
+    border-radius: 999px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 4px;
-    transition: all 0.15s ease;
+    gap: 6px;
+    min-height: 30px;
+    transition: all 0.18s ease;
 }
 .np-radio-btn:hover {
-    color: rgba(255, 255, 255, 0.7);
-    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(var(--np-radio-rgb), 0.42);
+    background:
+        linear-gradient(135deg, rgba(var(--np-radio-rgb), 0.16), rgba(var(--np-radio-rgb), 0.04)),
+        rgba(255, 255, 255, 0.055);
 }
 .np-radio-btn.active {
-    color: rgb(var(--accent-rgb));
-    border-color: rgba(var(--accent-rgb), 0.3);
-    background: rgba(var(--accent-rgb), 0.08);
+    color: #ffffff;
+    border-color: rgba(var(--np-radio-rgb), 0.55);
+    background:
+        linear-gradient(135deg, rgba(var(--np-radio-rgb), 0.28), rgba(var(--np-radio-rgb), 0.07)),
+        rgba(255, 255, 255, 0.06);
+    box-shadow: 0 0 0 1px rgba(var(--np-radio-rgb), 0.08), 0 0 18px rgba(var(--np-radio-rgb), 0.12);
+}
+.np-radio-label {
+    position: relative;
+    z-index: 1;
+}
+.np-radio-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.24);
+    box-shadow: none;
+    transition: all 0.18s ease;
+}
+.np-radio-btn.active .np-radio-pulse {
+    background: rgb(var(--np-radio-rgb));
+    box-shadow: 0 0 12px rgba(var(--np-radio-rgb), 0.95);
 }
 .np-queue-header-actions {
     display: flex;
