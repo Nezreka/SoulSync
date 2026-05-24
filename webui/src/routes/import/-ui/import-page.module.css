@@ -969,19 +969,12 @@
   color: #ef4444;
 }
 
-/* ========================================
-   END IMPORT PAGE
-    .importPageFileChip {
-        cursor: pointer;
-    }
-
-    .importPageMatchRow {
-        cursor: pointer;
-    }
-}
-
-/* Import Page — small screen */
 @media (max-width: 768px) {
+  .importPageFileChip,
+  .importPageMatchRow {
+    cursor: pointer;
+  }
+
   .importPageContainer {
     padding: 16px;
   }
