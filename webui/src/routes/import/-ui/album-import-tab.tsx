@@ -216,6 +216,16 @@ function useAlbumImportViewModel() {
 
 type AlbumImportViewModel = ReturnType<typeof useAlbumImportViewModel>;
 
+type AlbumMetaFields = {
+  total_tracks?: number | null;
+  release_date?: string | null;
+  format?: string | null;
+  country?: string | null;
+  disambiguation?: string | null;
+  status?: string | null;
+  label?: string | null;
+};
+
 export function AlbumImportTab() {
   const viewModel = useAlbumImportViewModel();
 
@@ -394,6 +404,8 @@ function AlbumCard({
   onSelect: (album: ImportAlbumResult) => void;
 }) {
   const resultSourceBadge = getImportSourceBadgeText(album.source, lookupSource);
+  const metaParts = getAlbumMetaParts(album);
+  const detailParts = getAlbumDetailParts(album);
 
   return (
     <button type="button" className={styles.importPageAlbumCard} onClick={() => onSelect(album)}>
@@ -409,9 +421,10 @@ function AlbumCard({
       <div className={styles.importPageAlbumCardArtist} title={album.artist}>
         {album.artist}
       </div>
-      <div className={styles.importPageAlbumCardMeta}>
-        {album.total_tracks || 0} tracks · {album.release_date?.substring(0, 4) || ''}
-      </div>
+      <div className={styles.importPageAlbumCardMeta}>{metaParts.join(' · ')}</div>
+      {detailParts.length > 0 ? (
+        <div className={styles.importPageAlbumCardDetail}>{detailParts.join(' · ')}</div>
+      ) : null}
       {resultSourceBadge ? (
         <div className={styles.importPageAlbumCardSource}>{resultSourceBadge}</div>
       ) : null}
@@ -448,6 +461,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
     matchOverrides,
   );
   const matchedCount = effectiveMatches.length;
+  const heroMetaParts = albumMatch?.album ? getAlbumMetaParts(albumMatch.album) : [];
 
   return albumMatchLoading ? (
     <div className={styles.importPageEmptyState}>Matching files to tracklist...</div>
@@ -467,10 +481,7 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
         <div className={styles.importPageAlbumHeroInfo}>
           <div className={styles.importPageAlbumHeroTitle}>{albumMatch.album.name}</div>
           <div className={styles.importPageAlbumHeroArtist}>{albumMatch.album.artist}</div>
-          <div className={styles.importPageAlbumHeroMeta}>
-            {albumMatch.album.total_tracks || albumMatch.matches?.length || 0} tracks ·{' '}
-            {albumMatch.album.release_date?.substring(0, 4) || ''}
-          </div>
+          <div className={styles.importPageAlbumHeroMeta}>{heroMetaParts.join(' · ')}</div>
         </div>
       </div>
 
@@ -616,4 +627,18 @@ function AlbumMatchPanel({ viewModel }: { viewModel: AlbumImportViewModel }) {
   ) : (
     <div className={styles.importPageEmptyState}>Select an album to start matching files.</div>
   );
+}
+
+function getAlbumMetaParts(album: AlbumMetaFields) {
+  return [
+    `${album.total_tracks || 0} tracks`,
+    album.release_date?.substring(0, 4) || '',
+    album.format || '',
+    album.country || '',
+    album.disambiguation || '',
+  ].filter(Boolean);
+}
+
+function getAlbumDetailParts(album: AlbumMetaFields) {
+  return [album.status || '', album.label || ''].filter(Boolean);
 }
