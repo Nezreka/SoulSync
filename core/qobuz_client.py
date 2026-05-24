@@ -887,11 +887,14 @@ class QobuzClient(DownloadSourcePlugin):
         logger.info(f"Retrieved Qobuz playlist '{normalized['name']}' with {len(tracks)} tracks")
         return normalized
 
-    def get_user_favorite_tracks(self, limit: int = 500) -> List[Dict[str, Any]]:
+    def get_user_favorite_tracks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch the authenticated user's favorited tracks.
 
         Mirrors ``TidalClient.get_collection_tracks`` — the Sync page's
-        Favorite Tracks card pulls from here on click.
+        Favorite Tracks card pulls from here on click. By default this
+        fetches the full favorites collection so the card count and the
+        discovered track list cannot silently diverge. Pass ``limit`` for
+        explicit capped callers.
         """
         if not self.is_authenticated():
             logger.warning("Qobuz not authenticated — cannot list favorite tracks")
@@ -899,8 +902,11 @@ class QobuzClient(DownloadSourcePlugin):
 
         tracks: List[Dict[str, Any]] = []
         offset = 0
-        while len(tracks) < limit:
-            page_size = min(self._PLAYLIST_PAGE_SIZE, limit - len(tracks))
+        while True:
+            page_size = self._PLAYLIST_PAGE_SIZE if limit is None else min(self._PLAYLIST_PAGE_SIZE, limit - len(tracks))
+            if page_size <= 0:
+                break
+
             data = self._api_request('favorite/getUserFavorites', {
                 'type': 'tracks',
                 'limit': page_size,
@@ -923,6 +929,8 @@ class QobuzClient(DownloadSourcePlugin):
             total = int(container.get('total', len(tracks)) or len(tracks))
             offset += len(items)
             if offset >= total or len(items) < page_size:
+                break
+            if limit is not None and len(tracks) >= limit:
                 break
 
         logger.info(f"Retrieved {len(tracks)} Qobuz favorite tracks")
