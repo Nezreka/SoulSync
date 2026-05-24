@@ -4315,7 +4315,7 @@ function _promptNotifyConfig(groupName) {
             if (type === 'discord_webhook') {
                 config = { webhook_url: (overlay.querySelector('#deploy-notify-url')?.value || '').trim() };
             } else if (type === 'telegram') {
-                config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim(), thread_id:  (overlay.querySelector('#deploy-notify-thread')?.value || '').trim() };
+                config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim(), thread_id: (overlay.querySelector('#deploy-notify-thread')?.value || '').trim() };
             } else if (type === 'pushbullet') {
                 config = { access_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim() };
             } else {
@@ -5447,7 +5447,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
     if (blockType === 'telegram') {
         const botToken = _escAttr(config.bot_token || '');
         const chatId = _escAttr(config.chat_id || '');
-        const threadID = _escAttr(config.thread_id || '');
+        const threadId = _escAttr(config.thread_id || '');
         return `<div class="config-row">
             <label>Bot Token</label>
             <input type="text" id="cfg-${slotKey}-bot_token" value="${botToken}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
@@ -5458,7 +5458,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         <div class="config-row">
             <label>Thread ID</label>
-            <input type="text" id="cfg-${slotKey}-thread_id" value="${threadID}" placeholder="Optional integer">
+            <input type="text" id="cfg-${slotKey}-thread_id" value="${threadId}" placeholder="Optional integer">
         </div>
         <div class="config-row">
             <label>Message</label>

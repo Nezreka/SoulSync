@@ -6530,7 +6530,7 @@ const TOOL_HELP_CONTENT = {
             <ul>
                 <li><strong>Bot Token:</strong> Your Telegram bot token (from @BotFather)</li>
                 <li><strong>Chat ID:</strong> The chat/group ID to send messages to</li>
-                <li><strong>Thread ID:</strong> Thread ID</li>
+                <li><strong>Thread ID:</strong> Optional — only set if your group uses Telegram topics. Leave blank for the main chat.</li>
                 <li><strong>Message Template:</strong> Custom message with variable placeholders</li>
             </ul>
 
