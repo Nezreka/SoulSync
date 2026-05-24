@@ -3413,6 +3413,14 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.1': [
+        { date: 'May 24, 2026 — 2.6.1 release' },
+        { title: 'React Import page polish', desc: 'Import now runs through the React route stack with album, singles, and auto-import tabs plus the state fixes needed for reliable Vite builds.' },
+        { title: 'Fix: album-bundle track numbering', desc: 'Soulseek-first hybrid and album-level source flows now preserve each track number during staging instead of importing every file as track 01.' },
+        { title: 'Fix: completed downloads stay visible', desc: 'The Downloads view now keeps a bounded completed-history tail so finished downloads remain visible after the live task disappears.' },
+        { title: 'MusicBrainz release variants', desc: 'Manual album search now surfaces concrete MusicBrainz releases with richer variant metadata instead of collapsing everything to the release group.' },
+        { title: 'Artist and radio UI refinements', desc: 'Artist detail actions and the Now Playing radio-mode controls were restyled and aligned for the refreshed artist workflow.' },
+    ],
     '2.6.0': [
         { date: 'May 24, 2026 — 2.6.0 release' },
         { title: 'Qobuz playlist sync', desc: 'new Qobuz tab on the Sync page. Connect Qobuz in Settings → Connections, hit Refresh on the tab, and your Qobuz playlists + Favorite Tracks show up alongside Tidal and Deezer. clicks run the same discovery → sync → download flow as the other sources.', page: 'sync' },
@@ -3906,7 +3914,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.6.0';
+    return versions[0] || '2.6.1';
 }
 
 function openWhatsNew() {
