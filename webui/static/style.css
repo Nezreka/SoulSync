@@ -40322,6 +40322,18 @@ div.artist-hero-badge {
     font-size: 10px;
     color: rgba(255, 255, 255, 0.3);
     margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.import-page-album-card-detail {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.36);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .import-page-album-card-source {

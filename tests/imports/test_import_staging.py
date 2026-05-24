@@ -105,6 +105,55 @@ def test_search_import_albums_falls_back_when_primary_has_no_results(monkeypatch
     assert spotify_client.calls == [("Album Two", {"limit": 2, "allow_fallback": False})]
 
 
+def test_search_import_albums_preserves_musicbrainz_release_variants(monkeypatch):
+    musicbrainz_client = FakeClient([
+        SimpleNamespace(
+            id="rel-clean",
+            name="Shock Value",
+            artists=["Timbaland"],
+            release_date="2007-04-03",
+            total_tracks=17,
+            image_url="",
+            album_type="album",
+            format="CD",
+            country="US",
+            status="Official",
+            disambiguation="clean",
+            release_group_id="rg-shock",
+        ),
+        SimpleNamespace(
+            id="rel-explicit",
+            name="Shock Value",
+            artists=["Timbaland"],
+            release_date="2007-04-03",
+            total_tracks=18,
+            image_url="",
+            album_type="album",
+            format="CD",
+            country="US",
+            status="Official",
+            disambiguation="explicit",
+            release_group_id="rg-shock",
+        ),
+    ])
+
+    monkeypatch.setattr(import_staging, "get_primary_source", lambda: "musicbrainz")
+    monkeypatch.setattr(import_staging, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(import_staging, "get_client_for_source", lambda source: musicbrainz_client)
+    monkeypatch.setattr(
+        import_staging,
+        "_search_albums_for_source",
+        lambda source, client, query, limit=5: client.search_albums(query, limit=limit),
+    )
+
+    results = import_staging.search_import_albums("Timbaland Shock Value", limit=12)
+
+    assert [result["id"] for result in results] == ["rel-clean", "rel-explicit"]
+    assert [result["total_tracks"] for result in results] == [17, 18]
+    assert results[1]["disambiguation"] == "explicit"
+    assert results[1]["release_group_id"] == "rg-shock"
+
+
 def test_search_import_tracks_prefers_primary_source(monkeypatch):
     deezer_client = FakeClient([
         SimpleNamespace(
