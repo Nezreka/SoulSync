@@ -179,6 +179,8 @@ def try_dispatch(
                 'phase': 'analysis',
                 'album_bundle_state': 'fallback',
                 'album_bundle_error': err,
+                'album_bundle_private_staging': False,
+                'album_bundle_staging_path': None,
             })
             return False
         logger.error("[Album Bundle] %s flow failed for '%s': %s",
