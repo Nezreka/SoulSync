@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 
 import { Select } from '@/components/form';
 import { Show } from '@/components/primitives';
@@ -73,13 +73,6 @@ function IssueBoard() {
     ...issueListQueryOptions(profileId, params),
   });
 
-  const openIssue = (issueId: number) => {
-    void navigate({
-      to: Route.fullPath,
-      search: (prev) => ({ ...prev, issueId }),
-    });
-  };
-
   const onCategoryChange = (category: IssuesSearch['category']) => {
     void navigate({
       to: Route.fullPath,
@@ -112,7 +105,6 @@ function IssueBoard() {
         issuesError={issuesQuery.error}
         issuesLoading={issuesQuery.isLoading}
         showReporterName={isAdmin}
-        onIssueSelect={openIssue}
         statusFilter={params.status}
       />
     </div>
@@ -225,7 +217,6 @@ function IssueBoardList({
   issues,
   issuesError,
   issuesLoading,
-  onIssueSelect,
   showReporterName,
   statusFilter,
 }: {
@@ -233,7 +224,6 @@ function IssueBoardList({
   issues: IssueRecord[];
   issuesError: unknown;
   issuesLoading: boolean;
-  onIssueSelect: (issueId: number) => void;
   showReporterName: boolean;
   statusFilter: IssuesSearch['status'];
 }) {
@@ -285,7 +275,6 @@ function IssueBoardList({
         key={issue.id}
         issue={issue}
         showReporterName={showReporterName}
-        onIssueSelect={onIssueSelect}
       />
     ));
   }
@@ -294,11 +283,9 @@ function IssueBoardList({
 function IssueBoardCard({
   issue,
   showReporterName,
-  onIssueSelect,
 }: {
   issue: IssueRecord;
   showReporterName: boolean;
-  onIssueSelect: (issueId: number) => void;
 }) {
   const snapshot = parseSnapshot(issue.snapshot_data);
   const artwork = getIssueArtwork(snapshot);
@@ -311,11 +298,11 @@ function IssueBoardCard({
   const createdDate = formatIssueDate(issue.created_at);
 
   return (
-    <button
+    <Link
       className={styles.issueCard}
-      type="button"
       data-testid={`issue-card-${issue.id}`}
-      onClick={() => onIssueSelect(issue.id)}
+      to={Route.fullPath}
+      search={(prev) => ({ ...prev, issueId: issue.id })}
     >
       <div className={styles.issueCardLeft}>
         {artwork ? (
@@ -360,7 +347,7 @@ function IssueBoardCard({
           title={`${issue.priority} priority`}
         />
       </div>
-    </button>
+    </Link>
   );
 }
 
