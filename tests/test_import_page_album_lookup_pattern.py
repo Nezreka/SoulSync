@@ -82,19 +82,39 @@ def test_select_album_handler_reads_cache(js_source: str):
         )
 
 
-def test_card_renderers_populate_cache_before_onclick(js_source: str):
-    """Both renderers (suggestion card + search-result card) must write
-    to ``_albumLookup`` before emitting the onclick — otherwise the
-    click handler reads an empty cache for newly-displayed albums."""
-    cache_writes = re.findall(
-        r"_albumLookup\[a\.id\]\s*=\s*\{",
-        js_source,
+def test_card_renderer_populates_cache_before_onclick(js_source: str):
+    """The shared card-renderer ``_renderSuggestionCard`` must write to
+    ``_albumLookup`` before emitting the onclick — otherwise the click
+    handler reads an empty cache for newly-displayed albums.
+
+    Originally this test required >=2 cache writes (one per inline
+    renderer), but the search-results inline render was consolidated
+    into a single ``_renderSuggestionCard`` call as part of the #681
+    fix. The invariant now is: the shared renderer populates the cache,
+    and every render call site goes through it (no inline duplicates)."""
+    # 1. The shared renderer must contain the cache write.
+    match = re.search(
+        r"function _renderSuggestionCard\([^)]*\) \{(.*?)^\}",
+        js_source, re.DOTALL | re.MULTILINE,
     )
-    assert len(cache_writes) >= 2, (
-        f"Expected >=2 _albumLookup writes (one per card renderer - "
-        f"suggestions + search results), found {len(cache_writes)}. "
-        "Adding a new card-rendering site without populating the cache "
-        "regresses issue #524 for that path."
+    assert match, "_renderSuggestionCard function not found"
+    body = match.group(1)
+    assert re.search(r"_albumLookup\[a\.id\]\s*=\s*\{", body), (
+        "_renderSuggestionCard no longer writes to _albumLookup before "
+        "emitting the onclick — every card rendered through this helper "
+        "would have an empty cache on click, regressing issue #524."
+    )
+
+    # 2. No inline card render allowed outside the shared helper.
+    #    A second `_albumLookup[a.id] = {` write means a caller is
+    #    re-implementing the renderer instead of calling the helper —
+    #    that's exactly the duplication the #524 fix consolidated away.
+    cache_writes = re.findall(r"_albumLookup\[a\.id\]\s*=\s*\{", js_source)
+    assert len(cache_writes) == 1, (
+        f"Expected exactly 1 _albumLookup write (inside _renderSuggestionCard), "
+        f"found {len(cache_writes)}. A new inline card-render site has "
+        "duplicated the cache-write logic — route the new caller through "
+        "_renderSuggestionCard(a, primarySource) instead."
     )
 
 

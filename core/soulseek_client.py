@@ -18,7 +18,13 @@ from core.download_plugins.types import (
     SearchResult,
     TrackResult,
 )
+from core.download_plugins.album_bundle import (
+    copy_audio_files_atomically,
+    get_poll_interval,
+    get_poll_timeout,
+)
 from core.download_plugins.base import DownloadSourcePlugin
+from utils.async_helpers import run_async
 
 logger = get_logger("soulseek_client")
 
@@ -1456,6 +1462,326 @@ class SoulseekClient(DownloadSourcePlugin):
 
         logger.info(f"Downloading: {best_result.filename} ({quality_info}) from {best_result.username}")
         return await self.download(best_result.username, best_result.filename, best_result.size)
+
+    def download_album_to_staging(
+        self,
+        album_name: str,
+        artist_name: str,
+        staging_dir: str,
+        progress_callback=None,
+        *,
+        preferred_source: Optional[Dict[str, Any]] = None,
+        preferred_tracks: Optional[List[TrackResult]] = None,
+    ) -> Dict[str, Any]:
+        """One-shot Soulseek album download.
+
+        Search for one album folder, enqueue files from that single
+        ``username + folder_path``, wait for slskd to report completion,
+        then copy completed files into the private album-bundle staging
+        directory. If the folder cannot be selected or enqueued cleanly,
+        callers may fall back to the existing per-track Soulseek flow.
+        Once files are staged, the per-track staging matcher owns final
+        import, same as torrent / usenet album bundles.
+        """
+        result: Dict[str, Any] = {
+            'success': False,
+            'files': [],
+            'error': None,
+            'fallback': True,
+            'partial': False,
+        }
+        if not self.is_configured():
+            result['error'] = 'Soulseek source not configured'
+            return result
+
+        def _emit(state: str, **extra) -> None:
+            if progress_callback:
+                try:
+                    progress_callback({'state': state, **extra})
+                except Exception as cb_exc:
+                    logger.debug("[Soulseek album] progress callback failed: %s", cb_exc)
+
+        picked = None
+        folder_tracks = list(preferred_tracks or [])
+        username = (preferred_source or {}).get('username', '') if preferred_source else ''
+        folder_path = (preferred_source or {}).get('folder_path', '') if preferred_source else ''
+        if username and folder_path:
+            logger.info(
+                "[Soulseek album] Using preflight-selected folder %s:%s",
+                username,
+                folder_path,
+            )
+            _emit('searching', query=f"{artist_name} {album_name}".strip(), release=folder_path)
+        else:
+            query = f"{artist_name} {album_name}".strip()
+            _emit('searching', query=query)
+            try:
+                _, albums = run_async(self.search(query, timeout=30))
+            except Exception as exc:
+                result['error'] = f'Soulseek album search failed: {exc}'
+                return result
+
+            if not albums:
+                result['error'] = 'No complete Soulseek album folders found'
+                return result
+
+            picked = self._pick_album_bundle_folder(albums, album_name, artist_name)
+            if picked is None:
+                result['error'] = 'No suitable Soulseek album folder after filtering'
+                return result
+
+            folder_path = getattr(picked, 'album_path', '') or ''
+            username = getattr(picked, 'username', '') or ''
+        if not username or not folder_path:
+            result['error'] = 'No suitable Soulseek album folder after filtering'
+            return result
+
+        logger.info(
+            "[Soulseek album] Picked %s:%s (%s tracks, quality=%s)",
+            username,
+            folder_path,
+            getattr(picked, 'track_count', 0),
+            getattr(picked, 'dominant_quality', ''),
+        )
+        _emit(
+            'queued',
+            release=getattr(picked, 'album_title', folder_path) if picked else folder_path,
+            count=getattr(picked, 'track_count', 0) if picked else len(folder_tracks),
+        )
+
+        if not folder_tracks:
+            try:
+                browse_files = run_async(self.browse_user_directory(username, folder_path))
+            except Exception as exc:
+                result['error'] = f'Soulseek folder browse failed: {exc}'
+                return result
+
+            if not browse_files:
+                result['error'] = 'Could not browse selected Soulseek album folder'
+                return result
+
+            folder_tracks = self.parse_browse_results_to_tracks(
+                username,
+                browse_files,
+                directory=folder_path,
+            )
+        folder_tracks = self.filter_results_by_quality_preference(folder_tracks)
+        if not folder_tracks:
+            result['error'] = 'Selected Soulseek album folder contained no audio files'
+            return result
+
+        transfer_keys: Dict[tuple, TrackResult] = {}
+        _emit(
+            'downloading',
+            release=getattr(picked, 'album_title', folder_path) if picked else folder_path,
+            count=len(folder_tracks),
+        )
+        for track in folder_tracks:
+            try:
+                download_id = run_async(self.download(track.username, track.filename, track.size))
+            except Exception as exc:
+                logger.warning("[Soulseek album] Failed to enqueue %s: %s", track.filename, exc)
+                continue
+            if download_id:
+                transfer_keys[(track.username, track.filename)] = track
+
+        if not transfer_keys:
+            result['error'] = 'No Soulseek album files could be enqueued'
+            return result
+
+        result['fallback'] = False
+        completed = self._poll_album_bundle_downloads(transfer_keys, _emit)
+        if not completed:
+            result['error'] = 'Soulseek album download failed or timed out'
+            return result
+
+        _emit('staging', release=getattr(picked, 'album_title', folder_path) if picked else folder_path)
+        copied = copy_audio_files_atomically(completed, Path(staging_dir))
+        if not copied:
+            result['error'] = 'No Soulseek album files copied to staging'
+            return result
+
+        partial = len(copied) < len(transfer_keys)
+        if partial:
+            logger.warning(
+                "[Soulseek album] Staged partial album for '%s': %d/%d files",
+                album_name,
+                len(copied),
+                len(transfer_keys),
+            )
+        else:
+            logger.info("[Soulseek album] Staged %d files for '%s'", len(copied), album_name)
+        _emit('staged', count=len(copied))
+        result['success'] = True
+        result['files'] = copied
+        result['partial'] = partial
+        result['expected_count'] = len(transfer_keys)
+        result['completed_count'] = len(copied)
+        return result
+
+    def _pick_album_bundle_folder(
+        self,
+        albums: List[AlbumResult],
+        album_name: str,
+        artist_name: str,
+    ) -> Optional[AlbumResult]:
+        scored = []
+        for album in albums:
+            tracks = self.filter_results_by_quality_preference(list(getattr(album, 'tracks', []) or []))
+            if not tracks:
+                continue
+            album_text = f"{getattr(album, 'album_title', '')} {getattr(album, 'album_path', '')}"
+            artist_text = f"{getattr(album, 'artist', '')} {getattr(album, 'album_path', '')}"
+            album_score = self._bundle_similarity(album_name, album_text)
+            artist_score = self._bundle_similarity(artist_name, artist_text)
+            track_count = int(getattr(album, 'track_count', 0) or len(tracks))
+            count_score = 1.0 if track_count >= 3 else 0.35
+            score = (
+                album_score * 0.42
+                + artist_score * 0.22
+                + count_score * 0.12
+                + min(1.0, len(tracks) / max(1, track_count)) * 0.12
+                + float(getattr(album, 'quality_score', 0.0) or 0.0) * 0.12
+            )
+            scored.append((score, len(tracks), album))
+        if not scored:
+            return None
+        scored.sort(key=lambda row: (row[0], row[1], getattr(row[2], 'quality_score', 0.0)), reverse=True)
+        best_score, _, best = scored[0]
+        if best_score < 0.58:
+            logger.warning("[Soulseek album] Best folder score %.3f below threshold", best_score)
+            return None
+        return best
+
+    @staticmethod
+    def _bundle_similarity(expected: Any, actual: Any) -> float:
+        import re
+        from difflib import SequenceMatcher
+        left = re.sub(r'[^a-z0-9]+', ' ', str(expected or '').lower()).strip()
+        right = re.sub(r'[^a-z0-9]+', ' ', str(actual or '').lower()).strip()
+        if not left or not right:
+            return 0.0
+        if left == right:
+            return 1.0
+        left_words = set(left.split())
+        right_words = set(right.split())
+        if left_words and left_words.issubset(right_words):
+            return 0.92
+        if right_words and right_words.issubset(left_words):
+            return 0.86
+        if left in right or right in left:
+            return min(len(left), len(right)) / max(len(left), len(right))
+        return SequenceMatcher(None, left, right).ratio()
+
+    def _poll_album_bundle_downloads(self, transfer_keys: Dict[tuple, TrackResult], emit) -> List[Path]:
+        deadline = time.monotonic() + get_poll_timeout()
+        interval = get_poll_interval()
+        completed_paths: Dict[tuple, Path] = {}
+        failed_states: Dict[tuple, str] = {}
+        while time.monotonic() < deadline:
+            try:
+                downloads = run_async(self.get_all_downloads())
+            except Exception as exc:
+                logger.warning("[Soulseek album] Poll error: %s", exc)
+                downloads = []
+
+            by_key = {}
+            for dl in downloads:
+                exact_key = (dl.username, dl.filename)
+                by_key[exact_key] = dl
+                basename_key = (
+                    dl.username,
+                    os.path.basename((dl.filename or '').replace('\\', '/')),
+                )
+                by_key.setdefault(basename_key, dl)
+            for key, track in transfer_keys.items():
+                if key in completed_paths or key in failed_states:
+                    continue
+                dl = by_key.get(key) or by_key.get((
+                    key[0],
+                    os.path.basename((key[1] or '').replace('\\', '/')),
+                ))
+                state = (getattr(dl, 'state', '') or '') if dl else ''
+                if any(token in state for token in ('Errored', 'Failed', 'Rejected', 'TimedOut')):
+                    failed_states[key] = state or 'Failed'
+                    logger.warning(
+                        "[Soulseek album] Transfer failed from selected folder: %s (%s)",
+                        os.path.basename((track.filename or '').replace('\\', '/')),
+                        failed_states[key],
+                    )
+                    continue
+                if dl and ('Completed' in state or 'Succeeded' in state):
+                    if dl.size and dl.transferred and dl.transferred < dl.size:
+                        continue
+                    path = self._resolve_downloaded_album_file(track.filename)
+                    if path:
+                        completed_paths[key] = path
+                    else:
+                        logger.debug(
+                            "[Soulseek album] Transfer completed but local file not found yet: %s",
+                            track.filename,
+                        )
+            emit(
+                'downloading',
+                progress=round(len(completed_paths) / max(1, len(transfer_keys)) * 100, 1),
+                count=len(completed_paths),
+                failed=len(failed_states),
+            )
+            if completed_paths and len(completed_paths) + len(failed_states) == len(transfer_keys):
+                logger.warning(
+                    "[Soulseek album] Selected folder finished with %d completed and %d failed transfer(s)",
+                    len(completed_paths),
+                    len(failed_states),
+                )
+                return list(completed_paths.values())
+            if not completed_paths and len(failed_states) == len(transfer_keys):
+                logger.warning("[Soulseek album] All %d transfer(s) failed from selected folder", len(failed_states))
+                return []
+            if len(completed_paths) == len(transfer_keys):
+                return list(completed_paths.values())
+            time.sleep(interval)
+        pending = len(transfer_keys) - len(completed_paths) - len(failed_states)
+        if completed_paths:
+            logger.warning(
+                "[Soulseek album] Timed out with partial album: %d completed, %d failed, %d pending",
+                len(completed_paths),
+                len(failed_states),
+                pending,
+            )
+            return list(completed_paths.values())
+        logger.error(
+            "[Soulseek album] Timed out waiting for %d album files (%d failed, %d pending)",
+            len(transfer_keys),
+            len(failed_states),
+            pending,
+        )
+        return []
+
+    def _resolve_downloaded_album_file(self, remote_filename: str) -> Optional[Path]:
+        basename = os.path.basename((remote_filename or '').replace('\\', '/'))
+        if not basename:
+            return None
+        candidates = [
+            self.download_path / remote_filename,
+            self.download_path / basename,
+        ]
+        normalized_parts = [p for p in remote_filename.replace('\\', '/').split('/') if p]
+        if normalized_parts:
+            candidates.append(self.download_path.joinpath(*normalized_parts))
+        for candidate in candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        try:
+            matches = list(self.download_path.rglob(basename))
+        except OSError:
+            matches = []
+        for match in matches:
+            if match.is_file():
+                return match
+        return None
     
     async def check_connection(self) -> bool:
         """Check if slskd is running and connected to the Soulseek network"""

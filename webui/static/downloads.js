@@ -64,10 +64,11 @@ function _wingItAction(urlHash, action) {
         const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
         const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
         const isTidal = state.is_tidal_playlist;
+        const isQobuz = state.is_qobuz_playlist;
         const isLB = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isDeezer = state.is_deezer_playlist;
-        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
         if (!tracks.length) {
             showToast('No tracks available for Wing It', 'error');
@@ -347,10 +348,11 @@ async function _wingItFromModal(urlHash) {
     const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
     const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
     const isTidal = state.is_tidal_playlist;
+    const isQobuz = state.is_qobuz_playlist;
     const isLB = state.is_listenbrainz_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isDeezer = state.is_deezer_playlist;
-    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isQobuz ? 'Qobuz' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
 
     if (!tracks.length) {
         showToast('No tracks available for Wing It', 'error');
@@ -582,7 +584,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                                    onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
@@ -2143,7 +2145,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -2611,6 +2613,89 @@ function updateTrackAnalysisResults(playlistId, results) {
             matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
     }
+}
+
+function getModalTrackArtistName(track, fallbackArtist = '') {
+    const formatted = formatArtists(track?.artists);
+    if (formatted && formatted !== 'Unknown Artist') return formatted;
+    return track?.artist_name || track?.artist || fallbackArtist || formatted || '';
+}
+
+function getModalTrackAlbumTitle(track, process = null) {
+    if (track?.album) {
+        if (typeof track.album === 'string') return track.album;
+        if (track.album.name) return track.album.name;
+        if (track.album.title) return track.album.title;
+    }
+    if (process?.album) {
+        return process.album.name || process.album.title || '';
+    }
+    return '';
+}
+
+function renderModalTrackPlayButton(playlistId, trackIndex) {
+    return `<button class="modal-track-play-btn" onclick="event.stopPropagation(); playDownloadModalTrack('${escapeForInlineJs(playlistId)}', ${trackIndex})" title="Play track">&#9654;</button>`;
+}
+
+async function playTrackFromLibraryOrStream(track, albumTitle = '', artistName = '') {
+    const title = track?.title || track?.name || '';
+    if (!title) {
+        showToast('No track title available to play', 'error');
+        return;
+    }
+
+    if (track?.file_path && typeof playLibraryTrack === 'function') {
+        await playLibraryTrack({
+            id: track.id || track.track_id || null,
+            title,
+            file_path: track.file_path,
+            _stats_image: track._stats_image || track.album_thumb_url || null,
+            bitrate: track.bitrate,
+            artist_id: track.artist_id,
+            album_id: track.album_id
+        }, albumTitle, artistName);
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist: artistName })
+        });
+        const data = await res.json();
+        if (data.success && data.track && data.track.file_path && typeof playLibraryTrack === 'function') {
+            await playLibraryTrack({
+                ...data.track,
+                title: data.track.title || title,
+                _stats_image: data.track.album_thumb_url || data.track.artist_thumb_url || null
+            }, data.track.album_title || albumTitle, data.track.artist_name || artistName);
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed before stream fallback:', e);
+    }
+
+    if (typeof _gsPlayTrack === 'function') {
+        await _gsPlayTrack(title, artistName, albumTitle);
+    } else {
+        showToast('Playback is not available here', 'error');
+    }
+}
+
+async function playDownloadModalTrack(playlistId, trackIndex) {
+    const process = activeDownloadProcesses[playlistId];
+    const track = process?.tracks?.[trackIndex] || playlistTrackCache[playlistId]?.[trackIndex];
+    if (!track) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+
+    await playTrackFromLibraryOrStream(
+        track,
+        getModalTrackAlbumTitle(track, process),
+        getModalTrackArtistName(track, process?.artist?.name || '')
+    );
 }
 
 

@@ -207,6 +207,7 @@ def test_staging_suggestions_returns_cache_payload(monkeypatch):
         "get_import_suggestions_cache",
         lambda: {"suggestions": [{"album": "Album"}], "built": True},
     )
+    monkeypatch.setattr(import_routes, "_get_primary_source", lambda: "deezer")
 
     payload, status = staging_suggestions()
 
@@ -215,6 +216,7 @@ def test_staging_suggestions_returns_cache_payload(monkeypatch):
         "success": True,
         "suggestions": [{"album": "Album"}],
         "ready": True,
+        "primary_source": "deezer",
     }
 
 
@@ -303,7 +305,11 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
     payload, status = search_albums(runtime, "  Album  ", 99)
 
     assert status == 200
-    assert payload == {"success": True, "albums": [{"id": "album-1"}]}
+    assert payload == {
+        "success": True,
+        "albums": [{"id": "album-1"}],
+        "primary_source": "hydrabase",
+    }
     assert worker.enqueued == [("Album", "albums")]
     assert calls == [("Album", 50)]
 
@@ -313,6 +319,28 @@ def test_search_albums_requires_query():
 
     assert status == 400
     assert payload == {"success": False, "error": "Missing query parameter"}
+
+
+def test_search_albums_exposes_primary_source_when_chain_falls_back():
+    # Pins github issue #681: when the primary source returns nothing and the
+    # silent fallback chain (intentional, see core/auto_import_worker.py:1316)
+    # serves results from a different source, the response must carry both
+    # `primary_source` (what the user configured) and per-album `source`
+    # (what actually served the result) so the UI can warn the user.
+    runtime = ImportRouteRuntime(
+        get_primary_source=lambda: "musicbrainz",
+        search_import_albums=lambda query, limit: [
+            {"id": "deezer-1", "name": "Album", "source": "deezer"},
+        ],
+        logger=_FakeLogger(),
+    )
+
+    payload, status = search_albums(runtime, "Weapons of Mass Destruction", 12)
+
+    assert status == 200
+    assert payload["success"] is True
+    assert payload["primary_source"] == "musicbrainz"
+    assert payload["albums"][0]["source"] == "deezer"
 
 
 def test_search_tracks_enqueues_hydrabase_and_caps_limit():
@@ -329,7 +357,11 @@ def test_search_tracks_enqueues_hydrabase_and_caps_limit():
     payload, status = search_tracks(runtime, "  Track  ", 99)
 
     assert status == 200
-    assert payload == {"success": True, "tracks": [{"id": "track-1"}]}
+    assert payload == {
+        "success": True,
+        "tracks": [{"id": "track-1"}],
+        "primary_source": "hydrabase",
+    }
     assert worker.enqueued == [("Track", "tracks")]
     assert calls == [("Track", 30)]
 

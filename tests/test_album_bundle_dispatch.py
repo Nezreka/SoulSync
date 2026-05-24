@@ -56,17 +56,19 @@ def test_is_eligible_requires_album_flag() -> None:
                        album_name='X', artist_name='Y') is False
 
 
-def test_is_eligible_requires_torrent_or_usenet_mode() -> None:
-    for mode in ('soulseek', 'youtube', 'tidal', 'qobuz', 'hifi',
+def test_is_eligible_requires_album_bundle_mode() -> None:
+    for mode in ('youtube', 'tidal', 'qobuz', 'hifi',
                  'deezer_dl', 'amazon', 'lidarr', 'soundcloud', 'hybrid'):
         assert is_eligible(mode=mode, is_album=True,
                            album_name='X', artist_name='Y') is False
 
 
-def test_is_eligible_accepts_torrent_and_usenet() -> None:
+def test_is_eligible_accepts_torrent_usenet_and_soulseek() -> None:
     assert is_eligible(mode='torrent', is_album=True,
                        album_name='X', artist_name='Y') is True
     assert is_eligible(mode='usenet', is_album=True,
+                       album_name='X', artist_name='Y') is True
+    assert is_eligible(mode='soulseek', is_album=True,
                        album_name='X', artist_name='Y') is True
 
 
@@ -103,13 +105,13 @@ def test_dispatch_returns_false_when_not_album() -> None:
     plugin.download_album_to_staging.assert_not_called()
 
 
-def test_dispatch_returns_false_for_non_torrent_modes() -> None:
+def test_dispatch_returns_false_for_non_album_bundle_modes() -> None:
     state = _FakeState()
     plugin = MagicMock()
     result = try_dispatch(
         batch_id='b1', is_album=True,
         album_context={'name': 'X'}, artist_context={'name': 'Y'},
-        config_get=_config({'download_source.mode': 'soulseek'}),
+        config_get=_config({'download_source.mode': 'youtube'}),
         plugin_resolver=lambda _name: plugin, state=state,
     )
     assert result is False
@@ -234,6 +236,28 @@ def test_dispatch_failure_returns_true_so_master_stops() -> None:
     assert state.fields['phase'] == 'failed'
 
 
+def test_dispatch_fallback_failure_returns_false_for_per_track_flow() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {
+        'success': False,
+        'files': [],
+        'error': 'No complete Soulseek album folders found',
+        'fallback': True,
+    }
+    result = try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Album'}, artist_context={'name': 'Artist'},
+        config_get=_config({'download_source.mode': 'soulseek'}),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert result is False
+    assert state.failed_with == ''
+    assert state.fields['phase'] == 'analysis'
+    assert state.fields['album_bundle_state'] == 'fallback'
+    assert state.fields['album_bundle_error'] == 'No complete Soulseek album folders found'
+
+
 def test_dispatch_plugin_exception_treated_as_failure() -> None:
     """A bug / network error in the plugin must not propagate into
     the master worker — caught + treated as a normal failure so
@@ -267,6 +291,25 @@ def test_dispatch_strips_whitespace_from_names() -> None:
     args = plugin.download_album_to_staging.call_args
     assert args.args[0] == 'GNX'
     assert args.args[1] == 'Kendrick'
+
+
+def test_dispatch_source_override_uses_first_hybrid_source() -> None:
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.return_value = {'success': True, 'files': ['/x']}
+    seen = []
+
+    try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'GNX'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({'download_source.mode': 'hybrid'}),
+        plugin_resolver=lambda name: seen.append(name) or plugin,
+        state=state,
+        source_override='soulseek',
+    )
+
+    assert seen == ['soulseek']
+    assert state.fields['album_bundle_source'] == 'soulseek'
 
 
 def test_dispatch_progress_callback_mirrors_payload_to_state() -> None:

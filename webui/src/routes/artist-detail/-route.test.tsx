@@ -2,25 +2,9 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
-
 import { createAppQueryClient } from '@/app/query-client';
 import { AppRouterProvider, createAppRouter } from '@/app/router';
-
-function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
-  return {
-    getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: false })),
-    isPageAllowed: vi.fn(() => true),
-    getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'artist-detail'),
-    setActivePageChrome: vi.fn(),
-    activateLegacyPath: vi.fn(),
-    navigateToArtistDetail: vi.fn(),
-    cancelSimilarArtistsLoad: vi.fn(),
-    showReactHost: vi.fn(),
-    ...overrides,
-  };
-}
+import { createShellBridge } from '@/test/shell-bridge';
 
 function renderArtistDetailRoute(initialEntries = ['/artist-detail/library/42']) {
   const queryClient = createAppQueryClient();
@@ -87,7 +71,8 @@ describe('artist-detail route', () => {
       );
     });
 
-    const cancelSimilarArtistsLoad = window.SoulSyncWebShellBridge?.cancelSimilarArtistsLoad as ReturnType<typeof vi.fn>;
+    const cancelSimilarArtistsLoad = window.SoulSyncWebShellBridge
+      ?.cancelSimilarArtistsLoad as ReturnType<typeof vi.fn>;
     cancelSimilarArtistsLoad.mockClear();
 
     unmount();
