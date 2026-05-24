@@ -21,7 +21,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "recharts": "^3.8.1",
-    "zod": "^4.4.2"
+    "zod": "^4.4.2",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

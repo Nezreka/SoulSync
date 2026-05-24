@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   Button,
+  Checkbox,
   FormActions,
   FormError,
   FormField,
@@ -11,7 +12,9 @@ import {
   OptionButtonGroup,
   OptionCard,
   OptionCardGroup,
+  RangeInput,
   Select,
+  Switch,
   TextArea,
   TextInput,
 } from './form';
@@ -22,6 +25,9 @@ function FormDemo() {
   const [category, setCategory] = useState<'wrong_cover' | 'wrong_metadata'>('wrong_cover');
   const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [status, setStatus] = useState('open');
+  const [archive, setArchive] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [confidence, setConfidence] = useState(90);
 
   return (
     <form>
@@ -90,11 +96,31 @@ function FormDemo() {
         </Select>
       </FormField>
 
+      <FormField label="Archive" helperText="Shared checkbox primitive">
+        <Checkbox checked={archive} onCheckedChange={setArchive} />
+      </FormField>
+
+      <FormField label="Enabled" helperText="Shared switch primitive">
+        <Switch checked={enabled} onCheckedChange={setEnabled} />
+      </FormField>
+
+      <FormField label="Confidence" helperText="Shared range primitive">
+        <RangeInput
+          label="Confidence"
+          min={50}
+          max={100}
+          value={confidence}
+          onValueChange={setConfidence}
+        />
+      </FormField>
+
       <FormError message="Validation failed" />
 
       <FormActions>
         <Button type="button">Cancel</Button>
-        <Button type="submit">Save</Button>
+        <Button type="submit" variant="primary">
+          Save
+        </Button>
       </FormActions>
     </form>
   );
@@ -109,8 +135,24 @@ describe('form primitives', () => {
     expect(screen.getByText('Short summary')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Validation failed');
     expect(screen.getByLabelText('Status')).toHaveValue('open');
+    expect(screen.getByLabelText('Status')).toHaveAttribute('data-size', 'md');
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'resolved' } });
     expect(screen.getByLabelText('Status')).toHaveValue('resolved');
+
+    const archiveCheckbox = screen.getByRole('checkbox', { name: 'Archive' });
+    expect(archiveCheckbox).not.toBeChecked();
+    fireEvent.click(archiveCheckbox);
+    expect(archiveCheckbox).toBeChecked();
+
+    const enabledSwitch = screen.getByRole('switch', { name: 'Enabled' });
+    expect(enabledSwitch).toBeChecked();
+    fireEvent.click(enabledSwitch);
+    expect(enabledSwitch).not.toBeChecked();
+
+    const confidenceSlider = screen.getByLabelText('Confidence', { selector: 'input' });
+    expect(confidenceSlider).toHaveValue('90');
+    fireEvent.change(confidenceSlider, { target: { value: '75' } });
+    expect(confidenceSlider).toHaveValue('75');
 
     const wrongCover = screen.getByRole('button', { name: /wrong cover/i });
     const wrongMetadata = screen.getByRole('button', { name: /wrong metadata/i });
@@ -126,6 +168,32 @@ describe('form primitives', () => {
     expect(highPriority).toHaveAttribute('aria-pressed', 'true');
 
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('data-variant', 'primary');
+  });
+
+  it('supports compact option button groups', () => {
+    const { container } = render(
+      <OptionButtonGroup size="sm">
+        <OptionButton selected>All</OptionButton>
+        <OptionButton variant="ghost">Pending</OptionButton>
+      </OptionButtonGroup>,
+    );
+
+    expect(container.querySelector('[data-size="sm"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pending' })).toHaveAttribute(
+      'data-variant',
+      'ghost',
+    );
+  });
+
+  it('supports compact select sizing', () => {
+    render(
+      <Select aria-label="Compact" defaultValue="one" size="sm">
+        <option value="one">One</option>
+        <option value="two">Two</option>
+      </Select>,
+    );
+
+    expect(screen.getByLabelText('Compact')).toHaveAttribute('data-size', 'sm');
   });
 });

@@ -60,6 +60,10 @@ function expectedUrlPattern(path: string, pageId: ShellPageId): RegExp {
     return /\/stats(?:\?range=7d)?$/;
   }
 
+  if (pageId === 'import') {
+    return /\/import\/album$/;
+  }
+
   return new RegExp(`${path.replace('/', '\\/')}$`);
 }
 

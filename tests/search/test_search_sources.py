@@ -19,7 +19,9 @@ class _Artist:
 
 class _Album:
     def __init__(self, id_, name, artists=None, image_url=None, release_date=None,
-                 total_tracks=10, album_type='album', external_urls=None):
+                 total_tracks=10, album_type='album', external_urls=None, format=None,
+                 country=None, status=None, label=None, disambiguation=None,
+                 release_group_id=None):
         self.id = id_
         self.name = name
         self.artists = artists or []
@@ -28,6 +30,12 @@ class _Album:
         self.total_tracks = total_tracks
         self.album_type = album_type
         self.external_urls = external_urls
+        self.format = format
+        self.country = country
+        self.status = status
+        self.label = label
+        self.disambiguation = disambiguation
+        self.release_group_id = release_group_id
 
 
 class _Track:
@@ -97,6 +105,27 @@ def test_search_kind_albums_handles_no_artists():
     client = _Client(albums=[_Album('a1', 'Mystery', artists=[])])
     result = sources.search_kind(client, 'm', 'albums')
     assert result[0]['artist'] == 'Unknown Artist'
+
+
+def test_search_kind_albums_passthrough_release_metadata():
+    client = _Client(albums=[_Album(
+        'a1',
+        'Variant',
+        artists=['Artist'],
+        format='CD',
+        country='US',
+        status='Official',
+        label='Fixture Records',
+        disambiguation='clean',
+        release_group_id='rg-1',
+    )])
+    result = sources.search_kind(client, 'v', 'albums')
+    assert result[0]['format'] == 'CD'
+    assert result[0]['country'] == 'US'
+    assert result[0]['status'] == 'Official'
+    assert result[0]['label'] == 'Fixture Records'
+    assert result[0]['disambiguation'] == 'clean'
+    assert result[0]['release_group_id'] == 'rg-1'
 
 
 def test_search_kind_tracks_returns_full_shape():

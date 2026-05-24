@@ -18,7 +18,9 @@ describe('shellRouteManifest', () => {
     expect(resolveShellPageFromPath('/watchlist')).toBe('watchlist');
     expect(resolveShellPageFromPath('/active-downloads')).toBe('active-downloads');
     expect(resolveShellPageFromPath('/artist-detail')).toBeNull();
-    expect(resolveShellPageFromPath('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')).toBe('artist-detail');
+    expect(resolveShellPageFromPath('/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg')).toBe(
+      'artist-detail',
+    );
     expect(resolveShellPageFromPath('/artists')).toBeNull();
   });
 
@@ -29,6 +31,13 @@ describe('shellRouteManifest', () => {
   it('normalizes trailing slashes before resolving', () => {
     expect(normalizeShellPath('/issues/')).toBe('/issues');
     expect(resolveShellPageFromPath('/issues/')).toBe('issues');
+  });
+
+  it('resolves nested React route paths to their shell page', () => {
+    expect(resolveShellPageFromPath('/import/album')).toBe('import');
+    expect(resolveShellPageFromPath('/import/auto')).toBe('import');
+    expect(resolveShellPageFromPath('/import/singles')).toBe('import');
+    expect(resolveLegacyShellPageFromPath('/import/album')).toBeNull();
   });
 
   it('keeps a route entry for every manifest page id', () => {
@@ -43,8 +52,9 @@ describe('shellRouteManifest', () => {
   it('tracks whether a route is rendered by React or the legacy shell', () => {
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
+    expect(getShellRouteByPageId('import')?.kind).toBe('react');
     expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['stats', 'issues']);
+    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['import', 'stats', 'issues']);
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
   });
 

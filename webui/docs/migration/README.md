@@ -16,6 +16,9 @@ This folder is the home for React migration planning work inside `webui`.
   - cross-route risk assessment
 - [stats-migration-plan.md](./stats-migration-plan.md)
   - route-specific migration plan for `stats`
+- [import-migration-plan.md](./import-migration-plan.md)
+  - route-specific migration plan for `import`
+  - implementation status and follow-up cleanup notes
 
 ## Naming Guidance
 

@@ -1834,7 +1834,7 @@
     /* --- Phase 9: Touch & Hover Adaptations --- */
 
     /* Global touch targets - only standalone/action buttons, not inline */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
         min-height: 38px;
     }
 
@@ -2312,86 +2312,9 @@
         opacity: 0.7;
         transition: opacity 0.1s ease;
     }
-
-    /* Import Page - Touch fallback */
-    .import-page-file-chip {
-        cursor: pointer;
-    }
-
-    .import-page-match-row {
-        cursor: pointer;
-    }
 }
 
-/* Import Page — small screen */
 @media (max-width: 768px) {
-    .import-page-container {
-        padding: 16px;
-    }
-
-    .import-page-title {
-        font-size: 22px;
-    }
-
-    .import-page-album-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: 10px;
-    }
-
-    .import-page-album-hero {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .import-page-album-hero img {
-        width: 100px;
-        height: 100px;
-    }
-
-    .import-page-match-row {
-        grid-template-columns: 28px 1fr;
-        gap: 8px;
-    }
-
-    .import-page-match-file {
-        grid-column: 1 / -1;
-        padding-left: 28px;
-    }
-
-    .import-page-match-unmatch {
-        grid-column: 1 / -1;
-        justify-self: end;
-    }
-
-    .import-page-singles-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .import-page-singles-actions {
-        width: 100%;
-        flex-wrap: wrap;
-    }
-
-    .import-page-single-item {
-        grid-template-columns: 28px 1fr;
-    }
-
-    .import-page-single-actions {
-        grid-column: 1 / -1;
-        justify-self: end;
-    }
-
-    .import-page-single-search-panel {
-        padding-left: 0;
-    }
-
-    .import-page-staging-bar {
-        flex-direction: column;
-        gap: 4px;
-        align-items: flex-start;
-    }
-
     /* Profile Picker - Mobile */
     .profile-picker-grid {
         gap: 20px;
