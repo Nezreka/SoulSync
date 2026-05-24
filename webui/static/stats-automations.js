@@ -6056,15 +6056,14 @@ async function playArtistRadio() {
         const albumArt = random.album.thumb_url || data.artist?.thumb_url || null;
 
         // Clear existing queue and disable radio before starting fresh
-        npRadioMode = false;
+        npSetRadioMode(false, { toast: false });
         clearQueue();
         if (audioPlayer && !audioPlayer.paused) {
             audioPlayer.pause();
         }
 
-        // Play the track first, then enable radio mode after a short delay
-        // so currentTrack is set and the radio queue fill triggers
-        playLibraryTrack({
+        // Play the track first so currentTrack is populated before radio seeds the queue.
+        await playLibraryTrack({
             id: random.track.id,
             title: random.track.title,
             file_path: random.track.file_path,
@@ -6073,14 +6072,9 @@ async function playArtistRadio() {
             album_id: random.album.id,
         }, random.album.title || '', artistName);
 
-        // Enable radio mode after track starts loading
-        setTimeout(() => {
-            npRadioMode = true;
-            const radioBtn = document.querySelector('.np-radio-btn');
-            if (radioBtn) radioBtn.classList.add('active');
-        }, 1000);
+        npSetRadioMode(true, { toast: false, fetchIfNeeded: true });
 
-        showToast(`Playing ${artistName} radio — similar tracks will auto-queue`, 'success');
+        showToast(`Playing ${artistName} radio - similar tracks will auto-queue`, 'success');
     } catch (e) {
         showToast(`Failed to start artist radio: ${e.message}`, 'error');
     }
