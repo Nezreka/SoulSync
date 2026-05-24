@@ -9,6 +9,7 @@ import { createShellBridge } from '@/test/shell-bridge';
 
 import type { ImportStagingFile } from './-import.types';
 
+import { autoImportResultsQueryOptions, autoImportStatusQueryOptions } from './-import.api';
 import { resetImportWorkflowStore } from './-import.store';
 
 function renderImportRoute(initialEntries = ['/import']) {
@@ -19,6 +20,7 @@ function renderImportRoute(initialEntries = ['/import']) {
   return {
     history,
     router,
+    queryClient,
     ...render(<AppRouterProvider router={router} queryClient={queryClient} />),
   };
 }
@@ -209,6 +211,26 @@ describe('import route', () => {
     expect(window.SoulSyncWebShellBridge?.setActivePageChrome).toHaveBeenCalledWith('import');
   });
 
+  it('keeps the import page rendering when staging files fail to load', async () => {
+    server.use(
+      http.get('/api/import/staging/files', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: 'Import folder unavailable',
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    renderImportRoute();
+
+    expect(await screen.findByTestId('import-page')).toBeInTheDocument();
+    expect(await screen.findByText('Import Music')).toBeInTheDocument();
+    expect(await screen.findByText('Import folder: error')).toBeInTheDocument();
+  });
+
   it('stores the active tab in nested route paths', async () => {
     const { history } = renderImportRoute();
 
@@ -317,5 +339,57 @@ describe('import route', () => {
     expect(getFetchUrls().some((url) => url.includes('/api/import/staging/suggestions'))).toBe(
       false,
     );
+  });
+
+  it('keeps cached auto-import status visible when a refetch fails', async () => {
+    const { queryClient } = renderImportRoute(['/import/auto']);
+
+    expect(await screen.findByText('Watching')).toBeInTheDocument();
+
+    server.use(
+      http.get('/api/auto-import/status', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: 'Auto-import unavailable',
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    await queryClient.refetchQueries({
+      queryKey: autoImportStatusQueryOptions().queryKey,
+    });
+
+    expect(screen.getByText('Watching')).toBeInTheDocument();
+    expect(screen.queryByText(/Auto-import is unavailable:/)).not.toBeInTheDocument();
+  });
+
+  it('keeps cached auto-import results visible when a refetch fails', async () => {
+    const { queryClient } = renderImportRoute(['/import/auto?autoFilter=pending']);
+
+    expect(await screen.findByRole('button', { name: /^Needs Review\s*1$/ })).toBeInTheDocument();
+    expect(screen.getAllByText('Album A').length).toBeGreaterThan(0);
+
+    server.use(
+      http.get('/api/auto-import/results', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: 'Auto-import results unavailable',
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    await queryClient.refetchQueries({
+      queryKey: autoImportResultsQueryOptions().queryKey,
+    });
+
+    expect(screen.getByRole('button', { name: /^Needs Review\s*1$/ })).toBeInTheDocument();
+    expect(screen.getAllByText('Album A').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Failed to load imports:/)).not.toBeInTheDocument();
   });
 });

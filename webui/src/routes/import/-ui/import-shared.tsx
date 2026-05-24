@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { ImportQueueJob } from '../-import.types';
+import type { ImportQueueJob, ImportStagingFile } from '../-import.types';
 
 import {
   importStagingFilesQueryOptions,
@@ -10,6 +10,8 @@ import {
 } from '../-import.api';
 import { getTrackDisplayInfo, IMPORT_PLACEHOLDER_IMAGE } from '../-import.helpers';
 import { useImportQueueWorkflow, useImportWorkflowStore } from '../-import.store';
+
+const EMPTY_STAGING_FILES: ImportStagingFile[] = [];
 
 export function useImportStaging() {
   const queryClient = useQueryClient();
@@ -23,7 +25,8 @@ export function useImportStaging() {
       clearFinishedJobs();
       await invalidateImportStagingQueries(queryClient);
     },
-    stagingFiles: stagingQuery.data?.files ?? [],
+    // Keep the empty fallback stable so staging-driven effects do not loop while loading.
+    stagingFiles: stagingQuery.data?.files ?? EMPTY_STAGING_FILES,
     stagingPath: stagingQuery.data?.staging_path || 'Not configured',
     stagingQuery,
   };
