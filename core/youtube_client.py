@@ -154,6 +154,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
         # Initialize production matching engine for parity with Soulseek
         self.matching_engine = MusicMatchingEngine()
+
         logger.info("Initialized production MusicMatchingEngine")
 
         # NOTE: deliberately don't call `_check_ffmpeg()` here. That call
@@ -215,6 +216,23 @@ class YouTubeClient(DownloadSourcePlugin):
 
         # Optional progress callback for UI updates
         self.progress_callback = None
+
+    @staticmethod
+    def _escape_ytsearch_query(query: str) -> str:
+        """Escape yt-dlp search terms that begin with a dash.
+
+        YouTube video IDs may start with ``-``. When passed through
+        ``ytsearchN:<query>``, yt-dlp treats that leading dash as search
+        syntax unless it is escaped. Preserve already-escaped input so
+        users who worked around the issue manually keep the same result.
+        """
+        if not isinstance(query, str):
+            return query
+        stripped = query.lstrip()
+        leading_ws_len = len(query) - len(stripped)
+        if stripped.startswith('-'):
+            return f"{query[:leading_ws_len]}\\{stripped}"
+        return query
 
     def is_available(self) -> bool:
         """
@@ -698,8 +716,9 @@ class YouTubeClient(DownloadSourcePlugin):
                 if cookies_browser:
                     ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
 
+                search_query = self._escape_ytsearch_query(query)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    data = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+                    data = ydl.extract_info(f"ytsearch{max_results}:{search_query}", download=False)
                     if not data or 'entries' not in data:
                         return []
 
@@ -777,9 +796,10 @@ class YouTubeClient(DownloadSourcePlugin):
                 if cookies_browser:
                     ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
 
+                search_query = self._escape_ytsearch_query(query)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # Search YouTube (max 50 results)
-                    search_results = ydl.extract_info(f"ytsearch50:{query}", download=False)
+                    search_results = ydl.extract_info(f"ytsearch50:{search_query}", download=False)
 
                     if not search_results or 'entries' not in search_results:
                         return []
