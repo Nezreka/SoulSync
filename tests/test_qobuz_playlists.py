@@ -331,6 +331,60 @@ def test_get_user_favorite_tracks_paginates(authed_client):
     assert tracks[-1]['name'] == 'F129'
 
 
+def test_get_user_favorite_tracks_fetches_all_by_default(authed_client):
+    def make_items(start, count):
+        return [
+            {'id': start + i, 'title': f'F{start + i}', 'duration': 200,
+             'performer': {'name': 'Fav Artist'},
+             'album': {'title': 'Fav Album', 'image': {}}}
+            for i in range(count)
+        ]
+
+    offsets: List[int] = []
+
+    def responder(endpoint, params=None):
+        assert endpoint == 'favorite/getUserFavorites'
+        offsets.append(params['offset'])
+        start = params['offset']
+        remaining = max(0, 625 - start)
+        return {'tracks': {'items': make_items(start, min(params['limit'], remaining)), 'total': 625}}
+
+    _install_api_responder(authed_client, responder)
+    tracks = authed_client.get_user_favorite_tracks()
+
+    assert len(tracks) == 625
+    assert offsets == [0, 100, 200, 300, 400, 500, 600]
+    assert tracks[-1]['name'] == 'F624'
+
+
+def test_get_user_favorite_tracks_honors_explicit_limit(authed_client):
+    def make_items(start, count):
+        return [
+            {'id': start + i, 'title': f'F{start + i}', 'duration': 200,
+             'performer': {'name': 'Fav Artist'},
+             'album': {'title': 'Fav Album', 'image': {}}}
+            for i in range(count)
+        ]
+
+    requests: List[Dict[str, Any]] = []
+
+    def responder(endpoint, params=None):
+        assert endpoint == 'favorite/getUserFavorites'
+        requests.append(dict(params))
+        start = params['offset']
+        return {'tracks': {'items': make_items(start, params['limit']), 'total': 625}}
+
+    _install_api_responder(authed_client, responder)
+    tracks = authed_client.get_user_favorite_tracks(limit=150)
+
+    assert len(tracks) == 150
+    assert requests == [
+        {'type': 'tracks', 'limit': 100, 'offset': 0},
+        {'type': 'tracks', 'limit': 50, 'offset': 100},
+    ]
+    assert tracks[-1]['name'] == 'F149'
+
+
 def test_get_user_favorite_tracks_count_uses_cheap_call(authed_client):
     captured: Dict[str, Any] = {}
 
