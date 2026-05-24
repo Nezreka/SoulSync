@@ -3,7 +3,6 @@ import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 
 import {
-  Badge,
   Button,
   OptionButton,
   OptionButtonGroup,
@@ -11,6 +10,7 @@ import {
   Select,
   Switch,
 } from '@/components/form/form';
+import { Badge } from '@/components/primitives';
 
 import type {
   ImportAutoFilter,
