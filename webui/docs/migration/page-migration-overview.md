@@ -134,7 +134,8 @@ Rollups:
 - Primary files: `webui/src/routes/import/*`, `webui/src/platform/shell/route-manifest.ts`.
 - Main surface: staging files, album and singles matching, suggestion cards, processing queue.
 - Key coupling: settings-derived staging path assumptions and downstream library state.
-- Recommendation: completed as the next migration after `stats`. Follow-up cleanup should remove the dead legacy import functions from `webui/static/stats-automations.js`.
+- Recommendation: completed as the next migration after `stats`. The import subtree now uses nested route paths, with `/import` redirecting to `/import/album` and `autoFilter` remaining in the search string; any remaining `import` references in `webui/static/stats-automations.js` belong to the broader automation feature set, not this page migration.
+- Route-local workflow state lives in `webui/src/routes/import/-import.store.ts`, which keeps drafts and queue state alive while moving between album, singles, and auto views.
 - Route plan: `webui/docs/migration/import-migration-plan.md`.
 
 ### Wave 2: Search split
