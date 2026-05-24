@@ -1068,6 +1068,13 @@ def _get_batch_max_concurrent(is_album=False, source=None):
         mode = config_manager.get('download_source.mode', 'soulseek')
         if mode == 'soulseek':
             return 1
+        if mode == 'hybrid':
+            hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+            if isinstance(hybrid_order, str):
+                hybrid_order = [hybrid_order]
+            first_source = next((str(s).strip().lower() for s in hybrid_order if str(s).strip()), '')
+            if first_source == 'soulseek':
+                return 1
     return _get_max_concurrent()
 
 # --- Session Download Statistics ---
@@ -16531,6 +16538,8 @@ def _get_staging_file_cache(batch_id):
                 'title': meta['title'] or '',
                 'artist': meta['albumartist'] or meta['artist'] or '',
                 'album': meta['album'] or '',
+                'track_number': meta.get('track_number'),
+                'disc_number': meta.get('disc_number'),
                 'extension': ext,
             })
 
