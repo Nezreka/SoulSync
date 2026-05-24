@@ -650,11 +650,23 @@ function _renderSuggestionCard(a, primarySource) {
     const sourceBadge = (a.source && primarySource && a.source !== primarySource)
         ? `<div class="import-page-album-card-source">via ${_esc((SOURCE_LABELS[a.source] || {}).text || a.source)}</div>`
         : '';
+    const metaParts = [
+        `${a.total_tracks || 0} tracks`,
+        a.release_date ? a.release_date.substring(0, 4) : '',
+        a.format || '',
+        a.country || '',
+        a.disambiguation || '',
+    ].filter(Boolean);
+    const details = [a.status || '', a.label || ''].filter(Boolean);
+    const detailsLine = details.length
+        ? `<div class="import-page-album-card-detail">${_esc(details.join(' · '))}</div>`
+        : '';
     return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${_escAttr(a.id)}')">
         <img src="${a.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
-        <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
+        <div class="import-page-album-card-meta">${_esc(metaParts.join(' · '))}</div>
+        ${detailsLine}
         ${sourceBadge}
     </div>`;
 }
@@ -744,12 +756,19 @@ async function importPageSelectAlbum(albumId) {
 
         // Render hero
         const album = data.album;
+        const heroMetaParts = [
+            `${album.total_tracks || 0} tracks`,
+            album.release_date ? album.release_date.substring(0, 4) : '',
+            album.format || '',
+            album.country || '',
+            album.disambiguation || '',
+        ].filter(Boolean);
         document.getElementById('import-page-album-hero').innerHTML = `
             <img src="${album.image_url || '/static/placeholder-album.png'}" alt="${_escAttr(album.name)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
             <div class="import-page-album-hero-info">
                 <div class="import-page-album-hero-title">${_esc(album.name)}</div>
                 <div class="import-page-album-hero-artist">${_esc(album.artist)}</div>
-                <div class="import-page-album-hero-meta">${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0, 4) : ''}</div>
+                <div class="import-page-album-hero-meta">${_esc(heroMetaParts.join(' · '))}</div>
             </div>
         `;
 

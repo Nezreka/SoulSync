@@ -299,6 +299,41 @@ class MusicBrainzClient:
             return []
 
     @rate_limited
+    def browse_release_group_releases(self, release_group_mbid: str,
+                                      limit: int = 100,
+                                      offset: int = 0) -> List[Dict[str, Any]]:
+        """Browse concrete releases that belong to a release-group.
+
+        Release-groups identify the logical album; releases identify the
+        actual edition the user may own (country, format, explicit/clean
+        disambiguation, bonus tracks, track count). Manual import needs the
+        latter so users can choose the matching tracklist.
+        """
+        try:
+            params = {
+                'release-group': release_group_mbid,
+                'fmt': 'json',
+                'limit': min(limit, 100),
+                'offset': offset,
+                'inc': 'artist-credits+media+labels+release-groups',
+            }
+
+            response = self.session.get(
+                f"{self.BASE_URL}/release",
+                params=params,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            releases = data.get('releases', [])
+            logger.debug(f"Browsed {len(releases)} releases for release-group {release_group_mbid}")
+            return releases
+        except Exception as e:
+            logger.error(f"Error browsing releases for release-group {release_group_mbid}: {e}")
+            return []
+
+    @rate_limited
     def search_recordings_by_artist_mbid(self, artist_mbid: str,
                                          limit: int = 100) -> List[Dict[str, Any]]:
         """Search for recordings linked to an artist via Lucene `arid:` query.
