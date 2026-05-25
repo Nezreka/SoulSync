@@ -32183,6 +32183,7 @@ def mirror_playlist_endpoint():
 def get_mirrored_playlists_endpoint():
     """List all mirrored playlists for the active profile."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -32192,6 +32193,11 @@ def get_mirrored_playlists_endpoint():
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']
             pl['in_library_count'] = counts['in_library']
+            source_ref = describe_mirrored_source_ref(pl)
+            pl['source_ref'] = source_ref.source_ref
+            pl['source_ref_kind'] = source_ref.source_ref_kind
+            pl['source_ref_status'] = source_ref.source_ref_status
+            pl['source_ref_error'] = source_ref.source_ref_error
         return jsonify(playlists)
     except Exception as e:
         logger.error(f"Error getting mirrored playlists: {e}")
@@ -32201,10 +32207,16 @@ def get_mirrored_playlists_endpoint():
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
+        source_ref = describe_mirrored_source_ref(playlist)
+        playlist['source_ref'] = source_ref.source_ref
+        playlist['source_ref_kind'] = source_ref.source_ref_kind
+        playlist['source_ref_status'] = source_ref.source_ref_status
+        playlist['source_ref_error'] = source_ref.source_ref_error
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
         return jsonify(playlist)
     except Exception as e:
