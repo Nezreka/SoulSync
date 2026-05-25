@@ -245,6 +245,7 @@ function renderAutoSyncScheduleModal() {
             <div class="auto-sync-tab-panel ${historyActive ? 'active' : ''}" id="auto-sync-history-panel">${historyPanel}</div>
         </div>
     `;
+    populateAutoSyncHistoryList(overlay);
     bindAutoSyncHistoryCardInteractions(overlay);
 }
 
@@ -439,13 +440,61 @@ function renderAutoSyncHistoryPanel(history, total) {
             <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
         </div>
         <div class="auto-sync-history-list">
-            ${history.map((entry, index) => autoSyncHistoryEntryHtml(entry, index)).join('')}
-            ${total > history.length ? `<div class="auto-sync-history-total">Showing ${history.length} of ${total} runs</div>` : ''}
+            <div class="auto-sync-history-loading">Loading run history...</div>
         </div>
     `;
 }
 
-function autoSyncHistoryEntryHtml(entry, index = 0) {
+function populateAutoSyncHistoryList(root = document) {
+    const list = root.querySelector('.auto-sync-history-list');
+    if (!list) return;
+    const history = _autoSyncScheduleState.runHistory || [];
+    const total = _autoSyncScheduleState.runHistoryTotal || 0;
+    list.innerHTML = '';
+    history.forEach((entry, index) => {
+        try {
+            list.appendChild(createAutoSyncHistoryEntryElement(entry, index));
+        } catch (err) {
+            list.appendChild(createAutoSyncHistoryErrorElement(entry, index, err));
+        }
+    });
+    if (total > history.length) {
+        const totalEl = document.createElement('div');
+        totalEl.className = 'auto-sync-history-total';
+        totalEl.textContent = `Showing ${history.length} of ${total} runs`;
+        list.appendChild(totalEl);
+    }
+}
+
+function createAutoSyncHistoryErrorElement(entry, index, err) {
+    const card = document.createElement('article');
+    card.className = 'auto-sync-history-entry auto-sync-history-entry-error';
+    const row = document.createElement('div');
+    row.className = 'auto-sync-history-row';
+    const head = document.createElement('div');
+    head.className = 'auto-sync-history-card-head';
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'auto-sync-history-title-block';
+    const title = document.createElement('div');
+    title.className = 'auto-sync-history-title-row';
+    const dot = document.createElement('span');
+    dot.className = 'auto-sync-card-status-dot disabled';
+    const name = document.createElement('strong');
+    name.textContent = entry?.playlist_name || `Run #${entry?.id || index + 1}`;
+    const badge = document.createElement('span');
+    badge.className = 'auto-sync-history-status error';
+    badge.textContent = 'Render error';
+    title.append(dot, name, badge);
+    const summary = document.createElement('small');
+    summary.textContent = err?.message || 'This run history row could not be rendered.';
+    titleBlock.append(title, summary);
+    head.appendChild(titleBlock);
+    row.appendChild(head);
+    card.appendChild(row);
+    return card;
+}
+
+function createAutoSyncHistoryEntryElement(entry, index = 0) {
     entry = autoSyncNormalizeHistoryEntry(entry, index);
     const status = entry.status || 'completed';
     const before = entry.before_json || {};
@@ -460,46 +509,98 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
     const entryId = `auto-sync-history-${entry.id}`;
     const playlistName = entry.playlist_name || after.name || before.name || `Playlist #${entry.playlist_id || 'unknown'}`;
     const summary = entry.summary || autoSyncHistoryFallbackSummary(before, after, status);
-    return `
-        <article class="auto-sync-history-entry" id="${entryId}-card" data-history-entry="${entryId}">
-            <div class="auto-sync-history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="${entryId}" data-history-toggle="${entryId}">
-                <div class="auto-sync-history-card-head">
-                    <div class="auto-sync-history-title-block">
-                        <div class="auto-sync-history-title-row">
-                            <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
-                            <strong>${_esc(playlistName)}</strong>
-                            <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
-                        </div>
-                        <small>${_esc(summary)}</small>
-                    </div>
-                    <div class="auto-sync-history-meta">
-                        ${started ? `<span>${_esc(started)}</span>` : ''}
-                        ${duration ? `<span>${_esc(duration)}</span>` : ''}
-                        <span>${_esc(entry.trigger_source || 'pipeline')}</span>
-                        <button type="button" class="auto-sync-history-expand-label" data-history-toggle-button="${entryId}">View details</button>
-                    </div>
-                </div>
-                <div class="auto-sync-card-flow">
-                    <span class="flow-trigger">${_esc(entry.trigger_source || 'pipeline')}</span>
-                    <span class="flow-arrow">&rarr;</span>
-                    <span class="flow-action">Refresh</span>
-                    <span class="flow-arrow">&rarr;</span>
-                    <span class="flow-action">Discover</span>
-                    <span class="flow-arrow">&rarr;</span>
-                    <span class="flow-notify">Sync + wishlist</span>
-                </div>
-                <div class="auto-sync-history-preview">
-                    ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
-                    ${autoSyncHistoryPreviewPill('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
-                    ${autoSyncHistoryPreviewPill('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
-                    ${autoSyncHistoryPreviewPill('Library', before.in_library_count, after.in_library_count, libraryDelta)}
-                </div>
-            </div>
-            <div id="${entryId}" class="auto-sync-history-detail">
-                ${autoSyncHistoryDetailHtml(entry, before, after, result, { trackDelta, discoveredDelta, wishlistDelta, libraryDelta })}
-            </div>
-        </article>
-    `;
+
+    const card = document.createElement('article');
+    card.className = 'auto-sync-history-entry';
+    card.id = `${entryId}-card`;
+    card.dataset.historyEntry = entryId;
+
+    const row = document.createElement('div');
+    row.className = 'auto-sync-history-row';
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.setAttribute('aria-expanded', 'false');
+    row.setAttribute('aria-controls', entryId);
+    row.dataset.historyToggle = entryId;
+
+    const head = document.createElement('div');
+    head.className = 'auto-sync-history-card-head';
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'auto-sync-history-title-block';
+    const titleRow = document.createElement('div');
+    titleRow.className = 'auto-sync-history-title-row';
+    const dot = document.createElement('span');
+    dot.className = `auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}`;
+    const title = document.createElement('strong');
+    title.textContent = playlistName;
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `auto-sync-history-status ${status}`;
+    statusBadge.textContent = autoSyncHistoryStatusLabel(status);
+    titleRow.append(dot, title, statusBadge);
+    const summaryEl = document.createElement('small');
+    summaryEl.textContent = summary;
+    titleBlock.append(titleRow, summaryEl);
+
+    const meta = document.createElement('div');
+    meta.className = 'auto-sync-history-meta';
+    [started, duration, entry.trigger_source || 'pipeline'].filter(Boolean).forEach(value => {
+        const span = document.createElement('span');
+        span.textContent = value;
+        meta.appendChild(span);
+    });
+    const expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'auto-sync-history-expand-label';
+    expand.dataset.historyToggleButton = entryId;
+    expand.textContent = 'View details';
+    meta.appendChild(expand);
+    head.append(titleBlock, meta);
+
+    const flow = document.createElement('div');
+    flow.className = 'auto-sync-card-flow';
+    autoSyncAppendFlowChip(flow, entry.trigger_source || 'pipeline', 'flow-trigger');
+    autoSyncAppendFlowArrow(flow);
+    autoSyncAppendFlowChip(flow, 'Refresh', 'flow-action');
+    autoSyncAppendFlowArrow(flow);
+    autoSyncAppendFlowChip(flow, 'Discover', 'flow-action');
+    autoSyncAppendFlowArrow(flow);
+    autoSyncAppendFlowChip(flow, 'Sync + wishlist', 'flow-notify');
+
+    const preview = document.createElement('div');
+    preview.className = 'auto-sync-history-preview';
+    [
+        ['Tracks', before.track_count, after.track_count, trackDelta],
+        ['Discovered', before.discovered_count, after.discovered_count, discoveredDelta],
+        ['Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta],
+        ['Library', before.in_library_count, after.in_library_count, libraryDelta],
+    ].forEach(([label, beforeValue, afterValue, delta]) => {
+        const pill = document.createElement('span');
+        pill.textContent = autoSyncHistoryPreviewText(label, beforeValue, afterValue, delta);
+        preview.appendChild(pill);
+    });
+
+    const detail = document.createElement('div');
+    detail.id = entryId;
+    detail.className = 'auto-sync-history-detail';
+    detail.innerHTML = autoSyncHistoryDetailHtml(entry, before, after, result, { trackDelta, discoveredDelta, wishlistDelta, libraryDelta });
+
+    row.append(head, flow, preview);
+    card.append(row, detail);
+    return card;
+}
+
+function autoSyncAppendFlowChip(parent, text, className) {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    parent.appendChild(span);
+}
+
+function autoSyncAppendFlowArrow(parent) {
+    const span = document.createElement('span');
+    span.className = 'flow-arrow';
+    span.textContent = '->';
+    parent.appendChild(span);
 }
 
 function autoSyncNormalizeHistoryEntry(entry, index) {
@@ -613,10 +714,14 @@ function autoSyncHistoryStatHtml(label, before, after, delta) {
 }
 
 function autoSyncHistoryPreviewPill(label, before, after, delta) {
+    return `<span>${_esc(autoSyncHistoryPreviewText(label, before, after, delta))}</span>`;
+}
+
+function autoSyncHistoryPreviewText(label, before, after, delta) {
     const beforeValue = parseInt(before, 10) || 0;
     const afterValue = parseInt(after, 10) || 0;
     const deltaText = delta ? ` ${delta > 0 ? '+' : ''}${delta}` : '';
-    return `<span>${_esc(label)} ${beforeValue}->${afterValue}${_esc(deltaText)}</span>`;
+    return `${label} ${beforeValue}->${afterValue}${deltaText}`;
 }
 
 function autoSyncHistoryResultPill(label, value) {
