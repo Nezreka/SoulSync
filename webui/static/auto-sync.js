@@ -373,14 +373,11 @@ function renderAutoSyncPipelineMonitor(playlists) {
                 </div>
                 <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
             </div>
-            <div class="auto-sync-monitor-list">
-                ${visible.length ? visible.map(({ playlist, state }) => autoSyncPipelineMonitorCardHtml(playlist, state)).join('') : `
-                    <div class="auto-sync-monitor-empty">
-                        <span>Ready</span>
-                        <small>Scheduled playlists will appear here while the all-in-one pipeline runs.</small>
-                    </div>
-                `}
-            </div>
+            ${visible.length ? `
+                <div class="auto-sync-monitor-list">
+                    ${visible.map(({ playlist, state }) => autoSyncPipelineMonitorCardHtml(playlist, state)).join('')}
+                </div>
+            ` : '<div class="auto-sync-monitor-empty"><span>Ready</span><small>Scheduled playlists appear here while the all-in-one pipeline runs.</small></div>'}
         </section>
     `;
 }
