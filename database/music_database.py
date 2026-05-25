@@ -11828,7 +11828,7 @@ class MusicDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
-                        description = excluded.description,
+                        description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
                         image_url = excluded.image_url,
                         track_count = excluded.track_count,
@@ -11938,6 +11938,39 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
+
+    def update_mirrored_playlist_source_ref(
+        self,
+        playlist_id: int,
+        source_playlist_id: str,
+        description: Optional[str] = None,
+    ) -> bool:
+        """Update a mirrored playlist's upstream source reference.
+
+        This intentionally leaves mirrored tracks and discovery extra_data
+        untouched; refresh/discovery can use the new source reference on the
+        next run without losing existing local state.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if description is None:
+                    cursor.execute("""
+                        UPDATE mirrored_playlists
+                        SET source_playlist_id = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (source_playlist_id, playlist_id))
+                else:
+                    cursor.execute("""
+                        UPDATE mirrored_playlists
+                        SET source_playlist_id = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (source_playlist_id, description, playlist_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating mirrored playlist source reference: {e}")
+            return False
 
     def update_mirrored_track_extra_data(self, track_id: int, extra_data_dict: dict) -> bool:
         """Merge new data into a mirrored track's extra_data JSON field."""

@@ -32211,6 +32211,55 @@ def get_mirrored_playlist_endpoint(playlist_id):
         logger.error(f"Error getting mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/mirrored-playlists/<int:playlist_id>/source-ref', methods=['PATCH'])
+def update_mirrored_playlist_source_ref_endpoint(playlist_id):
+    """Update the upstream source link/id for a mirrored playlist."""
+    try:
+        data = request.get_json() or {}
+        source_ref = data.get('source_ref') or data.get('source_playlist_id') or data.get('url')
+
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        try:
+            from core.playlists.source_refs import normalize_mirrored_source_ref
+            normalized = normalize_mirrored_source_ref(
+                playlist.get('source'),
+                source_ref,
+                playlist.get('description') or '',
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        existing = [
+            pl for pl in database.get_mirrored_playlists(profile_id=playlist.get('profile_id', 1))
+            if (
+                pl.get('source') == playlist.get('source')
+                and str(pl.get('source_playlist_id')) == str(normalized.source_playlist_id)
+                and int(pl.get('id')) != int(playlist_id)
+            )
+        ]
+        if existing:
+            return jsonify({
+                "error": f"That source is already mirrored as '{existing[0].get('name', 'another playlist')}'"
+            }), 409
+
+        ok = database.update_mirrored_playlist_source_ref(
+            playlist_id,
+            normalized.source_playlist_id,
+            normalized.description,
+        )
+        if not ok:
+            return jsonify({"error": "Failed to update source reference"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist source reference: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])
 def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
