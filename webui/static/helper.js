@@ -3413,6 +3413,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.2': [
+        { date: 'May 24, 2026 — 2.6.2 release' },
+        { title: 'Fix: Auto-Sync "next in 8h" timezone bug', desc: 'scheduled Auto-Sync playlists were all showing "next in 8h" regardless of the interval — Every 1 hour, Every 1 day, anything. backend stores next-run as a naive UTC string and the frontend was parsing it as local time, which on Pacific time offset the displayed countdown by ~8 hours. Auto-Sync now uses the existing UTC-aware parser the rest of the Automations page already uses. as a separate correctness fix, the automation update endpoint also now blanks the stored next-run whenever the trigger type or trigger config changes, so the engine recomputes from scratch instead of preserving a leftover timestamp from the previous schedule.' },
+        { title: 'Auto-Sync modal restyled to your accent color', desc: 'the Playlist Auto-Sync manager now picks up your chosen accent (the same one used everywhere else in the app) instead of the hardcoded sky-blue palette it shipped with. tabs, drop zones, scheduled-playlist chips, scrollbars, and the modal glow all follow the accent theme. drop targets also light up clearly while dragging.' },
+    ],
     '2.6.1': [
         { date: 'May 24, 2026 — 2.6.1 release' },
         { title: 'React Import page polish', desc: 'Import now runs through the React route stack with album, singles, and auto-import tabs plus the state fixes needed for reliable Vite builds.' },

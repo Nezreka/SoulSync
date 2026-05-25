@@ -818,7 +818,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     const bucketHtml = AUTO_SYNC_BUCKETS.map(hours => {
         const assigned = schedulablePlaylists.filter(p => playlistSchedules[p.id]?.hours === hours);
         return `
-            <div class="auto-sync-column" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondrop="autoSyncDrop(event, ${hours})">
+            <div class="auto-sync-column" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
                 <div class="auto-sync-column-head">
                     <span>${autoSyncBucketLabel(hours)}</span>
                     <small>${assigned.length} playlist${assigned.length === 1 ? '' : 's'}</small>
@@ -911,7 +911,7 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
 
 function autoSyncNextRunLabel(nextRun) {
     if (!nextRun) return '';
-    const ts = new Date(nextRun).getTime();
+    const ts = _autoParseUTC(nextRun);
     if (!Number.isFinite(ts)) return '';
     const diff = ts - Date.now();
     if (diff <= 0) return 'due now';
@@ -932,10 +932,23 @@ function autoSyncDragStart(event) {
 function autoSyncDragOver(event) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+    const col = event.currentTarget;
+    if (col && !col.classList.contains('drag-over')) {
+        col.classList.add('drag-over');
+    }
+}
+
+function autoSyncDragLeave(event) {
+    const col = event.currentTarget;
+    if (!col) return;
+    if (col.contains(event.relatedTarget)) return;
+    col.classList.remove('drag-over');
 }
 
 async function autoSyncDrop(event, hours) {
     event.preventDefault();
+    const col = event.currentTarget;
+    if (col) col.classList.remove('drag-over');
     const playlistId = parseInt(event.dataTransfer.getData('text/plain'), 10);
     if (!playlistId) return;
     await saveAutoSyncPlaylistSchedule(playlistId, hours);
