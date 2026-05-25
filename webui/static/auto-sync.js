@@ -21,6 +21,9 @@ let _autoSyncScheduleState = {
     runHistoryTotal: 0,
 };
 let _autoSyncActiveTab = 'schedule';
+let _autoSyncSidebarFilter = '';
+let _autoSyncHistoryFilter = 'all';  // 'all' | 'error' | 'completed' | 'skipped'
+let _autoSyncHistoryLimit = 50;
 
 function getMirroredSourceRef(p) {
     if (p && p.source_ref) return String(p.source_ref);
@@ -176,7 +179,7 @@ async function refreshAutoSyncScheduleModal() {
         const [playlistRes, automationRes, historyRes] = await Promise.all([
             fetch('/api/mirrored-playlists'),
             fetch('/api/automations'),
-            fetch('/api/playlist-pipeline/history?limit=50'),
+            fetch(`/api/playlist-pipeline/history?limit=${_autoSyncHistoryLimit}`),
         ]);
         const playlists = await playlistRes.json();
         const automations = await automationRes.json();
@@ -238,7 +241,13 @@ function renderAutoSyncScheduleModal() {
             <div class="auto-sync-tabs">
                 <button class="${scheduleActive ? 'active' : ''}" onclick="setAutoSyncTab('schedule')">Schedule Board</button>
                 <button class="${automationsActive ? 'active' : ''}" onclick="setAutoSyncTab('automations')">Automation Pipelines</button>
-                <button class="${historyActive ? 'active' : ''}" onclick="setAutoSyncTab('history')">Run History</button>
+                <button class="${historyActive ? 'active' : ''}" onclick="setAutoSyncTab('history')">
+                    Run History
+                    ${(() => {
+                        const errs = (runHistory || []).filter(h => h.status === 'error' || h.status === 'skipped').length;
+                        return errs ? `<span class="auto-sync-tab-badge error">${errs}</span>` : '';
+                    })()}
+                </button>
             </div>
             <div class="auto-sync-tab-panel ${scheduleActive ? 'active' : ''}" id="auto-sync-schedule-panel">${schedulePanel}</div>
             <div class="auto-sync-tab-panel ${automationsActive ? 'active' : ''}" id="auto-sync-automation-panel">${automationPanel}</div>
@@ -255,8 +264,11 @@ function setAutoSyncTab(tab) {
 }
 
 function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
-    const schedulablePlaylists = playlists.filter(autoSyncCanSchedulePlaylist);
-    const unavailablePlaylists = playlists.filter(p => !autoSyncCanSchedulePlaylist(p));
+    const filter = (_autoSyncSidebarFilter || '').trim().toLowerCase();
+    const matchesFilter = (p) => !filter || (p.name || '').toLowerCase().includes(filter)
+        || autoSyncSourceLabel(p.source || '').toLowerCase().includes(filter);
+    const schedulablePlaylists = playlists.filter(p => autoSyncCanSchedulePlaylist(p) && matchesFilter(p));
+    const unavailablePlaylists = playlists.filter(p => !autoSyncCanSchedulePlaylist(p) && matchesFilter(p));
     const grouped = schedulablePlaylists.reduce((acc, p) => {
         const key = p.source || 'other';
         if (!acc[key]) acc[key] = [];
@@ -308,6 +320,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
         `;
     }).join('');
 
+    const filterValue = _esc(_autoSyncSidebarFilter || '');
     return `
         <div class="auto-sync-board-intro">
             <div>
@@ -319,11 +332,31 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
             <div class="auto-sync-body">
                 <aside class="auto-sync-sidebar">
                     <div class="auto-sync-sidebar-title">Mirrored playlists</div>
+                    <div class="auto-sync-sidebar-filter">
+                        <input type="search" class="auto-sync-sidebar-search" placeholder="Filter playlists…"
+                               value="${filterValue}" oninput="setAutoSyncSidebarFilter(this.value)" />
+                        ${_autoSyncSidebarFilter ? `<button type="button" class="auto-sync-sidebar-filter-clear" onclick="setAutoSyncSidebarFilter('')" aria-label="Clear filter">&times;</button>` : ''}
+                    </div>
                     <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
                 </aside>
                 <main class="auto-sync-board">${bucketHtml}</main>
             </div>
     `;
+}
+
+function setAutoSyncSidebarFilter(value) {
+    _autoSyncSidebarFilter = String(value || '');
+    // Only re-render the sidebar/board portion to keep input focus.
+    const panel = document.getElementById('auto-sync-schedule-panel');
+    if (!panel) return;
+    const { playlists, playlistSchedules } = _autoSyncScheduleState;
+    panel.innerHTML = renderAutoSyncSchedulePanel(playlists, playlistSchedules);
+    // Restore focus to the search input + caret position at end.
+    const input = panel.querySelector('.auto-sync-sidebar-search');
+    if (input) {
+        input.focus();
+        try { input.setSelectionRange(value.length, value.length); } catch (_) {}
+    }
 }
 
 function getAutoSyncPipelinePlaylists(playlists) {
@@ -431,28 +464,77 @@ function renderAutoSyncHistoryPanel(history, total) {
             </div>
         `;
     }
+    const filter = _autoSyncHistoryFilter || 'all';
+    const tabs = [
+        ['all', 'All', history.length],
+        ['error', 'Errors', history.filter(h => h.status === 'error' || h.status === 'skipped').length],
+        ['completed', 'Completed', history.filter(h => h.status === 'completed' || h.status === 'finished').length],
+    ];
+    const filterTabsHtml = tabs.map(([key, label, count]) => `
+        <button class="auto-sync-history-filter-btn ${filter === key ? 'active' : ''} ${key === 'error' && count > 0 ? 'has-errors' : ''}"
+                onclick="setAutoSyncHistoryFilter('${key}')" type="button">
+            ${_esc(label)} <em>${count}</em>
+        </button>
+    `).join('');
+    const canLoadMore = total > history.length;
     return `
         <div class="auto-sync-history-intro">
             <div>
                 <strong>Playlist pipeline run history</strong>
                 <span>Each run records what changed on the mirrored playlist before and after refresh, discovery, sync, and wishlist processing.</span>
             </div>
-            <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+            <div class="auto-sync-history-intro-controls">
+                <div class="auto-sync-history-filters">${filterTabsHtml}</div>
+                <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+            </div>
         </div>
         <div class="auto-sync-history-list" data-renderer="pending">
             <div class="auto-sync-history-loading">Preparing run history...</div>
         </div>
+        ${canLoadMore ? `
+            <div class="auto-sync-history-load-more-row">
+                <button type="button" class="auto-sync-history-load-more" onclick="loadMoreAutoSyncHistory()">
+                    Load more (${history.length} of ${total})
+                </button>
+            </div>
+        ` : ''}
     `;
+}
+
+function setAutoSyncHistoryFilter(key) {
+    _autoSyncHistoryFilter = ['error', 'completed'].includes(key) ? key : 'all';
+    renderAutoSyncScheduleModal();
+}
+
+function loadMoreAutoSyncHistory() {
+    _autoSyncHistoryLimit = Math.min(500, _autoSyncHistoryLimit + 50);
+    refreshAutoSyncScheduleModal();
 }
 
 function populateAutoSyncHistoryList(root = document) {
     const list = root.querySelector('.auto-sync-history-list');
     if (!list) return;
-    const history = Array.isArray(_autoSyncScheduleState.runHistory) ? _autoSyncScheduleState.runHistory : [];
-    const total = _autoSyncScheduleState.runHistoryTotal || 0;
+    const allHistory = Array.isArray(_autoSyncScheduleState.runHistory) ? _autoSyncScheduleState.runHistory : [];
+    const filter = _autoSyncHistoryFilter || 'all';
+    const history = allHistory.filter(h => {
+        if (filter === 'error') return h.status === 'error' || h.status === 'skipped';
+        if (filter === 'completed') return h.status === 'completed' || h.status === 'finished';
+        return true;
+    });
     list.innerHTML = '';
     list.dataset.renderer = 'dom-cards';
     list.dataset.renderedCount = '0';
+    if (filter !== 'all' && !history.length) {
+        const note = document.createElement('div');
+        note.className = 'auto-sync-history-empty';
+        const strong = document.createElement('strong');
+        strong.textContent = filter === 'error' ? 'No failed runs in the loaded window' : 'No completed runs in the loaded window';
+        const small = document.createElement('span');
+        small.textContent = 'Switch filters or load more history.';
+        note.append(strong, small);
+        list.appendChild(note);
+        return;
+    }
     history.forEach((entry, index) => {
         try {
             list.appendChild(createAutoSyncHistoryEntryElement(entry, index));
@@ -769,9 +851,12 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
         ['Duration', entry.duration_seconds ? autoSyncDurationLabel(entry.duration_seconds) : '—'],
         ['Source', entry.source || after.source || before.source || '—'],
     ].map(([k, v]) => `<div class="auto-sync-history-fact"><span>${_esc(k)}</span><strong>${_esc(autoSyncValueLabel(v))}</strong></div>`).join('');
+    // `tracks_discovered` was a status STRING (e.g. "completed"), not a
+    // count — kept it out of the pills so the panel doesn't show a
+    // confusing "Discovered: completed" chip. Same data is already
+    // surfaced as a before/after stat card above.
     const resultPills = [
         ['Refreshed', result.playlists_refreshed],
-        ['Discovered', result.tracks_discovered],
         ['Synced', result.tracks_synced],
         ['Skipped', result.sync_skipped],
         ['Wishlisted', result.wishlist_queued],
@@ -779,10 +864,21 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
      .map(([k, v]) => `<span class="auto-sync-history-result-pill"><em>${_esc(k)}</em>${_esc(String(v))}</span>`).join('');
     const errorBlock = result.error ? `<div class="auto-sync-history-error">${_esc(result.error)}</div>` : '';
     const logsHtml = autoSyncHistoryLogsCompactHtml(entry.log_lines);
+    const playlistId = entry.playlist_id || after.playlist_id || before.playlist_id || '';
+    const playlistName = entry.playlist_name || after.name || before.name || '';
+    const runAgainHtml = playlistId
+        ? `<div class="auto-sync-history-detail-actions">
+              <button type="button" class="auto-sync-history-run-again"
+                  onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}')">
+                  Run pipeline again
+              </button>
+           </div>`
+        : '';
     return `
         <div class="auto-sync-history-stats-grid">${statsHtml}</div>
         <div class="auto-sync-history-facts-row">${factsHtml}</div>
         ${resultPills ? `<div class="auto-sync-history-result-row">${resultPills}</div>` : ''}
+        ${runAgainHtml}
         ${errorBlock}
         ${logsHtml}
     `;
@@ -944,10 +1040,17 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
     const enabled = schedule?.enabled !== false;
     const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
     const isRunning = playlist.pipeline_state?.status === 'running';
+    const health = autoSyncPlaylistHealth(playlist.id);
+    const healthClass = health.level === 'failing' ? 'failing'
+        : health.level === 'warning' ? 'warning'
+        : '';
     return `
-        <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
+        <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'} ${healthClass}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
             <div class="auto-sync-scheduled-main">
-                <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
+                <div class="auto-sync-scheduled-name">
+                    ${health.level !== 'ok' ? `<span class="auto-sync-scheduled-health ${healthClass}" title="${_escAttr(health.tooltip)}">${health.level === 'failing' ? '!' : '⚠'}</span>` : ''}
+                    ${_esc(playlist.name)}
+                </div>
                 <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
                 <div class="auto-sync-scheduled-timing">
                     <span>${_esc(autoSyncIntervalLabel(schedule?.hours || 24))}</span>
@@ -960,6 +1063,25 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
             </div>
         </div>
     `;
+}
+
+function autoSyncPlaylistHealth(playlistId) {
+    // Look at the last 3 runs for this playlist in the loaded history.
+    // 3-in-a-row errors = failing (red dot). 1+ recent error = warning.
+    const history = _autoSyncScheduleState.runHistory || [];
+    const id = parseInt(playlistId, 10);
+    const recent = history
+        .filter(h => parseInt(h.playlist_id, 10) === id)
+        .slice(0, 3);
+    if (!recent.length) return { level: 'ok', tooltip: '' };
+    const errored = recent.filter(h => h.status === 'error' || h.status === 'skipped');
+    if (errored.length >= 3) {
+        return { level: 'failing', tooltip: `Last ${recent.length} runs failed — check Run History tab` };
+    }
+    if (errored.length) {
+        return { level: 'warning', tooltip: `${errored.length} of last ${recent.length} runs failed` };
+    }
+    return { level: 'ok', tooltip: '' };
 }
 
 function autoSyncNextRunLabel(nextRun) {

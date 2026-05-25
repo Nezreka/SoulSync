@@ -11622,6 +11622,56 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     letter-spacing: 0.3px;
 }
 
+.auto-sync-sidebar-filter {
+    position: relative;
+    padding: 4px 16px 10px;
+}
+
+.auto-sync-sidebar-search {
+    width: 100%;
+    height: 30px;
+    padding: 0 28px 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.auto-sync-sidebar-search:focus {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.04);
+}
+
+.auto-sync-sidebar-search::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.auto-sync-sidebar-filter-clear {
+    position: absolute;
+    right: 22px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+}
+
+.auto-sync-sidebar-filter-clear:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
 .auto-sync-source-list {
     min-height: 0;
     overflow-y: auto;
@@ -11961,6 +12011,189 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.2);
     border-color: rgba(239, 68, 68, 0.4);
+}
+
+.auto-sync-scheduled-card.failing {
+    border-color: rgba(239, 68, 68, 0.4);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.15);
+}
+
+.auto-sync-scheduled-card.warning {
+    border-color: rgba(250, 204, 21, 0.3);
+}
+
+.auto-sync-scheduled-health {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    margin-right: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.auto-sync-scheduled-health.failing {
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.35);
+}
+
+.auto-sync-scheduled-health.warning {
+    background: rgba(250, 204, 21, 0.18);
+    color: #facc15;
+}
+
+/* Run history filters + load more + tab badge */
+.auto-sync-history-intro-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.auto-sync-history-filters {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.auto-sync-history-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.auto-sync-history-filter-btn:hover {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.auto-sync-history-filter-btn.active {
+    background: rgba(var(--accent-rgb), 0.18);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-history-filter-btn em {
+    font-style: normal;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.auto-sync-history-filter-btn.active em {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-history-filter-btn.has-errors:not(.active) em {
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
+}
+
+.auto-sync-history-filter-btn.has-errors.active {
+    background: rgba(239, 68, 68, 0.16);
+    color: #ef4444;
+}
+
+.auto-sync-history-load-more-row {
+    display: flex;
+    justify-content: center;
+    padding: 12px 14px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.auto-sync-history-load-more {
+    height: 32px;
+    padding: 0 18px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.auto-sync-history-load-more:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* Tab badge (error count on Run History tab) */
+.auto-sync-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 5px;
+    margin-left: 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.auto-sync-tab-badge.error {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+/* Run-again button inside history expanded detail */
+.auto-sync-history-detail-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.auto-sync-history-run-again {
+    height: 30px;
+    padding: 0 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+
+.auto-sync-history-run-again:hover {
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: rgb(var(--accent-neon-rgb));
 }
 
 .auto-sync-automation-list {
