@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
 
@@ -24,6 +24,14 @@ _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{16,32}$")
 class MirroredSourceRef:
     source_playlist_id: str
     description: Optional[str]
+
+
+@dataclass(frozen=True)
+class MirroredSourceRefView:
+    source_ref: str
+    source_ref_kind: str
+    source_ref_status: str
+    source_ref_error: Optional[str] = None
 
 
 def normalize_mirrored_source_ref(
@@ -75,6 +83,29 @@ def require_refresh_url(source: str, description: str, playlist_name: str = "") 
     return description
 
 
+def describe_mirrored_source_ref(playlist: Mapping[str, object]) -> MirroredSourceRefView:
+    """Build a UI/API friendly view of a mirrored playlist's refresh ref."""
+    source = str(playlist.get("source") or "").strip().lower()
+    source_playlist_id = str(playlist.get("source_playlist_id") or "").strip()
+    description = str(playlist.get("description") or "").strip()
+    name = str(playlist.get("name") or "")
+
+    if source in {"spotify_public", "youtube"}:
+        if description.startswith(("http://", "https://")):
+            return MirroredSourceRefView(description, "url", "ok")
+        try:
+            require_refresh_url(source, description, name)
+        except ValueError as exc:
+            return MirroredSourceRefView(
+                source_playlist_id,
+                "url",
+                "missing",
+                str(exc),
+            )
+
+    return MirroredSourceRefView(source_playlist_id, "id", "ok" if source_playlist_id else "missing")
+
+
 def _canonical_spotify_url(source_ref: str) -> str:
     parsed = _parse_spotify_ref(source_ref)
     if parsed:
@@ -94,7 +125,7 @@ def _parse_spotify_ref(source_ref: str) -> Optional[dict]:
         return {"type": uri_match.group(1), "id": uri_match.group(2)}
 
     url_match = re.search(
-        r"https?://open\.spotify\.com/(playlist|album)/([A-Za-z0-9]+)",
+        r"https?://open\.spotify\.com/(?:embed/)?(playlist|album)/([A-Za-z0-9]+)",
         source_ref,
     )
     if url_match:

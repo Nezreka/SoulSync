@@ -535,6 +535,7 @@ function renderMirroredCard(p, container) {
 }
 
 function getMirroredSourceRef(p) {
+    if (p && p.source_ref) return String(p.source_ref);
     const desc = (p && p.description) ? String(p.description).trim() : '';
     if ((p.source === 'spotify_public' || p.source === 'youtube') && /^https?:\/\//i.test(desc)) {
         return desc;
