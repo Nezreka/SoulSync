@@ -32479,6 +32479,37 @@ def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
         logger.error(f"Error getting mirrored playlist pipeline status: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/playlist-pipeline/history', methods=['GET'])
+def get_playlist_pipeline_history_endpoint():
+    """Return persisted run history for mirrored playlist pipeline executions."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        limit = min(max(int(request.args.get('limit', 50)), 1), 100)
+        offset = max(int(request.args.get('offset', 0)), 0)
+        playlist_id_raw = request.args.get('playlist_id')
+        playlist_id = int(playlist_id_raw) if playlist_id_raw else None
+        data = database.get_playlist_pipeline_run_history(
+            profile_id=profile_id,
+            playlist_id=playlist_id,
+            limit=limit,
+            offset=offset,
+        )
+        for entry in data.get('history', []):
+            for key in ('before_json', 'after_json', 'result_json', 'log_lines'):
+                if entry.get(key):
+                    try:
+                        entry[key] = json.loads(entry[key])
+                    except (json.JSONDecodeError, TypeError):
+                        entry[key] = [] if key == 'log_lines' else {}
+                else:
+                    entry[key] = [] if key == 'log_lines' else {}
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting playlist pipeline history: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])
 def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
