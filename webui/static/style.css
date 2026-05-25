@@ -11214,6 +11214,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 20px;
     padding: 22px 24px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
 }
 
 .auto-sync-eyebrow {
@@ -11260,6 +11261,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 1px;
     background: rgba(255, 255, 255, 0.08);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
 }
 
 .auto-sync-summary div {
@@ -11289,6 +11291,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 12px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.018);
+    flex-shrink: 0;
 }
 
 .auto-sync-tabs button {
@@ -11330,6 +11333,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 12px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     background: rgba(56, 189, 248, 0.035);
+    flex-shrink: 0;
 }
 
 .auto-sync-board-intro strong,
@@ -11427,6 +11431,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-color: rgba(34, 197, 94, 0.22);
 }
 
+.auto-sync-playlist.unavailable {
+    cursor: default;
+    opacity: 0.58;
+}
+
+.auto-sync-playlist.unavailable:hover {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.auto-sync-source-group-disabled {
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .auto-sync-playlist-name,
 .auto-sync-scheduled-name {
     color: rgba(255, 255, 255, 0.86);
@@ -11444,17 +11463,48 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 11px;
 }
 
+.auto-sync-scheduled-timing {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+}
+
+.auto-sync-scheduled-timing span,
+.auto-sync-scheduled-timing small {
+    padding: 3px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.auto-sync-scheduled-timing span {
+    background: rgba(56, 189, 248, 0.14);
+    color: #7dd3fc;
+}
+
+.auto-sync-scheduled-timing small {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.48);
+}
+
 .auto-sync-board {
     min-width: 0;
+    min-height: 0;
     overflow-x: auto;
+    overflow-y: hidden;
     padding: 18px;
     display: grid;
     grid-template-columns: repeat(10, minmax(185px, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
     gap: 12px;
 }
 
 .auto-sync-column {
     min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.025);
@@ -11470,6 +11520,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     color: rgba(255, 255, 255, 0.86);
     font-weight: 800;
+    flex-shrink: 0;
 }
 
 .auto-sync-column-head small {
@@ -11480,8 +11531,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .auto-sync-column-list {
     flex: 1;
-    min-height: 220px;
+    min-height: 0;
+    overflow-y: auto;
     padding: 10px;
+}
+
+.auto-sync-column-list::-webkit-scrollbar,
+.auto-sync-board::-webkit-scrollbar,
+.auto-sync-source-list::-webkit-scrollbar,
+.auto-sync-automation-list::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.auto-sync-column-list::-webkit-scrollbar-thumb,
+.auto-sync-board::-webkit-scrollbar-thumb,
+.auto-sync-source-list::-webkit-scrollbar-thumb,
+.auto-sync-automation-list::-webkit-scrollbar-thumb {
+    background: rgba(125, 211, 252, 0.22);
+    border-radius: 999px;
 }
 
 .auto-sync-drop-hint,
@@ -11645,6 +11713,67 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-radius: 8px;
     color: rgba(255, 255, 255, 0.42);
     text-align: center;
+}
+
+@media (max-width: 1100px) {
+    .auto-sync-modal {
+        width: calc(100vw - 18px);
+        height: calc(100vh - 18px);
+    }
+
+    .auto-sync-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .auto-sync-body {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(150px, 30%) 1fr;
+    }
+
+    .auto-sync-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .auto-sync-source-list {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0 12px 12px;
+    }
+
+    .auto-sync-source-group {
+        min-width: 220px;
+        margin-bottom: 0;
+    }
+
+    .auto-sync-board {
+        grid-template-columns: repeat(10, minmax(165px, 180px));
+    }
+}
+
+@media (max-height: 760px) {
+    .auto-sync-header {
+        padding: 14px 18px 12px;
+    }
+
+    .auto-sync-header p {
+        display: none;
+    }
+
+    .auto-sync-summary div {
+        padding: 9px 16px;
+    }
+
+    .auto-sync-tabs {
+        padding: 9px 14px;
+    }
+
+    .auto-sync-board-intro,
+    .auto-sync-automation-intro {
+        padding: 9px 14px;
+    }
 }
 
 /* Enhanced Progress Bar Animation */
