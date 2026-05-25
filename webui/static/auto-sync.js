@@ -459,16 +459,9 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
     const entryId = `auto-sync-history-${entry.id}`;
     const playlistName = entry.playlist_name || after.name || before.name || `Playlist #${entry.playlist_id || 'unknown'}`;
     const summary = entry.summary || autoSyncHistoryFallbackSummary(before, after, status);
-    const resultHtml = [
-        autoSyncHistoryResultPill('Refreshed', result.playlists_refreshed),
-        autoSyncHistoryResultPill('Synced', result.tracks_synced),
-        autoSyncHistoryResultPill('Skipped', result.sync_skipped),
-        autoSyncHistoryResultPill('Queued', result.wishlist_queued),
-        result.error ? `<span class="error">${_esc(result.error)}</span>` : '',
-    ].filter(Boolean).join('');
     return `
-        <article class="auto-sync-history-entry">
-            <div class="auto-sync-history-row" onclick="autoSyncToggleHistoryEntry('${entryId}')">
+        <article class="auto-sync-history-entry" id="${entryId}-card">
+            <div class="auto-sync-history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="${entryId}" onclick="autoSyncToggleHistoryEntry('${entryId}')" onkeydown="autoSyncHistoryEntryKeydown(event, '${entryId}')">
                 <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
                 <div class="auto-sync-history-main">
                     <div class="auto-sync-history-title-row">
@@ -496,19 +489,11 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
                     ${started ? `<span>${_esc(started)}</span>` : ''}
                     ${duration ? `<span>${_esc(duration)}</span>` : ''}
                     <span>${_esc(entry.trigger_source || 'pipeline')}</span>
-                    <button type="button" onclick="event.stopPropagation(); autoSyncToggleHistoryEntry('${entryId}')">Details</button>
+                    <span class="auto-sync-history-expand-label">Expand</span>
                 </div>
             </div>
             <div id="${entryId}" class="auto-sync-history-detail">
-                <div class="auto-sync-history-stats">
-                    ${autoSyncHistoryStatHtml('Tracks', before.track_count, after.track_count, trackDelta)}
-                    ${autoSyncHistoryStatHtml('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
-                    ${autoSyncHistoryStatHtml('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
-                    ${autoSyncHistoryStatHtml('In library', before.in_library_count, after.in_library_count, libraryDelta)}
-                </div>
-                <div class="auto-sync-history-result">
-                    ${resultHtml || '<span class="muted">No detailed result payload recorded for this run.</span>'}
-                </div>
+                ${autoSyncHistoryDetailHtml(entry, before, after, result, { trackDelta, discoveredDelta, wishlistDelta, libraryDelta })}
             </div>
         </article>
     `;
@@ -556,7 +541,18 @@ function autoSyncHistoryFallbackSummary(before, after, status) {
 
 function autoSyncToggleHistoryEntry(entryId) {
     const el = document.getElementById(entryId);
-    if (el) el.classList.toggle('expanded');
+    const card = document.getElementById(`${entryId}-card`);
+    const row = card?.querySelector('.auto-sync-history-row');
+    if (!el) return;
+    const expanded = el.classList.toggle('expanded');
+    if (card) card.classList.toggle('expanded', expanded);
+    if (row) row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+function autoSyncHistoryEntryKeydown(event, entryId) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    autoSyncToggleHistoryEntry(entryId);
 }
 
 function autoSyncHistoryStatusLabel(status) {
@@ -608,6 +604,141 @@ function autoSyncHistoryPreviewPill(label, before, after, delta) {
 function autoSyncHistoryResultPill(label, value) {
     if (value === undefined || value === null || value === '') return '';
     return `<span>${_esc(label)}: ${_esc(String(value))}</span>`;
+}
+
+function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
+    const resultPills = [
+        autoSyncHistoryResultPill('Refreshed', result.playlists_refreshed),
+        autoSyncHistoryResultPill('Discovered', result.tracks_discovered),
+        autoSyncHistoryResultPill('Synced', result.tracks_synced),
+        autoSyncHistoryResultPill('Skipped', result.sync_skipped),
+        autoSyncHistoryResultPill('Wishlisted', result.wishlist_queued),
+        autoSyncHistoryResultPill('Duration', result.duration_seconds ? autoSyncDurationLabel(result.duration_seconds) : ''),
+        result.error ? `<span class="error">${_esc(result.error)}</span>` : '',
+    ].filter(Boolean).join('');
+    const timeline = [
+        ['Started', autoSyncFormatDateTime(entry.started_at)],
+        ['Finished', autoSyncFormatDateTime(entry.finished_at)],
+        ['Duration', entry.duration_seconds ? autoSyncDurationLabel(entry.duration_seconds) : 'Not recorded'],
+        ['Trigger', entry.trigger_source || 'pipeline'],
+        ['Source', entry.source || after.source || before.source || 'Unknown'],
+        ['Playlist ID', entry.playlist_id || after.playlist_id || before.playlist_id || 'Unknown'],
+    ];
+    return `
+        <div class="auto-sync-history-detail-grid">
+            <section class="auto-sync-history-section">
+                <div class="auto-sync-history-section-title">Run Summary</div>
+                <div class="auto-sync-history-stats">
+                    ${autoSyncHistoryStatHtml('Tracks', before.track_count, after.track_count, deltas.trackDelta)}
+                    ${autoSyncHistoryStatHtml('Discovered', before.discovered_count, after.discovered_count, deltas.discoveredDelta)}
+                    ${autoSyncHistoryStatHtml('Wishlisted', before.wishlisted_count, after.wishlisted_count, deltas.wishlistDelta)}
+                    ${autoSyncHistoryStatHtml('In library', before.in_library_count, after.in_library_count, deltas.libraryDelta)}
+                </div>
+                <div class="auto-sync-history-result">
+                    ${resultPills || '<span class="muted">No detailed result payload recorded for this run.</span>'}
+                </div>
+            </section>
+            <section class="auto-sync-history-section">
+                <div class="auto-sync-history-section-title">Timeline</div>
+                <div class="auto-sync-history-facts">
+                    ${timeline.map(([label, value]) => autoSyncHistoryFactHtml(label, value)).join('')}
+                </div>
+            </section>
+        </div>
+        <div class="auto-sync-history-snapshots">
+            ${autoSyncHistorySnapshotHtml('Before refresh', before)}
+            ${autoSyncHistorySnapshotHtml('After pipeline', after)}
+        </div>
+        ${autoSyncHistoryObjectHtml('Result payload', result, { skipPrivate: true })}
+        ${autoSyncHistoryLogsHtml(entry.log_lines)}
+    `;
+}
+
+function autoSyncHistoryFactHtml(label, value) {
+    return `
+        <div>
+            <span>${_esc(label)}</span>
+            <strong>${_esc(autoSyncValueLabel(value))}</strong>
+        </div>
+    `;
+}
+
+function autoSyncHistorySnapshotHtml(title, snapshot) {
+    const fields = [
+        ['Name', snapshot.name],
+        ['Source', snapshot.source],
+        ['Tracks', snapshot.track_count],
+        ['Discovered', snapshot.discovered_count],
+        ['Wishlisted', snapshot.wishlisted_count],
+        ['In library', snapshot.in_library_count],
+    ];
+    return `
+        <section class="auto-sync-history-section auto-sync-history-snapshot">
+            <div class="auto-sync-history-section-title">${_esc(title)}</div>
+            <div class="auto-sync-history-facts compact">
+                ${fields.map(([label, value]) => autoSyncHistoryFactHtml(label, value)).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function autoSyncHistoryObjectHtml(title, obj, options = {}) {
+    if (!obj || typeof obj !== 'object') return '';
+    const entries = Object.entries(obj)
+        .filter(([key, value]) => !(options.skipPrivate && key.startsWith('_')) && value !== undefined && value !== null && value !== '')
+        .slice(0, 24);
+    if (!entries.length) return '';
+    return `
+        <section class="auto-sync-history-section">
+            <div class="auto-sync-history-section-title">${_esc(title)}</div>
+            <div class="auto-sync-history-payload">
+                ${entries.map(([key, value]) => `
+                    <div>
+                        <span>${_esc(autoSyncHumanizeKey(key))}</span>
+                        <strong>${_esc(autoSyncValueLabel(value))}</strong>
+                    </div>
+                `).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function autoSyncHistoryLogsHtml(logLines) {
+    if (!Array.isArray(logLines) || !logLines.length) return '';
+    return `
+        <section class="auto-sync-history-section">
+            <div class="auto-sync-history-section-title">Run Log</div>
+            <div class="auto-sync-history-logs">
+                ${logLines.slice(-12).map(line => {
+                    const text = typeof line === 'string' ? line : (line.message || line.log_line || JSON.stringify(line));
+                    const type = typeof line === 'object' ? (line.type || line.log_type || 'info') : 'info';
+                    return `<div class="${_escAttr(type)}">${_esc(text)}</div>`;
+                }).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function autoSyncFormatDateTime(value) {
+    if (!value) return '';
+    const ts = _autoParseUTC(value);
+    if (!Number.isFinite(ts)) return value;
+    return new Date(ts).toLocaleString();
+}
+
+function autoSyncHumanizeKey(key) {
+    return String(key || '')
+        .replace(/^_+/, '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function autoSyncValueLabel(value) {
+    if (value === undefined || value === null || value === '') return 'Not recorded';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (Array.isArray(value)) return value.length ? value.map(autoSyncValueLabel).join(', ') : 'None';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
 }
 
 function autoSyncAutomationCardHtml(auto, playlists) {
