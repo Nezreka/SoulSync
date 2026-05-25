@@ -11682,13 +11682,121 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 14px;
 }
 
-.auto-sync-source-title {
+.auto-sync-source-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
     padding: 6px 4px 4px;
+}
+
+.auto-sync-source-title {
     color: rgba(255, 255, 255, 0.38);
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+}
+
+.auto-sync-source-bulk-btn {
+    height: 20px;
+    padding: 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+
+.auto-sync-source-bulk-btn:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* Bulk-schedule popover for a source group */
+.auto-sync-bulk-menu {
+    position: fixed;
+    z-index: 10001;
+    min-width: 220px;
+    padding: 8px;
+    background: linear-gradient(135deg, #1f1f1f 0%, #161616 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.auto-sync-bulk-menu-title {
+    padding: 6px 8px 4px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.auto-sync-bulk-menu-buckets {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.auto-sync-bulk-menu button {
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: left;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.auto-sync-bulk-menu button:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-bulk-menu-custom {
+    margin-top: 2px;
+}
+
+.auto-sync-bulk-menu-unschedule {
+    color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.auto-sync-bulk-menu-unschedule:hover {
+    background: rgba(239, 68, 68, 0.18) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #ef4444 !important;
+}
+
+/* Custom-interval column tag */
+.auto-sync-column.custom {
+    border-style: dashed;
+}
+
+.auto-sync-column-head em {
+    font-style: normal;
+    color: rgba(var(--accent-rgb), 0.7);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-left: 4px;
 }
 
 .auto-sync-playlist,

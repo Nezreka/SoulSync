@@ -279,7 +279,14 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
 
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
-            <div class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</div>
+            <div class="auto-sync-source-group-head">
+                <span class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</span>
+                <button type="button" class="auto-sync-source-bulk-btn"
+                        onclick="event.stopPropagation(); openAutoSyncBulkMenu(event, '${_escAttr(source)}')"
+                        title="Schedule all ${_escAttr(autoSyncSourceLabel(source))} playlists at the same interval">
+                    Bulk
+                </button>
+            </div>
             ${grouped[source].map(p => {
                 const schedule = playlistSchedules[p.id];
                 const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
@@ -305,12 +312,21 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
         </div>
     ` : '';
 
-    const bucketHtml = AUTO_SYNC_BUCKETS.map(hours => {
+    // Merge standard buckets with any custom intervals that are already in
+    // use, so a 6h or 36h schedule (created via Automations page or the
+    // custom-interval prompt) still renders as its own column instead of
+    // disappearing from the board.
+    const customHours = Object.values(playlistSchedules)
+        .map(s => parseInt(s?.hours, 10))
+        .filter(h => Number.isFinite(h) && h > 0 && !AUTO_SYNC_BUCKETS.includes(h));
+    const allBuckets = [...new Set([...AUTO_SYNC_BUCKETS, ...customHours])].sort((a, b) => a - b);
+    const bucketHtml = allBuckets.map(hours => {
         const assigned = schedulablePlaylists.filter(p => playlistSchedules[p.id]?.hours === hours);
+        const isCustom = !AUTO_SYNC_BUCKETS.includes(hours);
         return `
-            <div class="auto-sync-column" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
+            <div class="auto-sync-column ${isCustom ? 'custom' : ''}" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondragleave="autoSyncDragLeave(event)" ondrop="autoSyncDrop(event, ${hours})">
                 <div class="auto-sync-column-head">
-                    <span>${autoSyncBucketLabel(hours)}</span>
+                    <span>${autoSyncBucketLabel(hours)}${isCustom ? ' <em>custom</em>' : ''}</span>
                     <small>${assigned.length} playlist${assigned.length === 1 ? '' : 's'}</small>
                 </div>
                 <div class="auto-sync-column-list">
@@ -509,6 +525,145 @@ function setAutoSyncHistoryFilter(key) {
 function loadMoreAutoSyncHistory() {
     _autoSyncHistoryLimit = Math.min(500, _autoSyncHistoryLimit + 50);
     refreshAutoSyncScheduleModal();
+}
+
+function openAutoSyncBulkMenu(event, source) {
+    // Build a transient popover with all the standard buckets + a "Custom…"
+    // entry. Position relative to the button that triggered it.
+    closeAutoSyncBulkMenu();
+    const anchor = event.currentTarget;
+    if (!anchor) return;
+    const menu = document.createElement('div');
+    menu.className = 'auto-sync-bulk-menu';
+    menu.id = 'auto-sync-bulk-menu';
+    const buckets = [...AUTO_SYNC_BUCKETS];
+    const buttons = buckets.map(h => `
+        <button type="button" onclick="bulkScheduleAutoSyncSource('${_escAttr(source)}', ${h})">
+            ${_esc(autoSyncIntervalLabel(h))}
+        </button>
+    `).join('');
+    menu.innerHTML = `
+        <div class="auto-sync-bulk-menu-title">Schedule all ${_esc(autoSyncSourceLabel(source))}</div>
+        <div class="auto-sync-bulk-menu-buckets">${buttons}</div>
+        <button type="button" class="auto-sync-bulk-menu-custom"
+                onclick="promptAutoSyncBulkCustom('${_escAttr(source)}')">
+            Custom interval…
+        </button>
+        <button type="button" class="auto-sync-bulk-menu-unschedule"
+                onclick="bulkUnscheduleAutoSyncSource('${_escAttr(source)}')">
+            Unschedule all
+        </button>
+    `;
+    document.body.appendChild(menu);
+    const rect = anchor.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, rect.right - menu.offsetWidth)}px`;
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', _autoSyncBulkMenuOutsideClick, { once: true });
+    }, 0);
+}
+
+function _autoSyncBulkMenuOutsideClick(event) {
+    const menu = document.getElementById('auto-sync-bulk-menu');
+    if (menu && !menu.contains(event.target)) closeAutoSyncBulkMenu();
+}
+
+function closeAutoSyncBulkMenu() {
+    const existing = document.getElementById('auto-sync-bulk-menu');
+    if (existing) existing.remove();
+}
+
+function promptAutoSyncBulkCustom(source) {
+    closeAutoSyncBulkMenu();
+    const raw = window.prompt('Custom interval in hours (e.g. 6, 36, 96):', '6');
+    if (raw === null) return;
+    const hours = parseInt(raw, 10);
+    if (!Number.isFinite(hours) || hours < 1) {
+        showToast('Interval must be a whole number of hours, 1 or greater', 'error');
+        return;
+    }
+    bulkScheduleAutoSyncSource(source, hours);
+}
+
+async function bulkScheduleAutoSyncSource(source, hours) {
+    closeAutoSyncBulkMenu();
+    const { playlists } = _autoSyncScheduleState;
+    const targets = (playlists || []).filter(p => p.source === source && autoSyncCanSchedulePlaylist(p));
+    if (!targets.length) {
+        showToast(`No schedulable ${autoSyncSourceLabel(source)} playlists`, 'info');
+        return;
+    }
+    if (!await showConfirmDialog({
+        title: `Schedule ${targets.length} ${autoSyncSourceLabel(source)} playlist${targets.length === 1 ? '' : 's'}`,
+        message: `Every ${autoSyncIntervalLabel(hours).toLowerCase().replace(/^every /, '')}. Existing schedules in this source will be updated.`,
+    })) return;
+    let ok = 0, fail = 0;
+    for (const playlist of targets) {
+        try {
+            await saveAutoSyncPlaylistScheduleSilent(playlist.id, hours);
+            ok++;
+        } catch (_err) {
+            fail++;
+        }
+    }
+    showToast(`Scheduled ${ok} ${autoSyncSourceLabel(source)} playlist${ok === 1 ? '' : 's'} at ${autoSyncBucketLabel(hours)}${fail ? ` (${fail} failed)` : ''}`, fail ? 'warning' : 'success');
+    await refreshAutoSyncScheduleModal();
+}
+
+async function bulkUnscheduleAutoSyncSource(source) {
+    closeAutoSyncBulkMenu();
+    const { playlists, playlistSchedules } = _autoSyncScheduleState;
+    const targets = (playlists || []).filter(p => p.source === source && playlistSchedules[p.id]);
+    if (!targets.length) {
+        showToast(`No scheduled ${autoSyncSourceLabel(source)} playlists to unschedule`, 'info');
+        return;
+    }
+    if (!await showConfirmDialog({
+        title: `Unschedule ${targets.length} ${autoSyncSourceLabel(source)} playlist${targets.length === 1 ? '' : 's'}`,
+        message: 'Removes the Auto-Sync schedules. Mirrored playlists themselves stay.',
+    })) return;
+    let ok = 0, fail = 0;
+    for (const playlist of targets) {
+        const schedule = playlistSchedules[playlist.id];
+        if (!schedule) continue;
+        try {
+            const res = await fetch(`/api/automations/${schedule.automation_id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            ok++;
+        } catch (_err) {
+            fail++;
+        }
+    }
+    showToast(`Removed ${ok} schedule${ok === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}`, fail ? 'warning' : 'success');
+    await refreshAutoSyncScheduleModal();
+}
+
+async function saveAutoSyncPlaylistScheduleSilent(playlistId, hours) {
+    // Like saveAutoSyncPlaylistSchedule but without toasts/refresh — caller
+    // batches feedback. Re-uses the existing automation row when one already
+    // exists for the playlist.
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+    if (!playlist) throw new Error('playlist not found');
+    const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
+    const payload = {
+        name: `Auto-Sync: ${playlist.name}`,
+        trigger_type: 'schedule',
+        trigger_config: autoSyncTriggerForHours(hours),
+        action_type: 'playlist_pipeline',
+        action_config: { playlist_id: String(playlistId), all: false },
+        then_actions: [],
+        group_name: 'Playlist Auto-Sync',
+        owned_by: 'auto_sync',
+    };
+    const res = await fetch(existing ? `/api/automations/${existing.automation_id}` : '/api/automations', {
+        method: existing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Failed');
+    return data;
 }
 
 function populateAutoSyncHistoryList(root = document) {
