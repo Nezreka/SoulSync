@@ -380,6 +380,7 @@ function importFileSubmit() {
 // ── Mirrored Playlists ────────────────────────────────────────────────
 
 let mirroredPlaylistsLoaded = false;
+const mirroredPipelinePollers = {};
 
 /**
  * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
@@ -444,13 +445,34 @@ async function loadMirroredPlaylists() {
 function renderMirroredCard(p, container) {
     const ago = timeAgo(p.updated_at || p.mirrored_at);
     const hash = `mirrored_${p.id}`;
-    const state = youtubePlaylistStates[hash];
+    const pipelineState = p.pipeline_state || null;
+    const pipelinePhase = pipelineState && pipelineState.status === 'running' ? 'pipeline_running'
+        : pipelineState && pipelineState.status === 'finished' ? 'pipeline_complete'
+        : pipelineState && (pipelineState.status === 'error' || pipelineState.status === 'skipped') ? 'pipeline_error'
+        : null;
+    const state = youtubePlaylistStates[hash] || (pipelinePhase ? {
+        phase: pipelinePhase,
+        pipeline_status: pipelineState.status,
+        pipeline_progress: pipelineState.progress || 0,
+        pipeline_phase: pipelineState.phase || '',
+        pipeline_error: pipelineState.error || '',
+        pipeline_log: pipelineState.log || [],
+        pipeline_result: pipelineState.result || null,
+    } : null);
     const phase = state ? state.phase : null;
     const sourceRef = getMirroredSourceRef(p);
 
     // Build phase indicator
     let phaseHtml = '';
-    if (phase === 'discovering') {
+    if (phase === 'pipeline_running') {
+        const pct = state.pipeline_progress || state.progress || 0;
+        const label = state.pipeline_phase || state.phase_label || 'Pipeline running';
+        phaseHtml = `<span style="color:#38bdf8;">${_esc(label)} ${pct}%</span>`;
+    } else if (phase === 'pipeline_complete') {
+        phaseHtml = `<span style="color:#22c55e;">Pipeline complete</span>`;
+    } else if (phase === 'pipeline_error') {
+        phaseHtml = `<span style="color:#ef4444;">Pipeline error</span>`;
+    } else if (phase === 'discovering') {
         const pct = state.discoveryProgress || state.discovery_progress || 0;
         phaseHtml = `<span style="color:#a78bfa;">Discovering ${pct}%</span>`;
     } else if (phase === 'discovered') {
@@ -491,6 +513,7 @@ function renderMirroredCard(p, container) {
                 <span>Mirrored ${ago}</span>
                 ${ratioHtml}
                 ${phaseHtml}
+                <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Run refresh, discover, sync, and wishlist">Run Pipeline</button>
             </div>
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
@@ -532,6 +555,10 @@ function renderMirroredCard(p, container) {
         }
     });
     container.appendChild(card);
+
+    if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
+        pollMirroredPipelineStatus(p.id, p.name);
+    }
 }
 
 function getMirroredSourceRef(p) {
@@ -577,6 +604,84 @@ async function editMirroredSourceRef(playlistId, name, source, currentRef) {
     }
 }
 
+function applyMirroredPipelineState(playlistId, state) {
+    const hash = `mirrored_${playlistId}`;
+    const existing = youtubePlaylistStates[hash] || {};
+    const status = state.status || 'idle';
+    let phase = existing.phase;
+    if (status === 'running') phase = 'pipeline_running';
+    else if (status === 'finished') phase = 'pipeline_complete';
+    else if (status === 'error' || status === 'skipped') phase = 'pipeline_error';
+
+    youtubePlaylistStates[hash] = {
+        ...existing,
+        phase,
+        pipeline_status: status,
+        pipeline_progress: state.progress || 0,
+        pipeline_phase: state.phase || '',
+        pipeline_error: state.error || '',
+        pipeline_log: state.log || [],
+        pipeline_result: state.result || null,
+    };
+
+    updateMirroredCardPhase(hash, phase);
+}
+
+async function runMirroredPlaylistPipeline(playlistId, name) {
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to start pipeline');
+        }
+        applyMirroredPipelineState(playlistId, data.state || { status: 'running', progress: 0, phase: 'Starting pipeline...' });
+        showToast(`Pipeline started for ${name}`, 'success');
+        pollMirroredPipelineStatus(playlistId, name);
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+function pollMirroredPipelineStatus(playlistId, name) {
+    const key = `mirrored_${playlistId}`;
+    if (mirroredPipelinePollers[key]) clearInterval(mirroredPipelinePollers[key]);
+
+    const tick = async () => {
+        try {
+            const res = await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/status`);
+            const state = await res.json();
+            if (!res.ok || state.error) throw new Error(state.error || 'Failed to read pipeline status');
+            applyMirroredPipelineState(playlistId, state);
+
+            if (state.status === 'finished') {
+                clearInterval(mirroredPipelinePollers[key]);
+                delete mirroredPipelinePollers[key];
+                showToast(`Pipeline complete for ${name}`, 'success');
+                loadMirroredPlaylists();
+            } else if (state.status === 'error' || state.status === 'skipped') {
+                clearInterval(mirroredPipelinePollers[key]);
+                delete mirroredPipelinePollers[key];
+                showToast(state.error || `Pipeline stopped for ${name}`, 'error');
+                loadMirroredPlaylists();
+            } else if (state.status === 'idle') {
+                clearInterval(mirroredPipelinePollers[key]);
+                delete mirroredPipelinePollers[key];
+            }
+        } catch (err) {
+            clearInterval(mirroredPipelinePollers[key]);
+            delete mirroredPipelinePollers[key];
+            showToast(`Pipeline status error: ${err.message}`, 'error');
+        }
+    };
+
+    tick();
+    mirroredPipelinePollers[key] = setInterval(tick, 2500);
+}
+
 function updateMirroredCardPhase(urlHash, phase) {
     // Update the state phase (updateYouTubeCardPhase skips this for mirrored playlists due to no cardElement)
     const state = youtubePlaylistStates[urlHash];
@@ -597,6 +702,17 @@ function updateMirroredCardPhase(urlHash, phase) {
     // Add new phase indicator
     let phaseHtml = '';
     switch (phase) {
+        case 'pipeline_running':
+            const pipelineProgress = state?.pipeline_progress || 0;
+            const pipelinePhase = state?.pipeline_phase || 'Pipeline running';
+            phaseHtml = `<span style="color:#38bdf8;">${_esc(pipelinePhase)} ${pipelineProgress}%</span>`;
+            break;
+        case 'pipeline_complete':
+            phaseHtml = `<span style="color:#22c55e;">Pipeline complete</span>`;
+            break;
+        case 'pipeline_error':
+            phaseHtml = `<span style="color:#ef4444;">Pipeline error</span>`;
+            break;
         case 'discovering':
             phaseHtml = `<span style="color:#a78bfa;">Discovering...</span>`;
             break;
@@ -874,6 +990,7 @@ async function openMirroredPlaylistModal(playlistId) {
                     </div>
                     <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
                         <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escAttr(data.name)}', '${_escAttr(source)}', '${_escAttr(sourceRef)}')">Edit Source</button>
+                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escAttr(data.name)}')">Run Pipeline</button>
                         <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
                         <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>

@@ -12047,6 +12047,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     letter-spacing: 0.3px;
 }
 
+.mirrored-card-pipeline {
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.24);
+    border-radius: 6px;
+    color: #7dd3fc;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    height: 24px;
+    padding: 0 10px;
+    transition: all 0.2s ease;
+}
+
+.mirrored-card-pipeline:hover {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: #e0f2fe;
+}
+
 .mirrored-card-delete,
 .mirrored-card-clear,
 .mirrored-card-link {
@@ -13224,6 +13243,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-btn-discover:hover {
     transform: translateY(-1px);
     box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.4);
+}
+
+.mirrored-btn-pipeline {
+    background: rgba(56, 189, 248, 0.12);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+}
+
+.mirrored-btn-pipeline:hover {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    color: #e0f2fe;
+    transform: translateY(-1px);
 }
 
 .mirrored-btn-delete {

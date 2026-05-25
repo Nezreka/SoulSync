@@ -38,7 +38,15 @@ def run_mirrored_playlist_pipeline(
     a future web/UI runner can provide the same small surface without becoming
     an automation.
     """
-    deps.state.set_pipeline_running(True)
+    if hasattr(deps.state, 'try_start_pipeline'):
+        if not deps.state.try_start_pipeline():
+            return {
+                'status': 'skipped',
+                'reason': 'playlist_pipeline is already running',
+                '_manages_own_progress': True,
+            }
+    else:
+        deps.state.set_pipeline_running(True)
     automation_id = config.get('_automation_id')
     pipeline_start = time.time()
 

@@ -387,6 +387,19 @@ class TestSyncPlaylist:
 
 
 class TestPlaylistPipeline:
+    def test_pipeline_skips_when_shared_lock_is_already_running(self):
+        deps = _build_deps()
+        deps.state.set_pipeline_running(True)
+
+        result = auto_playlist_pipeline({'all': True}, deps)
+
+        assert result == {
+            'status': 'skipped',
+            'reason': 'playlist_pipeline is already running',
+            '_manages_own_progress': True,
+        }
+        assert deps.state.pipeline_running is True
+
     def test_no_playlist_specified_returns_error(self):
         deps = _build_deps()
         result = auto_playlist_pipeline({}, deps)
