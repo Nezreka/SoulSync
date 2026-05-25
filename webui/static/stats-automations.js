@@ -602,6 +602,15 @@ function autoSyncBucketLabel(hours) {
     return `${hours}h`;
 }
 
+function autoSyncIntervalLabel(hours) {
+    if (hours === 168) return 'Every week';
+    if (hours >= 24) {
+        const days = hours / 24;
+        return `Every ${days} day${days === 1 ? '' : 's'}`;
+    }
+    return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
 function autoSyncSourceLabel(source) {
     const labels = {
         spotify: 'Spotify',
@@ -614,6 +623,10 @@ function autoSyncSourceLabel(source) {
         file: 'File Imports',
     };
     return labels[source] || source || 'Other';
+}
+
+function autoSyncCanSchedulePlaylist(playlist) {
+    return playlist && !['file', 'beatport'].includes(playlist.source || '');
 }
 
 function autoSyncIsPipelineAutomation(auto) {
@@ -764,7 +777,9 @@ function setAutoSyncTab(tab) {
 }
 
 function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
-    const grouped = playlists.reduce((acc, p) => {
+    const schedulablePlaylists = playlists.filter(autoSyncCanSchedulePlaylist);
+    const unavailablePlaylists = playlists.filter(p => !autoSyncCanSchedulePlaylist(p));
+    const grouped = schedulablePlaylists.reduce((acc, p) => {
         const key = p.source || 'other';
         if (!acc[key]) acc[key] = [];
         acc[key].push(p);
@@ -777,7 +792,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
             <div class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</div>
             ${grouped[source].map(p => {
                 const schedule = playlistSchedules[p.id];
-                const assigned = schedule ? autoSyncBucketLabel(schedule.hours) : 'Unscheduled';
+                const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
                 return `
                     <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)">
                         <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
@@ -786,15 +801,27 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                 `;
             }).join('')}
         </div>
-    `).join('') : '<div class="auto-sync-empty">No mirrored playlists yet.</div>';
+    `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
+
+    const unavailableHtml = unavailablePlaylists.length ? `
+        <div class="auto-sync-source-group auto-sync-source-group-disabled">
+            <div class="auto-sync-source-title">Not schedulable</div>
+            ${unavailablePlaylists.map(p => `
+                <div class="auto-sync-playlist unavailable">
+                    <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
+                    <div class="auto-sync-playlist-meta">${_esc(autoSyncSourceLabel(p.source))} &middot; refresh not supported</div>
+                </div>
+            `).join('')}
+        </div>
+    ` : '';
 
     const bucketHtml = AUTO_SYNC_BUCKETS.map(hours => {
-        const assigned = playlists.filter(p => playlistSchedules[p.id]?.hours === hours);
+        const assigned = schedulablePlaylists.filter(p => playlistSchedules[p.id]?.hours === hours);
         return `
             <div class="auto-sync-column" data-hours="${hours}" ondragover="autoSyncDragOver(event)" ondrop="autoSyncDrop(event, ${hours})">
                 <div class="auto-sync-column-head">
                     <span>${autoSyncBucketLabel(hours)}</span>
-                    <small>${assigned.length}</small>
+                    <small>${assigned.length} playlist${assigned.length === 1 ? '' : 's'}</small>
                 </div>
                 <div class="auto-sync-column-list">
                     ${assigned.length ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('') : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists at this interval</span></div>'}
@@ -814,7 +841,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
             <div class="auto-sync-body">
                 <aside class="auto-sync-sidebar">
                     <div class="auto-sync-sidebar-title">Mirrored playlists</div>
-                    <div class="auto-sync-source-list">${sidebarHtml}</div>
+                    <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
                 </aside>
                 <main class="auto-sync-board">${bucketHtml}</main>
             </div>
@@ -866,11 +893,16 @@ function autoSyncAutomationCardHtml(auto, playlists) {
 
 function autoSyncScheduledCardHtml(playlist, schedule) {
     const enabled = schedule?.enabled !== false;
+    const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
     return `
         <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)">
             <div>
                 <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
-                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks${schedule?.next_run ? ` &middot; ${autoSyncNextRunLabel(schedule.next_run)}` : ''}</div>
+                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
+                <div class="auto-sync-scheduled-timing">
+                    <span>${_esc(autoSyncIntervalLabel(schedule?.hours || 24))}</span>
+                    ${nextLabel ? `<small>${_esc(nextLabel)}</small>` : ''}
+                </div>
             </div>
             <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
         </div>
@@ -912,6 +944,10 @@ async function autoSyncDrop(event, hours) {
 async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) return;
+    if (!autoSyncCanSchedulePlaylist(playlist)) {
+        showToast('That playlist source cannot be refreshed by Auto-Sync.', 'info');
+        return;
+    }
     const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
     const payload = {
         name: `Auto-Sync: ${playlist.name}`,
