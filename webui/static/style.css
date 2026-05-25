@@ -12023,6 +12023,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-history-entry {
+    display: block;
+    min-height: 84px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     background:
@@ -12030,6 +12032,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         rgba(255, 255, 255, 0.035);
     overflow: hidden;
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
+}
+
+.auto-sync-history-entry:empty {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+}
+
+.auto-sync-history-entry:empty::before {
+    content: 'Run history entry unavailable. Refresh after the next playlist pipeline run.';
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 12px;
+    font-weight: 700;
 }
 
 .auto-sync-history-entry:hover {
@@ -12047,6 +12062,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-height: 84px;
     padding: 15px 16px;
     cursor: pointer;
+    background: rgba(255, 255, 255, 0.018);
 }
 
 .auto-sync-history-status {
