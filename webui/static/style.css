@@ -61140,6 +61140,39 @@ body.reduce-effects .dash-card::after {
 .qa-tile--hero:hover .qa-tile__eq,
 .qa-tile--hero:focus-visible .qa-tile__eq { opacity: 0.65; }
 
+/* Hero playhead — vertical accent line that sweeps left-to-right across
+   the equalizer like a now-playing scrubber. Adds horizontal motion to
+   pair with the vertical bar pulse. */
+.qa-tile--hero .qa-tile__bg::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 65%;
+    width: 2px;
+    background: linear-gradient(180deg,
+        transparent 0%,
+        rgb(var(--accent-light-rgb)) 35%,
+        rgb(var(--accent-light-rgb)) 80%,
+        transparent 100%);
+    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.55));
+    opacity: 0.6;
+    animation: qa-playhead 5.5s linear infinite;
+    pointer-events: none;
+}
+
+.qa-tile--hero:hover .qa-tile__bg::after,
+.qa-tile--hero:focus-visible .qa-tile__bg::after { opacity: 0.95; }
+
+@keyframes qa-playhead {
+    0%   { left: -2%; }
+    100% { left: 102%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qa-tile--hero .qa-tile__bg::after { animation: none; opacity: 0; }
+    .qa-flow-line { animation: none; }
+}
+
 /* Tools background: large gear icon rotating slowly off the right edge */
 .qa-tile__gear {
     position: absolute;
@@ -61165,25 +61198,31 @@ body.reduce-effects .dash-card::after {
     animation-duration: 12s;
 }
 
-/* Automations background: 3-node trigger→action→notify flow that pulses */
+/* Automations background: 3-node trigger→action→notify flow centered
+   horizontally across the lower portion of the tile. Stays inside the
+   visible area regardless of how small the minor tile gets. Connecting
+   lines have a moving glow that travels left-to-right like a signal
+   propagating along a circuit. */
 .qa-tile__flow {
     position: absolute;
-    top: 50%;
-    right: -8%;
-    transform: translateY(-50%);
+    left: clamp(10px, 1.4cqw + 6px, 18px);
+    right: clamp(10px, 1.4cqw + 6px, 18px);
+    bottom: clamp(10px, 1.4cqw + 6px, 18px);
     display: flex;
     align-items: center;
-    gap: 4px;
-    opacity: 0.25;
+    justify-content: space-between;
+    gap: clamp(4px, 0.5cqw, 8px);
+    opacity: 0.45;
     transition: opacity 0.35s ease;
 }
 
 .qa-flow-node {
-    width: clamp(18px, 1.6cqw + 10px, 28px);
+    width: clamp(16px, 1.4cqw + 8px, 24px);
     aspect-ratio: 1;
-    border: 1.5px solid rgb(var(--accent-light-rgb));
+    border: 1.5px solid rgba(var(--accent-rgb), 0.6);
     border-radius: 50%;
-    background: rgba(var(--accent-rgb), 0.06);
+    background: rgba(var(--accent-rgb), 0.1);
+    flex-shrink: 0;
 }
 
 .qa-flow-node:nth-of-type(1) { animation: qa-flow-pulse 2.4s ease-in-out infinite; }
@@ -61192,20 +61231,32 @@ body.reduce-effects .dash-card::after {
 
 .qa-flow-line {
     flex: 1;
-    height: 1.5px;
-    background: linear-gradient(90deg,
-        rgba(var(--accent-rgb), 0.6),
-        rgba(var(--accent-rgb), 0.2));
-    width: clamp(14px, 1.2cqw + 6px, 22px);
+    height: 2px;
+    border-radius: 2px;
+    background:
+        linear-gradient(90deg,
+            transparent 0%,
+            rgb(var(--accent-light-rgb)) 50%,
+            transparent 100%) 0 0 / 60% 100% no-repeat,
+        rgba(var(--accent-rgb), 0.2);
+    background-position: -60% 0;
+    animation: qa-flow-line-sweep 2.4s linear infinite;
+}
+
+.qa-flow-line:nth-of-type(2) { animation-delay: -0.8s; }
+
+@keyframes qa-flow-line-sweep {
+    from { background-position: -60% 0; }
+    to   { background-position: 160% 0; }
 }
 
 @keyframes qa-flow-pulse {
-    0%, 100% { background: rgba(var(--accent-rgb), 0.06); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
-    50%      { background: rgba(var(--accent-rgb), 0.3);  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.16); }
+    0%, 100% { background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+    50%      { background: rgba(var(--accent-rgb), 0.5); box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.18); }
 }
 
 .qa-tile--auto:hover .qa-tile__flow,
-.qa-tile--auto:focus-visible .qa-tile__flow { opacity: 0.55; }
+.qa-tile--auto:focus-visible .qa-tile__flow { opacity: 0.85; }
 
 @media (prefers-reduced-motion: reduce) {
     .qa-tile__eq span,
