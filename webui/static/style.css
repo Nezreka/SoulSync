@@ -59815,22 +59815,43 @@ body.reduce-effects .dash-card::after {
 }
 
 .dashboard-action-grid {
+    position: relative;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 14px;
     overflow: hidden;
+    isolation: isolate;
     background:
+        radial-gradient(circle at 50% -20%, rgba(var(--accent-rgb), 0.16), transparent 44%),
         linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.025)),
         rgba(255, 255, 255, 0.035);
     box-shadow:
         inset 0 1px 0 rgba(255,255,255,0.08),
-        0 12px 28px rgba(0,0,0,0.16);
+        0 12px 28px rgba(0,0,0,0.16),
+        0 0 0 1px rgba(var(--accent-rgb), 0.04);
+}
+
+.dashboard-action-grid::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.4),
+        rgb(var(--accent-light-rgb)),
+        rgba(var(--accent-rgb), 0.4),
+        transparent);
+    opacity: 0.85;
+    pointer-events: none;
+    z-index: 2;
 }
 
 .dashboard-action-lane {
     position: relative;
+    z-index: 1;
     min-width: 0;
     min-height: 126px;
     display: flex;
@@ -59841,7 +59862,7 @@ body.reduce-effects .dash-card::after {
     padding: 16px;
     border: 0;
     background:
-        radial-gradient(circle at 22% 10%, var(--lane-glow), transparent 42%),
+        radial-gradient(circle at var(--lane-glow-x, 22%) 10%, var(--lane-glow), transparent 42%),
         rgba(255, 255, 255, 0.032);
     color: rgba(255, 255, 255, 0.88);
     cursor: pointer;
@@ -59866,9 +59887,14 @@ body.reduce-effects .dash-card::after {
 .dashboard-action-lane:hover,
 .dashboard-action-lane:focus-visible {
     background:
-        radial-gradient(circle at 22% 10%, var(--lane-glow-strong), transparent 46%),
+        radial-gradient(circle at var(--lane-glow-x, 22%) 10%, var(--lane-glow-strong), transparent 46%),
         rgba(255, 255, 255, 0.06);
     transform: translateY(-1px);
+}
+
+.dashboard-action-lane:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.55);
+    outline-offset: -4px;
 }
 
 .dashboard-action-lane:hover::after,
@@ -59878,24 +59904,27 @@ body.reduce-effects .dash-card::after {
 }
 
 .dashboard-action-lane.tools {
-    --lane-glow: rgba(56, 189, 248, 0.18);
-    --lane-glow-strong: rgba(56, 189, 248, 0.3);
-    --lane-border: rgba(56, 189, 248, 0.28);
-    --lane-accent: #7dd3fc;
+    --lane-glow-x: 18%;
+    --lane-glow: rgba(var(--accent-rgb), 0.12);
+    --lane-glow-strong: rgba(var(--accent-rgb), 0.22);
+    --lane-border: rgba(var(--accent-rgb), 0.26);
+    --lane-accent: rgb(var(--accent-light-rgb));
 }
 
 .dashboard-action-lane.auto-sync {
-    --lane-glow: rgba(34, 197, 94, 0.16);
-    --lane-glow-strong: rgba(34, 197, 94, 0.28);
-    --lane-border: rgba(34, 197, 94, 0.26);
-    --lane-accent: #86efac;
+    --lane-glow-x: 50%;
+    --lane-glow: rgba(var(--accent-rgb), 0.18);
+    --lane-glow-strong: rgba(var(--accent-rgb), 0.3);
+    --lane-border: rgba(var(--accent-rgb), 0.34);
+    --lane-accent: rgb(var(--accent-light-rgb));
 }
 
 .dashboard-action-lane.automations {
-    --lane-glow: rgba(168, 85, 247, 0.18);
-    --lane-glow-strong: rgba(168, 85, 247, 0.3);
-    --lane-border: rgba(168, 85, 247, 0.28);
-    --lane-accent: #d8b4fe;
+    --lane-glow-x: 82%;
+    --lane-glow: rgba(var(--accent-rgb), 0.12);
+    --lane-glow-strong: rgba(var(--accent-rgb), 0.22);
+    --lane-border: rgba(var(--accent-rgb), 0.26);
+    --lane-accent: rgb(var(--accent-light-rgb));
 }
 
 .dashboard-action-icon {
@@ -59905,10 +59934,12 @@ body.reduce-effects .dash-card::after {
     align-items: center;
     justify-content: center;
     border-radius: 11px;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.11);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
     color: var(--lane-accent);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 16px rgba(var(--accent-rgb), 0.08);
 }
 
 .dashboard-action-label {
@@ -59936,6 +59967,7 @@ body.reduce-effects .dash-card::after {
     color: var(--lane-accent);
     font-size: 11px;
     font-weight: 800;
+    letter-spacing: 0.01em;
 }
 
 .dashboard-action-arrow::after {
