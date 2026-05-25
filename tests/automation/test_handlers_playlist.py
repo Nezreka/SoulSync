@@ -26,6 +26,7 @@ import pytest
 
 from core.automation.deps import AutomationDeps, AutomationState
 from core.automation.handlers.discover_playlist import auto_discover_playlist
+from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
@@ -266,6 +267,24 @@ class TestRefreshMirrored:
         assert result['errors'] == '1'
         assert result['refreshed'] == '0'
 
+    def test_spotify_public_missing_source_url_is_reported_as_error(self):
+        db = _StubDB(playlists=[
+            {'id': 1, 'name': 'No URL', 'source': 'spotify_public', 'source_playlist_id': 'hash'},
+        ])
+        progress = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '1'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '0'
+        assert result['errors'] == '1'
+        assert db.mirror_calls == []
+        assert any(p.get('log_type') == 'error' and 'missing its original source URL' in p.get('log_line', '') for p in progress)
+
 
 # ─── sync_playlist ───────────────────────────────────────────────────
 
@@ -368,6 +387,19 @@ class TestSyncPlaylist:
 
 
 class TestPlaylistPipeline:
+    def test_pipeline_skips_when_shared_lock_is_already_running(self):
+        deps = _build_deps()
+        deps.state.set_pipeline_running(True)
+
+        result = auto_playlist_pipeline({'all': True}, deps)
+
+        assert result == {
+            'status': 'skipped',
+            'reason': 'playlist_pipeline is already running',
+            '_manages_own_progress': True,
+        }
+        assert deps.state.pipeline_running is True
+
     def test_no_playlist_specified_returns_error(self):
         deps = _build_deps()
         result = auto_playlist_pipeline({}, deps)
@@ -398,3 +430,26 @@ class TestPlaylistPipeline:
         assert result['status'] == 'error'
         assert result['_manages_own_progress'] is True
         assert deps.state.pipeline_running is False
+
+    def test_shared_sync_tail_counts_background_sync_errors(self):
+        progress = []
+        sync_states = {
+            'auto_mirror_1': {'status': 'error', 'error': 'media server unavailable'},
+        }
+        deps = _build_deps(
+            get_sync_states=lambda: sync_states,
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = run_sync_and_wishlist(
+            deps,
+            'auto-1',
+            [{'id': 1, 'name': 'Broken'}],
+            sync_one_fn=lambda _pl: {'status': 'started'},
+            sync_id_for_fn=lambda _pl: 'auto_mirror_1',
+            skip_wishlist=True,
+        )
+
+        assert result['errors'] == 1
+        assert result['synced'] == 0
+        assert any(p.get('log_type') == 'error' and 'media server unavailable' in p.get('log_line', '') for p in progress)

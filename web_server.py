@@ -919,6 +919,12 @@ except Exception as e:
 
 # --- Automation Progress Tracking ---
 _scan_library_automation_id = None
+_automation_deps = None
+
+# Playlist-native manual pipeline runs share the automation dependency
+# bundle, but keep their own small progress state for the playlist UI.
+playlist_pipeline_progress_states = {}
+playlist_pipeline_progress_lock = threading.Lock()
 
 
 def _register_automation_handlers():
@@ -935,6 +941,8 @@ def _register_automation_handlers():
     closures still live below until subsequent commits in the same
     branch finish the lift.
     """
+    global _automation_deps
+
     if not automation_engine:
         return
 
@@ -32183,6 +32191,7 @@ def mirror_playlist_endpoint():
 def get_mirrored_playlists_endpoint():
     """List all mirrored playlists for the active profile."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -32192,6 +32201,12 @@ def get_mirrored_playlists_endpoint():
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']
             pl['in_library_count'] = counts['in_library']
+            source_ref = describe_mirrored_source_ref(pl)
+            pl['source_ref'] = source_ref.source_ref
+            pl['source_ref_kind'] = source_ref.source_ref_kind
+            pl['source_ref_status'] = source_ref.source_ref_status
+            pl['source_ref_error'] = source_ref.source_ref_error
+            pl['pipeline_state'] = _snapshot_playlist_pipeline_state(pl['id'])
         return jsonify(playlists)
     except Exception as e:
         logger.error(f"Error getting mirrored playlists: {e}")
@@ -32201,14 +32216,267 @@ def get_mirrored_playlists_endpoint():
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
+        source_ref = describe_mirrored_source_ref(playlist)
+        playlist['source_ref'] = source_ref.source_ref
+        playlist['source_ref_kind'] = source_ref.source_ref_kind
+        playlist['source_ref_status'] = source_ref.source_ref_status
+        playlist['source_ref_error'] = source_ref.source_ref_error
+        playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
         return jsonify(playlist)
     except Exception as e:
         logger.error(f"Error getting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/source-ref', methods=['PATCH'])
+def update_mirrored_playlist_source_ref_endpoint(playlist_id):
+    """Update the upstream source link/id for a mirrored playlist."""
+    try:
+        data = request.get_json() or {}
+        source_ref = data.get('source_ref') or data.get('source_playlist_id') or data.get('url')
+
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        try:
+            from core.playlists.source_refs import normalize_mirrored_source_ref
+            normalized = normalize_mirrored_source_ref(
+                playlist.get('source'),
+                source_ref,
+                playlist.get('description') or '',
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        existing = [
+            pl for pl in database.get_mirrored_playlists(profile_id=playlist.get('profile_id', 1))
+            if (
+                pl.get('source') == playlist.get('source')
+                and str(pl.get('source_playlist_id')) == str(normalized.source_playlist_id)
+                and int(pl.get('id')) != int(playlist_id)
+            )
+        ]
+        if existing:
+            return jsonify({
+                "error": f"That source is already mirrored as '{existing[0].get('name', 'another playlist')}'"
+            }), 409
+
+        ok = database.update_mirrored_playlist_source_ref(
+            playlist_id,
+            normalized.source_playlist_id,
+            normalized.description,
+        )
+        if not ok:
+            return jsonify({"error": "Failed to update source reference"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist source reference: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _playlist_pipeline_state_key(playlist_id):
+    return f"mirrored_{int(playlist_id)}"
+
+
+def _snapshot_playlist_pipeline_state(playlist_id):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        state = playlist_pipeline_progress_states.get(key)
+        return dict(state) if state else None
+
+
+def _replace_playlist_pipeline_state(playlist_id, state):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        playlist_pipeline_progress_states[key] = dict(state)
+        return dict(playlist_pipeline_progress_states[key])
+
+
+def _update_playlist_pipeline_progress(playlist_id, **kwargs):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        state = playlist_pipeline_progress_states.setdefault(key, {
+            'run_id': key,
+            'playlist_id': int(playlist_id),
+            'status': 'running',
+            'progress': 0,
+            'phase': 'Starting pipeline...',
+            'log': [],
+            'started_at': time.time(),
+            'finished_at': None,
+            'result': None,
+            'error': None,
+        })
+        for field in ('status', 'progress', 'phase', 'result', 'error'):
+            if field in kwargs:
+                state[field] = kwargs[field]
+        if 'log_line' in kwargs and kwargs.get('log_line'):
+            state.setdefault('log', []).append({
+                'message': kwargs.get('log_line'),
+                'type': kwargs.get('log_type') or 'info',
+                'timestamp': time.time(),
+            })
+            state['log'] = state['log'][-80:]
+        if state.get('status') in ('finished', 'error', 'skipped') and not state.get('finished_at'):
+            state['finished_at'] = time.time()
+        return dict(state)
+
+
+class _PlaylistPipelineDepsProxy:
+    """Forward automation deps while routing progress into playlist UI state."""
+
+    def __init__(self, base_deps, playlist_id):
+        self._base_deps = base_deps
+        self._playlist_id = playlist_id
+
+    def __getattr__(self, name):
+        return getattr(self._base_deps, name)
+
+    def update_progress(self, _automation_id, **kwargs):
+        _update_playlist_pipeline_progress(self._playlist_id, **kwargs)
+
+
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
+    try:
+        if _automation_deps is None:
+            raise RuntimeError("Automation dependencies are not available")
+
+        from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
+        from core.automation.handlers.sync_playlist import auto_sync_playlist
+        from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
+        from core.playlists.pipeline import run_mirrored_playlist_pipeline
+
+        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id)
+        result = run_mirrored_playlist_pipeline(
+            {
+                'playlist_id': str(playlist_id),
+                'all': False,
+                'skip_wishlist': bool(skip_wishlist),
+                '_automation_id': _playlist_pipeline_state_key(playlist_id),
+            },
+            deps,
+            refresh_fn=auto_refresh_mirrored,
+            sync_one_fn=auto_sync_playlist,
+            sync_and_wishlist_fn=run_sync_and_wishlist,
+        )
+
+        status = result.get('status')
+        if status == 'completed':
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='finished',
+                progress=100,
+                phase='Pipeline complete',
+                result=result,
+            )
+        elif status == 'skipped':
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='skipped',
+                progress=100,
+                phase='Pipeline already running',
+                error=result.get('reason') or 'Pipeline already running',
+                result=result,
+                log_line=result.get('reason') or 'Pipeline already running',
+                log_type='warning',
+            )
+        else:
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='error',
+                progress=100,
+                phase='Pipeline error',
+                error=result.get('error') or 'Pipeline failed',
+                result=result,
+            )
+    except Exception as e:
+        logger.error(f"Manual mirrored playlist pipeline failed for {playlist_id}: {e}")
+        _update_playlist_pipeline_progress(
+            playlist_id,
+            status='error',
+            progress=100,
+            phase='Pipeline error',
+            error=str(e),
+            log_line=f'Pipeline failed: {e}',
+            log_type='error',
+        )
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/run', methods=['POST'])
+def run_mirrored_playlist_pipeline_endpoint(playlist_id):
+    """Run the all-in-one mirrored playlist pipeline from the playlist UI."""
+    try:
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        if playlist.get('source') in ('file', 'beatport'):
+            return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
+        if _automation_deps is None:
+            return jsonify({"error": "Playlist pipeline is not available"}), 503
+        if _automation_deps.state.is_pipeline_running():
+            return jsonify({"error": "A playlist pipeline is already running"}), 409
+
+        data = request.get_json(silent=True) or {}
+        state = _replace_playlist_pipeline_state(playlist_id, {
+            'run_id': _playlist_pipeline_state_key(playlist_id),
+            'playlist_id': int(playlist_id),
+            'playlist_name': playlist.get('name') or '',
+            'status': 'running',
+            'progress': 0,
+            'phase': 'Starting pipeline...',
+            'log': [{
+                'message': f"Starting pipeline for {playlist.get('name') or playlist_id}",
+                'type': 'info',
+                'timestamp': time.time(),
+            }],
+            'started_at': time.time(),
+            'finished_at': None,
+            'result': None,
+            'error': None,
+        })
+
+        threading.Thread(
+            target=_run_mirrored_playlist_pipeline_for_ui,
+            args=(playlist_id, bool(data.get('skip_wishlist', False))),
+            daemon=True,
+            name=f"playlist-pipeline-{playlist_id}",
+        ).start()
+
+        return jsonify({"success": True, "state": state})
+    except Exception as e:
+        logger.error(f"Error starting mirrored playlist pipeline: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/status', methods=['GET'])
+def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
+    """Return the latest manual pipeline progress for a mirrored playlist."""
+    try:
+        state = _snapshot_playlist_pipeline_state(playlist_id)
+        if not state:
+            return jsonify({
+                "run_id": _playlist_pipeline_state_key(playlist_id),
+                "playlist_id": int(playlist_id),
+                "status": "idle",
+                "progress": 0,
+                "phase": "Idle",
+                "log": [],
+                "result": None,
+                "error": None,
+            })
+        return jsonify(state)
+    except Exception as e:
+        logger.error(f"Error getting mirrored playlist pipeline status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])

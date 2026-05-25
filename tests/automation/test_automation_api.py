@@ -28,7 +28,8 @@ class _FakeDB:
         return dict(self.automations[automation_id]) if automation_id in self.automations else None
 
     def create_automation(self, name, trigger_type, trigger_config, action_type, action_config,
-                          profile_id, notify_type, notify_config, then_actions, group_name):
+                          profile_id, notify_type, notify_config, then_actions, group_name,
+                          owned_by=None):
         aid = self._next_id
         self._next_id += 1
         self.automations[aid] = {
@@ -37,6 +38,7 @@ class _FakeDB:
             'action_config': action_config, 'profile_id': profile_id,
             'notify_type': notify_type, 'notify_config': notify_config,
             'then_actions': then_actions, 'group_name': group_name,
+            'owned_by': owned_by,
             'enabled': 1, 'is_system': 0,
         }
         return aid
@@ -287,6 +289,91 @@ def test_update_then_actions_clears_notify_when_empty():
     api.update_automation(db, _FakeEngine(), automation_id=1, data={'then_actions': []})
     assert db.automations[1]['notify_type'] is None
     assert db.automations[1]['notify_config'] == '{}'
+
+
+def test_update_trigger_config_change_resets_next_run():
+    """Changing the interval must blank stored next_run so the engine
+    recomputes from scratch — otherwise dragging a playlist from the 8h
+    Auto-Sync column to the 1h column keeps firing at the old 8h mark."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule',
+        'trigger_config': '{"interval": 8, "unit": "hours"}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    eng = _FakeEngine()
+    body, status = api.update_automation(db, eng, automation_id=1, data={
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+    })
+    assert status == 200
+    assert db.automations[1]['next_run'] is None
+    assert eng.scheduled == [1]
+
+
+def test_update_trigger_type_change_resets_next_run():
+    """Switching from interval to daily_time must also reset next_run."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule', 'trigger_config': '{}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={
+        'trigger_type': 'daily_time',
+    })
+    assert db.automations[1]['next_run'] is None
+
+
+def test_update_non_trigger_field_preserves_next_run():
+    """Renaming an automation must NOT disturb its scheduled clock —
+    the reset is scoped to schedule-shape changes only."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule', 'trigger_config': '{}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={'name': 'renamed'})
+    assert db.automations[1].get('next_run') == '2026-05-25 05:00:00'
+
+
+def test_create_with_owned_by_persists_marker():
+    """Auto-Sync schedule board posts `owned_by: 'auto_sync'` so it can
+    recognize its own rows on subsequent reads without name-prefix
+    string scraping."""
+    db = _FakeDB()
+    api.create_automation(db, _FakeEngine(), profile_id=1, data={
+        'name': 'Auto-Sync: Discover Weekly',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'playlist_pipeline',
+        'owned_by': 'auto_sync',
+    })
+    assert db.automations[1]['owned_by'] == 'auto_sync'
+
+
+def test_create_without_owned_by_defaults_to_none():
+    db = _FakeDB()
+    api.create_automation(db, _FakeEngine(), profile_id=1, data={
+        'name': 'Plain', 'trigger_type': 'schedule', 'action_type': 'process_wishlist',
+    })
+    assert db.automations[1]['owned_by'] is None
+
+
+def test_update_can_set_or_clear_owned_by():
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule', 'owned_by': None,
+    }
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={'owned_by': 'auto_sync'})
+    assert db.automations[1]['owned_by'] == 'auto_sync'
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={'owned_by': None})
+    assert db.automations[1]['owned_by'] is None
 
 
 # ---------------------------------------------------------------------------

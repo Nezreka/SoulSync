@@ -539,6 +539,7 @@ class MusicDatabase:
             self._add_automation_system_column(cursor)
             self._add_automation_then_actions_column(cursor)
             self._add_automation_group_name_column(cursor)
+            self._add_automation_owned_by_column(cursor)
 
             # Library issues — user-reported problems with tracks/albums/artists
             cursor.execute("""
@@ -844,6 +845,28 @@ class MusicDatabase:
                 logger.info("Added group_name column to automations table")
         except Exception as e:
             logger.error(f"Error adding automation group_name column: {e}")
+
+    def _add_automation_owned_by_column(self, cursor):
+        """Add owned_by column so feature surfaces (Auto-Sync schedule
+        board, future pipeline groups) can recognize automations they
+        manage without relying on fragile name-prefix string matches."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'owned_by' not in cols:
+                cursor.execute("ALTER TABLE automations ADD COLUMN owned_by TEXT DEFAULT NULL")
+                logger.info("Added owned_by column to automations table")
+                # Backfill existing Auto-Sync automations created via the
+                # name/group-prefix convention so the board keeps managing them.
+                cursor.execute("""
+                    UPDATE automations
+                    SET owned_by = 'auto_sync'
+                    WHERE (group_name = 'Playlist Auto-Sync' OR name LIKE 'Auto-Sync:%')
+                      AND owned_by IS NULL
+                """)
+                logger.info(f"Backfilled {cursor.rowcount} existing Auto-Sync automations with owned_by='auto_sync'")
+        except Exception as e:
+            logger.error(f"Error adding automation owned_by column: {e}")
 
     def _add_automation_then_actions_column(self, cursor):
         """Add then_actions column to automations table and migrate existing notify data."""
@@ -6370,6 +6393,54 @@ class MusicDatabase:
             logger.error(f"Error fetching candidate albums for artist '{artist}': {e}")
             return candidates
 
+    def get_artist_tracks_indexed(self, name: str, server_source: Optional[str] = None, limit: int = 10000) -> List[DatabaseTrack]:
+        """Indexed two-step lookup: artist_id by exact name (then case-insensitive
+        fallback), then tracks via `artist_id IN (...)`. Avoids the function-in-WHERE
+        pattern in search_tracks that defeats the artists.name index. Returns []
+        when the artist isn't in the library — caller can decide to fall back to
+        the slower LIKE-based path for track_artist / diacritic recall."""
+        if not name:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Step 1: exact case-sensitive match — hits idx_artists_name in O(log n).
+            # Spotify's canonical artist names match the library 90%+ of the time.
+            cursor.execute("SELECT id FROM artists WHERE name = ?", (name,))
+            artist_ids = [r['id'] for r in cursor.fetchall()]
+
+            # Step 2: case-insensitive fallback if exact missed. Full scan, but only
+            # runs on the (uncommon) miss path so amortized cost stays low.
+            if not artist_ids:
+                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (name,))
+                artist_ids = [r['id'] for r in cursor.fetchall()]
+
+            if not artist_ids:
+                return []
+
+            placeholders = ','.join('?' for _ in artist_ids)
+            where = f"t.artist_id IN ({placeholders})"
+            params: list = list(artist_ids)
+            if server_source:
+                where += " AND t.server_source = ?"
+                params.append(server_source)
+            params.append(limit)
+
+            cursor.execute(f"""
+                SELECT t.*, a.name as artist_name, al.title as album_title,
+                       al.thumb_url as album_thumb_url
+                FROM tracks t
+                JOIN artists a ON a.id = t.artist_id
+                JOIN albums al ON al.id = t.album_id
+                WHERE {where}
+                LIMIT ?
+            """, params)
+            return self._rows_to_tracks(cursor.fetchall())
+        except Exception as e:
+            logger.error(f"Error fetching indexed artist tracks for '{name}': {e}")
+            return []
+
     def get_candidate_tracks_for_albums(self, album_ids: List) -> List[DatabaseTrack]:
         """
         Fetch every track belonging to the given set of album IDs in a single query.
@@ -6897,22 +6968,12 @@ class MusicDatabase:
         return unique_variations
     
     def _normalize_for_comparison(self, text: str) -> str:
-        """Normalize text for comparison with Unicode accent handling"""
-        if not text:
-            return ""
-        
-        # Try to use unidecode for accent normalization, fallback to basic if not available
-        try:
-            from unidecode import unidecode
-            # Convert accents: é→e, ñ→n, ü→u, etc.
-            normalized = unidecode(text)
-        except ImportError:
-            # Fallback: basic normalization without accent handling
-            normalized = text
-            logger.warning("unidecode not available, accent matching may be limited")
-        
-        # Convert to lowercase and strip
-        return normalized.lower().strip()
+        """Delegates to `core.text.normalize.normalize_for_comparison`.
+        Kept as an instance method so existing internal callers don't need
+        to be touched — new code should import the public helper directly.
+        """
+        from core.text.normalize import normalize_for_comparison
+        return normalize_for_comparison(text)
     
     def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
         """Calculate confidence score for track match with enhanced cleaning and Unicode normalization"""
@@ -11828,7 +11889,7 @@ class MusicDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
-                        description = excluded.description,
+                        description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
                         image_url = excluded.image_url,
                         track_count = excluded.track_count,
@@ -11938,6 +11999,39 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
+
+    def update_mirrored_playlist_source_ref(
+        self,
+        playlist_id: int,
+        source_playlist_id: str,
+        description: Optional[str] = None,
+    ) -> bool:
+        """Update a mirrored playlist's upstream source reference.
+
+        This intentionally leaves mirrored tracks and discovery extra_data
+        untouched; refresh/discovery can use the new source reference on the
+        next run without losing existing local state.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if description is None:
+                    cursor.execute("""
+                        UPDATE mirrored_playlists
+                        SET source_playlist_id = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (source_playlist_id, playlist_id))
+                else:
+                    cursor.execute("""
+                        UPDATE mirrored_playlists
+                        SET source_playlist_id = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (source_playlist_id, description, playlist_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating mirrored playlist source reference: {e}")
+            return False
 
     def update_mirrored_track_extra_data(self, track_id: int, extra_data_dict: dict) -> bool:
         """Merge new data into a mirrored track's extra_data JSON field."""
@@ -12083,15 +12177,22 @@ class MusicDatabase:
     def create_automation(self, name: str, trigger_type: str, trigger_config: str,
                           action_type: str, action_config: str, profile_id: int = 1,
                           notify_type: str = None, notify_config: str = '{}',
-                          then_actions: str = '[]', group_name: str = None):
-        """Create a new automation. Returns the new automation ID or None."""
+                          then_actions: str = '[]', group_name: str = None,
+                          owned_by: str = None):
+        """Create a new automation. Returns the new automation ID or None.
+
+        ``owned_by`` tags an automation as managed by a feature surface
+        (e.g. ``'auto_sync'`` for entries the Playlist Auto-Sync board
+        creates) so that surface can recognize its own rows without
+        scraping the display name.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
@@ -12138,7 +12239,7 @@ class MusicDatabase:
 
     def update_automation(self, automation_id: int, **kwargs) -> bool:
         """Update automation fields."""
-        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions', 'group_name'}
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions', 'group_name', 'owned_by'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False

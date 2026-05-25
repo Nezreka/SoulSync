@@ -172,9 +172,11 @@ def create_automation(
         return {'error': f'Signal cycle detected: {cycle_path}. This would cause an infinite loop.'}, 400
 
     group_name = data.get('group_name') or None
+    owned_by = data.get('owned_by') or None
     auto_id = database.create_automation(
         name, trigger_type, trigger_config, action_type, action_config,
         profile_id, notify_type, notify_config, then_actions_json, group_name,
+        owned_by=owned_by,
     )
     if auto_id is None:
         return {'error': 'Failed to create automation'}, 500
@@ -217,6 +219,8 @@ def update_automation(
         update_fields['notify_config'] = json.dumps(data['notify_config'])
     if 'group_name' in data:
         update_fields['group_name'] = data['group_name'] or None
+    if 'owned_by' in data:
+        update_fields['owned_by'] = data['owned_by'] or None
 
     if not update_fields:
         return {'error': 'No fields to update'}, 400
@@ -224,6 +228,12 @@ def update_automation(
     cycle_path = _check_update_cycle(automation_engine, database, automation_id, data)
     if cycle_path:
         return {'error': f'Signal cycle detected: {cycle_path}. This would cause an infinite loop.'}, 400
+
+    # Schedule-shape changes must invalidate the stored next_run so the
+    # scheduler recomputes it; otherwise restart-survival logic keeps the
+    # leftover timestamp from the previous interval.
+    if {'trigger_type', 'trigger_config'} & update_fields.keys():
+        update_fields['next_run'] = None
 
     success = database.update_automation(automation_id, **update_fields)
     if not success:

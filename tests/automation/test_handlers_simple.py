@@ -311,6 +311,14 @@ class TestAutomationState:
         s.set_pipeline_running(False)
         assert s.is_pipeline_running() is False
 
+    def test_try_start_pipeline_is_atomic(self):
+        s = AutomationState()
+        assert s.try_start_pipeline() is True
+        assert s.is_pipeline_running() is True
+        assert s.try_start_pipeline() is False
+        s.set_pipeline_running(False)
+        assert s.try_start_pipeline() is True
+
     def test_concurrent_set_safe_via_lock(self):
         # Smoke test: two threads flipping the same field don't crash.
         # Lock ensures the final value is consistent.
