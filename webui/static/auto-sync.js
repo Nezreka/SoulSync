@@ -438,13 +438,14 @@ function renderAutoSyncHistoryPanel(history, total) {
             <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
         </div>
         <div class="auto-sync-history-list">
-            ${history.map(autoSyncHistoryEntryHtml).join('')}
+            ${history.map((entry, index) => autoSyncHistoryEntryHtml(entry, index)).join('')}
             ${total > history.length ? `<div class="auto-sync-history-total">Showing ${history.length} of ${total} runs</div>` : ''}
         </div>
     `;
 }
 
-function autoSyncHistoryEntryHtml(entry) {
+function autoSyncHistoryEntryHtml(entry, index = 0) {
+    entry = autoSyncNormalizeHistoryEntry(entry, index);
     const status = entry.status || 'completed';
     const before = entry.before_json || {};
     const after = entry.after_json || {};
@@ -497,6 +498,40 @@ function autoSyncHistoryEntryHtml(entry) {
             </div>
         </article>
     `;
+}
+
+function autoSyncNormalizeHistoryEntry(entry, index) {
+    if (!entry || typeof entry !== 'object') {
+        return {
+            id: `unknown-${index}`,
+            status: 'completed',
+            playlist_name: 'Playlist pipeline run',
+            trigger_source: 'pipeline',
+            summary: 'Run history entry did not include detailed metadata.',
+            before_json: {},
+            after_json: {},
+            result_json: {},
+        };
+    }
+    return {
+        ...entry,
+        id: entry.id ?? `history-${index}`,
+        before_json: autoSyncParseHistoryObject(entry.before_json),
+        after_json: autoSyncParseHistoryObject(entry.after_json),
+        result_json: autoSyncParseHistoryObject(entry.result_json),
+    };
+}
+
+function autoSyncParseHistoryObject(value) {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') return {};
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_err) {
+        return {};
+    }
 }
 
 function autoSyncHistoryFallbackSummary(before, after, status) {
