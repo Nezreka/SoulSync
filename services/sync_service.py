@@ -213,13 +213,21 @@ class PlaylistSyncService:
 
             media_client, server_type = self._get_active_media_client()
             self._update_progress(playlist.name, f"Matching tracks against {server_type.title()} library", "", 20, 5, 2, total_tracks=total_tracks)
-            
+
+            # Per-artist track pool, populated lazily inside _find_track_in_media_server.
+            # Only tracks that miss the sync_match_cache fast-path trigger a pool fetch
+            # for their artist — so warm-cache playlists pay zero pool cost. Misses
+            # for the same artist later in the playlist reuse the cached list and skip
+            # the per-variation SQL grid in check_track_exists. Empty dict (not None)
+            # to signal that pooling is enabled for this sync.
+            candidate_pool: Dict[str, list] = {}
+
             # Use the same robust matching approach as "Download Missing Tracks"
             match_results = []
             for i, track in enumerate(playlist.tracks):
                 if self._cancelled:
                     return self._create_error_result(playlist.name, ["Sync cancelled"])
-                
+
                 # Update progress for each track
                 progress_percent = 20 + (40 * (i + 1) / total_tracks)  # 20-60% for matching
                 # Extract artist name from both string and dict formats
@@ -229,13 +237,13 @@ class PlaylistSyncService:
                     current_track_name = f"{artist_name} - {track.name}"
                 else:
                     current_track_name = track.name
-                self._update_progress(playlist.name, "Matching tracks", current_track_name, progress_percent, 5, 2, 
+                self._update_progress(playlist.name, "Matching tracks", current_track_name, progress_percent, 5, 2,
                                     total_tracks=total_tracks,
                                     matched_tracks=len([r for r in match_results if r.is_match]),
                                     failed_tracks=len([r for r in match_results if not r.is_match]))
-                
+
                 # Use the robust search approach
-                plex_match, confidence = await self._find_track_in_media_server(track)
+                plex_match, confidence = await self._find_track_in_media_server(track, candidate_pool=candidate_pool)
                 
                 match_result = MatchResult(
                     spotify_track=track,
@@ -469,7 +477,36 @@ class PlaylistSyncService:
             self.clear_progress_callback(playlist.name)
             self._cancelled = False
     
-    async def _find_track_in_media_server(self, spotify_track: SpotifyTrack) -> Tuple[Optional[TrackInfo], float]:
+    def _get_or_fetch_artist_candidates(self, candidate_pool: Optional[Dict[str, list]], db, artist_name: str, active_server) -> Optional[list]:
+        """Lazy per-artist pool fetch. Only fires SQL when a track for this artist
+        actually missed the sync_match_cache fast-path — playlists where every
+        track is cached pay zero pool cost. Returns the candidate list (possibly
+        empty) on success; returns None when pooling is disabled so the caller
+        falls back to the legacy per-track SQL loop.
+        """
+        if candidate_pool is None:
+            return None
+        key = db._normalize_for_comparison(artist_name)
+        if key in candidate_pool:
+            return candidate_pool[key]
+        try:
+            candidates = db.search_tracks(
+                artist=artist_name,
+                limit=10000,
+                server_source=active_server,
+            )
+            # Cache the empty result too — same key is asked once per artist this
+            # sync, then never again. Empty list still triggers the batched path
+            # in check_track_exists, which short-circuits without firing SQL.
+            candidate_pool[key] = candidates or []
+            return candidate_pool[key]
+        except Exception as fetch_err:
+            logger.debug(f"Candidate pool fetch failed for '{artist_name}': {fetch_err}")
+            # Don't cache the failure — let a later artist for the same key retry,
+            # and let this call's check_track_exists fall through to legacy SQL.
+            return None
+
+    async def _find_track_in_media_server(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
             # Check active media server connection
@@ -477,7 +514,7 @@ class PlaylistSyncService:
             if not media_client or not media_client.is_connected():
                 logger.warning(f"{server_type.upper()} client not connected")
                 return None, 0.0
-            
+
             # Use the SAME improved database matching as PlaylistTrackAnalysisWorker
             from database.music_database import MusicDatabase
             from config.settings import config_manager
@@ -542,7 +579,14 @@ class PlaylistSyncService:
                 # Use the improved database check_track_exists method with server awareness
                 try:
                     db = MusicDatabase()
-                    db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7, server_source=active_server)
+                    artist_candidates = self._get_or_fetch_artist_candidates(
+                        candidate_pool, db, artist_name, active_server,
+                    )
+                    db_track, confidence = db.check_track_exists(
+                        original_title, artist_name,
+                        confidence_threshold=0.7, server_source=active_server,
+                        candidate_tracks=artist_candidates,
+                    )
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
