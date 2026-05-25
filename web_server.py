@@ -305,7 +305,20 @@ _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
 @app.context_processor
 def _inject_static_cache_bust():
-    return {'static_v': _STATIC_CACHE_BUST}
+    static_v = _STATIC_CACHE_BUST
+    if DEV_STATIC_NO_CACHE:
+        try:
+            static_dir = Path(app.static_folder)
+            mtimes = [
+                p.stat().st_mtime_ns
+                for p in static_dir.rglob('*')
+                if p.is_file() and p.suffix.lower() in {'.css', '.js'}
+            ]
+            if mtimes:
+                static_v = str(max(mtimes))
+        except Exception:
+            static_v = _STATIC_CACHE_BUST
+    return {'static_v': static_v}
 
 
 @app.context_processor
@@ -32195,8 +32208,12 @@ def get_mirrored_playlists_endpoint():
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        # Single batched query instead of N per-playlist round-trips. Used to
+        # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
+        # playlists that's 1.5s of modal load time just for status counts.
+        batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
         for pl in playlists:
-            counts = database.get_mirrored_playlist_status_counts(pl['id'])
+            counts = batch_counts.get(pl['id'], {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0})
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']

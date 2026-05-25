@@ -12136,6 +12136,82 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlist discovery counts: {e}")
             return (0, 0)
 
+    def get_all_mirrored_playlist_status_counts(self, profile_id: int = 1) -> dict:
+        """Return status counts for every mirrored playlist owned by the profile
+        in a single round-trip. Replaces N×4-query per-playlist loop on the
+        Auto-Sync modal load path. Result is `{playlist_id: {total, discovered,
+        wishlisted, in_library}}`."""
+        result: dict = {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT mp.id as playlist_id
+                    FROM mirrored_playlists mp
+                    WHERE mp.profile_id = ?
+                """, (profile_id,))
+                for row in cursor.fetchall():
+                    result[row['playlist_id']] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+
+                # Core counts: total + discovered, grouped per playlist
+                cursor.execute("""
+                    SELECT mpt.playlist_id,
+                           COUNT(*) as total,
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered
+                    FROM mirrored_playlist_tracks mpt
+                    JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                    WHERE mp.profile_id = ?
+                    GROUP BY mpt.playlist_id
+                """, (profile_id,))
+                for row in cursor.fetchall():
+                    pid = row['playlist_id']
+                    if pid not in result:
+                        result[pid] = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
+                    result[pid]['total'] = row['total'] or 0
+                    result[pid]['discovered'] = row['discovered'] or 0
+
+                # Wishlist counts in one shot
+                try:
+                    cursor.execute("""
+                        SELECT mpt.playlist_id, COUNT(*) as wishlisted
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        WHERE mp.profile_id = ?
+                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
+                                      WHERE wt.spotify_track_id = mpt.source_track_id)
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['wishlisted'] = row['wishlisted'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch wishlist counts failed: {e}")
+
+                # In-library counts in one shot. Case-sensitive join so
+                # idx_artists_name + idx_tracks_title kick in.
+                try:
+                    cursor.execute("""
+                        SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        JOIN artists a ON a.name = mpt.artist_name
+                        JOIN tracks t ON t.artist_id = a.id
+                                     AND t.title = mpt.track_name
+                        WHERE mp.profile_id = ?
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['in_library'] = row['in_library'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch library counts failed: {e}")
+        except Exception as e:
+            logger.error(f"Error getting batch mirrored playlist status counts: {e}")
+        return result
+
     def get_mirrored_playlist_status_counts(self, playlist_id: int) -> dict:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
         Discovery counts are critical (same as old method). Library/wishlist counts are
@@ -12157,26 +12233,39 @@ class MusicDatabase:
                 )
                 result['discovered'] = cursor.fetchone()['discovered']
 
-                # Best-effort extras — won't break if tracks table has issues
+                # Best-effort extras — won't break if tracks table has issues.
+                # Wishlisted: indexed via wishlist_tracks.spotify_track_id.
                 try:
                     cursor.execute("""
-                        SELECT
-                            SUM(CASE WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                                 AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                             WHERE wt.spotify_track_id = mpt.source_track_id)
-                                 THEN 1 ELSE 0 END) as wishlisted,
-                            SUM(CASE WHEN EXISTS (SELECT 1 FROM tracks t
-                                                  WHERE t.title = mpt.track_name COLLATE NOCASE
-                                                    AND t.artist = mpt.artist_name COLLATE NOCASE)
-                                 THEN 1 ELSE 0 END) as in_library
+                        SELECT COUNT(*) as wishlisted
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
+                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
+                                      WHERE wt.spotify_track_id = mpt.source_track_id)
                     """, (playlist_id,))
-                    row = cursor.fetchone()
-                    result['wishlisted'] = row['wishlisted'] or 0
-                    result['in_library'] = row['in_library'] or 0
+                    result['wishlisted'] = cursor.fetchone()['wishlisted'] or 0
                 except Exception as extra_err:
-                    logger.debug(f"Optional status counts failed for playlist {playlist_id}: {extra_err}")
+                    logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
+
+                # In-library: case-sensitive equality so SQLite can use
+                # `idx_artists_name` and `idx_tracks_title`. COLLATE NOCASE on
+                # the join columns prevents index usage and takes ~18s per
+                # playlist on a 300k-track library; the case-sensitive variant
+                # is ~6ms. Misses purely-case-different matches (rare — Spotify
+                # canonicalizes artist/track names that match library imports).
+                try:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT mpt.id) as in_library
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN artists a ON a.name = mpt.artist_name
+                        JOIN tracks t ON t.artist_id = a.id
+                                     AND t.title = mpt.track_name
+                        WHERE mpt.playlist_id = ?
+                    """, (playlist_id,))
+                    result['in_library'] = cursor.fetchone()['in_library'] or 0
+                except Exception as extra_err:
+                    logger.debug(f"Library count failed for playlist {playlist_id}: {extra_err}")
 
         except Exception as e:
             logger.error(f"Error getting mirrored playlist status counts: {e}")
