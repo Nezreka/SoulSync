@@ -12111,21 +12111,17 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-history-row {
-    display: grid;
-    grid-template-columns: 16px minmax(280px, 1fr) minmax(160px, auto);
-    grid-template-areas:
-        "dot main meta"
-        ". preview meta";
-    align-items: center;
-    gap: 10px 16px;
-    min-height: 118px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     padding: 18px 20px;
     cursor: pointer;
 }
 
 .auto-sync-history-row:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.45);
-    outline-offset: -3px;
+    outline-offset: -4px;
+    border-radius: 12px;
 }
 
 .auto-sync-history-status {
@@ -12154,10 +12150,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #facc15;
 }
 
-.auto-sync-history-main {
-    grid-area: main;
+.auto-sync-history-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
     min-width: 0;
-    max-width: 760px;
+}
+
+.auto-sync-history-title-block {
+    min-width: 0;
 }
 
 .auto-sync-history-title-row {
@@ -12179,7 +12181,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     white-space: nowrap;
 }
 
-.auto-sync-history-main small {
+.auto-sync-history-title-block small {
     display: block;
     margin-top: 8px;
     color: rgba(255, 255, 255, 0.4);
@@ -12191,11 +12193,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-history-preview {
-    grid-area: preview;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    max-width: 760px;
 }
 
 .auto-sync-history-preview span {
@@ -12208,14 +12208,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-history-meta {
-    grid-area: meta;
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     align-content: center;
     align-items: center;
     gap: 6px;
-    max-width: 240px;
+    min-width: 190px;
+    max-width: 320px;
 }
 
 .auto-sync-history-meta span,
@@ -12261,13 +12261,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-color: rgba(var(--accent-rgb), 0.35);
 }
 
-.auto-sync-history-entry .auto-sync-card-status-dot {
-    grid-area: dot;
-}
-
 .auto-sync-history-detail {
     display: none;
-    padding: 18px 20px 20px 52px;
+    padding: 18px 20px 20px;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
@@ -12575,18 +12571,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     }
 
     .auto-sync-history-row {
-        grid-template-columns: 12px minmax(0, 1fr);
-        grid-template-areas:
-            "dot main"
-            ". preview"
-            ". meta";
-        align-items: flex-start;
-        min-height: 0;
         padding: 16px;
+    }
+
+    .auto-sync-history-card-head {
+        flex-direction: column;
     }
 
     .auto-sync-history-meta {
         justify-content: flex-start;
+        min-width: 0;
         max-width: none;
     }
 

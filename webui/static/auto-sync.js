@@ -463,28 +463,30 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
     return `
         <article class="auto-sync-history-entry" id="${entryId}-card" data-history-entry="${entryId}">
             <div class="auto-sync-history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="${entryId}" data-history-toggle="${entryId}">
-                <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
-                <div class="auto-sync-history-main">
-                    <div class="auto-sync-history-title-row">
-                        <strong>${_esc(playlistName)}</strong>
-                        <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
+                <div class="auto-sync-history-card-head">
+                    <div class="auto-sync-history-title-block">
+                        <div class="auto-sync-history-title-row">
+                            <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
+                            <strong>${_esc(playlistName)}</strong>
+                            <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
+                        </div>
+                        <small>${_esc(summary)}</small>
                     </div>
-                    <div class="auto-sync-card-flow">
-                        <span class="flow-trigger">${_esc(entry.trigger_source || 'pipeline')}</span>
-                        <span class="flow-arrow">&rarr;</span>
-                        <span class="flow-action">Refresh</span>
-                        <span class="flow-arrow">&rarr;</span>
-                        <span class="flow-action">Discover</span>
-                        <span class="flow-arrow">&rarr;</span>
-                        <span class="flow-notify">Sync + wishlist</span>
+                    <div class="auto-sync-history-meta">
+                        ${started ? `<span>${_esc(started)}</span>` : ''}
+                        ${duration ? `<span>${_esc(duration)}</span>` : ''}
+                        <span>${_esc(entry.trigger_source || 'pipeline')}</span>
+                        <button type="button" class="auto-sync-history-expand-label" data-history-toggle-button="${entryId}">View details</button>
                     </div>
-                    <small>${_esc(summary)}</small>
                 </div>
-                <div class="auto-sync-history-meta">
-                    ${started ? `<span>${_esc(started)}</span>` : ''}
-                    ${duration ? `<span>${_esc(duration)}</span>` : ''}
-                    <span>${_esc(entry.trigger_source || 'pipeline')}</span>
-                    <button type="button" class="auto-sync-history-expand-label" data-history-toggle-button="${entryId}">View details</button>
+                <div class="auto-sync-card-flow">
+                    <span class="flow-trigger">${_esc(entry.trigger_source || 'pipeline')}</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-action">Refresh</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-action">Discover</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-notify">Sync + wishlist</span>
                 </div>
                 <div class="auto-sync-history-preview">
                     ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
