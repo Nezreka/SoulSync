@@ -456,18 +456,32 @@ function autoSyncHistoryEntryHtml(entry) {
     const wishlistDelta = autoSyncDelta(after.wishlisted_count, before.wishlisted_count);
     const libraryDelta = autoSyncDelta(after.in_library_count, before.in_library_count);
     const entryId = `auto-sync-history-${entry.id}`;
+    const playlistName = entry.playlist_name || after.name || before.name || `Playlist #${entry.playlist_id || 'unknown'}`;
+    const summary = entry.summary || autoSyncHistoryFallbackSummary(before, after, status);
+    const resultHtml = [
+        autoSyncHistoryResultPill('Refreshed', result.playlists_refreshed),
+        autoSyncHistoryResultPill('Synced', result.tracks_synced),
+        autoSyncHistoryResultPill('Skipped', result.sync_skipped),
+        autoSyncHistoryResultPill('Queued', result.wishlist_queued),
+        result.error ? `<span class="error">${_esc(result.error)}</span>` : '',
+    ].filter(Boolean).join('');
     return `
         <article class="auto-sync-history-entry">
             <div class="auto-sync-history-row" onclick="autoSyncToggleHistoryEntry('${entryId}')">
                 <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
                 <div class="auto-sync-history-main">
-                    <strong>${_esc(entry.playlist_name || 'Mirrored playlist')}</strong>
-                    <small>${_esc(entry.summary || '')}</small>
+                    <strong>${_esc(playlistName)}</strong>
+                    <small>${_esc(summary)}</small>
+                    <div class="auto-sync-history-preview">
+                        ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
+                        ${autoSyncHistoryPreviewPill('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
+                    </div>
                 </div>
                 <div class="auto-sync-history-meta">
                     ${started ? `<span>${_esc(started)}</span>` : ''}
                     ${duration ? `<span>${_esc(duration)}</span>` : ''}
                     <span>${_esc(entry.trigger_source || 'pipeline')}</span>
+                    <button type="button" onclick="event.stopPropagation(); autoSyncToggleHistoryEntry('${entryId}')">Details</button>
                 </div>
             </div>
             <div id="${entryId}" class="auto-sync-history-detail">
@@ -478,15 +492,17 @@ function autoSyncHistoryEntryHtml(entry) {
                     ${autoSyncHistoryStatHtml('In library', before.in_library_count, after.in_library_count, libraryDelta)}
                 </div>
                 <div class="auto-sync-history-result">
-                    ${autoSyncHistoryResultPill('Refreshed', result.playlists_refreshed)}
-                    ${autoSyncHistoryResultPill('Synced', result.tracks_synced)}
-                    ${autoSyncHistoryResultPill('Skipped', result.sync_skipped)}
-                    ${autoSyncHistoryResultPill('Queued', result.wishlist_queued)}
-                    ${result.error ? `<span class="error">${_esc(result.error)}</span>` : ''}
+                    ${resultHtml || '<span class="muted">No detailed result payload recorded for this run.</span>'}
                 </div>
             </div>
         </article>
     `;
+}
+
+function autoSyncHistoryFallbackSummary(before, after, status) {
+    const beforeTracks = parseInt(before.track_count, 10) || 0;
+    const afterTracks = parseInt(after.track_count, 10) || 0;
+    return `${autoSyncHistoryStatusLabel(status)} | ${beforeTracks} -> ${afterTracks} tracks`;
 }
 
 function autoSyncToggleHistoryEntry(entryId) {
@@ -525,6 +541,13 @@ function autoSyncHistoryStatHtml(label, before, after, delta) {
             <strong>${beforeValue} -> ${afterValue}${_esc(deltaText)}</strong>
         </div>
     `;
+}
+
+function autoSyncHistoryPreviewPill(label, before, after, delta) {
+    const beforeValue = parseInt(before, 10) || 0;
+    const afterValue = parseInt(after, 10) || 0;
+    const deltaText = delta ? ` ${delta > 0 ? '+' : ''}${delta}` : '';
+    return `<span>${_esc(label)} ${beforeValue}->${afterValue}${_esc(deltaText)}</span>`;
 }
 
 function autoSyncHistoryResultPill(label, value) {
