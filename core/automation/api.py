@@ -225,11 +225,10 @@ def update_automation(
     if cycle_path:
         return {'error': f'Signal cycle detected: {cycle_path}. This would cause an infinite loop.'}, 400
 
-    trigger_changed = (
-        'trigger_type' in update_fields
-        or 'trigger_config' in update_fields
-    )
-    if trigger_changed:
+    # Schedule-shape changes must invalidate the stored next_run so the
+    # scheduler recomputes it; otherwise restart-survival logic keeps the
+    # leftover timestamp from the previous interval.
+    if {'trigger_type', 'trigger_config'} & update_fields.keys():
         update_fields['next_run'] = None
 
     success = database.update_automation(automation_id, **update_fields)
