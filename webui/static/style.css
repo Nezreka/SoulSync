@@ -12058,6 +12058,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     height: 24px;
     padding: 0 10px;
     transition: all 0.2s ease;
+    flex-shrink: 0;
+    opacity: 0;
 }
 
 .mirrored-card-pipeline:hover {
@@ -12088,7 +12090,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
-.mirrored-playlist-card:hover .mirrored-card-link {
+.mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
 }
 

@@ -513,10 +513,10 @@ function renderMirroredCard(p, container) {
                 <span>Mirrored ${ago}</span>
                 ${ratioHtml}
                 ${phaseHtml}
-                <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Run refresh, discover, sync, and wishlist">Run Pipeline</button>
             </div>
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
+        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Run refresh, discover, sync, and wishlist">Run</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escAttr(p.name)}', '${_escAttr(p.source)}', '${_escAttr(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
     `;
