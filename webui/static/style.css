@@ -59805,6 +59805,189 @@ body.reduce-effects .dash-card::after {
 
 /* Body overrides for embedded sub-grids — make them compact for bento */
 
+/* Quick Actions: polished three-lane dashboard launcher */
+.dash-card--quick-actions {
+    overflow: hidden;
+}
+
+.dash-card--quick-actions .dash-card__body {
+    min-height: 128px;
+}
+
+.dashboard-action-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.025)),
+        rgba(255, 255, 255, 0.035);
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        0 12px 28px rgba(0,0,0,0.16);
+}
+
+.dashboard-action-lane {
+    position: relative;
+    min-width: 0;
+    min-height: 126px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px;
+    border: 0;
+    background:
+        radial-gradient(circle at 22% 10%, var(--lane-glow), transparent 42%),
+        rgba(255, 255, 255, 0.032);
+    color: rgba(255, 255, 255, 0.88);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dashboard-action-lane + .dashboard-action-lane {
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.07);
+}
+
+.dashboard-action-lane::after {
+    content: '';
+    position: absolute;
+    inset: 10px;
+    border-radius: 11px;
+    border: 1px solid transparent;
+    pointer-events: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.dashboard-action-lane:hover,
+.dashboard-action-lane:focus-visible {
+    background:
+        radial-gradient(circle at 22% 10%, var(--lane-glow-strong), transparent 46%),
+        rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
+
+.dashboard-action-lane:hover::after,
+.dashboard-action-lane:focus-visible::after {
+    border-color: var(--lane-border);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.dashboard-action-lane.tools {
+    --lane-glow: rgba(56, 189, 248, 0.18);
+    --lane-glow-strong: rgba(56, 189, 248, 0.3);
+    --lane-border: rgba(56, 189, 248, 0.28);
+    --lane-accent: #7dd3fc;
+}
+
+.dashboard-action-lane.auto-sync {
+    --lane-glow: rgba(34, 197, 94, 0.16);
+    --lane-glow-strong: rgba(34, 197, 94, 0.28);
+    --lane-border: rgba(34, 197, 94, 0.26);
+    --lane-accent: #86efac;
+}
+
+.dashboard-action-lane.automations {
+    --lane-glow: rgba(168, 85, 247, 0.18);
+    --lane-glow-strong: rgba(168, 85, 247, 0.3);
+    --lane-border: rgba(168, 85, 247, 0.28);
+    --lane-accent: #d8b4fe;
+}
+
+.dashboard-action-icon {
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    color: var(--lane-accent);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-action-label {
+    display: block;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.dashboard-action-copy {
+    display: block;
+    min-height: 28px;
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.dashboard-action-arrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--lane-accent);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.dashboard-action-arrow::after {
+    content: '›';
+    font-size: 16px;
+    line-height: 1;
+    transform: translateY(-1px);
+    transition: transform 0.18s ease;
+}
+
+.dashboard-action-lane:hover .dashboard-action-arrow::after,
+.dashboard-action-lane:focus-visible .dashboard-action-arrow::after {
+    transform: translate(3px, -1px);
+}
+
+@media (max-width: 1180px) {
+    .dashboard-action-lane {
+        padding: 14px 12px;
+    }
+
+    .dashboard-action-copy {
+        min-height: 42px;
+    }
+}
+
+@media (max-width: 760px) {
+    .dashboard-action-grid {
+        grid-template-columns: 1fr;
+        gap: 1px;
+    }
+
+    .dashboard-action-lane {
+        min-height: 86px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .dashboard-action-lane + .dashboard-action-lane {
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    }
+
+    .dashboard-action-copy {
+        min-height: 0;
+    }
+
+    .dashboard-action-arrow {
+        align-self: center;
+    }
+}
+
 /* Service status: 3 service cards side-by-side in a tighter grid */
 .dash-card[data-card="services"] .service-status-grid {
     display: grid;
