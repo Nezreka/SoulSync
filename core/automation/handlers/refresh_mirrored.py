@@ -18,6 +18,7 @@ import json
 from typing import Any, Dict
 
 from core.automation.deps import AutomationDeps
+from core.playlists.source_refs import require_refresh_url
 
 
 def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
@@ -129,7 +130,7 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 # source_playlist_id is an MD5 hash; extract actual Spotify ID from stored description (URL).
                 try:
                     from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
-                    spotify_url = pl.get('description', '')
+                    spotify_url = require_refresh_url(source, pl.get('description', ''), pl.get('name', ''))
                     parsed = parse_spotify_url(spotify_url) if spotify_url else None
 
                     # If Spotify is authenticated, use the full API (auto-discovers with album art).
@@ -185,6 +186,13 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                                 # No extra_data — let preservation code keep existing discovery data.
                 except Exception as e:
                     deps.logger.warning(f"Spotify public playlist refresh failed for {source_id}: {e}")
+                    errors.append(f"{pl.get('name', '?')}: {str(e)}")
+                    deps.update_progress(
+                        auto_id,
+                        log_line=f'Refresh failed: "{pl.get("name", "")}" - {str(e)}',
+                        log_type='error',
+                    )
+                    continue
 
             elif source == 'deezer':
                 try:
@@ -228,7 +236,7 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
 
             elif source == 'youtube':
                 # source_playlist_id is now a deterministic hash; use stored description (original URL) for refresh.
-                yt_url = pl.get('description', '') or f"https://www.youtube.com/playlist?list={source_id}"
+                yt_url = require_refresh_url(source, pl.get('description', ''), pl.get('name', ''))
                 playlist_data = deps.parse_youtube_playlist(yt_url)
                 if playlist_data and playlist_data.get('tracks'):
                     tracks = []
@@ -241,6 +249,15 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                             'duration_ms': t.get('duration_ms', 0),
                             'source_track_id': t.get('id', ''),
                         })
+
+            if tracks is None:
+                errors.append(f"{pl.get('name', '?')}: no tracks returned from source")
+                deps.update_progress(
+                    auto_id,
+                    log_line=f'Refresh failed: "{pl.get("name", "")}" - no tracks returned from source',
+                    log_type='error',
+                )
+                continue
 
             if tracks is not None:
                 # Compare old vs new track IDs to detect changes.
@@ -261,6 +278,7 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                     name=pl['name'],
                     tracks=tracks,
                     profile_id=pl.get('profile_id', 1),
+                    description=pl.get('description'),
                     owner=pl.get('owner'),
                     image_url=pl.get('image_url'),
                 )

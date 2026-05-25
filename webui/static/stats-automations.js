@@ -446,6 +446,7 @@ function renderMirroredCard(p, container) {
     const hash = `mirrored_${p.id}`;
     const state = youtubePlaylistStates[hash];
     const phase = state ? state.phase : null;
+    const sourceRef = getMirroredSourceRef(p);
 
     // Build phase indicator
     let phaseHtml = '';
@@ -493,6 +494,7 @@ function renderMirroredCard(p, container) {
             </div>
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
+        <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escAttr(p.name)}', '${_escAttr(p.source)}', '${_escAttr(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
@@ -530,6 +532,48 @@ function renderMirroredCard(p, container) {
         }
     });
     container.appendChild(card);
+}
+
+function getMirroredSourceRef(p) {
+    const desc = (p && p.description) ? String(p.description).trim() : '';
+    if ((p.source === 'spotify_public' || p.source === 'youtube') && /^https?:\/\//i.test(desc)) {
+        return desc;
+    }
+    return (p && p.source_playlist_id) ? String(p.source_playlist_id) : '';
+}
+
+async function editMirroredSourceRef(playlistId, name, source, currentRef) {
+    const label = (source === 'spotify_public' || source === 'youtube')
+        ? 'original playlist URL'
+        : 'original playlist ID or URL';
+    const nextRef = window.prompt(`Update ${label} for "${name}"`, currentRef || '');
+    if (nextRef === null) return;
+    const trimmed = nextRef.trim();
+    if (!trimmed) {
+        showToast('Source link or ID is required', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/source-ref`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_ref: trimmed })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to update source reference');
+        }
+        showToast(`Updated source for ${name}`, 'success');
+        loadMirroredPlaylists();
+        const openModal = document.getElementById('mirrored-track-modal');
+        if (openModal) {
+            closeMirroredModal();
+            openMirroredPlaylistModal(playlistId);
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
 }
 
 function updateMirroredCardPhase(urlHash, phase) {
@@ -785,6 +829,7 @@ async function openMirroredPlaylistModal(playlistId) {
 
         const tracks = data.tracks || [];
         const source = data.source || 'unknown';
+        const sourceRef = getMirroredSourceRef(data);
         const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
         const sourceIcon = sourceIcons[source] || '📋';
 
@@ -827,6 +872,7 @@ async function openMirroredPlaylistModal(playlistId) {
                         <button class="mirrored-btn-delete" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escAttr(data.name)}')">Delete Mirror</button>
                     </div>
                     <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
+                        <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escAttr(data.name)}', '${_escAttr(source)}', '${_escAttr(sourceRef)}')">Edit Source</button>
                         <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
                         <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>

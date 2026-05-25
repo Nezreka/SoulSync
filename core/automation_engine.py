@@ -617,7 +617,7 @@ class AutomationEngine:
                     self._progress_finish_fn(automation_id, result)
                 except Exception as e:
                     logger.debug("scheduled progress finish (skipped): %s", e)
-            self._finish_run(auto, automation_id, result, error=None)
+            self._finish_run(auto, automation_id, result, error=None, retry_delay_seconds=300)
             return
 
         # Initialize progress tracking (skip if already done during delay)
@@ -664,7 +664,7 @@ class AutomationEngine:
 
         self._finish_run(auto, automation_id, result, error)
 
-    def _finish_run(self, auto, automation_id, result, error):
+    def _finish_run(self, auto, automation_id, result, error, retry_delay_seconds=None):
         """Update DB with run stats and reschedule."""
         next_run_str = None
         trigger_type = auto.get('trigger_type', '')
@@ -672,7 +672,9 @@ class AutomationEngine:
         if trigger_type in self._trigger_handlers:
             try:
                 trigger_config = json.loads(auto.get('trigger_config') or '{}')
-                if trigger_type == 'daily_time':
+                if retry_delay_seconds:
+                    next_run_str = _utc_after(retry_delay_seconds)
+                elif trigger_type == 'daily_time':
                     # Next run is tomorrow at the configured time (compute delay from local time, store as UTC)
                     time_str = trigger_config.get('time', '00:00')
                     hour, minute = map(int, time_str.split(':'))
