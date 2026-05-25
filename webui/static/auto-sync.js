@@ -469,13 +469,27 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
     return `
         <article class="auto-sync-history-entry">
             <div class="auto-sync-history-row" onclick="autoSyncToggleHistoryEntry('${entryId}')">
-                <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
+                <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
                 <div class="auto-sync-history-main">
-                    <strong>${_esc(playlistName)}</strong>
+                    <div class="auto-sync-history-title-row">
+                        <strong>${_esc(playlistName)}</strong>
+                        <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
+                    </div>
+                    <div class="auto-sync-card-flow">
+                        <span class="flow-trigger">${_esc(entry.trigger_source || 'pipeline')}</span>
+                        <span class="flow-arrow">&rarr;</span>
+                        <span class="flow-action">Refresh</span>
+                        <span class="flow-arrow">&rarr;</span>
+                        <span class="flow-action">Discover</span>
+                        <span class="flow-arrow">&rarr;</span>
+                        <span class="flow-notify">Sync + wishlist</span>
+                    </div>
                     <small>${_esc(summary)}</small>
                     <div class="auto-sync-history-preview">
                         ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
                         ${autoSyncHistoryPreviewPill('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
+                        ${autoSyncHistoryPreviewPill('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
+                        ${autoSyncHistoryPreviewPill('Library', before.in_library_count, after.in_library_count, libraryDelta)}
                     </div>
                 </div>
                 <div class="auto-sync-history-meta">
@@ -552,6 +566,12 @@ function autoSyncHistoryStatusLabel(status) {
     return status || 'Run';
 }
 
+function autoSyncHistoryStatusClass(status) {
+    if (status === 'completed' || status === 'finished') return 'enabled';
+    if (status === 'error' || status === 'skipped') return 'disabled';
+    return 'enabled';
+}
+
 function autoSyncDurationLabel(seconds) {
     const total = Math.max(0, Math.round(parseFloat(seconds) || 0));
     if (total < 60) return `${total}s`;
@@ -600,15 +620,24 @@ function autoSyncAutomationCardHtml(auto, playlists) {
     const trigger = _autoFormatTrigger(auto.trigger_type, auto.trigger_config || {});
     const enabled = auto.enabled !== false && auto.enabled !== 0;
     const next = auto.next_run ? autoSyncNextRunLabel(auto.next_run) : 'not scheduled';
+    const sourceLabel = playlist ? autoSyncSourceLabel(playlist.source) : (cfg.all === true || cfg.all === 'true' ? 'All sources' : 'Pipeline');
     return `
         <div class="auto-sync-automation-card">
+            <span class="auto-sync-card-status-dot ${enabled ? 'enabled' : 'disabled'}"></span>
             <div class="auto-sync-automation-main">
                 <div class="auto-sync-automation-title-row">
-                    <span class="auto-sync-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? 'Enabled' : 'Disabled'}</span>
                     <strong>${_esc(auto.name || 'Playlist Pipeline')}</strong>
                 </div>
+                <div class="auto-sync-card-flow">
+                    <span class="flow-trigger">${_esc(trigger)}</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-action">Playlist pipeline</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-notify">Refresh + sync</span>
+                </div>
                 <div class="auto-sync-automation-meta">
-                    <span>${_esc(trigger)}</span>
+                    <span class="auto-sync-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? 'Enabled' : 'Disabled'}</span>
+                    <span>${_esc(sourceLabel)}</span>
                     <span>${_esc(target)}</span>
                     <span>${_esc(next)}</span>
                 </div>
