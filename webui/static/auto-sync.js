@@ -245,6 +245,7 @@ function renderAutoSyncScheduleModal() {
             <div class="auto-sync-tab-panel ${historyActive ? 'active' : ''}" id="auto-sync-history-panel">${historyPanel}</div>
         </div>
     `;
+    bindAutoSyncHistoryCardInteractions(overlay);
 }
 
 function setAutoSyncTab(tab) {
@@ -460,8 +461,8 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
     const playlistName = entry.playlist_name || after.name || before.name || `Playlist #${entry.playlist_id || 'unknown'}`;
     const summary = entry.summary || autoSyncHistoryFallbackSummary(before, after, status);
     return `
-        <article class="auto-sync-history-entry" id="${entryId}-card">
-            <div class="auto-sync-history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="${entryId}" onclick="autoSyncToggleHistoryEntry('${entryId}')" onkeydown="autoSyncHistoryEntryKeydown(event, '${entryId}')">
+        <article class="auto-sync-history-entry" id="${entryId}-card" data-history-entry="${entryId}">
+            <div class="auto-sync-history-row" role="button" tabindex="0" aria-expanded="false" aria-controls="${entryId}" data-history-toggle="${entryId}">
                 <span class="auto-sync-card-status-dot ${autoSyncHistoryStatusClass(status)}"></span>
                 <div class="auto-sync-history-main">
                     <div class="auto-sync-history-title-row">
@@ -478,18 +479,18 @@ function autoSyncHistoryEntryHtml(entry, index = 0) {
                         <span class="flow-notify">Sync + wishlist</span>
                     </div>
                     <small>${_esc(summary)}</small>
-                    <div class="auto-sync-history-preview">
-                        ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
-                        ${autoSyncHistoryPreviewPill('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
-                        ${autoSyncHistoryPreviewPill('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
-                        ${autoSyncHistoryPreviewPill('Library', before.in_library_count, after.in_library_count, libraryDelta)}
-                    </div>
                 </div>
                 <div class="auto-sync-history-meta">
                     ${started ? `<span>${_esc(started)}</span>` : ''}
                     ${duration ? `<span>${_esc(duration)}</span>` : ''}
                     <span>${_esc(entry.trigger_source || 'pipeline')}</span>
-                    <span class="auto-sync-history-expand-label">Expand</span>
+                    <button type="button" class="auto-sync-history-expand-label" data-history-toggle-button="${entryId}">View details</button>
+                </div>
+                <div class="auto-sync-history-preview">
+                    ${autoSyncHistoryPreviewPill('Tracks', before.track_count, after.track_count, trackDelta)}
+                    ${autoSyncHistoryPreviewPill('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
+                    ${autoSyncHistoryPreviewPill('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
+                    ${autoSyncHistoryPreviewPill('Library', before.in_library_count, after.in_library_count, libraryDelta)}
                 </div>
             </div>
             <div id="${entryId}" class="auto-sync-history-detail">
@@ -519,6 +520,21 @@ function autoSyncNormalizeHistoryEntry(entry, index) {
         after_json: autoSyncParseHistoryObject(entry.after_json),
         result_json: autoSyncParseHistoryObject(entry.result_json),
     };
+}
+
+function bindAutoSyncHistoryCardInteractions(root = document) {
+    root.querySelectorAll('[data-history-toggle]').forEach(row => {
+        const entryId = row.dataset.historyToggle;
+        row.addEventListener('click', () => autoSyncToggleHistoryEntry(entryId));
+        row.addEventListener('keydown', event => autoSyncHistoryEntryKeydown(event, entryId));
+    });
+    root.querySelectorAll('[data-history-toggle-button]').forEach(button => {
+        const entryId = button.dataset.historyToggleButton;
+        button.addEventListener('click', event => {
+            event.stopPropagation();
+            autoSyncToggleHistoryEntry(entryId);
+        });
+    });
 }
 
 function autoSyncParseHistoryObject(value) {
