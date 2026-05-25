@@ -380,6 +380,10 @@ function importFileSubmit() {
 // ── Mirrored Playlists ────────────────────────────────────────────────
 
 let mirroredPlaylistsLoaded = false;
+// Auto-Sync state + functions moved to webui/static/auto-sync.js; declared
+// as globals there so the older mirrored-playlist render path below can
+// still reach `mirroredPipelinePollers`, `runMirroredPlaylistPipeline`,
+// `editMirroredSourceRef`, `getMirroredSourceRef`, and `pollMirroredPipelineStatus`.
 
 /**
  * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
@@ -444,12 +448,34 @@ async function loadMirroredPlaylists() {
 function renderMirroredCard(p, container) {
     const ago = timeAgo(p.updated_at || p.mirrored_at);
     const hash = `mirrored_${p.id}`;
-    const state = youtubePlaylistStates[hash];
+    const pipelineState = p.pipeline_state || null;
+    const pipelinePhase = pipelineState && pipelineState.status === 'running' ? 'pipeline_running'
+        : pipelineState && pipelineState.status === 'finished' ? 'pipeline_complete'
+        : pipelineState && (pipelineState.status === 'error' || pipelineState.status === 'skipped') ? 'pipeline_error'
+        : null;
+    const state = youtubePlaylistStates[hash] || (pipelinePhase ? {
+        phase: pipelinePhase,
+        pipeline_status: pipelineState.status,
+        pipeline_progress: pipelineState.progress || 0,
+        pipeline_phase: pipelineState.phase || '',
+        pipeline_error: pipelineState.error || '',
+        pipeline_log: pipelineState.log || [],
+        pipeline_result: pipelineState.result || null,
+    } : null);
     const phase = state ? state.phase : null;
+    const sourceRef = getMirroredSourceRef(p);
 
     // Build phase indicator
     let phaseHtml = '';
-    if (phase === 'discovering') {
+    if (phase === 'pipeline_running') {
+        const pct = state.pipeline_progress || state.progress || 0;
+        const label = state.pipeline_phase || state.phase_label || 'Pipeline running';
+        phaseHtml = `<span style="color:#38bdf8;">${_esc(label)} ${pct}%</span>`;
+    } else if (phase === 'pipeline_complete') {
+        phaseHtml = `<span style="color:#22c55e;">Pipeline complete</span>`;
+    } else if (phase === 'pipeline_error') {
+        phaseHtml = `<span style="color:#ef4444;">Pipeline error</span>`;
+    } else if (phase === 'discovering') {
         const pct = state.discoveryProgress || state.discovery_progress || 0;
         phaseHtml = `<span style="color:#a78bfa;">Discovering ${pct}%</span>`;
     } else if (phase === 'discovered') {
@@ -493,6 +519,8 @@ function renderMirroredCard(p, container) {
             </div>
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
+        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
+        <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escAttr(p.name)}', '${_escAttr(p.source)}', '${_escAttr(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
@@ -530,6 +558,10 @@ function renderMirroredCard(p, container) {
         }
     });
     container.appendChild(card);
+
+    if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
+        pollMirroredPipelineStatus(p.id, p.name);
+    }
 }
 
 function updateMirroredCardPhase(urlHash, phase) {
@@ -552,6 +584,17 @@ function updateMirroredCardPhase(urlHash, phase) {
     // Add new phase indicator
     let phaseHtml = '';
     switch (phase) {
+        case 'pipeline_running':
+            const pipelineProgress = state?.pipeline_progress || 0;
+            const pipelinePhase = state?.pipeline_phase || 'Pipeline running';
+            phaseHtml = `<span style="color:#38bdf8;">${_esc(pipelinePhase)} ${pipelineProgress}%</span>`;
+            break;
+        case 'pipeline_complete':
+            phaseHtml = `<span style="color:#22c55e;">Pipeline complete</span>`;
+            break;
+        case 'pipeline_error':
+            phaseHtml = `<span style="color:#ef4444;">Pipeline error</span>`;
+            break;
         case 'discovering':
             phaseHtml = `<span style="color:#a78bfa;">Discovering...</span>`;
             break;
@@ -785,6 +828,7 @@ async function openMirroredPlaylistModal(playlistId) {
 
         const tracks = data.tracks || [];
         const source = data.source || 'unknown';
+        const sourceRef = getMirroredSourceRef(data);
         const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
         const sourceIcon = sourceIcons[source] || '📋';
 
@@ -827,6 +871,8 @@ async function openMirroredPlaylistModal(playlistId) {
                         <button class="mirrored-btn-delete" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escAttr(data.name)}')">Delete Mirror</button>
                     </div>
                     <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
+                        <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escAttr(data.name)}', '${_escAttr(source)}', '${_escAttr(sourceRef)}')">Edit Source</button>
+                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escAttr(data.name)}')">Auto-Sync</button>
                         <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
                         <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>

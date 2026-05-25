@@ -132,3 +132,38 @@ def test_skipped_status_records_no_error(engine_with_handler) -> None:
     engine.run_automation(1, skip_delay=True)
     kwargs = db_mock.update_automation_run.call_args.kwargs
     assert kwargs.get('error') is None
+
+
+def test_guarded_scheduled_skip_retries_soon() -> None:
+    """A busy guarded action should retry soon instead of waiting a full interval."""
+    db_mock = MagicMock()
+    db_mock.get_automation.return_value = {
+        'id': 1,
+        'name': 'Playlist Pipeline',
+        'enabled': True,
+        'action_type': 'playlist_pipeline',
+        'action_config': '{}',
+        'trigger_type': 'schedule',
+        'trigger_config': '{"interval": 6, "unit": "hours"}',
+    }
+    db_mock.update_automation_run = MagicMock(return_value=True)
+
+    engine = AutomationEngine(db_mock)
+    engine._running = True
+    engine.schedule_automation = MagicMock()
+    engine._action_handlers['playlist_pipeline'] = {
+        'handler': lambda config: {'status': 'completed'},
+        'guard': lambda: True,
+    }
+
+    engine.run_automation(1, skip_delay=True)
+
+    kwargs = db_mock.update_automation_run.call_args.kwargs
+    assert kwargs.get('error') is None
+    assert kwargs.get('next_run') is not None
+    # It should be scheduled for roughly five minutes, not the configured six hours.
+    from datetime import datetime, timezone
+
+    next_run = datetime.strptime(kwargs['next_run'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+    delay = (next_run - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < delay <= 360

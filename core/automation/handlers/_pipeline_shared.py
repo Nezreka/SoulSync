@@ -80,9 +80,11 @@ def run_sync_and_wishlist(
         if sync_status == 'started':
             sync_id = sync_id_for_fn(pl)
             sync_poll_start = time.time()
+            timed_out = True
             while time.time() - sync_poll_start < _SYNC_PER_PLAYLIST_TIMEOUT_SECONDS:
                 if (sync_id in sync_states
                         and sync_states[sync_id].get('status') in _SYNC_TERMINAL_STATUSES):
+                    timed_out = False
                     break
                 time.sleep(2)
                 elapsed = int(time.time() - sync_poll_start)
@@ -94,6 +96,25 @@ def run_sync_and_wishlist(
                 )
 
             ss = sync_states.get(sync_id, {})
+            final_status = ss.get('status')
+            if timed_out:
+                sync_errors += 1
+                deps.update_progress(
+                    automation_id,
+                    log_line=f'Sync timed out "{pl_name}" after {_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS}s',
+                    log_type='error',
+                )
+                continue
+            if final_status in ('error', 'failed'):
+                sync_errors += 1
+                reason = ss.get('error') or ss.get('reason') or 'background sync failed'
+                deps.update_progress(
+                    automation_id,
+                    log_line=f'Sync error "{pl_name}": {reason}',
+                    log_type='error',
+                )
+                continue
+
             ss_result = ss.get('result', ss.get('progress', {}))
             matched = ss_result.get('matched_tracks', 0) if isinstance(ss_result, dict) else 0
             total_synced += int(matched) if matched else 0

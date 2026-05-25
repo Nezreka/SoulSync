@@ -45,6 +45,7 @@ SPLIT_MODULES = [
     "discover.js",
     "enrichment.js",
     "stats-automations.js",
+    "auto-sync.js",
     "pages-extra.js",
     "init.js",
 ]
