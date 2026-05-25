@@ -61108,7 +61108,7 @@ body.reduce-effects .dash-card::after {
         rgb(var(--accent-light-rgb)),
         rgba(var(--accent-rgb), 0.3));
     transform-origin: bottom;
-    animation: qa-eq 1.6s ease-in-out infinite;
+    animation: qa-eq 3.2s ease-in-out infinite;
 }
 
 .qa-tile__eq span:nth-child(1)  { animation-delay: -0.10s; --eq-h: 0.30; }
@@ -61133,39 +61133,38 @@ body.reduce-effects .dash-card::after {
 .qa-tile__eq span:nth-child(20) { animation-delay: -0.18s; --eq-h: 0.45; }
 
 @keyframes qa-eq {
-    0%, 100% { transform: scaleY(calc(var(--eq-h, 0.5) * 0.4)); }
-    50%      { transform: scaleY(var(--eq-h, 0.5)); }
+    0%, 100% { transform: scaleY(calc(var(--eq-h, 0.5) * 0.55)); }
+    50%      { transform: scaleY(calc(var(--eq-h, 0.5) * 0.85)); }
 }
 
 .qa-tile--hero:hover .qa-tile__eq,
 .qa-tile--hero:focus-visible .qa-tile__eq { opacity: 0.65; }
 
-/* Hero playhead — vertical accent line that sweeps left-to-right across
-   the equalizer like a now-playing scrubber. Adds horizontal motion to
-   pair with the vertical bar pulse. */
+/* Hero playhead — slow vertical accent line that drifts across the
+   equalizer like a now-playing scrubber. Fades in/out at the edges so
+   the loop reset isn't visible. */
 .qa-tile--hero .qa-tile__bg::after {
     content: '';
     position: absolute;
     inset: auto 0 0 0;
     height: 65%;
-    width: 2px;
+    width: 1.5px;
     background: linear-gradient(180deg,
         transparent 0%,
-        rgb(var(--accent-light-rgb)) 35%,
-        rgb(var(--accent-light-rgb)) 80%,
+        rgba(var(--accent-rgb), 0.7) 40%,
+        rgba(var(--accent-rgb), 0.7) 85%,
         transparent 100%);
-    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.55));
-    opacity: 0.6;
-    animation: qa-playhead 5.5s linear infinite;
+    filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.35));
+    opacity: 0;
+    animation: qa-playhead 9s linear infinite;
     pointer-events: none;
 }
 
-.qa-tile--hero:hover .qa-tile__bg::after,
-.qa-tile--hero:focus-visible .qa-tile__bg::after { opacity: 0.95; }
-
 @keyframes qa-playhead {
-    0%   { left: -2%; }
-    100% { left: 102%; }
+    0%   { left: -4%; opacity: 0; }
+    10%  { opacity: 0.5; }
+    85%  { opacity: 0.5; }
+    100% { left: 102%; opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -61225,29 +61224,45 @@ body.reduce-effects .dash-card::after {
     flex-shrink: 0;
 }
 
-.qa-flow-node:nth-of-type(1) { animation: qa-flow-pulse 2.4s ease-in-out infinite; }
-.qa-flow-node:nth-of-type(2) { animation: qa-flow-pulse 2.4s ease-in-out infinite; animation-delay: -0.8s; }
-.qa-flow-node:nth-of-type(3) { animation: qa-flow-pulse 2.4s ease-in-out infinite; animation-delay: -1.6s; }
+.qa-flow-node:nth-of-type(1) { animation: qa-flow-pulse 3.2s ease-in-out infinite; }
+.qa-flow-node:nth-of-type(2) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -1.07s; }
+.qa-flow-node:nth-of-type(3) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -2.13s; }
 
 .qa-flow-line {
+    position: relative;
     flex: 1;
     height: 2px;
     border-radius: 2px;
-    background:
-        linear-gradient(90deg,
-            transparent 0%,
-            rgb(var(--accent-light-rgb)) 50%,
-            transparent 100%) 0 0 / 60% 100% no-repeat,
-        rgba(var(--accent-rgb), 0.2);
-    background-position: -60% 0;
-    animation: qa-flow-line-sweep 2.4s linear infinite;
+    background: rgba(var(--accent-rgb), 0.2);
+    overflow: hidden;
 }
 
-.qa-flow-line:nth-of-type(2) { animation-delay: -0.8s; }
+/* Sweep is a separate pseudo so opacity can fade independently of the
+   position. Without the fade the reset jump from 100% → -60% was
+   visible as a snap each cycle. */
+.qa-flow-line::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgb(var(--accent-light-rgb)) 50%,
+        transparent 100%);
+    transform: translateX(-100%);
+    opacity: 0;
+    animation: qa-flow-line-sweep 3.2s ease-in-out infinite;
+}
+
+.qa-flow-line:nth-of-type(2)::before { animation-delay: -1.0s; }
 
 @keyframes qa-flow-line-sweep {
-    from { background-position: -60% 0; }
-    to   { background-position: 160% 0; }
+    0%   { transform: translateX(-100%); opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { transform: translateX(220%); opacity: 1; }
+    100% { transform: translateX(220%); opacity: 0; }
 }
 
 @keyframes qa-flow-pulse {
