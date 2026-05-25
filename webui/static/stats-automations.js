@@ -644,6 +644,11 @@ function autoSyncPlaylistIdFromAutomation(auto) {
 }
 
 function autoSyncIsScheduleOwned(auto) {
+    // Primary signal: the explicit owned_by flag the board writes on every
+    // schedule it creates. Falls back to the legacy name/group convention
+    // so rows created before the column existed (or hand-edited from the
+    // Automations page) still get recognized after backfill.
+    if (auto?.owned_by === 'auto_sync') return true;
     const group = auto?.group_name || '';
     const name = auto?.name || '';
     return group === 'Playlist Auto-Sync' || name.startsWith('Auto-Sync:');
@@ -970,6 +975,7 @@ async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
         action_config: { playlist_id: String(playlistId), all: false },
         then_actions: [],
         group_name: 'Playlist Auto-Sync',
+        owned_by: 'auto_sync',
     };
     try {
         const res = await fetch(existing ? `/api/automations/${existing.automation_id}` : '/api/automations', {
