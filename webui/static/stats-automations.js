@@ -386,8 +386,9 @@ let _autoSyncScheduleState = {
     playlists: [],
     automations: [],
     playlistSchedules: {},
-    automationManaged: [],
+    automationPipelines: [],
 };
+let _autoSyncActiveTab = 'schedule';
 
 /**
  * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
@@ -637,25 +638,26 @@ function autoSyncIsScheduleOwned(auto) {
 
 function buildAutoSyncScheduleState(playlists, automations) {
     const playlistSchedules = {};
-    const automationManaged = [];
-    automations.filter(autoSyncIsPipelineAutomation).forEach(auto => {
+    const automationPipelines = [];
+    const pipelineAutomations = automations.filter(autoSyncIsPipelineAutomation);
+    pipelineAutomations.forEach(auto => {
         const playlistId = autoSyncPlaylistIdFromAutomation(auto);
         const hours = auto.trigger_type === 'schedule' ? autoSyncHoursFromTrigger(auto.trigger_config || {}) : null;
-        if (playlistId && hours) {
+        if (playlistId && hours && autoSyncIsScheduleOwned(auto)) {
             playlistSchedules[playlistId] = {
                 automation_id: auto.id,
                 automation_name: auto.name,
                 hours,
                 enabled: auto.enabled !== false && auto.enabled !== 0,
-                owned: autoSyncIsScheduleOwned(auto),
+                owned: true,
                 next_run: auto.next_run,
                 trigger_config: auto.trigger_config || {},
             };
         } else {
-            automationManaged.push(auto);
+            automationPipelines.push(auto);
         }
     });
-    return { playlists, automations, playlistSchedules, automationManaged };
+    return { playlists, automations, playlistSchedules, automationPipelines };
 }
 
 async function openAutoSyncScheduleModal() {
@@ -679,7 +681,7 @@ async function openAutoSyncScheduleModal() {
         </div>
     `;
     overlay.style.display = 'flex';
-    overlay.addEventListener('click', e => { if (e.target === overlay) closeAutoSyncScheduleModal(); }, { once: true });
+    overlay.onclick = e => { if (e.target === overlay) closeAutoSyncScheduleModal(); };
     await refreshAutoSyncScheduleModal();
 }
 
@@ -719,7 +721,49 @@ function renderAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
 
-    const { playlists, playlistSchedules, automationManaged } = _autoSyncScheduleState;
+    const { playlists, playlistSchedules, automationPipelines } = _autoSyncScheduleState;
+    const scheduledCount = Object.keys(playlistSchedules).length;
+    const enabledCount = Object.values(playlistSchedules).filter(s => s.enabled).length;
+    const pipelineCount = automationPipelines.length;
+    const totalTracks = playlists.reduce((sum, p) => sum + (parseInt(p.track_count, 10) || 0), 0);
+    const scheduleActive = _autoSyncActiveTab === 'schedule';
+    const automationsActive = _autoSyncActiveTab === 'automations';
+
+    const schedulePanel = renderAutoSyncSchedulePanel(playlists, playlistSchedules);
+    const automationPanel = renderAutoSyncAutomationPanel(automationPipelines, playlists);
+
+    overlay.innerHTML = `
+        <div class="auto-sync-modal">
+            <div class="auto-sync-header">
+                <div>
+                    <div class="auto-sync-eyebrow">Playlist automation</div>
+                    <h3>Auto-Sync Manager</h3>
+                    <p>Schedule mirrored playlists through the same playlist-pipeline engine used by Automations.</p>
+                </div>
+                <button class="auto-sync-close" onclick="closeAutoSyncScheduleModal()">&times;</button>
+            </div>
+            <div class="auto-sync-summary">
+                <div><span>${scheduledCount}</span><small>scheduled playlists</small></div>
+                <div><span>${enabledCount}</span><small>active schedules</small></div>
+                <div><span>${pipelineCount}</span><small>automation pipelines</small></div>
+                <div><span>${totalTracks}</span><small>mirrored tracks</small></div>
+            </div>
+            <div class="auto-sync-tabs">
+                <button class="${scheduleActive ? 'active' : ''}" onclick="setAutoSyncTab('schedule')">Schedule Board</button>
+                <button class="${automationsActive ? 'active' : ''}" onclick="setAutoSyncTab('automations')">Automation Pipelines</button>
+            </div>
+            <div class="auto-sync-tab-panel ${scheduleActive ? 'active' : ''}" id="auto-sync-schedule-panel">${schedulePanel}</div>
+            <div class="auto-sync-tab-panel ${automationsActive ? 'active' : ''}" id="auto-sync-automation-panel">${automationPanel}</div>
+        </div>
+    `;
+}
+
+function setAutoSyncTab(tab) {
+    _autoSyncActiveTab = tab === 'automations' ? 'automations' : 'schedule';
+    renderAutoSyncScheduleModal();
+}
+
+function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     const grouped = playlists.reduce((acc, p) => {
         const key = p.source || 'other';
         if (!acc[key]) acc[key] = [];
@@ -737,7 +781,7 @@ function renderAutoSyncScheduleModal() {
                 return `
                     <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)">
                         <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
-                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks · ${_esc(assigned)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
                     </div>
                 `;
             }).join('')}
@@ -753,29 +797,20 @@ function renderAutoSyncScheduleModal() {
                     <small>${assigned.length}</small>
                 </div>
                 <div class="auto-sync-column-list">
-                    ${assigned.length ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('') : '<div class="auto-sync-drop-hint">Drop playlists here</div>'}
+                    ${assigned.length ? assigned.map(p => autoSyncScheduledCardHtml(p, playlistSchedules[p.id])).join('') : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists at this interval</span></div>'}
                 </div>
             </div>
         `;
     }).join('');
 
-    const managedHtml = automationManaged.length ? `
-        <div class="auto-sync-managed">
-            <div class="auto-sync-managed-title">Automation-managed pipelines</div>
-            ${automationManaged.map(a => `<span title="${_escAttr(_autoFormatTrigger(a.trigger_type, a.trigger_config || {}))}">${_esc(a.name || 'Playlist Pipeline')}</span>`).join('')}
-        </div>
-    ` : '';
-
-    overlay.innerHTML = `
-        <div class="auto-sync-modal">
-            <div class="auto-sync-header">
-                <div>
-                    <h3>Auto-Sync Schedule</h3>
-                    <p>Drag mirrored playlists into an interval. Each placement creates or updates a matching playlist-pipeline automation.</p>
-                </div>
-                <button class="auto-sync-close" onclick="closeAutoSyncScheduleModal()">&times;</button>
+    return `
+        <div class="auto-sync-board-intro">
+            <div>
+                <strong>Drag playlists into an interval</strong>
+                <span>Each placement creates or updates an Auto-Sync-owned playlist-pipeline automation.</span>
             </div>
-            ${managedHtml}
+            <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+        </div>
             <div class="auto-sync-body">
                 <aside class="auto-sync-sidebar">
                     <div class="auto-sync-sidebar-title">Mirrored playlists</div>
@@ -783,22 +818,61 @@ function renderAutoSyncScheduleModal() {
                 </aside>
                 <main class="auto-sync-board">${bucketHtml}</main>
             </div>
+    `;
+}
+
+function renderAutoSyncAutomationPanel(automationPipelines, playlists) {
+    if (!automationPipelines.length) {
+        return '<div class="auto-sync-automation-empty">No Automations-page playlist pipelines found.</div>';
+    }
+    return `
+        <div class="auto-sync-automation-intro">
+            <strong>Read-only Automations-page pipelines</strong>
+            <span>These use the playlist pipeline but are managed from the Automations page, so this modal only displays them.</span>
+        </div>
+        <div class="auto-sync-automation-list">
+            ${automationPipelines.map(auto => autoSyncAutomationCardHtml(auto, playlists)).join('')}
+        </div>
+    `;
+}
+
+function autoSyncAutomationCardHtml(auto, playlists) {
+    const cfg = auto.action_config || {};
+    const playlistId = autoSyncPlaylistIdFromAutomation(auto);
+    const playlist = playlistId ? playlists.find(p => parseInt(p.id, 10) === playlistId) : null;
+    const target = cfg.all === true || cfg.all === 'true'
+        ? 'All refreshable mirrored playlists'
+        : playlist ? playlist.name : playlistId ? `Playlist #${playlistId}` : 'Custom pipeline target';
+    const trigger = _autoFormatTrigger(auto.trigger_type, auto.trigger_config || {});
+    const enabled = auto.enabled !== false && auto.enabled !== 0;
+    const next = auto.next_run ? autoSyncNextRunLabel(auto.next_run) : 'not scheduled';
+    return `
+        <div class="auto-sync-automation-card">
+            <div class="auto-sync-automation-main">
+                <div class="auto-sync-automation-title-row">
+                    <span class="auto-sync-status ${enabled ? 'enabled' : 'disabled'}">${enabled ? 'Enabled' : 'Disabled'}</span>
+                    <strong>${_esc(auto.name || 'Playlist Pipeline')}</strong>
+                </div>
+                <div class="auto-sync-automation-meta">
+                    <span>${_esc(trigger)}</span>
+                    <span>${_esc(target)}</span>
+                    <span>${_esc(next)}</span>
+                </div>
+            </div>
+            <div class="auto-sync-automation-lock">Read only</div>
         </div>
     `;
 }
 
 function autoSyncScheduledCardHtml(playlist, schedule) {
     const enabled = schedule?.enabled !== false;
-    const owned = schedule?.owned === true;
     return `
         <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)">
             <div>
                 <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
-                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} · ${playlist.track_count || 0} tracks${schedule?.next_run ? ` · ${autoSyncNextRunLabel(schedule.next_run)}` : ''}${owned ? '' : ' · Automations page'}</div>
+                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks${schedule?.next_run ? ` &middot; ${autoSyncNextRunLabel(schedule.next_run)}` : ''}</div>
             </div>
-            ${owned
-                ? `<button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>`
-                : '<span class="auto-sync-lock" title="Managed from Automations page">Lock</span>'}
+            <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
         </div>
     `;
 }
@@ -839,10 +913,6 @@ async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) return;
     const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
-    if (existing && !existing.owned) {
-        showToast('This playlist pipeline is managed from the Automations page for now.', 'info');
-        return;
-    }
     const payload = {
         name: `Auto-Sync: ${playlist.name}`,
         trigger_type: 'schedule',
