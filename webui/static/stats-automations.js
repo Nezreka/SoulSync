@@ -516,7 +516,7 @@ function renderMirroredCard(p, container) {
             </div>
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
-        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Run refresh, discover, sync, and wishlist">Run</button>
+        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escAttr(p.name)}', '${_escAttr(p.source)}', '${_escAttr(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
     `;
@@ -568,6 +568,25 @@ function getMirroredSourceRef(p) {
         return desc;
     }
     return (p && p.source_playlist_id) ? String(p.source_playlist_id) : '';
+}
+
+async function parseMirroredPipelineResponse(res, fallbackMessage) {
+    const text = await res.text();
+    let data = {};
+    if (text) {
+        try {
+            data = JSON.parse(text);
+        } catch (_err) {
+            const detail = res.status === 404
+                ? 'Auto-Sync endpoint not found. Restart the SoulSync server so the new backend routes load.'
+                : fallbackMessage;
+            throw new Error(detail);
+        }
+    }
+    if (!res.ok || data.error) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
 }
 
 async function editMirroredSourceRef(playlistId, name, source, currentRef) {
@@ -634,12 +653,9 @@ async function runMirroredPlaylistPipeline(playlistId, name) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
-        const data = await res.json();
-        if (!res.ok || data.error) {
-            throw new Error(data.error || 'Failed to start pipeline');
-        }
+        const data = await parseMirroredPipelineResponse(res, 'Failed to start Auto-Sync');
         applyMirroredPipelineState(playlistId, data.state || { status: 'running', progress: 0, phase: 'Starting pipeline...' });
-        showToast(`Pipeline started for ${name}`, 'success');
+        showToast(`Auto-Sync started for ${name}`, 'success');
         pollMirroredPipelineStatus(playlistId, name);
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
@@ -653,14 +669,13 @@ function pollMirroredPipelineStatus(playlistId, name) {
     const tick = async () => {
         try {
             const res = await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/status`);
-            const state = await res.json();
-            if (!res.ok || state.error) throw new Error(state.error || 'Failed to read pipeline status');
+            const state = await parseMirroredPipelineResponse(res, 'Failed to read Auto-Sync status');
             applyMirroredPipelineState(playlistId, state);
 
             if (state.status === 'finished') {
                 clearInterval(mirroredPipelinePollers[key]);
                 delete mirroredPipelinePollers[key];
-                showToast(`Pipeline complete for ${name}`, 'success');
+                showToast(`Auto-Sync complete for ${name}`, 'success');
                 loadMirroredPlaylists();
             } else if (state.status === 'error' || state.status === 'skipped') {
                 clearInterval(mirroredPipelinePollers[key]);
@@ -990,7 +1005,7 @@ async function openMirroredPlaylistModal(playlistId) {
                     </div>
                     <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
                         <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escAttr(data.name)}', '${_escAttr(source)}', '${_escAttr(sourceRef)}')">Edit Source</button>
-                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escAttr(data.name)}')">Run Pipeline</button>
+                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escAttr(data.name)}')">Auto-Sync</button>
                         <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
                         <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>
