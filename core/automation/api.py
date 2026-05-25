@@ -225,6 +225,13 @@ def update_automation(
     if cycle_path:
         return {'error': f'Signal cycle detected: {cycle_path}. This would cause an infinite loop.'}, 400
 
+    trigger_changed = (
+        'trigger_type' in update_fields
+        or 'trigger_config' in update_fields
+    )
+    if trigger_changed:
+        update_fields['next_run'] = None
+
     success = database.update_automation(automation_id, **update_fields)
     if not success:
         return {'error': 'Automation not found'}, 404
