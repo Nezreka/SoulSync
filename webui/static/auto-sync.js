@@ -670,6 +670,7 @@ function populateAutoSyncHistoryList(root = document) {
     const list = root.querySelector('.auto-sync-history-list');
     if (!list) return;
     const allHistory = Array.isArray(_autoSyncScheduleState.runHistory) ? _autoSyncScheduleState.runHistory : [];
+    const total = _autoSyncScheduleState.runHistoryTotal || 0;
     const filter = _autoSyncHistoryFilter || 'all';
     const history = allHistory.filter(h => {
         if (filter === 'error') return h.status === 'error' || h.status === 'skipped';
