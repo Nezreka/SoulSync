@@ -531,6 +531,30 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_automation_id ON automation_run_history(automation_id)")
 
+            # Playlist pipeline run history table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS playlist_pipeline_run_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_id INTEGER,
+                    playlist_name TEXT,
+                    source TEXT,
+                    profile_id INTEGER DEFAULT 1,
+                    trigger_source TEXT DEFAULT 'pipeline',
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
+                    duration_seconds REAL,
+                    status TEXT NOT NULL,
+                    summary TEXT,
+                    before_json TEXT,
+                    after_json TEXT,
+                    result_json TEXT,
+                    log_lines TEXT,
+                    FOREIGN KEY (playlist_id) REFERENCES mirrored_playlists(id) ON DELETE SET NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pprh_playlist_id ON playlist_pipeline_run_history(playlist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pprh_profile_id ON playlist_pipeline_run_history(profile_id)")
+
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
 
@@ -12416,6 +12440,73 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing automation run history: {e}")
             return 0
+
+    def insert_playlist_pipeline_run_history(self, playlist_id, playlist_name, source,
+                                             profile_id, trigger_source, started_at,
+                                             finished_at, duration_seconds, status,
+                                             summary=None, before_json=None,
+                                             after_json=None, result_json=None,
+                                             log_lines=None):
+        """Insert a playlist pipeline run history entry and retain recent rows per profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO playlist_pipeline_run_history
+                    (playlist_id, playlist_name, source, profile_id, trigger_source,
+                     started_at, finished_at, duration_seconds, status, summary,
+                     before_json, after_json, result_json, log_lines)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    playlist_id, playlist_name, source, profile_id, trigger_source,
+                    started_at, finished_at, duration_seconds, status, summary,
+                    before_json, after_json, result_json, log_lines,
+                ))
+                cursor.execute("""
+                    DELETE FROM playlist_pipeline_run_history
+                    WHERE profile_id = ? AND id NOT IN (
+                        SELECT id FROM playlist_pipeline_run_history
+                        WHERE profile_id = ?
+                        ORDER BY id DESC LIMIT 300
+                    )
+                """, (profile_id, profile_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error inserting playlist pipeline run history for {playlist_id}: {e}")
+            return False
+
+    def get_playlist_pipeline_run_history(self, profile_id=1, playlist_id=None, limit=50, offset=0):
+        """Get playlist pipeline run history, newest first."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                where = ["profile_id = ?"]
+                params = [profile_id]
+                if playlist_id:
+                    where.append("playlist_id = ?")
+                    params.append(playlist_id)
+                where_sql = " AND ".join(where)
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM playlist_pipeline_run_history WHERE {where_sql}",
+                    params,
+                )
+                total = cursor.fetchone()[0]
+                cursor.execute(f"""
+                    SELECT id, playlist_id, playlist_name, source, profile_id, trigger_source,
+                           started_at, finished_at, duration_seconds, status, summary,
+                           before_json, after_json, result_json, log_lines
+                    FROM playlist_pipeline_run_history
+                    WHERE {where_sql}
+                    ORDER BY id DESC
+                    LIMIT ? OFFSET ?
+                """, [*params, limit, offset])
+                cols = [d[0] for d in cursor.description]
+                rows = [dict(zip(cols, row, strict=False)) for row in cursor.fetchall()]
+                return {'history': rows, 'total': total}
+        except Exception as e:
+            logger.error(f"Error getting playlist pipeline run history: {e}")
+            return {'history': [], 'total': 0}
 
     def get_radio_tracks(self, track_id, limit=20, exclude_ids=None) -> Dict[str, Any]:
         """Find similar tracks for radio mode auto-play queue.

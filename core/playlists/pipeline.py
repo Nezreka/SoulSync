@@ -11,8 +11,10 @@ future playlist-card "Run Pipeline" button can call the same command.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 
@@ -48,7 +50,12 @@ def run_mirrored_playlist_pipeline(
     else:
         deps.state.set_pipeline_running(True)
     automation_id = config.get('_automation_id')
+    trigger_source = config.get('_trigger_source') or (
+        'manual' if str(automation_id or '').startswith('mirrored_') else 'automation'
+    )
     pipeline_start = time.time()
+    history_playlists: List[Dict[str, Any]] = []
+    before_snapshots: Dict[int, Dict[str, Any]] = {}
 
     try:
         db = deps.get_database()
@@ -65,6 +72,12 @@ def run_mirrored_playlist_pipeline(
         if not playlists:
             deps.state.set_pipeline_running(False)
             return {'status': 'error', 'error': 'No refreshable playlists found'}
+        history_playlists = list(playlists)
+        before_snapshots = {
+            int(pl['id']): _playlist_history_snapshot(db, pl)
+            for pl in history_playlists
+            if pl.get('id')
+        }
 
         deps.update_progress(
             automation_id,
@@ -117,8 +130,7 @@ def run_mirrored_playlist_pipeline(
             log_type='success',
         )
 
-        deps.state.set_pipeline_running(False)
-        return {
+        result = {
             'status': 'completed',
             '_manages_own_progress': True,
             'playlists_refreshed': str(refreshed),
@@ -128,9 +140,38 @@ def run_mirrored_playlist_pipeline(
             'wishlist_queued': str(sync_summary['wishlist_queued']),
             'duration_seconds': str(duration),
         }
+        try:
+            _record_playlist_pipeline_history(
+                db,
+                history_playlists,
+                before_snapshots,
+                result,
+                status='completed',
+                started_at=pipeline_start,
+                finished_at=time.time(),
+                trigger_source=trigger_source,
+            )
+        except Exception as history_error:  # noqa: BLE001 - history should never fail a successful pipeline
+            deps.logger.debug(f"[Pipeline] History recording failed: {history_error}")
+        deps.state.set_pipeline_running(False)
+        return result
 
     except Exception as e:  # noqa: BLE001 - pipeline callers should receive status dicts
         deps.state.set_pipeline_running(False)
+        try:
+            if history_playlists:
+                _record_playlist_pipeline_history(
+                    db,
+                    history_playlists,
+                    before_snapshots,
+                    {'status': 'error', 'error': str(e), '_manages_own_progress': True},
+                    status='error',
+                    started_at=pipeline_start,
+                    finished_at=time.time(),
+                    trigger_source=trigger_source,
+                )
+        except Exception as history_error:  # noqa: BLE001 - history should never mask pipeline errors
+            deps.logger.debug(f"[Pipeline] History recording failed after error: {history_error}")
         deps.update_progress(
             automation_id,
             status='error',
@@ -140,6 +181,79 @@ def run_mirrored_playlist_pipeline(
             log_type='error',
         )
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
+
+
+def _pipeline_history_timestamp(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+
+def _playlist_history_snapshot(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
+    playlist_id = int(playlist['id'])
+    current = db.get_mirrored_playlist(playlist_id) or playlist
+    counts = db.get_mirrored_playlist_status_counts(playlist_id)
+    return {
+        'playlist_id': playlist_id,
+        'name': current.get('name') or playlist.get('name') or '',
+        'source': current.get('source') or playlist.get('source') or '',
+        'track_count': int(counts.get('total') or current.get('track_count') or 0),
+        'discovered_count': int(counts.get('discovered') or 0),
+        'wishlisted_count': int(counts.get('wishlisted') or 0),
+        'in_library_count': int(counts.get('in_library') or 0),
+    }
+
+
+def _playlist_history_summary(before: Dict[str, Any], after: Dict[str, Any], status: str) -> str:
+    before_tracks = int(before.get('track_count') or 0)
+    after_tracks = int(after.get('track_count') or 0)
+    track_delta = after_tracks - before_tracks
+    before_discovered = int(before.get('discovered_count') or 0)
+    after_discovered = int(after.get('discovered_count') or 0)
+    discovered_delta = after_discovered - before_discovered
+    parts = [status.capitalize()]
+    parts.append(f"{before_tracks} -> {after_tracks} tracks")
+    if track_delta:
+        parts.append(f"{track_delta:+d} tracks")
+    if discovered_delta:
+        parts.append(f"{discovered_delta:+d} discovered")
+    return ' | '.join(parts)
+
+
+def _record_playlist_pipeline_history(
+    db: Any,
+    playlists: List[Dict[str, Any]],
+    before_snapshots: Dict[int, Dict[str, Any]],
+    result: Dict[str, Any],
+    *,
+    status: str,
+    started_at: float,
+    finished_at: float,
+    trigger_source: str,
+) -> None:
+    if not hasattr(db, 'insert_playlist_pipeline_run_history'):
+        return
+    duration = max(0, finished_at - started_at)
+    for playlist in playlists:
+        if not playlist.get('id'):
+            continue
+        playlist_id = int(playlist['id'])
+        before = before_snapshots.get(playlist_id, {})
+        after = _playlist_history_snapshot(db, playlist)
+        db.insert_playlist_pipeline_run_history(
+            playlist_id=playlist_id,
+            playlist_name=after.get('name') or playlist.get('name') or '',
+            source=after.get('source') or playlist.get('source') or '',
+            profile_id=int(playlist.get('profile_id') or 1),
+            trigger_source=trigger_source,
+            started_at=_pipeline_history_timestamp(started_at),
+            finished_at=_pipeline_history_timestamp(finished_at),
+            duration_seconds=duration,
+            status=status,
+            summary=_playlist_history_summary(before, after, status),
+            before_json=json.dumps(before),
+            after_json=json.dumps(after),
+            result_json=json.dumps(result),
+            log_lines=None,
+        )
 
 
 def _resolve_pipeline_playlists(db: Any, playlist_id: Any, process_all: bool) -> List[Dict[str, Any]] | None:

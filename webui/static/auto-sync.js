@@ -10,11 +10,15 @@
 
 const mirroredPipelinePollers = {};
 const AUTO_SYNC_BUCKETS = [1, 2, 4, 8, 12, 16, 24, 48, 72, 168];
+let _autoSyncStatusPoller = null;
+let _autoSyncIsDragging = false;
 let _autoSyncScheduleState = {
     playlists: [],
     automations: [],
     playlistSchedules: {},
     automationPipelines: [],
+    runHistory: [],
+    runHistoryTotal: 0,
 };
 let _autoSyncActiveTab = 'schedule';
 
@@ -103,7 +107,7 @@ function autoSyncIsScheduleOwned(auto) {
     return group === 'Playlist Auto-Sync' || name.startsWith('Auto-Sync:');
 }
 
-function buildAutoSyncScheduleState(playlists, automations) {
+function buildAutoSyncScheduleState(playlists, automations, historyData = {}) {
     const playlistSchedules = {};
     const automationPipelines = [];
     const pipelineAutomations = automations.filter(autoSyncIsPipelineAutomation);
@@ -124,7 +128,14 @@ function buildAutoSyncScheduleState(playlists, automations) {
             automationPipelines.push(auto);
         }
     });
-    return { playlists, automations, playlistSchedules, automationPipelines };
+    return {
+        playlists,
+        automations,
+        playlistSchedules,
+        automationPipelines,
+        runHistory: historyData.history || [],
+        runHistoryTotal: historyData.total || 0,
+    };
 }
 
 async function openAutoSyncScheduleModal() {
@@ -154,6 +165,7 @@ async function openAutoSyncScheduleModal() {
 
 function closeAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
+    stopAutoSyncStatusPolling();
     if (overlay) overlay.remove();
 }
 
@@ -161,16 +173,20 @@ async function refreshAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
     try {
-        const [playlistRes, automationRes] = await Promise.all([
+        const [playlistRes, automationRes, historyRes] = await Promise.all([
             fetch('/api/mirrored-playlists'),
             fetch('/api/automations'),
+            fetch('/api/playlist-pipeline/history?limit=50'),
         ]);
         const playlists = await playlistRes.json();
         const automations = await automationRes.json();
+        const historyData = await historyRes.json();
         if (!playlistRes.ok || playlists.error) throw new Error(playlists.error || 'Failed to load mirrored playlists');
         if (!automationRes.ok || automations.error) throw new Error(automations.error || 'Failed to load automations');
-        _autoSyncScheduleState = buildAutoSyncScheduleState(playlists, automations);
+        if (!historyRes.ok || historyData.error) throw new Error(historyData.error || 'Failed to load pipeline run history');
+        _autoSyncScheduleState = buildAutoSyncScheduleState(playlists, automations, historyData);
         renderAutoSyncScheduleModal();
+        manageAutoSyncStatusPolling();
     } catch (err) {
         overlay.innerHTML = `
             <div class="auto-sync-modal">
@@ -188,16 +204,19 @@ function renderAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
 
-    const { playlists, playlistSchedules, automationPipelines } = _autoSyncScheduleState;
+    const { playlists, playlistSchedules, automationPipelines, runHistory, runHistoryTotal } = _autoSyncScheduleState;
     const scheduledCount = Object.keys(playlistSchedules).length;
     const enabledCount = Object.values(playlistSchedules).filter(s => s.enabled).length;
     const pipelineCount = automationPipelines.length;
     const totalTracks = playlists.reduce((sum, p) => sum + (parseInt(p.track_count, 10) || 0), 0);
     const scheduleActive = _autoSyncActiveTab === 'schedule';
     const automationsActive = _autoSyncActiveTab === 'automations';
+    const historyActive = _autoSyncActiveTab === 'history';
 
     const schedulePanel = renderAutoSyncSchedulePanel(playlists, playlistSchedules);
     const automationPanel = renderAutoSyncAutomationPanel(automationPipelines, playlists);
+    const historyPanel = renderAutoSyncHistoryPanel(runHistory, runHistoryTotal);
+    const monitor = renderAutoSyncPipelineMonitor(playlists);
 
     overlay.innerHTML = `
         <div class="auto-sync-modal">
@@ -215,18 +234,21 @@ function renderAutoSyncScheduleModal() {
                 <div><span>${pipelineCount}</span><small>automation pipelines</small></div>
                 <div><span>${totalTracks}</span><small>mirrored tracks</small></div>
             </div>
+            ${monitor}
             <div class="auto-sync-tabs">
                 <button class="${scheduleActive ? 'active' : ''}" onclick="setAutoSyncTab('schedule')">Schedule Board</button>
                 <button class="${automationsActive ? 'active' : ''}" onclick="setAutoSyncTab('automations')">Automation Pipelines</button>
+                <button class="${historyActive ? 'active' : ''}" onclick="setAutoSyncTab('history')">Run History</button>
             </div>
             <div class="auto-sync-tab-panel ${scheduleActive ? 'active' : ''}" id="auto-sync-schedule-panel">${schedulePanel}</div>
             <div class="auto-sync-tab-panel ${automationsActive ? 'active' : ''}" id="auto-sync-automation-panel">${automationPanel}</div>
+            <div class="auto-sync-tab-panel ${historyActive ? 'active' : ''}" id="auto-sync-history-panel">${historyPanel}</div>
         </div>
     `;
 }
 
 function setAutoSyncTab(tab) {
-    _autoSyncActiveTab = tab === 'automations' ? 'automations' : 'schedule';
+    _autoSyncActiveTab = ['automations', 'history'].includes(tab) ? tab : 'schedule';
     renderAutoSyncScheduleModal();
 }
 
@@ -248,7 +270,7 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
                 const schedule = playlistSchedules[p.id];
                 const assigned = schedule ? autoSyncIntervalLabel(schedule.hours) : 'Unscheduled';
                 return `
-                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)">
+                    <div class="auto-sync-playlist ${schedule ? 'scheduled' : ''}" draggable="true" data-playlist-id="${p.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
                         <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
                         <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
                     </div>
@@ -302,6 +324,90 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     `;
 }
 
+function getAutoSyncPipelinePlaylists(playlists) {
+    return playlists
+        .map(p => ({ playlist: p, state: p.pipeline_state || null }))
+        .filter(item => item.state && item.state.status && item.state.status !== 'idle')
+        .sort((a, b) => {
+            const aRunning = a.state.status === 'running' ? 1 : 0;
+            const bRunning = b.state.status === 'running' ? 1 : 0;
+            if (aRunning !== bRunning) return bRunning - aRunning;
+            return (b.state.finished_at || b.state.started_at || 0) - (a.state.finished_at || a.state.started_at || 0);
+        });
+}
+
+function autoSyncPipelineStatusLabel(status) {
+    if (status === 'running') return 'Running';
+    if (status === 'finished') return 'Completed';
+    if (status === 'skipped') return 'Skipped';
+    if (status === 'error') return 'Needs attention';
+    return 'Idle';
+}
+
+function autoSyncPipelineStatusClass(status) {
+    if (status === 'running') return 'running';
+    if (status === 'finished') return 'finished';
+    if (status === 'error' || status === 'skipped') return 'error';
+    return 'idle';
+}
+
+function renderAutoSyncPipelineMonitor(playlists) {
+    const pipelineItems = getAutoSyncPipelinePlaylists(playlists);
+    const running = pipelineItems.filter(item => item.state.status === 'running');
+    const recent = pipelineItems.filter(item => item.state.status !== 'running').slice(0, 2);
+    const visible = [...running, ...recent].slice(0, 4);
+    const title = running.length
+        ? `${running.length} pipeline${running.length === 1 ? '' : 's'} running`
+        : 'No pipelines running';
+    const detail = running.length
+        ? 'Live status refreshes while this modal is open.'
+        : 'Use Run now on a scheduled playlist when you want the pipeline immediately.';
+
+    return `
+        <section class="auto-sync-monitor">
+            <div class="auto-sync-monitor-head">
+                <div>
+                    <span class="auto-sync-monitor-kicker">Live pipeline monitor</span>
+                    <strong>${_esc(title)}</strong>
+                    <small>${_esc(detail)}</small>
+                </div>
+                <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+            </div>
+            <div class="auto-sync-monitor-list">
+                ${visible.length ? visible.map(({ playlist, state }) => autoSyncPipelineMonitorCardHtml(playlist, state)).join('') : `
+                    <div class="auto-sync-monitor-empty">
+                        <span>Ready</span>
+                        <small>Scheduled playlists will appear here while the all-in-one pipeline runs.</small>
+                    </div>
+                `}
+            </div>
+        </section>
+    `;
+}
+
+function autoSyncPipelineMonitorCardHtml(playlist, state) {
+    const status = state.status || 'idle';
+    const progress = Math.max(0, Math.min(100, parseInt(state.progress, 10) || 0));
+    const latest = Array.isArray(state.log) && state.log.length ? state.log[state.log.length - 1].message : '';
+    const phase = state.phase || autoSyncPipelineStatusLabel(status);
+    return `
+        <article class="auto-sync-monitor-card ${autoSyncPipelineStatusClass(status)}">
+            <div class="auto-sync-monitor-card-main">
+                <div class="auto-sync-monitor-title-row">
+                    <strong>${_esc(playlist.name || `Playlist #${playlist.id}`)}</strong>
+                    <span>${_esc(autoSyncPipelineStatusLabel(status))}</span>
+                </div>
+                <div class="auto-sync-monitor-phase">${_esc(phase)}</div>
+                <div class="auto-sync-monitor-progress" aria-label="${progress}% complete">
+                    <div style="width: ${progress}%"></div>
+                </div>
+                ${latest ? `<small>${_esc(latest)}</small>` : ''}
+            </div>
+            <button onclick="event.stopPropagation(); openMirroredPlaylistModal(${playlist.id})">Details</button>
+        </article>
+    `;
+}
+
 function renderAutoSyncAutomationPanel(automationPipelines, playlists) {
     if (!automationPipelines.length) {
         return '<div class="auto-sync-automation-empty">No Automations-page playlist pipelines found.</div>';
@@ -315,6 +421,118 @@ function renderAutoSyncAutomationPanel(automationPipelines, playlists) {
             ${automationPipelines.map(auto => autoSyncAutomationCardHtml(auto, playlists)).join('')}
         </div>
     `;
+}
+
+function renderAutoSyncHistoryPanel(history, total) {
+    if (!history.length) {
+        return `
+            <div class="auto-sync-history-empty">
+                <strong>No playlist pipeline runs yet</strong>
+                <span>Future Auto-Sync and playlist pipeline runs will record before/after playlist snapshots here.</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="auto-sync-history-intro">
+            <div>
+                <strong>Playlist pipeline run history</strong>
+                <span>Each run records what changed on the mirrored playlist before and after refresh, discovery, sync, and wishlist processing.</span>
+            </div>
+            <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+        </div>
+        <div class="auto-sync-history-list">
+            ${history.map(autoSyncHistoryEntryHtml).join('')}
+            ${total > history.length ? `<div class="auto-sync-history-total">Showing ${history.length} of ${total} runs</div>` : ''}
+        </div>
+    `;
+}
+
+function autoSyncHistoryEntryHtml(entry) {
+    const status = entry.status || 'completed';
+    const before = entry.before_json || {};
+    const after = entry.after_json || {};
+    const result = entry.result_json || {};
+    const started = entry.started_at ? _autoTimeAgo(entry.started_at) : '';
+    const duration = entry.duration_seconds ? autoSyncDurationLabel(entry.duration_seconds) : '';
+    const trackDelta = autoSyncDelta(after.track_count, before.track_count);
+    const discoveredDelta = autoSyncDelta(after.discovered_count, before.discovered_count);
+    const wishlistDelta = autoSyncDelta(after.wishlisted_count, before.wishlisted_count);
+    const libraryDelta = autoSyncDelta(after.in_library_count, before.in_library_count);
+    const entryId = `auto-sync-history-${entry.id}`;
+    return `
+        <article class="auto-sync-history-entry">
+            <div class="auto-sync-history-row" onclick="autoSyncToggleHistoryEntry('${entryId}')">
+                <span class="auto-sync-history-status ${_escAttr(status)}">${_esc(autoSyncHistoryStatusLabel(status))}</span>
+                <div class="auto-sync-history-main">
+                    <strong>${_esc(entry.playlist_name || 'Mirrored playlist')}</strong>
+                    <small>${_esc(entry.summary || '')}</small>
+                </div>
+                <div class="auto-sync-history-meta">
+                    ${started ? `<span>${_esc(started)}</span>` : ''}
+                    ${duration ? `<span>${_esc(duration)}</span>` : ''}
+                    <span>${_esc(entry.trigger_source || 'pipeline')}</span>
+                </div>
+            </div>
+            <div id="${entryId}" class="auto-sync-history-detail">
+                <div class="auto-sync-history-stats">
+                    ${autoSyncHistoryStatHtml('Tracks', before.track_count, after.track_count, trackDelta)}
+                    ${autoSyncHistoryStatHtml('Discovered', before.discovered_count, after.discovered_count, discoveredDelta)}
+                    ${autoSyncHistoryStatHtml('Wishlisted', before.wishlisted_count, after.wishlisted_count, wishlistDelta)}
+                    ${autoSyncHistoryStatHtml('In library', before.in_library_count, after.in_library_count, libraryDelta)}
+                </div>
+                <div class="auto-sync-history-result">
+                    ${autoSyncHistoryResultPill('Refreshed', result.playlists_refreshed)}
+                    ${autoSyncHistoryResultPill('Synced', result.tracks_synced)}
+                    ${autoSyncHistoryResultPill('Skipped', result.sync_skipped)}
+                    ${autoSyncHistoryResultPill('Queued', result.wishlist_queued)}
+                    ${result.error ? `<span class="error">${_esc(result.error)}</span>` : ''}
+                </div>
+            </div>
+        </article>
+    `;
+}
+
+function autoSyncToggleHistoryEntry(entryId) {
+    const el = document.getElementById(entryId);
+    if (el) el.classList.toggle('expanded');
+}
+
+function autoSyncHistoryStatusLabel(status) {
+    if (status === 'completed' || status === 'finished') return 'Completed';
+    if (status === 'error') return 'Error';
+    if (status === 'skipped') return 'Skipped';
+    return status || 'Run';
+}
+
+function autoSyncDurationLabel(seconds) {
+    const total = Math.max(0, Math.round(parseFloat(seconds) || 0));
+    if (total < 60) return `${total}s`;
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}m ${secs}s`;
+}
+
+function autoSyncDelta(after, before) {
+    const a = parseInt(after, 10) || 0;
+    const b = parseInt(before, 10) || 0;
+    return a - b;
+}
+
+function autoSyncHistoryStatHtml(label, before, after, delta) {
+    const beforeValue = parseInt(before, 10) || 0;
+    const afterValue = parseInt(after, 10) || 0;
+    const deltaText = delta ? ` (${delta > 0 ? '+' : ''}${delta})` : '';
+    return `
+        <div>
+            <span>${_esc(label)}</span>
+            <strong>${beforeValue} -> ${afterValue}${_esc(deltaText)}</strong>
+        </div>
+    `;
+}
+
+function autoSyncHistoryResultPill(label, value) {
+    if (value === undefined || value === null || value === '') return '';
+    return `<span>${_esc(label)}: ${_esc(String(value))}</span>`;
 }
 
 function autoSyncAutomationCardHtml(auto, playlists) {
@@ -348,8 +566,9 @@ function autoSyncAutomationCardHtml(auto, playlists) {
 function autoSyncScheduledCardHtml(playlist, schedule) {
     const enabled = schedule?.enabled !== false;
     const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
+    const isRunning = playlist.pipeline_state?.status === 'running';
     return `
-        <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)">
+        <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
             <div>
                 <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
                 <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
@@ -358,7 +577,10 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
                     ${nextLabel ? `<small>${_esc(nextLabel)}</small>` : ''}
                 </div>
             </div>
-            <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
+            <div class="auto-sync-scheduled-actions">
+                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>
+                <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
+            </div>
         </div>
     `;
 }
@@ -379,6 +601,7 @@ function autoSyncNextRunLabel(nextRun) {
 function autoSyncDragStart(event) {
     const playlistId = event.currentTarget?.dataset?.playlistId;
     if (!playlistId) return;
+    _autoSyncIsDragging = true;
     event.dataTransfer.setData('text/plain', playlistId);
     event.dataTransfer.effectAllowed = 'move';
 }
@@ -401,11 +624,16 @@ function autoSyncDragLeave(event) {
 
 async function autoSyncDrop(event, hours) {
     event.preventDefault();
+    _autoSyncIsDragging = false;
     const col = event.currentTarget;
     if (col) col.classList.remove('drag-over');
     const playlistId = parseInt(event.dataTransfer.getData('text/plain'), 10);
     if (!playlistId) return;
     await saveAutoSyncPlaylistSchedule(playlistId, hours);
+}
+
+function autoSyncDragEnd() {
+    _autoSyncIsDragging = false;
 }
 
 async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
@@ -455,6 +683,37 @@ async function unscheduleAutoSyncPlaylist(playlistId) {
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
     }
+}
+
+async function runAutoSyncScheduledPlaylist(playlistId) {
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+    if (!playlist) return;
+    await runMirroredPlaylistPipeline(playlistId, playlist.name || `Playlist #${playlistId}`);
+    await refreshAutoSyncScheduleModal();
+}
+
+function manageAutoSyncStatusPolling() {
+    const overlay = document.getElementById('auto-sync-schedule-modal');
+    if (!overlay) {
+        stopAutoSyncStatusPolling();
+        return;
+    }
+    const hasRunning = _autoSyncScheduleState.playlists.some(p => p.pipeline_state?.status === 'running');
+    if (!hasRunning) {
+        stopAutoSyncStatusPolling();
+        return;
+    }
+    if (_autoSyncStatusPoller) return;
+    _autoSyncStatusPoller = setInterval(() => {
+        if (_autoSyncIsDragging) return;
+        refreshAutoSyncScheduleModal();
+    }, 3000);
+}
+
+function stopAutoSyncStatusPolling() {
+    if (!_autoSyncStatusPoller) return;
+    clearInterval(_autoSyncStatusPoller);
+    _autoSyncStatusPoller = null;
 }
 
 async function parseMirroredPipelineResponse(res, fallbackMessage) {
@@ -543,6 +802,13 @@ async function runMirroredPlaylistPipeline(playlistId, name) {
         const data = await parseMirroredPipelineResponse(res, 'Failed to start Auto-Sync');
         applyMirroredPipelineState(playlistId, data.state || { status: 'running', progress: 0, phase: 'Starting pipeline...' });
         showToast(`Auto-Sync started for ${name}`, 'success');
+        _autoSyncScheduleState.playlists = _autoSyncScheduleState.playlists.map(p => (
+            parseInt(p.id, 10) === parseInt(playlistId, 10)
+                ? { ...p, pipeline_state: data.state || { status: 'running', progress: 0, phase: 'Starting pipeline...' } }
+                : p
+        ));
+        renderAutoSyncScheduleModal();
+        manageAutoSyncStatusPolling();
         pollMirroredPipelineStatus(playlistId, name);
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
@@ -564,11 +830,13 @@ function pollMirroredPipelineStatus(playlistId, name) {
                 delete mirroredPipelinePollers[key];
                 showToast(`Auto-Sync complete for ${name}`, 'success');
                 loadMirroredPlaylists();
+                refreshAutoSyncScheduleModal();
             } else if (state.status === 'error' || state.status === 'skipped') {
                 clearInterval(mirroredPipelinePollers[key]);
                 delete mirroredPipelinePollers[key];
                 showToast(state.error || `Pipeline stopped for ${name}`, 'error');
                 loadMirroredPlaylists();
+                refreshAutoSyncScheduleModal();
             } else if (state.status === 'idle') {
                 clearInterval(mirroredPipelinePollers[key]);
                 delete mirroredPipelinePollers[key];
