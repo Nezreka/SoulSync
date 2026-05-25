@@ -289,6 +289,56 @@ def test_update_then_actions_clears_notify_when_empty():
     assert db.automations[1]['notify_config'] == '{}'
 
 
+def test_update_trigger_config_change_resets_next_run():
+    """Changing the interval must blank stored next_run so the engine
+    recomputes from scratch — otherwise dragging a playlist from the 8h
+    Auto-Sync column to the 1h column keeps firing at the old 8h mark."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule',
+        'trigger_config': '{"interval": 8, "unit": "hours"}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    eng = _FakeEngine()
+    body, status = api.update_automation(db, eng, automation_id=1, data={
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+    })
+    assert status == 200
+    assert db.automations[1]['next_run'] is None
+    assert eng.scheduled == [1]
+
+
+def test_update_trigger_type_change_resets_next_run():
+    """Switching from interval to daily_time must also reset next_run."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule', 'trigger_config': '{}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={
+        'trigger_type': 'daily_time',
+    })
+    assert db.automations[1]['next_run'] is None
+
+
+def test_update_non_trigger_field_preserves_next_run():
+    """Renaming an automation must NOT disturb its scheduled clock —
+    the reset is scoped to schedule-shape changes only."""
+    db = _FakeDB()
+    db.automations[1] = {
+        'id': 1, 'name': 'a', 'enabled': 1, 'is_system': 0,
+        'trigger_type': 'schedule', 'trigger_config': '{}',
+        'then_actions': '[]',
+        'next_run': '2026-05-25 05:00:00',
+    }
+    api.update_automation(db, _FakeEngine(), automation_id=1, data={'name': 'renamed'})
+    assert db.automations[1].get('next_run') == '2026-05-25 05:00:00'
+
+
 # ---------------------------------------------------------------------------
 # batch_update_group
 # ---------------------------------------------------------------------------
