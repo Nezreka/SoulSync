@@ -566,7 +566,7 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
     const isRunning = playlist.pipeline_state?.status === 'running';
     return `
         <div class="auto-sync-scheduled-card ${enabled ? '' : 'disabled'}" draggable="true" data-playlist-id="${playlist.id}" ondragstart="autoSyncDragStart(event)" ondragend="autoSyncDragEnd()">
-            <div>
+            <div class="auto-sync-scheduled-main">
                 <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
                 <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
                 <div class="auto-sync-scheduled-timing">
