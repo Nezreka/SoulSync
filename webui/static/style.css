@@ -11203,7 +11203,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .auto-sync-modal {
     width: min(1500px, calc(100vw - 40px));
-    height: min(920px, calc(100vh - 32px));
+    height: min(940px, calc(100vh - 28px));
     background:
         radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.08) 0%, transparent 60%),
         rgba(17, 19, 27, 0.98);
@@ -11222,7 +11222,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
-    padding: 22px 24px 18px;
+    padding: 22px 26px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     flex-shrink: 0;
 }
@@ -11276,7 +11276,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-summary div {
-    padding: 14px 20px;
+    padding: 12px 20px;
     background: rgba(255, 255, 255, 0.025);
 }
 
@@ -11298,7 +11298,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .auto-sync-monitor {
     flex-shrink: 0;
-    padding: 14px 18px;
+    padding: 12px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     background:
         radial-gradient(circle at 14% 0%, rgba(var(--accent-rgb), 0.14), transparent 34%),
@@ -11310,7 +11310,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 10px;
+    margin-bottom: 0;
+}
+
+.auto-sync-monitor-head > div {
+    min-width: 0;
 }
 
 .auto-sync-monitor-head strong,
@@ -11365,6 +11369,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
+    margin-top: 10px;
 }
 
 .auto-sync-monitor-card,
@@ -11380,7 +11385,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: stretch;
     justify-content: space-between;
     gap: 10px;
-    padding: 11px;
+    padding: 10px;
 }
 
 .auto-sync-monitor-card.running {
@@ -11483,8 +11488,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-monitor-empty {
-    grid-column: 1 / -1;
-    padding: 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 8px;
+    padding: 8px 10px;
 }
 
 .auto-sync-monitor-empty span,
@@ -11499,15 +11509,18 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-monitor-empty small {
-    margin-top: 3px;
+    margin-top: 0;
     color: rgba(255, 255, 255, 0.38);
     font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .auto-sync-tabs {
     display: flex;
     gap: 8px;
-    padding: 12px 18px;
+    padding: 12px 18px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.018);
     flex-shrink: 0;
@@ -11551,7 +11564,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 12px 18px;
+    padding: 14px 18px;
     border-bottom: 1px solid rgba(var(--accent-rgb), 0.16);
     background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.08) 0%, rgba(var(--accent-rgb), 0.03) 60%, transparent 100%);
     flex-shrink: 0;
@@ -11578,7 +11591,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-height: 0;
     flex: 1;
     display: grid;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: 300px minmax(0, 1fr);
 }
 
 .auto-sync-sidebar {
@@ -11703,11 +11716,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 18px;
+    padding: 26px;
     display: grid;
-    grid-template-columns: repeat(10, minmax(185px, 1fr));
+    grid-template-columns: repeat(10, minmax(225px, 1fr));
     grid-auto-rows: minmax(0, 1fr);
-    gap: 12px;
+    gap: 16px;
 }
 
 .auto-sync-column {
@@ -11732,7 +11745,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px;
+    padding: 14px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     color: rgba(255, 255, 255, 0.86);
     font-weight: 800;
@@ -11749,7 +11762,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 10px;
+    padding: 14px;
 }
 
 .auto-sync-column-list::-webkit-scrollbar,
@@ -11815,11 +11828,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-scheduled-card {
-    padding: 10px;
-    margin-bottom: 10px;
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
 }
 
 .auto-sync-scheduled-card.disabled {
@@ -11828,9 +11842,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .auto-sync-scheduled-actions {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: flex-end;
-    gap: 6px;
+    gap: 7px;
     flex-shrink: 0;
 }
 
@@ -11847,8 +11861,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .auto-sync-scheduled-card button.run {
     width: auto;
-    min-width: 64px;
-    padding: 0 8px;
+    min-width: 68px;
+    padding: 0 9px;
     color: rgb(var(--accent-light-rgb));
     background: rgba(var(--accent-rgb), 0.12);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
@@ -12194,7 +12208,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     }
 
     .auto-sync-board {
-        grid-template-columns: repeat(10, minmax(165px, 180px));
+        grid-template-columns: repeat(10, minmax(210px, 230px));
+        padding: 18px;
     }
 }
 
@@ -12212,7 +12227,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     }
 
     .auto-sync-monitor {
-        padding: 10px 14px;
+        padding: 9px 14px;
     }
 
     .auto-sync-monitor-empty,
@@ -12227,7 +12242,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     .auto-sync-board-intro,
     .auto-sync-automation-intro,
     .auto-sync-history-intro {
-        padding: 9px 14px;
+        padding: 10px 14px;
     }
 }
 
@@ -12239,6 +12254,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     .auto-sync-monitor-head {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .auto-sync-monitor-empty {
+        align-items: flex-start;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .auto-sync-monitor-empty small {
+        white-space: normal;
     }
 
     .auto-sync-monitor-card {
@@ -12260,6 +12285,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
     .auto-sync-history-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .auto-sync-scheduled-card {
+        grid-template-columns: 1fr;
+    }
+
+    .auto-sync-scheduled-actions {
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
     }
 }
 
