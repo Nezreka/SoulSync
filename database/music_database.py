@@ -539,6 +539,7 @@ class MusicDatabase:
             self._add_automation_system_column(cursor)
             self._add_automation_then_actions_column(cursor)
             self._add_automation_group_name_column(cursor)
+            self._add_automation_owned_by_column(cursor)
 
             # Library issues — user-reported problems with tracks/albums/artists
             cursor.execute("""
@@ -844,6 +845,28 @@ class MusicDatabase:
                 logger.info("Added group_name column to automations table")
         except Exception as e:
             logger.error(f"Error adding automation group_name column: {e}")
+
+    def _add_automation_owned_by_column(self, cursor):
+        """Add owned_by column so feature surfaces (Auto-Sync schedule
+        board, future pipeline groups) can recognize automations they
+        manage without relying on fragile name-prefix string matches."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'owned_by' not in cols:
+                cursor.execute("ALTER TABLE automations ADD COLUMN owned_by TEXT DEFAULT NULL")
+                logger.info("Added owned_by column to automations table")
+                # Backfill existing Auto-Sync automations created via the
+                # name/group-prefix convention so the board keeps managing them.
+                cursor.execute("""
+                    UPDATE automations
+                    SET owned_by = 'auto_sync'
+                    WHERE (group_name = 'Playlist Auto-Sync' OR name LIKE 'Auto-Sync:%')
+                      AND owned_by IS NULL
+                """)
+                logger.info(f"Backfilled {cursor.rowcount} existing Auto-Sync automations with owned_by='auto_sync'")
+        except Exception as e:
+            logger.error(f"Error adding automation owned_by column: {e}")
 
     def _add_automation_then_actions_column(self, cursor):
         """Add then_actions column to automations table and migrate existing notify data."""
@@ -12154,15 +12177,22 @@ class MusicDatabase:
     def create_automation(self, name: str, trigger_type: str, trigger_config: str,
                           action_type: str, action_config: str, profile_id: int = 1,
                           notify_type: str = None, notify_config: str = '{}',
-                          then_actions: str = '[]', group_name: str = None):
-        """Create a new automation. Returns the new automation ID or None."""
+                          then_actions: str = '[]', group_name: str = None,
+                          owned_by: str = None):
+        """Create a new automation. Returns the new automation ID or None.
+
+        ``owned_by`` tags an automation as managed by a feature surface
+        (e.g. ``'auto_sync'`` for entries the Playlist Auto-Sync board
+        creates) so that surface can recognize its own rows without
+        scraping the display name.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
@@ -12209,7 +12239,7 @@ class MusicDatabase:
 
     def update_automation(self, automation_id: int, **kwargs) -> bool:
         """Update automation fields."""
-        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions', 'group_name'}
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions', 'group_name', 'owned_by'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False
