@@ -12088,6 +12088,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: none;
 }
 
+.auto-sync-history-entry.expanded {
+    border-color: rgba(var(--accent-rgb), 0.26);
+    background: rgba(26, 26, 26, 0.98);
+}
+
 .auto-sync-history-entry:empty {
     display: flex;
     align-items: center;
@@ -12114,6 +12119,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-height: 96px;
     padding: 13px 14px;
     cursor: pointer;
+}
+
+.auto-sync-history-row:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.45);
+    outline-offset: -3px;
 }
 
 .auto-sync-history-status {
@@ -12196,11 +12206,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 6px;
+    max-width: 190px;
 }
 
 .auto-sync-history-meta span,
-.auto-sync-history-result span,
-.auto-sync-history-meta button {
+.auto-sync-history-result span {
     padding: 4px 7px;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.055);
@@ -12209,32 +12219,74 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 700;
 }
 
-.auto-sync-history-meta button {
+.auto-sync-history-meta .auto-sync-history-expand-label {
     border: 1px solid rgba(var(--accent-rgb), 0.18);
     color: rgb(var(--accent-light-rgb));
-    cursor: pointer;
+    padding-right: 20px;
+    position: relative;
 }
 
-.auto-sync-history-meta button:hover {
+.auto-sync-history-meta .auto-sync-history-expand-label::after {
+    content: '';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-65%) rotate(45deg);
+    transition: transform 160ms ease;
+}
+
+.auto-sync-history-entry.expanded .auto-sync-history-expand-label::after {
+    transform: translateY(-30%) rotate(225deg);
+}
+
+.auto-sync-history-entry:hover .auto-sync-history-expand-label {
     background: rgba(var(--accent-rgb), 0.14);
     border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .auto-sync-history-detail {
     display: none;
-    padding: 0 16px 16px;
+    padding: 16px;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .auto-sync-history-detail.expanded {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.auto-sync-history-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.8fr);
+    gap: 12px;
+}
+
+.auto-sync-history-section {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.028);
+}
+
+.auto-sync-history-section-title {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0;
+    text-transform: uppercase;
 }
 
 .auto-sync-history-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
-    padding-top: 14px;
+    padding-top: 10px;
 }
 
 .auto-sync-history-stats div {
@@ -12265,7 +12317,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     flex-wrap: wrap;
     gap: 7px;
-    margin-top: 9px;
+    margin-top: 10px;
 }
 
 .auto-sync-history-result span {
@@ -12285,6 +12337,81 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(255, 255, 255, 0.045);
     border-color: rgba(255, 255, 255, 0.08);
 }
+
+.auto-sync-history-snapshots {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.auto-sync-history-facts,
+.auto-sync-history-payload {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.auto-sync-history-facts.compact {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.auto-sync-history-facts div,
+.auto-sync-history-payload div {
+    min-width: 0;
+    padding: 9px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.auto-sync-history-facts span,
+.auto-sync-history-payload span,
+.auto-sync-history-facts strong,
+.auto-sync-history-payload strong {
+    display: block;
+    min-width: 0;
+}
+
+.auto-sync-history-facts span,
+.auto-sync-history-payload span {
+    color: rgba(255, 255, 255, 0.36);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.auto-sync-history-facts strong,
+.auto-sync-history-payload strong {
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.auto-sync-history-logs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 190px;
+    overflow: auto;
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.auto-sync-history-logs div {
+    color: rgba(255, 255, 255, 0.54);
+    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 10px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.auto-sync-history-logs .success { color: #4ade80; }
+.auto-sync-history-logs .error { color: #ef4444; }
+.auto-sync-history-logs .warning { color: #facc15; }
 
 .auto-sync-history-empty {
     margin: 24px;
@@ -12358,6 +12485,15 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         grid-template-columns: repeat(10, minmax(230px, 250px));
         padding: 18px;
     }
+
+    .auto-sync-history-detail-grid,
+    .auto-sync-history-snapshots {
+        grid-template-columns: 1fr;
+    }
+
+    .auto-sync-history-facts.compact {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-height: 760px) {
@@ -12428,10 +12564,17 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
     .auto-sync-history-meta {
         justify-content: flex-start;
+        max-width: none;
     }
 
     .auto-sync-history-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .auto-sync-history-facts,
+    .auto-sync-history-facts.compact,
+    .auto-sync-history-payload {
+        grid-template-columns: 1fr;
     }
 
     .auto-sync-scheduled-card {
