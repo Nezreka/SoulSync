@@ -29986,6 +29986,7 @@ def _get_lb_discover_playlists(playlist_type):
                 "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
                 "title": playlist['title'],
                 "creator": playlist['creator'],
+                "track_count": playlist.get('track_count', 0),
                 "annotation": playlist.get('annotation', {}),
                 "track": []
             }
