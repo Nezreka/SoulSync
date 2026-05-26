@@ -77,6 +77,10 @@ function autoSyncSourceLabel(source) {
         qobuz: 'Qobuz',
         beatport: 'Beatport',
         file: 'File Imports',
+        itunes_link: 'iTunes Link',
+        listenbrainz: 'ListenBrainz',
+        lastfm: 'Last.fm Radio',
+        soulsync_discovery: 'SoulSync Discovery',
     };
     return labels[source] || source || 'Other';
 }
