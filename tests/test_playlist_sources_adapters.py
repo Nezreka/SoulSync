@@ -21,7 +21,9 @@ from core.playlists.sources import (
     PlaylistSource,
     PlaylistSourceRegistry,
     get_registry,
+    to_mirror_track_dict,
 )
+from core.playlists.sources.deezer import DeezerPlaylistSource
 from core.playlists.sources.itunes_link import ITunesLinkPlaylistSource
 from core.playlists.sources.lastfm import LastFMPlaylistSource
 from core.playlists.sources.listenbrainz import ListenBrainzPlaylistSource
@@ -104,10 +106,20 @@ def test_spotify_adapter_lists_and_fetches():
     t = detail.tracks[0]
     assert t.source_track_id == "t1"
     assert t.track_name == "Run"
-    assert t.artist_name == "A, B"
+    # First artist only — matches the mirrored_playlist shape that the
+    # legacy refresh_mirrored handler wrote (``t.artists[0]``).
+    assert t.artist_name == "A"
     assert t.album_name == "Album"
     assert t.duration_ms == 180_000
     assert t.needs_discovery is False
+    # Spotify authenticated API path emits matched_data so the discovery
+    # worker can skip its search step and go straight to enrichment.
+    assert t.extra["discovered"] is True
+    assert t.extra["provider"] == "spotify"
+    assert t.extra["matched_data"]["id"] == "t1"
+    assert t.extra["matched_data"]["artists"] == [{"name": "A"}, {"name": "B"}]
+    assert t.extra["matched_data"]["album"]["name"] == "Album"
+    assert t.extra["matched_data"]["album"]["images"][0]["url"] == "img"
 
 
 def test_spotify_adapter_handles_unauthed():
@@ -571,3 +583,133 @@ def test_registry_re_register_invalidates_instance():
 def test_registry_unknown_source_returns_none():
     reg = PlaylistSourceRegistry()
     assert reg.get_source("nope") is None
+
+
+# ─── Deezer ─────────────────────────────────────────────────────────────
+
+
+class _FakeDeezerClient:
+    def is_authenticated(self) -> bool:
+        return True  # Deezer public API always available
+
+    def get_user_playlists(self):
+        return []  # stub-interface variant returns []
+
+    def get_playlist(self, playlist_id: str):
+        return {
+            "id": playlist_id,
+            "name": "Deez Mix",
+            "description": "deezer",
+            "track_count": 1,
+            "image_url": "img",
+            "owner": "user",
+            "tracks": [{
+                "id": "dt1",
+                "name": "Song",
+                "artists": ["Deez Artist"],
+                "album": "Deez Album",
+                "duration_ms": 240_000,
+                "track_number": 1,
+            }],
+        }
+
+
+def test_deezer_adapter_projection():
+    src = DeezerPlaylistSource(lambda: _FakeDeezerClient())
+    assert src.is_authenticated() is True
+    assert src.list_playlists() == []  # user playlists need OAuth
+
+    detail = src.get_playlist("d1")
+    assert detail is not None
+    assert detail.meta.source == "deezer"
+    assert detail.meta.image_url == "img"
+    t = detail.tracks[0]
+    assert t.source_track_id == "dt1"
+    assert t.artist_name == "Deez Artist"
+    assert t.album_name == "Deez Album"
+    assert t.needs_discovery is False
+
+
+# ─── to_mirror_track_dict projection helper ─────────────────────────────
+
+
+def test_mirror_dict_minimal_track_has_no_extra_data():
+    track = NormalizedTrack(
+        position=0,
+        track_name="Song",
+        artist_name="Artist",
+        album_name="Album",
+        duration_ms=200_000,
+        source_track_id="abc",
+    )
+    d = to_mirror_track_dict(track)
+    assert d == {
+        "track_name": "Song",
+        "artist_name": "Artist",
+        "album_name": "Album",
+        "duration_ms": 200_000,
+        "source_track_id": "abc",
+    }
+    assert "extra_data" not in d
+
+
+def test_mirror_dict_spotify_authed_emits_matched_data():
+    """The Spotify adapter's authenticated-API path planted
+    ``discovered`` + ``matched_data`` in ``extra``; projection must
+    serialize them into ``extra_data`` matching the legacy refresh
+    handler's shape (pre-extraction)."""
+    track = NormalizedTrack(
+        position=0,
+        track_name="Run",
+        artist_name="Adele",
+        album_name="25",
+        duration_ms=295_000,
+        source_track_id="track123",
+        extra={
+            "discovered": True,
+            "provider": "spotify",
+            "confidence": 1.0,
+            "matched_data": {
+                "id": "track123",
+                "name": "Run",
+                "artists": [{"name": "Adele"}],
+                "album": {"name": "25"},
+                "duration_ms": 295_000,
+                "image_url": None,
+            },
+        },
+    )
+    d = to_mirror_track_dict(track)
+    assert "extra_data" in d
+    import json as _json
+    extra = _json.loads(d["extra_data"])
+    assert extra["discovered"] is True
+    assert extra["provider"] == "spotify"
+    assert extra["confidence"] == 1.0
+    assert extra["matched_data"]["id"] == "track123"
+    assert extra["matched_data"]["artists"] == [{"name": "Adele"}]
+
+
+def test_mirror_dict_spotify_public_emits_spotify_hint():
+    """Public-embed path: track ID known but album art / canonical
+    metadata missing, so we emit a ``spotify_hint`` for the discovery
+    worker instead of marking discovered."""
+    track = NormalizedTrack(
+        position=0,
+        track_name="Song",
+        artist_name="Artist",
+        duration_ms=200_000,
+        source_track_id="sptrk",
+        extra={
+            "spotify_hint": {
+                "id": "sptrk",
+                "name": "Song",
+                "artists": [{"name": "Artist"}],
+            },
+        },
+    )
+    d = to_mirror_track_dict(track)
+    import json as _json
+    extra = _json.loads(d["extra_data"])
+    assert extra["discovered"] is False
+    assert extra["spotify_hint"]["id"] == "sptrk"

@@ -70,7 +70,7 @@ class YouTubePlaylistSource(PlaylistSource):
 
     def _track_from_yt(self, track: dict, position: int) -> NormalizedTrack:
         artists = track.get("artists") or []
-        artist_name = ", ".join(artists) if artists else "Unknown Artist"
+        artist_name = artists[0] if artists else "Unknown Artist"
         return NormalizedTrack(
             position=position,
             track_name=track.get("name", "Unknown Track"),

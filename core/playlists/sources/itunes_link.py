@@ -80,9 +80,11 @@ class ITunesLinkPlaylistSource(PlaylistSource):
     def _track_from_itunes(self, track: dict, position: int) -> NormalizedTrack:
         artists = track.get("artists") or []
         if artists and isinstance(artists[0], dict):
-            artist_name = ", ".join(a.get("name", "") for a in artists if a.get("name"))
+            artist_name = artists[0].get("name", "") or ""
+        elif artists:
+            artist_name = str(artists[0])
         else:
-            artist_name = ", ".join(str(a) for a in artists if a)
+            artist_name = ""
         if not artist_name:
             artist_name = "Unknown Artist"
         album = track.get("album")

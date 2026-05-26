@@ -3416,6 +3416,7 @@ const WHATS_NEW = {
     '2.6.3': [
         { unreleased: true },
         { title: 'Groundwork: unified playlist source layer', desc: 'first slice of a refactor that\'ll let ListenBrainz, Last.fm radio, and SoulSync Discovery playlists live as Sync-page tabs alongside Spotify / Tidal / Qobuz / YouTube — so they can be mirrored + scheduled like the rest. this commit adds the shared adapter layer all those sources will plug into; no UI changes yet. nothing to do on your end.' },
+        { title: 'Auto-Sync refresh now routes through the unified source layer', desc: 'follow-up to the groundwork above. the mirrored-playlist auto-refresh handler used to have a ~190-line if/elif chain branching per source (one branch each for Spotify, Spotify public, Deezer, Tidal, YouTube). now it asks the source registry for the right adapter and calls one refresh method. behavior identical — same matched_data, same Tidal-skip-on-no-auth log, same Spotify-public-prefers-authed-API fallback. unlocks ListenBrainz / Last.fm / SoulSync Discovery as future Sync-page mirror sources without a fresh elif branch each time.' },
     ],
     '2.6.2': [
         { date: 'May 24, 2026 — 2.6.2 release' },

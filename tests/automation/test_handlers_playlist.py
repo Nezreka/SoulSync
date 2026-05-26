@@ -30,6 +30,7 @@ from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
+from core.playlists.sources.bootstrap import build_playlist_source_registry
 
 
 # ─── shared scaffolding ──────────────────────────────────────────────
@@ -74,6 +75,22 @@ class _StubDB:
 
 
 def _build_deps(**overrides) -> AutomationDeps:
+    # Build a default registry from whatever clients the test passed.
+    # The refresh_mirrored handler reads from deps.playlist_source_registry
+    # exclusively, so the registry must mirror the passed clients to
+    # preserve the pre-refactor test behavior.
+    _spotify = overrides.get('spotify_client')
+    _tidal = overrides.get('tidal_client')
+    _get_deezer = overrides.get('get_deezer_client', lambda: None)
+    _parse_youtube = overrides.get('parse_youtube_playlist', lambda url: None)
+    _registry = build_playlist_source_registry(
+        spotify_client_getter=lambda: _spotify,
+        tidal_client_getter=lambda: _tidal,
+        qobuz_client_getter=lambda: None,
+        deezer_client_getter=_get_deezer,
+        youtube_parser=_parse_youtube,
+    )
+
     defaults = dict(
         engine=object(),
         state=AutomationState(),
@@ -94,6 +111,7 @@ def _build_deps(**overrides) -> AutomationDeps:
         load_sync_status_file=lambda: {},
         get_deezer_client=lambda: None,
         parse_youtube_playlist=lambda url: None,
+        playlist_source_registry=_registry,
         get_sync_states=lambda: {},
         set_db_update_automation_id=lambda v: None,
         get_db_update_state=lambda: {},
@@ -190,6 +208,17 @@ class _StubSpotifyTrack:
 @dataclass
 class _StubSpotifyPlaylist:
     tracks: list
+    # Adapter-side projection reads metadata fields off the playlist
+    # object (the real ``core.spotify_client.Playlist`` dataclass).
+    # Provide minimal defaults so the stub stays a one-liner at call
+    # sites that only care about tracks.
+    id: str = 'spot-id'
+    name: str = 'My Spot'
+    description: Optional[str] = ''
+    owner: str = 'me'
+    public: bool = True
+    collaborative: bool = False
+    total_tracks: int = 0
 
 
 class _StubSpotifyClient:
@@ -284,6 +313,163 @@ class TestRefreshMirrored:
         assert result['errors'] == '1'
         assert db.mirror_calls == []
         assert any(p.get('log_type') == 'error' and 'missing its original source URL' in p.get('log_line', '') for p in progress)
+
+    def test_tidal_not_authenticated_emits_skip_not_error(self):
+        """Soft-skip preserves the legacy log_type='skip' contract — the
+        run still counts as completed with 0 errors so the automation
+        doesn't surface a Tidal-down condition as a refresh failure."""
+        class _UnauthedTidal:
+            def is_authenticated(self):
+                return False
+
+        db = _StubDB(playlists=[
+            {'id': 7, 'name': 'My Tidal', 'source': 'tidal',
+             'source_playlist_id': 'tid-id', 'profile_id': 1},
+        ])
+        progress = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            tidal_client=_UnauthedTidal(),
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '7'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '0'
+        assert result['errors'] == '0'  # skip, not error
+        assert db.mirror_calls == []
+        assert any(
+            p.get('log_type') == 'skip' and 'Tidal not authenticated' in p.get('log_line', '')
+            for p in progress
+        )
+
+    def test_deezer_refresh_writes_plain_tracks_no_matched_data(self):
+        class _StubDeezer:
+            def is_authenticated(self):
+                return True
+
+            def get_user_playlists(self):
+                return []
+
+            def get_playlist(self, playlist_id):
+                return {
+                    'id': playlist_id,
+                    'name': 'Deez',
+                    'description': '',
+                    'track_count': 1,
+                    'image_url': '',
+                    'owner': '',
+                    'tracks': [{
+                        'id': 'dz1',
+                        'name': 'Track',
+                        'artists': ['Deez Artist'],
+                        'album': 'Deez Album',
+                        'duration_ms': 200_000,
+                    }],
+                }
+
+        db = _StubDB(playlists=[
+            {'id': 9, 'name': 'Deez Mix', 'source': 'deezer',
+             'source_playlist_id': 'dz-id', 'profile_id': 1},
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            get_deezer_client=lambda: _StubDeezer(),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '9'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '1'
+        assert len(db.mirror_calls) == 1
+        call = db.mirror_calls[0]
+        assert call['source'] == 'deezer'
+        assert len(call['tracks']) == 1
+        # Deezer tracks don't carry discovery state — no extra_data.
+        assert 'extra_data' not in call['tracks'][0]
+        assert call['tracks'][0]['source_track_id'] == 'dz1'
+
+    def test_youtube_refresh_reads_url_from_description(self):
+        """URL-backed sources store the hash in source_playlist_id and
+        the canonical URL in description. The handler has to pull the
+        URL out before passing to the adapter."""
+        parsed_calls = []
+
+        def _fake_parser(url):
+            parsed_calls.append(url)
+            return {
+                'id': 'yt_pl',
+                'name': 'YT Mix',
+                'url': url,
+                'track_count': 1,
+                'tracks': [{
+                    'id': 'vid1',
+                    'name': 'Track',
+                    'artists': ['Channel'],
+                    'duration_ms': 240_000,
+                }],
+            }
+
+        db = _StubDB(playlists=[
+            {
+                'id': 11,
+                'name': 'YT Mix',
+                'source': 'youtube',
+                'source_playlist_id': 'hashhash',
+                'description': 'https://youtube.com/playlist?list=yt_pl',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            parse_youtube_playlist=_fake_parser,
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '11'}, deps)
+
+        assert result['refreshed'] == '1'
+        # Parser was called with the URL from description, not the hash.
+        assert parsed_calls == ['https://youtube.com/playlist?list=yt_pl']
+        assert db.mirror_calls[0]['tracks'][0]['source_track_id'] == 'vid1'
+
+    def test_spotify_public_uses_authed_spotify_when_signed_in(self):
+        """The handler-level fallback chain: when Spotify is authed
+        AND the public URL is a playlist URL, prefer the authed API so
+        the mirror gets album-art-bearing matched_data instead of the
+        bare scraper output."""
+        track = _StubSpotifyTrack(
+            id='auth-trk', name='From Auth', artists=['Artist'],
+            album='Album', duration_ms=200_000, image_url='img',
+        )
+        spotify = _StubSpotifyClient(_StubSpotifyPlaylist(
+            tracks=[track], id='auth-pid', name='Auth',
+        ))
+
+        db = _StubDB(playlists=[
+            {
+                'id': 22,
+                'name': 'Pub',
+                'source': 'spotify_public',
+                'source_playlist_id': 'hash',
+                'description': 'https://open.spotify.com/playlist/abc123def456',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            spotify_client=spotify,
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '22'}, deps)
+
+        assert result['refreshed'] == '1'
+        call = db.mirror_calls[0]
+        # Track came from the authed Spotify path → carries matched_data.
+        extra = json.loads(call['tracks'][0]['extra_data'])
+        assert extra['discovered'] is True
+        assert extra['provider'] == 'spotify'
+        assert extra['matched_data']['id'] == 'auth-trk'
 
 
 # ─── sync_playlist ───────────────────────────────────────────────────

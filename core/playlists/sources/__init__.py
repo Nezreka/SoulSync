@@ -16,6 +16,7 @@ from core.playlists.sources.base import (
     PlaylistMeta,
     PlaylistSource,
     NormalizedTrack,
+    to_mirror_track_dict,
 )
 from core.playlists.sources.registry import (
     PlaylistSourceRegistry,
@@ -29,4 +30,5 @@ __all__ = [
     "NormalizedTrack",
     "PlaylistSourceRegistry",
     "get_registry",
+    "to_mirror_track_dict",
 ]
