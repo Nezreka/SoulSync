@@ -3735,10 +3735,18 @@ function initializeSyncPage() {
             // Auto-load ListenBrainz Sync-tab playlists on first activation.
             // Reuses the LB discovery + sync flow already wired up for the
             // Discover page — the tab is purely a Sync-page entry point.
-            if (tabId === 'listenbrainz' && typeof loadListenBrainzSyncPlaylists === 'function'
-                    && !window._listenbrainzSyncTabLoaded) {
-                window._listenbrainzSyncTabLoaded = true;
-                loadListenBrainzSyncPlaylists();
+            if (tabId === 'listenbrainz') {
+                if (typeof loadListenBrainzSyncPlaylists === 'function'
+                        && !window._listenbrainzSyncTabLoaded) {
+                    window._listenbrainzSyncTabLoaded = true;
+                    loadListenBrainzSyncPlaylists();
+                }
+                // Cards mirror canonical listenbrainzPlaylistStates via a
+                // 500ms refresh loop that auto-stops when the tab loses
+                // active state — gives parity with Tidal/Qobuz live updates.
+                if (typeof _startLbSyncCardRefreshLoop === 'function') {
+                    _startLbSyncCardRefreshLoop();
+                }
             }
         });
     });

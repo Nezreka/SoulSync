@@ -130,6 +130,7 @@ function renderListenBrainzSyncPlaylists() {
                         <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
                     </div>
                 </div>
+                <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}"></div>
                 <button class="playlist-card-action-btn">${buttonText}</button>
             </div>
         `;
@@ -143,6 +144,14 @@ function renderListenBrainzSyncPlaylists() {
             handleListenBrainzSyncCardClick(mbid, title);
         });
     });
+
+    // If the tab is currently visible, kick the refresh loop so cards
+    // start showing live state immediately. ``_startLbSyncCardRefreshLoop``
+    // is idempotent + self-stops when the tab loses focus.
+    const tab = document.getElementById('listenbrainz-tab-content');
+    if (tab && tab.classList.contains('active')) {
+        _startLbSyncCardRefreshLoop();
+    }
 }
 
 async function handleListenBrainzSyncCardClick(playlistMbid, playlistTitle) {
@@ -203,6 +212,98 @@ async function handleListenBrainzSyncCardClick(playlistMbid, playlistTitle) {
         if (typeof showToast === 'function') {
             showToast(`Could not open playlist: ${err.message}`, 'error');
         }
+    }
+}
+
+// Live card refresh — keeps the Sync-tab cards in sync with the
+// canonical ``listenbrainzPlaylistStates`` dict that the discovery /
+// sync polling loops own. Tidal does this via explicit
+// ``updateTidalCardPhase`` / ``updateTidalCardProgress`` calls
+// sprinkled through its polling code; we get the same UX with a
+// single 500ms tick that reads the shared state. The loop only runs
+// while the LB tab is the active Sync tab so it's cheap.
+
+let _lbSyncCardRefreshInterval = null;
+
+function _refreshOneLbSyncCard(card) {
+    const mbid = card.dataset.lbMbid;
+    if (!mbid) return;
+    const state = (typeof listenbrainzPlaylistStates !== 'undefined')
+        ? listenbrainzPlaylistStates[mbid] : null;
+    if (!state) return;
+
+    const phase = state.phase || 'fresh';
+    const phaseEl = card.querySelector('.playlist-card-phase-text');
+    if (phaseEl) {
+        const text = (typeof getPhaseText === 'function') ? getPhaseText(phase) : phase;
+        const color = (typeof getPhaseColor === 'function') ? getPhaseColor(phase) : '';
+        if (phaseEl.textContent !== text) phaseEl.textContent = text;
+        if (color) phaseEl.style.color = color;
+    }
+
+    const btnEl = card.querySelector('.playlist-card-action-btn');
+    if (btnEl) {
+        const btnText = (typeof getActionButtonText === 'function')
+            ? getActionButtonText(phase) : btnEl.textContent;
+        if (btnEl.textContent !== btnText) btnEl.textContent = btnText;
+    }
+
+    // Discovery progress mirrors Tidal's per-card text:
+    // "♪ <total> / ✓ <matched> / ✗ <failed> / <percent>%".
+    // During sync, swap to the sync progress payload the LB sync poller
+    // writes into state.lastSyncProgress (same shape Tidal uses).
+    const progEl = card.querySelector('.playlist-card-progress');
+    if (!progEl) return;
+    if (phase === 'fresh') {
+        progEl.classList.add('hidden');
+        progEl.textContent = '';
+        return;
+    }
+
+    if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+        const sp = state.lastSyncProgress;
+        const matched = sp.matched_tracks || sp.spotify_matches || 0;
+        const total = sp.total_tracks || sp.spotify_total || 0;
+        const failed = (sp.failed_tracks !== undefined)
+            ? sp.failed_tracks : Math.max(0, total - matched);
+        const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
+        progEl.textContent = `♪ ${total} / ✓ ${matched} / ✗ ${failed} / ${pct}%`;
+        progEl.classList.remove('hidden');
+        return;
+    }
+
+    const total = state.spotify_total || state.spotifyTotal || 0;
+    const matched = state.spotify_matches || state.spotifyMatches || 0;
+    const failed = Math.max(0, total - matched);
+    const pct = total > 0 ? Math.round((matched / total) * 100)
+        : (state.discovery_progress || state.discoveryProgress || 0);
+    progEl.textContent = `♪ ${total} / ✓ ${matched} / ✗ ${failed} / ${pct}%`;
+    progEl.classList.remove('hidden');
+}
+
+function _refreshAllLbSyncCards() {
+    document.querySelectorAll('#listenbrainz-tab-content .listenbrainz-playlist-card')
+        .forEach(_refreshOneLbSyncCard);
+}
+
+function _startLbSyncCardRefreshLoop() {
+    if (_lbSyncCardRefreshInterval) return;
+    _lbSyncCardRefreshInterval = setInterval(() => {
+        const tab = document.getElementById('listenbrainz-tab-content');
+        if (!tab || !tab.classList.contains('active')) {
+            _stopLbSyncCardRefreshLoop();
+            return;
+        }
+        _refreshAllLbSyncCards();
+    }, 500);
+    // Initial tick so the user doesn't wait 500ms for the first update.
+    _refreshAllLbSyncCards();
+}
+
+function _stopLbSyncCardRefreshLoop() {
+    if (_lbSyncCardRefreshInterval) {
+        clearInterval(_lbSyncCardRefreshInterval);
+        _lbSyncCardRefreshInterval = null;
     }
 }
 
