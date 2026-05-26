@@ -209,10 +209,60 @@ class ListenBrainzManager:
         if tracks:
             self._cache_tracks(playlist_id, playlist_mbid, tracks, cursor)
 
+        # Ensure a rolling-series mirror row exists for known LB series
+        # (Weekly Jams / Weekly Exploration / Top Discoveries / Top
+        # Missed Recordings). The Auto-Sync sidebar then surfaces the
+        # rolling entry as schedulable even before the user has
+        # explicitly discovered any per-period card — first scheduled
+        # refresh fills tracks via the LB adapter's synthetic-id
+        # resolution.
+        self._ensure_rolling_series_mirror(cursor, title)
+
         conn.commit()
         conn.close()
 
         return result_type
+
+    def _ensure_rolling_series_mirror(self, cursor, playlist_title: str):
+        """Upsert a placeholder ``mirrored_playlists`` row for the
+        rolling series this title belongs to.
+
+        Idempotent — uses ``INSERT OR IGNORE``, so existing rolling
+        mirrors (which may already have discovered tracks) are not
+        touched. No-op for non-series titles (Last.fm radios,
+        user-created playlists, collaborative playlists)."""
+        try:
+            # Defer import to avoid a top-level dependency loop — the
+            # series detector lives in core.playlists which itself
+            # transitively imports manager-flavor helpers.
+            from core.playlists.lb_series import detect_series
+            match = detect_series(playlist_title or "")
+            if match is None:
+                return
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO mirrored_playlists
+                    (source, source_playlist_id, name, description, owner, image_url, track_count, profile_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    match.source_for_mirror,
+                    match.series_id,
+                    match.canonical_name,
+                    "Rolling ListenBrainz series — refresh resolves to the latest period automatically.",
+                    "ListenBrainz",
+                    "",
+                    0,
+                    self.profile_id,
+                ),
+            )
+            if cursor.rowcount:
+                logger.info(
+                    f"Pre-created rolling mirror placeholder '{match.canonical_name}' "
+                    f"(series id: {match.series_id})"
+                )
+        except Exception as exc:
+            logger.debug(f"Rolling-series mirror ensure skipped: {exc}")
 
     def _cache_tracks(self, playlist_id: int, playlist_mbid: str, tracks: List[Dict], cursor):
         """
