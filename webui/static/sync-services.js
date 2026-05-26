@@ -3735,7 +3735,10 @@ function initializeSyncPage() {
             // Auto-load ListenBrainz Sync-tab playlists on first activation.
             // Reuses the LB discovery + sync flow already wired up for the
             // Discover page — the tab is purely a Sync-page entry point.
-            if (tabId === 'listenbrainz') {
+            // Tab id is ``listenbrainz-sync`` (not ``listenbrainz``) so the
+            // ``${tabId}-tab-content`` lookup doesn't collide with the
+            // Discover page's own ``id="listenbrainz-tab-content"``.
+            if (tabId === 'listenbrainz-sync') {
                 if (typeof loadListenBrainzSyncPlaylists === 'function'
                         && !window._listenbrainzSyncTabLoaded) {
                     window._listenbrainzSyncTabLoaded = true;
