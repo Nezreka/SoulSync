@@ -3751,6 +3751,19 @@ function initializeSyncPage() {
                     _startLbSyncCardRefreshLoop();
                 }
             }
+
+            // Last.fm Sync tab — same MB-track shape as LB, shares the
+            // listenbrainzPlaylistStates machinery + refresh loop.
+            if (tabId === 'lastfm-sync') {
+                if (typeof loadLastfmSyncPlaylists === 'function'
+                        && !window._lastfmSyncTabLoaded) {
+                    window._lastfmSyncTabLoaded = true;
+                    loadLastfmSyncPlaylists();
+                }
+                if (typeof _startLbSyncCardRefreshLoop === 'function') {
+                    _startLbSyncCardRefreshLoop();
+                }
+            }
         });
     });
 
