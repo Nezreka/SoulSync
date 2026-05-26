@@ -5247,7 +5247,7 @@ class MusicDatabase:
                 # Album exists - update it (update server_source if different)
                 cursor.execute("""
                     UPDATE albums
-                    SET artist_id = ?, title = ?, year = ?, thumb_url = ?, genres = ?,
+                    SET artist_id = ?, title = ?, year = ?, thumb_url = COALESCE(NULLIF(?, ''), thumb_url), genres = ?,
                         track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
@@ -5280,6 +5280,7 @@ class MusicDatabase:
                     # Read enrichment data from old album
                     cursor.execute("SELECT * FROM albums WHERE id = ?", (old_id,))
                     old_row = cursor.fetchone()
+                    preserved_thumb_url = thumb_url or (old_row['thumb_url'] if old_row and 'thumb_url' in old_row.keys() else None)
 
                     # Insert new album with fresh server metadata + preserved created_at
                     old_created = old_row['created_at'] if old_row else None
@@ -5287,7 +5288,7 @@ class MusicDatabase:
                         INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
                                             track_count, duration, server_source, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, title, year, thumb_url, genres_json,
+                    """, (album_id, artist_id, title, year, preserved_thumb_url, genres_json,
                           track_count, duration, server_source, old_created))
 
                     # Copy enrichment data from old record to new record

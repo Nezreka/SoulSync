@@ -67,6 +67,7 @@ class NavidromeAlbum:
         self.year = navidrome_data.get('year')
         self.addedAt = self._parse_date(navidrome_data.get('created'))
         self._artist_id = navidrome_data.get('artistId', '')
+        self.thumb = self._get_album_image_url()
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
@@ -75,6 +76,18 @@ class NavidromeAlbum:
             return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         except:
             return None
+
+    def _get_album_image_url(self) -> Optional[str]:
+        """Generate a Subsonic getCoverArt URL for this album.
+
+        Navidrome exposes the stable artwork key as ``coverArt``. Falling
+        back to the album ID keeps compatibility with older responses while
+        ensuring library refreshes do not mark albums as artless.
+        """
+        cover_id = self._data.get('coverArt') or self.ratingKey
+        if not cover_id:
+            return None
+        return f"/rest/getCoverArt?id={cover_id}"
 
     def artist(self) -> Optional[NavidromeArtist]:
         """Get the album artist"""
