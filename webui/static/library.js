@@ -5299,6 +5299,99 @@ function _pollRedownloadProgress(taskId, overlay) {
     }, 300000);
 }
 
+async function redownloadLibraryAlbum(album, artistName, btn) {
+    const albumName = album.title || '';
+    const spotifyAlbumId = album.spotify_album_id || '';
+
+    if (!spotifyAlbumId && !albumName) {
+        showToast('No album ID or name available for redownload', 'warning');
+        return;
+    }
+
+    const origText = btn ? btn.innerHTML : '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let response;
+        if (spotifyAlbumId) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
+        }
+
+        if (!response || !response.ok) {
+            const query = `${artistName || ''} ${albumName}`.trim();
+            const searchResp = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (!searchResp.ok) throw new Error('Album search failed');
+            const searchData = await searchResp.json();
+            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
+            if (!found || !found.id) {
+                showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                return;
+            }
+            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
+        }
+
+        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+
+        const albumData = await response.json();
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks found for "${albumName}"`, 'warning');
+            return;
+        }
+
+        const resolvedId = albumData.id || spotifyAlbumId || album.id;
+        const virtualPlaylistId = `library_redownload_${resolvedId}`;
+        const playlistName = `[${artistName || 'Unknown'}] ${albumData.name}`;
+
+        const enrichedTracks = albumData.tracks.map(track => ({
+            ...track,
+            album: {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks
+            }
+        }));
+
+        const enhancedArtist = artistDetailPageState.enhancedData?.artist;
+        const artistObject = {
+            id: artistDetailPageState.currentArtistId || `library_${artistName || album.id}`,
+            name: artistName || '',
+            image_url: enhancedArtist?.thumb_url || ''
+        };
+        const fullAlbumObject = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            image_url: albumData.images?.[0]?.url || null,
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumData.artists || [{ name: artistName || '' }]
+        };
+
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
+        );
+
+        const albumType = fullAlbumObject.album_type || 'album';
+        registerArtistDownload(artistObject, fullAlbumObject, virtualPlaylistId, albumType);
+
+    } catch (error) {
+        console.error('Redownload album error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+    }
+}
+
 async function deleteLibraryAlbum(albumId) {
     const choice = await _showAlbumDeleteDialog();
     if (!choice) return;
