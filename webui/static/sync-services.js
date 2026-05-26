@@ -3731,6 +3731,15 @@ function initializeSyncPage() {
             if (tabId === 'beatport') {
                 ensureBeatportContentLoaded();
             }
+
+            // Auto-load ListenBrainz Sync-tab playlists on first activation.
+            // Reuses the LB discovery + sync flow already wired up for the
+            // Discover page — the tab is purely a Sync-page entry point.
+            if (tabId === 'listenbrainz' && typeof loadListenBrainzSyncPlaylists === 'function'
+                    && !window._listenbrainzSyncTabLoaded) {
+                window._listenbrainzSyncTabLoaded = true;
+                loadListenBrainzSyncPlaylists();
+            }
         });
     });
 

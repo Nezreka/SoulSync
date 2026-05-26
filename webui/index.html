@@ -1027,6 +1027,9 @@
                             <button class="sync-tab-button" data-tab="beatport">
                                 <span class="tab-icon beatport-icon"></span> Beatport
                             </button>
+                            <button class="sync-tab-button" data-tab="listenbrainz">
+                                <span class="tab-icon listenbrainz-icon"></span> ListenBrainz
+                            </button>
                             <button class="sync-tab-button" data-tab="import-file">
                                 <span class="tab-icon import-file-icon"></span> Import
                             </button>
@@ -1909,6 +1912,22 @@
                                         Import as Mirrored Playlist
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- ListenBrainz Tab Content -->
+                        <div class="sync-tab-content" id="listenbrainz-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your ListenBrainz Playlists</h3>
+                                <div class="listenbrainz-sub-tabs">
+                                    <button class="listenbrainz-sub-tab-btn active" data-lb-type="created_for_user">For You</button>
+                                    <button class="listenbrainz-sub-tab-btn" data-lb-type="user_created">My Playlists</button>
+                                    <button class="listenbrainz-sub-tab-btn" data-lb-type="collaborative">Collaborative</button>
+                                </div>
+                                <button class="refresh-button listenbrainz" id="listenbrainz-sync-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="listenbrainz-sync-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your ListenBrainz playlists.</div>
                             </div>
                         </div>
 
@@ -7962,6 +7981,7 @@
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
