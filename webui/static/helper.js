@@ -3538,7 +3538,7 @@ const VERSION_MODAL_SECTIONS = [
         title: "Qobuz Playlist Sync",
         description: "Qobuz joins Tidal and Deezer as a first-class playlist sync source on the Sync page. Browse your Qobuz playlists and Favorite Tracks, run them through the same discovery flow as Tidal, sync the resulting Spotify-matched tracks, and queue downloads — same multi-step pipeline you already know.",
         features: [
-            "new Qobuz tab on the Sync page, listed between Deezer and Deezer Link",
+            "new Qobuz tab on the Sync page, grouped with Tidal alongside the other lossless services",
             "lists your Qobuz user playlists plus a Favorite Tracks entry (same virtual-playlist treatment Tidal gets)",
             "click any card to fire discovery (Spotify-preferred, your primary metadata fallback otherwise), then sync or download just like Tidal / Deezer playlists",
             "uses the Qobuz auth token you already configured for downloads — no extra connection step",
