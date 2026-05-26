@@ -96,7 +96,9 @@ function renderListenBrainzSyncPlaylists() {
         const title = inner.title || inner.name || 'ListenBrainz Playlist';
         const creator = inner.creator || 'ListenBrainz';
         let count = 0;
-        if (inner.annotation && inner.annotation.track_count) {
+        if (inner.track_count) {
+            count = inner.track_count;
+        } else if (inner.annotation && inner.annotation.track_count) {
             count = inner.annotation.track_count;
         } else if (Array.isArray(inner.track) && inner.track.length > 0) {
             count = inner.track.length;

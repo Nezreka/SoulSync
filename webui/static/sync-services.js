@@ -10793,6 +10793,72 @@ async function resetBeatportChart(urlHash) {
 // LISTENBRAINZ PLAYLIST DISCOVERY & SYNC
 // ============================================================================
 
+/**
+ * Auto-mirror a ListenBrainz playlist into the mirrored_playlists
+ * table after discovery completes. Pattern parity with Tidal —
+ * Tidal mirrors on tab load with raw tracks, then discovery enriches;
+ * LB tracks only have provider IDs after discovery, so we mirror at
+ * the end. Idempotent (UPSERT on source + source_playlist_id +
+ * profile_id), so calling it twice is a no-op.
+ */
+function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
+    try {
+        const state = listenbrainzPlaylistStates[playlistMbid];
+        if (!state || !state.playlist) return;
+        if (typeof mirrorPlaylist !== 'function') return;
+
+        const results = state.discovery_results || [];
+        if (!results.length) return;
+
+        const tracks = results
+            .filter(r => r && r.spotify_data && r.spotify_data.id)
+            .map(r => {
+                const sp = r.spotify_data;
+                const artistName = Array.isArray(sp.artists)
+                    ? (typeof sp.artists[0] === 'object' ? sp.artists[0].name : sp.artists[0])
+                    : (sp.artists || '');
+                const albumName = (sp.album && typeof sp.album === 'object')
+                    ? sp.album.name : (sp.album || '');
+                const albumImage = (sp.album && sp.album.images && sp.album.images[0])
+                    ? sp.album.images[0].url : (sp.image_url || null);
+                return {
+                    track_name: sp.name || '',
+                    artist_name: artistName || '',
+                    album_name: albumName || '',
+                    duration_ms: sp.duration_ms || 0,
+                    image_url: albumImage,
+                    source_track_id: sp.id || '',
+                    extra_data: JSON.stringify({
+                        discovered: true,
+                        provider: sp.source || 'spotify',
+                        confidence: r.confidence || 1.0,
+                        matched_data: sp,
+                    }),
+                };
+            });
+
+        if (!tracks.length) {
+            console.warn(`🪞 [LB Mirror] No matched tracks in '${state.playlist.name}', skipping mirror`);
+            return;
+        }
+
+        mirrorPlaylist(
+            'listenbrainz',
+            playlistMbid,
+            state.playlist.name || 'ListenBrainz Playlist',
+            tracks,
+            {
+                owner: state.playlist.creator || 'ListenBrainz',
+                description: state.playlist.description || '',
+                image_url: state.playlist.image_url || '',
+            }
+        );
+        console.log(`🪞 [LB Mirror] Mirrored '${state.playlist.name}' with ${tracks.length} matched tracks`);
+    } catch (err) {
+        console.warn('LB mirror-after-discovery failed:', err);
+    }
+}
+
 function startListenBrainzDiscoveryPolling(playlistMbid) {
     console.log(`🔄 Starting ListenBrainz discovery polling for: ${playlistMbid}`);
 
@@ -10843,6 +10909,10 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 const playlistIdEl = `discover-lb-playlist-${playlistMbid}`;
                 const syncBtn = document.getElementById(`${playlistIdEl}-sync-btn`);
                 if (syncBtn) syncBtn.style.display = 'inline-block';
+                // Mirror matched tracks → mirrored_playlists table so the
+                // playlist participates in Auto-Sync schedules just like
+                // Tidal / Qobuz / Spotify mirrors do.
+                _mirrorListenBrainzAfterDiscovery(playlistMbid);
                 showToast('ListenBrainz discovery complete!', 'success');
             }
         };
@@ -10935,6 +11005,9 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 }
 
                 console.log('✅ ListenBrainz discovery complete:', playlistMbid);
+                // Mirror matched tracks → mirrored_playlists table so
+                // the playlist participates in Auto-Sync schedules.
+                _mirrorListenBrainzAfterDiscovery(playlistMbid);
                 showToast('ListenBrainz discovery complete!', 'success');
             }
 
