@@ -418,13 +418,17 @@ class ListenBrainzManager:
         # the new rolling series mirrors (Phase 1c.2.1).
         self._cleanup_per_period_series_mirrors(cursor)
 
-        # For each playlist type, keep only the N most recent
-        # lastfm_radio keeps fewer since they're auto-regenerated weekly
+        # For each playlist type, keep only the N most recent.
+        # Last.fm radios are per-seed-track snapshots that don't update
+        # on the Last.fm side — capping the cache (and via the cascade
+        # below, the matching mirror rows) keeps the Mirrored tab from
+        # accumulating one row per random seed track the user ever
+        # picked. 10 is the user-facing limit.
         playlist_type_limits = {
             'created_for': 25,
             'user': 25,
             'collaborative': 25,
-            'lastfm_radio': 5,
+            'lastfm_radio': 10,
         }
 
         for playlist_type, keep_count in playlist_type_limits.items():
