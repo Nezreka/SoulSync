@@ -25,6 +25,12 @@ from core.playlists.sources.base import (
 )
 
 
+# Type alias for the discovery callable: takes a list of MB-shaped
+# track dicts, returns a parallel list of matched_data dicts (or None
+# when no match). Kept narrow so test stubs are easy.
+DiscoverCallable = Callable[[List[Dict[str, Any]]], List[Optional[Dict[str, Any]]]]
+
+
 class ListenBrainzPlaylistSource(PlaylistSource):
     name = SOURCE_LISTENBRAINZ
     supports_listing = True
@@ -36,11 +42,20 @@ class ListenBrainzPlaylistSource(PlaylistSource):
     # ``meta.extra['playlist_type']`` if it wants per-type sub-tabs.
     PLAYLIST_TYPES = ("created_for_user", "user_created", "collaborative")
 
-    def __init__(self, manager_getter: Callable[[], Any]):
+    def __init__(
+        self,
+        manager_getter: Callable[[], Any],
+        discover_callable: Optional[DiscoverCallable] = None,
+    ):
         """``manager_getter`` returns a live ``ListenBrainzManager`` for
         the current profile. ``None`` is allowed and means "no LB
-        configured" — adapter degrades to empty results."""
+        configured" — adapter degrades to empty results.
+
+        ``discover_callable`` runs the actual matching-engine + provider
+        search. ``None`` means no discovery is wired (Phase 0 default):
+        ``discover_tracks`` returns the input list unchanged."""
         self._manager_getter = manager_getter
+        self._discover_callable = discover_callable
 
     def _manager(self):
         return self._manager_getter()
@@ -104,6 +119,68 @@ class ListenBrainzPlaylistSource(PlaylistSource):
         meta.track_count = len(tracks_raw)
         tracks = [self._track_from_cache_row(t, idx) for idx, t in enumerate(tracks_raw)]
         return PlaylistDetail(meta=meta, tracks=tracks)
+
+    def discover_tracks(self, tracks: List[NormalizedTrack]) -> List[NormalizedTrack]:
+        """Run each MB-metadata track through the matching engine.
+
+        Tracks with ``needs_discovery=False`` (e.g. already-matched
+        survivors of a previous refresh) pass through unchanged.
+        Matched tracks get ``extra['discovered']=True`` + a
+        ``matched_data`` block so the projection helper can produce
+        the canonical ``extra_data`` JSON; ``needs_discovery`` flips
+        to False on them.
+
+        Unmatched tracks stay ``needs_discovery=True`` so the caller
+        can decide how to handle them (wing-it stub, skip, retry)."""
+        if not tracks or self._discover_callable is None:
+            return tracks
+
+        to_match: List[Dict[str, Any]] = []
+        match_indices: List[int] = []
+        for idx, t in enumerate(tracks):
+            if not t.needs_discovery:
+                continue
+            to_match.append({
+                "track_name": t.track_name,
+                "artist_name": t.artist_name,
+                "album_name": t.album_name or "",
+                "duration_ms": t.duration_ms or 0,
+            })
+            match_indices.append(idx)
+
+        if not to_match:
+            return tracks
+
+        try:
+            matched = self._discover_callable(to_match) or []
+        except Exception:
+            return tracks
+
+        out = list(tracks)
+        for slot_idx, result in zip(match_indices, matched):
+            if not result:
+                continue
+            track = out[slot_idx]
+            provider = result.pop("_provider", None) or "unknown"
+            confidence = result.pop("_confidence", None)
+            new_extra = dict(track.extra or {})
+            new_extra["discovered"] = True
+            new_extra["provider"] = provider
+            if confidence is not None:
+                new_extra["confidence"] = confidence
+            new_extra["matched_data"] = result
+            out[slot_idx] = NormalizedTrack(
+                position=track.position,
+                track_name=track.track_name,
+                artist_name=track.artist_name,
+                album_name=track.album_name,
+                duration_ms=track.duration_ms,
+                source_track_id=result.get("id") or track.source_track_id,
+                image_url=result.get("image_url") or track.image_url,
+                needs_discovery=False,
+                extra=new_extra,
+            )
+        return out
 
     def refresh_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
         """Trigger a manager-side refresh, then return the new snapshot.

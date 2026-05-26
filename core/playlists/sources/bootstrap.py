@@ -51,6 +51,7 @@ def build_playlist_source_registry(
     lastfm_manager_getter: Optional[Callable[[], Any]] = None,
     personalized_manager_getter: Optional[Callable[[], Any]] = None,
     profile_id_getter: Optional[Callable[[], int]] = None,
+    discover_callable: Optional[Callable[..., Any]] = None,
 ) -> PlaylistSourceRegistry:
     """Build a fresh registry with every default adapter registered.
 
@@ -80,11 +81,17 @@ def build_playlist_source_registry(
     _no_manager = lambda: None
     reg.register(
         SOURCE_LISTENBRAINZ,
-        lambda: ListenBrainzPlaylistSource(listenbrainz_manager_getter or _no_manager),
+        lambda: ListenBrainzPlaylistSource(
+            listenbrainz_manager_getter or _no_manager,
+            discover_callable=discover_callable,
+        ),
     )
     reg.register(
         SOURCE_LASTFM,
-        lambda: LastFMPlaylistSource(lastfm_manager_getter or _no_manager),
+        lambda: LastFMPlaylistSource(
+            lastfm_manager_getter or _no_manager,
+            discover_callable=discover_callable,
+        ),
     )
     reg.register(
         SOURCE_SOULSYNC_DISCOVERY,

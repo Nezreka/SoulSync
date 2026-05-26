@@ -433,6 +433,110 @@ class TestRefreshMirrored:
         assert parsed_calls == ['https://youtube.com/playlist?list=yt_pl']
         assert db.mirror_calls[0]['tracks'][0]['source_track_id'] == 'vid1'
 
+    def test_listenbrainz_refresh_runs_discovery_and_writes_matched_data(self):
+        """End-to-end: LB cached playlist → adapter projects to
+        NormalizedTrack with needs_discovery=True → refresh_mirrored
+        calls source.discover_tracks → matched_data lands in
+        extra_data on the mirror DB row."""
+        from core.playlists.sources.bootstrap import build_playlist_source_registry
+        from core.playlists.sources.listenbrainz import ListenBrainzPlaylistSource
+
+        class _StubLBManager:
+            def get_cached_playlists(self, playlist_type):
+                if playlist_type == 'created_for_user':
+                    return [{
+                        'playlist_mbid': 'lb-1',
+                        'title': 'LB Weekly',
+                        'creator': 'ListenBrainz',
+                        'track_count': 1,
+                        'annotation': {},
+                        'last_updated': '2026-05-26',
+                    }]
+                return []
+
+            def get_playlist_type(self, mbid):
+                return 'created_for_user' if mbid == 'lb-1' else ''
+
+            def get_cached_tracks(self, mbid):
+                if mbid == 'lb-1':
+                    return [{
+                        'track_name': 'MB Song',
+                        'artist_name': 'MB Artist',
+                        'album_name': 'MB Album',
+                        'duration_ms': 240_000,
+                        'recording_mbid': 'rec-1',
+                        'release_mbid': 'rel-1',
+                        'album_cover_url': '',
+                        'additional_metadata': {},
+                    }]
+                return []
+
+            def update_all_playlists(self):
+                pass
+
+        discovery_calls = []
+
+        def fake_discover(track_dicts):
+            discovery_calls.append(list(track_dicts))
+            return [{
+                'id': 'sp-matched',
+                'name': 'Matched',
+                'artists': ['Spotify Artist'],
+                'album': {'name': 'Spotify Album'},
+                'duration_ms': 240_000,
+                'image_url': 'art',
+                'source': 'spotify',
+                '_provider': 'spotify',
+                '_confidence': 0.93,
+            }]
+
+        # Build a registry with the LB adapter pre-wired with discovery.
+        # The default _build_deps registry won't have discovery wired,
+        # so we override it for this test.
+        registry = build_playlist_source_registry(
+            spotify_client_getter=lambda: None,
+            tidal_client_getter=lambda: None,
+            qobuz_client_getter=lambda: None,
+            deezer_client_getter=lambda: None,
+            listenbrainz_manager_getter=lambda: _StubLBManager(),
+            discover_callable=fake_discover,
+        )
+
+        db = _StubDB(playlists=[
+            {
+                'id': 33,
+                'name': 'LB Weekly',
+                'source': 'listenbrainz',
+                'source_playlist_id': 'lb-1',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(get_database=lambda: db)
+        # Replace the default registry with the one wired up above.
+        # AutomationDeps is a frozen dataclass-like — re-assign via
+        # object.__setattr__ since it's a plain dataclass.
+        object.__setattr__(deps, 'playlist_source_registry', registry)
+
+        result = auto_refresh_mirrored({'playlist_id': '33'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '1'
+        # discover_tracks ran once, with the single MB track.
+        assert len(discovery_calls) == 1
+        assert discovery_calls[0][0]['track_name'] == 'MB Song'
+        assert discovery_calls[0][0]['artist_name'] == 'MB Artist'
+
+        # Mirror DB row carries the matched_data extra_data.
+        call = db.mirror_calls[0]
+        assert call['source'] == 'listenbrainz'
+        assert len(call['tracks']) == 1
+        track = call['tracks'][0]
+        assert track['source_track_id'] == 'sp-matched'
+        extra = json.loads(track['extra_data'])
+        assert extra['discovered'] is True
+        assert extra['provider'] == 'spotify'
+        assert extra['matched_data']['id'] == 'sp-matched'
+
     def test_spotify_public_uses_authed_spotify_when_signed_in(self):
         """The handler-level fallback chain: when Spotify is authed
         AND the public URL is a playlist URL, prefer the authed API so
