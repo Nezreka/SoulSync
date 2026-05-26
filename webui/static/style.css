@@ -17611,21 +17611,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .tidal-playlist-card .playlist-card-icon { background: rgba(255, 102, 0, 0.12); border: 1px solid rgba(255, 102, 0, 0.2); color: #ff6600; font-size: 16px; }
 .deezer-playlist-card .playlist-card-icon { background: rgba(162, 56, 255, 0.12); border: 1px solid rgba(162, 56, 255, 0.2); color: #a238ff; }
 .spotify-public-card .playlist-card-icon { background: rgba(29, 185, 84, 0.12); border: 1px solid rgba(29, 185, 84, 0.2); color: #1DB954; }
+.listenbrainz-playlist-card .playlist-card-icon { background: rgba(235, 116, 59, 0.12); border: 1px solid rgba(235, 116, 59, 0.2); color: #eb743b; }
 
 .youtube-playlist-card .playlist-card-content,
 .tidal-playlist-card .playlist-card-content,
 .deezer-playlist-card .playlist-card-content,
-.spotify-public-card .playlist-card-content { flex: 1; min-width: 0; }
+.spotify-public-card .playlist-card-content,
+.listenbrainz-playlist-card .playlist-card-content { flex: 1; min-width: 0; }
 
 .youtube-playlist-card .playlist-card-name,
 .tidal-playlist-card .playlist-card-name,
 .deezer-playlist-card .playlist-card-name,
-.spotify-public-card .playlist-card-name { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.9); margin-bottom: 4px; }
+.spotify-public-card .playlist-card-name,
+.listenbrainz-playlist-card .playlist-card-name { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.9); margin-bottom: 4px; }
 
 .youtube-playlist-card .playlist-card-info,
 .tidal-playlist-card .playlist-card-info,
 .deezer-playlist-card .playlist-card-info,
-.spotify-public-card .playlist-card-info { font-size: 13px; color: rgba(255, 255, 255, 0.4); display: flex; align-items: center; gap: 10px; }
+.spotify-public-card .playlist-card-info,
+.listenbrainz-playlist-card .playlist-card-info { font-size: 13px; color: rgba(255, 255, 255, 0.4); display: flex; align-items: center; gap: 10px; }
 
 .youtube-playlist-card .playlist-card-track-count { color: rgba(255, 255, 255, 0.7); }
 .youtube-playlist-card .playlist-card-phase-text { font-weight: 500; }
@@ -17635,7 +17639,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .youtube-playlist-card .playlist-card-action-btn,
 .tidal-playlist-card .playlist-card-action-btn,
 .deezer-playlist-card .playlist-card-action-btn,
-.spotify-public-card .playlist-card-action-btn {
+.spotify-public-card .playlist-card-action-btn,
+.listenbrainz-playlist-card .playlist-card-action-btn {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.8);
@@ -17654,7 +17659,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .youtube-playlist-card .playlist-card-action-btn::before,
 .tidal-playlist-card .playlist-card-action-btn::before,
 .deezer-playlist-card .playlist-card-action-btn::before,
-.spotify-public-card .playlist-card-action-btn::before {
+.spotify-public-card .playlist-card-action-btn::before,
+.listenbrainz-playlist-card .playlist-card-action-btn::before {
     content: '';
     position: absolute;
     inset: 0;
@@ -17667,21 +17673,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .tidal-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(255, 102, 0, 0.05)); }
 .deezer-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(162, 56, 255, 0.2), rgba(162, 56, 255, 0.05)); }
 .spotify-public-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(29, 185, 84, 0.2), rgba(29, 185, 84, 0.05)); }
+.listenbrainz-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(235, 116, 59, 0.2), rgba(235, 116, 59, 0.05)); }
 
 .youtube-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
 .tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
 .deezer-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
-.spotify-public-card .playlist-card-action-btn:hover:not(:disabled)::before { opacity: 1; }
+.spotify-public-card .playlist-card-action-btn:hover:not(:disabled)::before,
+.listenbrainz-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before { opacity: 1; }
 
 .youtube-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(255, 0, 0, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 0, 0, 0.15); }
 .tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(255, 102, 0, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 102, 0, 0.15); }
 .deezer-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(162, 56, 255, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(162, 56, 255, 0.15); }
 .spotify-public-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(29, 185, 84, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(29, 185, 84, 0.15); }
+.listenbrainz-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(235, 116, 59, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(235, 116, 59, 0.15); }
 
 .youtube-playlist-card .playlist-card-action-btn:disabled,
 .tidal-playlist-card .playlist-card-action-btn:disabled,
 .deezer-playlist-card .playlist-card-action-btn:disabled,
-.spotify-public-card .playlist-card-action-btn:disabled {
+.spotify-public-card .playlist-card-action-btn:disabled,
+.listenbrainz-playlist-card .playlist-card-action-btn:disabled {
     background: rgba(255, 255, 255, 0.03);
     border-color: rgba(255, 255, 255, 0.04);
     color: rgba(255, 255, 255, 0.2);
@@ -36142,44 +36152,10 @@ div.artist-hero-badge {
     margin-top: 60px;
 }
 
-.listenbrainz-playlist-card {
-    background: linear-gradient(135deg, #eb743b 0%, #d26230 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-}
-
-.listenbrainz-playlist-card::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
-    animation: pulse 3s ease-in-out infinite;
-}
-
-.listenbrainz-icon {
-    font-size: 48px;
-    position: relative;
-    z-index: 1;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-}
-
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 0.5;
-    }
-
-    50% {
-        opacity: 0.8;
-    }
-}
+/* (Removed dead Discover-page LB card styling — solid orange gradient
+ * + .listenbrainz-icon { font-size: 48px } were orphaned rules that
+ * collided with the Sync-page LB tab cards. The legacy class was
+ * never instantiated in JS or HTML outside the new Sync tab.) */
 
 /* ========================================= */
 /* ========================================= */

@@ -148,7 +148,7 @@ function renderListenBrainzSyncPlaylists() {
     // If the tab is currently visible, kick the refresh loop so cards
     // start showing live state immediately. ``_startLbSyncCardRefreshLoop``
     // is idempotent + self-stops when the tab loses focus.
-    const tab = document.getElementById('listenbrainz-tab-content');
+    const tab = document.getElementById('listenbrainz-sync-tab-content');
     if (tab && tab.classList.contains('active')) {
         _startLbSyncCardRefreshLoop();
     }
@@ -282,14 +282,14 @@ function _refreshOneLbSyncCard(card) {
 }
 
 function _refreshAllLbSyncCards() {
-    document.querySelectorAll('#listenbrainz-tab-content .listenbrainz-playlist-card')
+    document.querySelectorAll('#listenbrainz-sync-tab-content .listenbrainz-playlist-card')
         .forEach(_refreshOneLbSyncCard);
 }
 
 function _startLbSyncCardRefreshLoop() {
     if (_lbSyncCardRefreshInterval) return;
     _lbSyncCardRefreshInterval = setInterval(() => {
-        const tab = document.getElementById('listenbrainz-tab-content');
+        const tab = document.getElementById('listenbrainz-sync-tab-content');
         if (!tab || !tab.classList.contains('active')) {
             _stopLbSyncCardRefreshLoop();
             return;
@@ -309,7 +309,7 @@ function _stopLbSyncCardRefreshLoop() {
 
 // Sub-tab switching (For You / My Playlists / Collaborative).
 function _initListenBrainzSyncSubTabs() {
-    const subTabContainer = document.querySelector('#listenbrainz-tab-content .listenbrainz-sub-tabs');
+    const subTabContainer = document.querySelector('#listenbrainz-sync-tab-content .listenbrainz-sub-tabs');
     if (!subTabContainer) return;
     subTabContainer.addEventListener('click', (e) => {
         const btn = e.target.closest('.listenbrainz-sub-tab-btn');
