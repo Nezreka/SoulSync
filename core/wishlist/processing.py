@@ -148,15 +148,39 @@ def recover_uncaptured_failed_tracks(
     return recovered_count
 
 
+def resolve_wishlist_source_type_for_batch(batch: Dict[str, Any]) -> str:
+    """Pick the wishlist ``source_type`` for failed tracks coming out of a
+    download batch.
+
+    Album-context batches must produce ``'album'`` provenance — the legacy
+    hardcoded ``'playlist'`` mislabels every album-batch failure, breaks
+    the wishlist UI's source filter, and makes ``by_source_type`` stats
+    look like all wishlist work came from playlists.
+    """
+    return 'album' if batch.get('is_album_download') else 'playlist'
+
+
 def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime | None = None) -> Dict[str, Any]:
     """Build the source_context payload used when adding failed tracks back to the wishlist."""
     current_time = current_time or datetime.now()
-    return {
+    context = {
         'playlist_name': batch.get('playlist_name', 'Unknown Playlist'),
         'playlist_id': batch.get('playlist_id', None),
         'added_from': 'webui_modal',
         'timestamp': current_time.isoformat(),
     }
+    # Preserve album-batch provenance so wishlist requeue has a real signal
+    # for album-vs-single routing instead of relying on per-track album dicts
+    # that may have been mangled by reconstruction fallbacks.
+    if batch.get('is_album_download'):
+        context['is_album_download'] = True
+        album_ctx = batch.get('album_context')
+        if isinstance(album_ctx, dict):
+            context['album_context'] = album_ctx
+        artist_ctx = batch.get('artist_context')
+        if isinstance(artist_ctx, dict):
+            context['artist_context'] = artist_ctx
+    return context
 
 
 def finalize_auto_wishlist_completion(
