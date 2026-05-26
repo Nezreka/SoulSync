@@ -3413,6 +3413,10 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.3': [
+        { unreleased: true },
+        { title: 'Groundwork: unified playlist source layer', desc: 'first slice of a refactor that\'ll let ListenBrainz, Last.fm radio, and SoulSync Discovery playlists live as Sync-page tabs alongside Spotify / Tidal / Qobuz / YouTube — so they can be mirrored + scheduled like the rest. this commit adds the shared adapter layer all those sources will plug into; no UI changes yet. nothing to do on your end.' },
+    ],
     '2.6.2': [
         { date: 'May 24, 2026 — 2.6.2 release' },
         { title: 'Fix: songs stuck in quarantine loop when picking a different candidate', desc: 'when a track failed AcoustID verification and got quarantined, opening the candidates modal and manually picking a different file would just re-quarantine it — the manual pick path ran full AcoustID verification with no bypass, so if the alternate file disagreed with AcoustID\'s stored metadata too (common for live versions, remasters, regional title differences) the file landed right back in quarantine. user got stuck in the loop. manual picks via the candidates modal now skip AcoustID for that one post-process pass (matching what the Approve button already does for restored quarantine files). integrity and bit-depth gates still run because those check the new file\'s actual condition, not its identity. closes #701.' },
