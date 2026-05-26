@@ -13193,6 +13193,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 4px 15px rgba(29, 185, 84, 0.3);
 }
 
+.sync-tab-button[data-tab="itunes-link"].active {
+    background: #fa586a;
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(250, 88, 106, 0.3);
+}
+
 /* Server tab — prominent first tab */
 .sync-tab-server {
     flex: 1.4 !important;
@@ -17092,6 +17098,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-color: rgba(29, 185, 84, 0.3);
 }
 
+#itunes-link-url-history .url-history-pill:hover {
+    border-color: rgba(250, 88, 106, 0.3);
+}
+
 /* Playlist URL input section (YouTube, Deezer) */
 .youtube-input-section {
     display: flex;
@@ -17111,7 +17121,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 #youtube-url-input,
 #deezer-url-input,
-#spotify-public-url-input {
+#spotify-public-url-input,
+#itunes-link-url-input {
     flex: 1;
     background: transparent;
     border: none;
@@ -17125,14 +17136,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 #youtube-url-input::placeholder,
 #deezer-url-input::placeholder,
-#spotify-public-url-input::placeholder {
+#spotify-public-url-input::placeholder,
+#itunes-link-url-input::placeholder {
     color: rgba(255, 255, 255, 0.3);
     font-weight: 400;
 }
 
 #youtube-parse-btn,
 #deezer-parse-btn,
-#spotify-public-parse-btn {
+#spotify-public-parse-btn,
+#itunes-link-parse-btn {
     flex-shrink: 0;
     padding: 10px 22px;
     border: none;
@@ -17182,7 +17195,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 #youtube-parse-btn:disabled,
 #deezer-parse-btn:disabled,
-#spotify-public-parse-btn:disabled {
+#spotify-public-parse-btn:disabled,
+#itunes-link-parse-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
@@ -17206,9 +17220,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 2px 8px rgba(29, 185, 84, 0.2);
 }
 
+#itunes-link-parse-btn {
+    background: linear-gradient(135deg, #fa586a, #ff7a59);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(250, 88, 106, 0.2);
+}
+
 #spotify-public-parse-btn:hover {
     background: linear-gradient(135deg, #1ed760, #2de86e);
     box-shadow: 0 4px 16px rgba(29, 185, 84, 0.3);
+    transform: translateY(-1px);
+}
+
+#itunes-link-parse-btn:hover {
+    background: linear-gradient(135deg, #ff6a7a, #ff8b6c);
+    box-shadow: 0 4px 16px rgba(250, 88, 106, 0.3);
     transform: translateY(-1px);
 }
 
@@ -17217,9 +17243,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 1px 4px rgba(29, 185, 84, 0.2);
 }
 
+#itunes-link-parse-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(250, 88, 106, 0.2);
+}
+
 #spotify-public-tab-content .youtube-input-section:focus-within {
     border-color: rgba(29, 185, 84, 0.25);
     box-shadow: 0 0 16px rgba(29, 185, 84, 0.08);
+}
+
+#itunes-link-tab-content .youtube-input-section:focus-within {
+    border-color: rgba(250, 88, 106, 0.25);
+    box-shadow: 0 0 16px rgba(250, 88, 106, 0.08);
 }
 
 /* Right Sidebar */

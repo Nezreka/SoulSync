@@ -3415,6 +3415,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.6.2': [
         { date: 'May 24, 2026 — 2.6.2 release' },
+        { title: 'iTunes / Apple Music link import', desc: 'new iTunes Link tab on the Sync page, between Deezer Link and YouTube. paste an Apple Music album, track, or playlist URL and SoulSync pulls the tracklist, runs it through the same discovery → sync → download flow as the other link tabs. handles the new Apple Music SPA token shape — token gets scraped from the JS bundle on first use and cached for 6 hours, with a 401 retry that refetches if Apple rotates mid-session.' },
         { title: 'Auto-Sync: bulk schedule by source + custom interval columns', desc: 'each source group in the sidebar gets a Bulk button — opens a popover that lets you schedule every playlist in that group at a chosen interval in one click (1h / 2h / 4h / 8h / 12h / 16h / 24h / 48h / 72h / weekly) or "Custom interval…" for an arbitrary number of hours. also includes "Unschedule all" to clear a source\'s schedules. on the board itself, a schedule with a non-standard interval (e.g. 6h or 36h, created via Automations page or the custom prompt) now renders as its own dashed-border column instead of disappearing because it didn\'t match a hardcoded bucket.' },
         { title: 'Auto-Sync manager: filter, failure indicators, history filters + load more', desc: 'a handful of UX additions on the Playlist Auto-Sync modal. sidebar gets a "Filter playlists…" search input so you can narrow down a long mirrored-playlist list. scheduled cards on the board now show a red ! badge when the last three pipeline runs all failed (yellow ⚠ if at least one of the last few failed) so chronically broken schedules surface visually instead of getting buried in the run-history tab. run history tab title shows a red error count when there are failed runs in the loaded window. the history tab itself gains All / Errors / Completed filter pills, a "Load more" footer that pulls another 50 entries, and a "Run pipeline again" button inside the expanded detail panel so you can re-trigger a specific playlist without leaving the modal. also dropped the "Discovered: completed" pill — `tracks_discovered` was a status string, not a count, and the same data is already in the before/after stats grid above.' },
         { title: 'Auto-Sync manager redesigned to match the rest of the app', desc: 'the Auto-Sync modal got a top-to-bottom restyle so it stops feeling like it lives in a different app. modal shell now uses the standard SoulSync gradient + accent-tinted border + 20px radius, the KPI summary became inset stat tiles, the live pipeline monitor is auto-fill instead of a fixed 4-col grid, tabs are now underline-style instead of pill buttons, and the schedule board sidebar/columns use the dense dark-card pattern that Automations + Library pages already use. modal also fills more of the screen since there was a lot of unused real estate. run history cards got the same treatment — slim horizontal row matching `.automation-card` (status dot + name + flow chips + meta row), and the expanded panel uses the same stats-grid / log-section structure as the Automations run-history modal.' },
@@ -3518,6 +3519,17 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "iTunes / Apple Music Link Import",
+        description: "new iTunes Link tab on the Sync page. paste an Apple Music album, track, or playlist URL and SoulSync pulls the tracklist, runs it through discovery, and lets you sync or download like any other link source.",
+        features: [
+            "new iTunes Link tab on the Sync page, sitting between Deezer Link and YouTube",
+            "accepts album, track, and playlist URLs from music.apple.com or iTunes",
+            "tracklist runs through the same discovery → sync → download pipeline as Deezer Link / YouTube",
+            "handles the current Apple Music SPA token flow — token is scraped from the JS bundle on first use, cached for 6 hours, and refetched automatically on 401 if Apple rotates",
+        ],
+        usage_note: "Sync → iTunes Link → paste URL → Load",
+    },
     {
         title: "Qobuz Playlist Sync",
         description: "Qobuz joins Tidal and Deezer as a first-class playlist sync source on the Sync page. Browse your Qobuz playlists and Favorite Tracks, run them through the same discovery flow as Tidal, sync the resulting Spotify-matched tracks, and queue downloads — same multi-step pipeline you already know.",

@@ -1365,14 +1365,15 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             virtualPlaylistId.startsWith('qobuz_') ? 'Qobuz' :
                 virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                     virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
-                        virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
-                            virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                                    virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                                    'YouTube';
+                        virtualPlaylistId.startsWith('itunes_link_') ? 'iTunes' :
+                            virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
+                                virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                                        virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                            virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                                virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                                        'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -3930,6 +3931,22 @@ function initializeSyncPage() {
         spotifyPublicUrlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 parseSpotifyPublicUrl();
+            }
+        });
+    }
+
+    // Logic for iTunes Link parse button
+    const itunesLinkParseBtn = document.getElementById('itunes-link-parse-btn');
+    if (itunesLinkParseBtn) {
+        itunesLinkParseBtn.addEventListener('click', parseITunesLinkUrl);
+    }
+
+    // Logic for iTunes Link URL input (Enter key support)
+    const itunesLinkUrlInput = document.getElementById('itunes-link-url-input');
+    if (itunesLinkUrlInput) {
+        itunesLinkUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                parseITunesLinkUrl();
             }
         });
     }
@@ -7587,6 +7604,1031 @@ async function startSpotifyPublicDownloadMissing(urlHash) {
     }
 }
 
+
+// ===============================
+// ITUNES LINK FUNCTIONALITY
+// ===============================
+
+let itunesLinkPlaylists = []; // Array of loaded iTunes Link playlist objects
+let itunesLinkPlaylistStates = {}; // Key: url_hash, Value: state dict
+
+async function parseITunesLinkUrl() {
+    const urlInput = document.getElementById('itunes-link-url-input');
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        showToast('Please enter a iTunes URL', 'error');
+        return;
+    }
+
+    // Basic URL validation
+    const lowerUrl = url.toLowerCase();
+    if (!lowerUrl.includes('itunes.apple.com') && !lowerUrl.includes('music.apple.com') &&
+        !lowerUrl.startsWith('itunes:album:') && !lowerUrl.startsWith('itunes:track:') &&
+        !lowerUrl.startsWith('itunes:playlist:') && !lowerUrl.startsWith('applemusic:album:') &&
+        !lowerUrl.startsWith('applemusic:track:') && !lowerUrl.startsWith('applemusic:playlist:')) {
+        showToast('Please enter a valid iTunes or Apple Music URL', 'error');
+        return;
+    }
+
+    // Check if already loaded
+    if (_isUrlAlreadyLoaded('itunes-link', url)) {
+        showToast('This playlist is already loaded', 'info');
+        urlInput.value = '';
+        return;
+    }
+
+    const parseBtn = document.getElementById('itunes-link-parse-btn');
+    if (parseBtn) {
+        parseBtn.disabled = true;
+        parseBtn.textContent = 'Loading...';
+    }
+
+    try {
+        console.log('🎵 Parsing public iTunes URL:', url);
+
+        const response = await fetch('/api/itunes-link/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error: ${result.error}`, 'error');
+            return;
+        }
+
+        // Check if already loaded
+        if (itunesLinkPlaylists.find(p => String(p.url_hash) === String(result.url_hash))) {
+            showToast('This playlist is already loaded', 'info');
+            urlInput.value = '';
+            return;
+        }
+
+        console.log(`✅ iTunes ${result.type} parsed: ${result.name} (${result.track_count} tracks)`);
+
+        itunesLinkPlaylists.push(result);
+
+        // Auto-mirror
+        if (result.tracks && result.tracks.length > 0) {
+            mirrorPlaylist('itunes_link', result.url_hash, result.name, result.tracks.map(t => ({
+                track_name: t.name || '',
+                artist_name: Array.isArray(t.artists) ? t.artists.map(a => (typeof a === 'object' && a !== null) ? a.name : a).filter(Boolean).join(', ') : '',
+                album_name: t.album?.name || '',
+                duration_ms: t.duration_ms || 0,
+                source_track_id: t.id || ''
+            })), { owner: result.subtitle || '', image_url: '', description: result.url || '' });
+        }
+
+        // Save to URL history
+        saveUrlHistory('itunes-link', url, result.name);
+
+        renderITunesLinkPlaylists();
+        await loadITunesLinkPlaylistStatesFromBackend();
+
+        urlInput.value = '';
+        showToast(`Loaded: ${result.name} (${result.track_count} tracks)`, 'success');
+        console.log(`🎵 Loaded iTunes link: ${result.name}`);
+
+    } catch (error) {
+        console.error('❌ Error parsing iTunes URL:', error);
+        showToast(`Error parsing iTunes URL: ${error.message}`, 'error');
+    } finally {
+        if (parseBtn) {
+            parseBtn.disabled = false;
+            parseBtn.textContent = 'Load';
+        }
+    }
+}
+
+function renderITunesLinkPlaylists() {
+    const container = document.getElementById('itunes-link-playlist-container');
+    if (itunesLinkPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">Paste an iTunes or Apple Music album/track URL above to load tracks.</div>`;
+        return;
+    }
+
+    container.innerHTML = itunesLinkPlaylists.map(p => {
+        if (!itunesLinkPlaylistStates[p.url_hash]) {
+            itunesLinkPlaylistStates[p.url_hash] = {
+                phase: 'fresh',
+                playlist: p
+            };
+        }
+        return createITunesLinkCard(p);
+    }).join('');
+
+    // Add click handlers to cards
+    itunesLinkPlaylists.forEach(p => {
+        const card = document.getElementById(`itunes-link-card-${p.url_hash}`);
+        if (card) {
+            card.addEventListener('click', () => handleITunesLinkCardClick(p.url_hash));
+        }
+    });
+}
+
+function createITunesLinkCard(playlist) {
+    const state = itunesLinkPlaylistStates[playlist.url_hash];
+    const phase = state ? state.phase : 'fresh';
+    const isAlbum = playlist.type === 'album';
+    const isPlaylist = playlist.type === 'playlist';
+
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
+
+    return `
+        <div class="youtube-playlist-card itunes-link-card" id="itunes-link-card-${playlist.url_hash}">
+            <div class="playlist-card-icon">${isAlbum ? '💿' : (isPlaylist ? '♫' : '🎵')}</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-type-badge" style="color: ${isAlbum ? '#b3b3b3' : '#fa586a'}; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.5px;">${isAlbum ? 'Album' : (isPlaylist ? 'Playlist' : 'Track')}</span>
+                    <span class="playlist-card-track-count">${playlist.track_count || playlist.tracks.length} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                <!-- Progress will be dynamically updated based on phase -->
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+async function handleITunesLinkCardClick(urlHash) {
+    const state = itunesLinkPlaylistStates[urlHash];
+    if (!state) {
+        console.error(`No state found for iTunes Link playlist: ${urlHash}`);
+        showToast('Playlist state not found - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.playlist) {
+        console.error(`No playlist data found for iTunes Link playlist: ${urlHash}`);
+        showToast('Playlist data missing - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.phase) {
+        state.phase = 'fresh';
+    }
+
+    console.log(`🎵 [Card Click] iTunes Link card clicked: ${urlHash}, Phase: ${state.phase}`);
+
+    if (state.phase === 'fresh') {
+        console.log(`🎵 Using pre-loaded iTunes Link playlist data for: ${state.playlist.name}`);
+        openITunesLinkDiscoveryModal(urlHash, state.playlist);
+
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
+        console.log(`🎵 [Card Click] Opening iTunes Link discovery modal for ${state.phase} phase`);
+
+        if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
+            try {
+                const stateResponse = await fetch(`/api/itunes-link/state/${urlHash}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results) {
+                        state.discovery_results = fullState.discovery_results;
+                        state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
+                        state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
+                        itunesLinkPlaylistStates[urlHash] = { ...itunesLinkPlaylistStates[urlHash], ...state };
+                        console.log(`Restored ${fullState.discovery_results.length} discovery results from backend`);
+                    }
+                }
+            } catch (error) {
+                console.error(`Failed to fetch discovery results from backend: ${error}`);
+            }
+        }
+
+        openITunesLinkDiscoveryModal(urlHash, state.playlist);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        if (state.convertedSpotifyPlaylistId) {
+            if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'flex';
+                } else {
+                    await rehydrateITunesLinkDownloadModal(urlHash, state);
+                }
+            } else {
+                await rehydrateITunesLinkDownloadModal(urlHash, state);
+            }
+        } else {
+            if (state.discovery_results && state.discovery_results.length > 0) {
+                openITunesLinkDiscoveryModal(urlHash, state.playlist);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
+        }
+    }
+}
+
+async function rehydrateITunesLinkDownloadModal(urlHash, state) {
+    try {
+        if (!state || !state.playlist) {
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        const spotifyTracks = state.discovery_results
+            ?.filter(result => result.spotify_data)
+            ?.map(result => result.spotify_data) || [];
+
+        if (spotifyTracks.length > 0) {
+            const virtualPlaylistId = state.convertedSpotifyPlaylistId || `itunes_link_${urlHash}`;
+            await openDownloadMissingModalForTidal(virtualPlaylistId, state.playlist.name, spotifyTracks);
+
+            if (state.download_process_id) {
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = state.download_process_id;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    startModalDownloadPolling(virtualPlaylistId);
+                }
+            }
+        } else {
+            showToast('No Spotify tracks found for download', 'error');
+        }
+    } catch (error) {
+        console.error(`Error rehydrating iTunes Link download modal: ${error}`);
+    }
+}
+
+async function openITunesLinkDiscoveryModal(urlHash, playlistData) {
+    console.log(`🎵 Opening iTunes Link discovery modal (reusing YouTube modal): ${playlistData.name}`);
+
+    const fakeUrlHash = `ituneslink_${urlHash}`;
+
+    const cardState = itunesLinkPlaylistStates[urlHash];
+    const isAlreadyDiscovered = cardState && (cardState.phase === 'discovered' || cardState.phase === 'syncing' || cardState.phase === 'sync_complete');
+    const isCurrentlyDiscovering = cardState && cardState.phase === 'discovering';
+
+    let transformedResults = [];
+    let actualMatches = 0;
+    if (isAlreadyDiscovered && cardState.discovery_results) {
+        transformedResults = cardState.discovery_results.map((result, index) => {
+            const isFound = result.status === 'found' ||
+                result.status === '✅ Found' ||
+                result.status_class === 'found' ||
+                result.spotify_data ||
+                result.spotify_track;
+            if (isFound) actualMatches++;
+
+            return {
+                index: index,
+                yt_track: result.itunes_link_track ? result.itunes_link_track.name : 'Unknown',
+                yt_artist: result.itunes_link_track ? (result.itunes_link_track.artists ? result.itunes_link_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                status: isFound ? '✅ Found' : '❌ Not Found',
+                status_class: isFound ? 'found' : 'not-found',
+                spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                    (Array.isArray(result.spotify_data.artists)
+                        ? result.spotify_data.artists
+                            .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                            .filter(Boolean)
+                            .join(', ') || '-'
+                        : result.spotify_data.artists)
+                    : (result.spotify_artist || '-'),
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                spotify_data: result.spotify_data,
+                spotify_id: result.spotify_id,
+                manual_match: result.manual_match
+            };
+        });
+        console.log(`🎵 iTunes Link modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
+    }
+
+    // Normalize artist objects to strings for the discovery modal table
+    const normalizedTracks = playlistData.tracks.map(t => ({
+        ...t,
+        artists: Array.isArray(t.artists)
+            ? t.artists.map(a => typeof a === 'object' ? a.name : a)
+            : t.artists
+    }));
+
+    const modalPhase = cardState ? cardState.phase : 'fresh';
+    youtubePlaylistStates[fakeUrlHash] = {
+        phase: modalPhase,
+        playlist: {
+            name: playlistData.name,
+            tracks: normalizedTracks
+        },
+        is_itunes_link_playlist: true,
+        itunes_link_playlist_id: urlHash,
+        discovery_progress: isAlreadyDiscovered ? 100 : 0,
+        spotify_matches: isAlreadyDiscovered ? actualMatches : 0,
+        spotifyMatches: isAlreadyDiscovered ? actualMatches : 0,
+        spotify_total: playlistData.tracks.length,
+        discovery_results: transformedResults,
+        discoveryResults: transformedResults,
+        discoveryProgress: isAlreadyDiscovered ? 100 : 0
+    };
+
+    if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        try {
+            console.log(`🔍 Starting iTunes Link discovery for: ${playlistData.name}`);
+
+            const response = await fetch(`/api/itunes-link/discovery/start/${urlHash}`, {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                console.error('Error starting iTunes Link discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+                return;
+            }
+
+            console.log('iTunes Link discovery started, beginning polling...');
+
+            itunesLinkPlaylistStates[urlHash].phase = 'discovering';
+            updateITunesLinkCardPhase(urlHash, 'discovering');
+            youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+
+            startITunesLinkDiscoveryPolling(fakeUrlHash, urlHash);
+
+        } catch (error) {
+            console.error('Error starting iTunes Link discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+    } else if (isCurrentlyDiscovering) {
+        console.log(`🔄 Resuming iTunes Link discovery polling for: ${playlistData.name}`);
+        startITunesLinkDiscoveryPolling(fakeUrlHash, urlHash);
+    } else if (cardState && cardState.phase === 'syncing') {
+        console.log(`🔄 Resuming iTunes Link sync polling for: ${playlistData.name}`);
+        startITunesLinkSyncPolling(fakeUrlHash);
+    } else {
+        console.log('Using existing results - no need to re-discover');
+    }
+
+    openYouTubeDiscoveryModal(fakeUrlHash);
+}
+
+function startITunesLinkDiscoveryPolling(fakeUrlHash, urlHash) {
+    console.log(`🔄 Starting iTunes Link discovery polling for: ${urlHash}`);
+
+    if (activeYouTubePollers[fakeUrlHash]) {
+        clearInterval(activeYouTubePollers[fakeUrlHash]);
+    }
+
+    // WebSocket subscription
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [urlHash] });
+        _discoveryProgressCallbacks[urlHash] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                return;
+            }
+            const transformed = {
+                progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                complete: data.complete,
+                results: (data.results || []).map((r, i) => {
+                    const isWingIt = r.wing_it_fallback || r.status_class === 'wing-it';
+                    const isFound = !isWingIt && (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track);
+                    return {
+                        index: i, yt_track: r.itunes_link_track ? r.itunes_link_track.name : 'Unknown',
+                        yt_artist: r.itunes_link_track ? (r.itunes_link_track.artists ? r.itunes_link_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
+                        status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists
+                            ? (Array.isArray(r.spotify_data.artists)
+                                ? (r.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : r.spotify_data.artists)
+                            : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
+                        wing_it_fallback: isWingIt
+                    };
+                })
+            };
+            const st = youtubePlaylistStates[fakeUrlHash];
+            if (st) {
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase;
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformed);
+            }
+            if (itunesLinkPlaylistStates[urlHash]) {
+                itunesLinkPlaylistStates[urlHash].phase = data.phase;
+                itunesLinkPlaylistStates[urlHash].discovery_results = data.results;
+                itunesLinkPlaylistStates[urlHash].spotify_matches = data.spotify_matches;
+                itunesLinkPlaylistStates[urlHash].discovery_progress = data.progress;
+                updateITunesLinkCardPhase(urlHash, data.phase);
+            }
+            updateITunesLinkCardProgress(urlHash, data);
+            if (data.complete) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+            }
+        };
+    }
+
+    const pollInterval = setInterval(async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/itunes-link/discovery/status/${urlHash}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling iTunes Link discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+                return;
+            }
+
+            const transformedStatus = {
+                progress: status.progress,
+                spotify_matches: status.spotify_matches,
+                spotify_total: status.spotify_total,
+                complete: status.complete,
+                results: status.results.map((result, index) => {
+                    const isFound = result.status === 'found' ||
+                        result.status === '✅ Found' ||
+                        result.status_class === 'found' ||
+                        result.spotify_data ||
+                        result.spotify_track;
+
+                    return {
+                        index: index,
+                        yt_track: result.itunes_link_track ? result.itunes_link_track.name : 'Unknown',
+                        yt_artist: result.itunes_link_track ? (result.itunes_link_track.artists ? result.itunes_link_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found',
+                        status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists
+                            ? (Array.isArray(result.spotify_data.artists)
+                                ? (result.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : result.spotify_data.artists)
+                            : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data,
+                        spotify_id: result.spotify_id,
+                        manual_match: result.manual_match
+                    };
+                })
+            };
+
+            const state = youtubePlaylistStates[fakeUrlHash];
+            if (state) {
+                state.discovery_progress = status.progress;
+                state.discoveryProgress = status.progress;
+                state.spotify_matches = status.spotify_matches;
+                state.spotifyMatches = status.spotify_matches;
+                state.discovery_results = status.results;
+                state.discoveryResults = transformedStatus.results;
+                state.phase = status.phase;
+
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
+
+                if (itunesLinkPlaylistStates[urlHash]) {
+                    itunesLinkPlaylistStates[urlHash].phase = status.phase;
+                    itunesLinkPlaylistStates[urlHash].discovery_results = status.results;
+                    itunesLinkPlaylistStates[urlHash].spotify_matches = status.spotify_matches;
+                    itunesLinkPlaylistStates[urlHash].discovery_progress = status.progress;
+                    updateITunesLinkCardPhase(urlHash, status.phase);
+                }
+
+                updateITunesLinkCardProgress(urlHash, status);
+
+                console.log(`🔄 iTunes Link discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
+            }
+
+            if (status.complete) {
+                console.log(`iTunes Link discovery complete: ${status.spotify_matches}/${status.spotify_total} tracks found`);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+            }
+
+        } catch (error) {
+            console.error('Error polling iTunes Link discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[fakeUrlHash];
+        }
+    }, 1000);
+
+    activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+async function loadITunesLinkPlaylistStatesFromBackend() {
+    try {
+        console.log('🎵 Loading iTunes Link playlist states from backend...');
+
+        const response = await fetch('/api/itunes-link/playlists/states');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch iTunes Link playlist states');
+        }
+
+        const data = await response.json();
+        const states = data.states || [];
+
+        console.log(`🎵 Found ${states.length} stored iTunes Link playlist states in backend`);
+
+        if (states.length === 0) return;
+
+        for (const stateInfo of states) {
+            await applyITunesLinkPlaylistState(stateInfo);
+        }
+
+        // Rehydrate download modals for playlists in downloading/download_complete phases
+        for (const stateInfo of states) {
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') &&
+                stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
+
+                const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
+
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    console.log(`Rehydrating download modal for iTunes Link playlist: ${stateInfo.playlist_id}`);
+                    try {
+                        const playlistData = itunesLinkPlaylists.find(p => String(p.url_hash) === String(stateInfo.playlist_id));
+                        if (!playlistData) continue;
+
+                        const spotifyTracks = itunesLinkPlaylistStates[stateInfo.playlist_id]?.discovery_results
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForTidal(
+                                convertedPlaylistId,
+                                playlistData.name,
+                                spotifyTracks
+                            );
+
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = stateInfo.download_process_id;
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                startModalDownloadPolling(convertedPlaylistId);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error rehydrating iTunes Link download modal for ${stateInfo.playlist_id}:`, error);
+                    }
+                }
+            }
+        }
+
+        console.log('iTunes Link playlist states loaded and applied');
+
+    } catch (error) {
+        console.error('Error loading iTunes Link playlist states:', error);
+    }
+}
+
+async function applyITunesLinkPlaylistState(stateInfo) {
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
+
+    try {
+        console.log(`🎵 Applying saved state for iTunes Link playlist: ${playlist_id}, Phase: ${phase}`);
+
+        const playlistData = itunesLinkPlaylists.find(p => String(p.url_hash) === String(playlist_id));
+        if (!playlistData) {
+            console.warn(`Playlist data not found for state ${playlist_id} - skipping`);
+            return;
+        }
+
+        if (!itunesLinkPlaylistStates[playlist_id]) {
+            itunesLinkPlaylistStates[playlist_id] = {
+                playlist: playlistData,
+                phase: 'fresh'
+            };
+        }
+
+        itunesLinkPlaylistStates[playlist_id].phase = phase;
+        itunesLinkPlaylistStates[playlist_id].discovery_progress = discovery_progress;
+        itunesLinkPlaylistStates[playlist_id].spotify_matches = spotify_matches;
+        itunesLinkPlaylistStates[playlist_id].discovery_results = discovery_results;
+        itunesLinkPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
+        itunesLinkPlaylistStates[playlist_id].download_process_id = download_process_id;
+        itunesLinkPlaylistStates[playlist_id].playlist = playlistData;
+
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                const stateResponse = await fetch(`/api/itunes-link/state/${playlist_id}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results && itunesLinkPlaylistStates[playlist_id]) {
+                        itunesLinkPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
+                        itunesLinkPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
+                        itunesLinkPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        itunesLinkPlaylistStates[playlist_id].convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                        itunesLinkPlaylistStates[playlist_id].download_process_id = fullState.download_process_id;
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error fetching full discovery results for iTunes Link playlist ${playlistData.name}:`, error.message);
+            }
+        }
+
+        updateITunesLinkCardPhase(playlist_id, phase);
+
+        if (phase === 'discovered' && itunesLinkPlaylistStates[playlist_id]) {
+            const progressInfo = {
+                spotify_total: playlistData.track_count || playlistData.tracks?.length || 0,
+                spotify_matches: itunesLinkPlaylistStates[playlist_id].spotify_matches || 0
+            };
+            updateITunesLinkCardProgress(playlist_id, progressInfo);
+        }
+
+        if (phase === 'discovering') {
+            const fakeUrlHash = `ituneslink_${playlist_id}`;
+            startITunesLinkDiscoveryPolling(fakeUrlHash, playlist_id);
+        } else if (phase === 'syncing') {
+            const fakeUrlHash = `ituneslink_${playlist_id}`;
+            startITunesLinkSyncPolling(fakeUrlHash);
+        }
+
+    } catch (error) {
+        console.error(`Error applying iTunes Link playlist state for ${playlist_id}:`, error);
+    }
+}
+
+function updateITunesLinkCardPhase(urlHash, phase) {
+    const state = itunesLinkPlaylistStates[urlHash];
+    if (!state) return;
+
+    state.phase = phase;
+
+    const card = document.getElementById(`itunes-link-card-${urlHash}`);
+    if (card) {
+        const newCardHtml = createITunesLinkCard(state.playlist);
+        card.outerHTML = newCardHtml;
+
+        const newCard = document.getElementById(`itunes-link-card-${urlHash}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleITunesLinkCardClick(urlHash));
+        }
+
+        if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+            setTimeout(() => {
+                updateITunesLinkCardSyncProgress(urlHash, state.lastSyncProgress);
+            }, 0);
+        }
+    }
+}
+
+function updateITunesLinkCardProgress(urlHash, progress) {
+    const state = itunesLinkPlaylistStates[urlHash];
+    if (!state) return;
+
+    const card = document.getElementById(`itunes-link-card-${urlHash}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+
+    progressElement.classList.remove('hidden');
+
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+
+    if (total > 0) {
+        progressElement.innerHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat matched-tracks">✓ ${matches}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+            </div>
+        `;
+    }
+}
+
+// ===============================
+// SPOTIFY PUBLIC SYNC FUNCTIONALITY
+// ===============================
+
+async function startITunesLinkPlaylistSync(urlHash) {
+    try {
+        console.log('🎵 Starting iTunes Link playlist sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_itunes_link_playlist) {
+            console.error('Invalid iTunes Link playlist state for sync');
+            return;
+        }
+
+        const playlistId = state.itunes_link_playlist_id;
+        const response = await fetch(`/api/itunes-link/sync/start/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
+        updateITunesLinkCardPhase(playlistId, 'syncing');
+        updateITunesLinkModalButtons(urlHash, 'syncing');
+
+        startITunesLinkSyncPolling(urlHash, syncPlaylistId);
+
+        showToast('iTunes Link playlist sync started!', 'success');
+
+    } catch (error) {
+        console.error('Error starting iTunes Link sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startITunesLinkSyncPolling(urlHash, syncPlaylistId) {
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const state = youtubePlaylistStates[urlHash];
+    const playlistId = state.itunes_link_playlist_id;
+
+    syncPlaylistId = syncPlaylistId || (state && state.syncPlaylistId);
+
+    // WebSocket subscription
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateITunesLinkCardSyncProgress(playlistId, progress);
+            updateITunesLinkModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (itunesLinkPlaylistStates[playlistId]) itunesLinkPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateITunesLinkCardPhase(playlistId, 'sync_complete');
+                updateITunesLinkModalButtons(urlHash, 'sync_complete');
+                showToast('iTunes Link playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (itunesLinkPlaylistStates[playlistId]) itunesLinkPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateITunesLinkCardPhase(playlistId, 'discovered');
+                updateITunesLinkModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    const pollFunction = async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/itunes-link/sync/status/${playlistId}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling iTunes Link sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+
+            updateITunesLinkCardSyncProgress(playlistId, status.progress);
+            updateITunesLinkModalSyncProgress(urlHash, status.progress);
+
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (itunesLinkPlaylistStates[playlistId]) itunesLinkPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateITunesLinkCardPhase(playlistId, 'sync_complete');
+                updateITunesLinkModalButtons(urlHash, 'sync_complete');
+                showToast('iTunes Link playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (itunesLinkPlaylistStates[playlistId]) itunesLinkPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateITunesLinkCardPhase(playlistId, 'discovered');
+                updateITunesLinkModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error polling iTunes Link sync:', error);
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
+        }
+    };
+
+    if (!socketConnected) pollFunction();
+
+    const pollInterval = setInterval(pollFunction, 1000);
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelITunesLinkSync(urlHash) {
+    try {
+        console.log('Cancelling iTunes Link sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_itunes_link_playlist) {
+            console.error('Invalid iTunes Link playlist state');
+            return;
+        }
+
+        const playlistId = state.itunes_link_playlist_id;
+        const response = await fetch(`/api/itunes-link/sync/cancel/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+
+        const syncId = state && state.syncPlaylistId;
+        if (syncId && _syncProgressCallbacks[syncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncId] });
+            delete _syncProgressCallbacks[syncId];
+        }
+
+        updateITunesLinkCardPhase(playlistId, 'discovered');
+        updateITunesLinkModalButtons(urlHash, 'discovered');
+
+        showToast('iTunes Link sync cancelled', 'info');
+
+    } catch (error) {
+        console.error('Error cancelling iTunes Link sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateITunesLinkCardSyncProgress(urlHash, progress) {
+    const state = itunesLinkPlaylistStates[urlHash];
+    if (!state || !state.playlist || !progress) return;
+
+    state.lastSyncProgress = progress;
+
+    const card = document.getElementById(`itunes-link-card-${urlHash}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
+}
+
+function updateITunesLinkModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`itunes-link-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+
+    const totalEl = document.getElementById(`itunes-link-total-${urlHash}`);
+    const matchedEl = document.getElementById(`itunes-link-matched-${urlHash}`);
+    const failedEl = document.getElementById(`itunes-link-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`itunes-link-percentage-${urlHash}`);
+
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+}
+
+function updateITunesLinkModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+async function startITunesLinkDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for iTunes Link playlist:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_itunes_link_playlist) {
+            console.error('Invalid iTunes Link playlist state for download');
+            return;
+        }
+
+        const discoveryResults = state.discoveryResults || state.discovery_results;
+
+        if (!discoveryResults) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+
+        const spotifyTracks = [];
+        for (const result of discoveryResults) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            } else if (result.spotify_track && result.status_class === 'found') {
+                const albumData = result.spotify_album || 'Unknown Album';
+                const albumObject = typeof albumData === 'object' && albumData !== null
+                    ? albumData
+                    : {
+                        name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+
+                spotifyTracks.push({
+                    id: result.spotify_id || 'unknown',
+                    name: result.spotify_track || 'Unknown Track',
+                    artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                    album: albumObject,
+                    duration_ms: 0
+                });
+            }
+        }
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const realUrlHash = state.itunes_link_playlist_id;
+        const virtualPlaylistId = `itunes_link_${realUrlHash}`;
+        const playlistName = state.playlist.name;
+
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+
+        // Sync convertedSpotifyPlaylistId to itunesLinkPlaylistStates for card click routing
+        if (realUrlHash && itunesLinkPlaylistStates[realUrlHash]) {
+            itunesLinkPlaylistStates[realUrlHash].convertedSpotifyPlaylistId = virtualPlaylistId;
+        }
+
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.classList.add('hidden');
+        }
+
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+
+    } catch (error) {
+        console.error('Error starting iTunes Link download missing:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+
 // ===============================
 // URL HISTORY (Saved playlist URLs)
 // ===============================
@@ -7595,7 +8637,8 @@ const URL_HISTORY_MAX = 10;
 const URL_HISTORY_SOURCES = {
     youtube: { key: 'soulsync-url-history-youtube', icon: '▶', inputId: 'youtube-url-input', containerId: 'youtube-url-history', loadFn: () => parseYouTubePlaylist() },
     deezer: { key: 'soulsync-url-history-deezer', icon: '🎵', inputId: 'deezer-url-input', containerId: 'deezer-url-history', loadFn: () => loadDeezerPlaylist() },
-    'spotify-public': { key: 'soulsync-url-history-spotify-public', icon: '🎧', inputId: 'spotify-public-url-input', containerId: 'spotify-public-url-history', loadFn: () => parseSpotifyPublicUrl() }
+    'spotify-public': { key: 'soulsync-url-history-spotify-public', icon: '🎧', inputId: 'spotify-public-url-input', containerId: 'spotify-public-url-history', loadFn: () => parseSpotifyPublicUrl() },
+    'itunes-link': { key: 'soulsync-url-history-itunes-link', icon: '♪', inputId: 'itunes-link-url-input', containerId: 'itunes-link-url-history', loadFn: () => parseITunesLinkUrl() }
 };
 
 function getUrlHistory(source) {
@@ -7704,8 +8747,32 @@ function _isUrlAlreadyLoaded(source, url) {
         if (spId && spotifyPublicPlaylists.some(p => p.id === spId)) return true;
         // Fallback: direct URL comparison
         return spotifyPublicPlaylists.some(p => p.url === url);
+    } else if (source === 'itunes-link') {
+        const parsed = extractITunesLinkId(url);
+        if (parsed && itunesLinkPlaylists.some(p => p.id === parsed.id && p.type === parsed.type)) return true;
+        return itunesLinkPlaylists.some(p => p.url === url);
     }
     return false;
+}
+
+function extractITunesLinkId(url) {
+    try {
+        const raw = (url || '').trim();
+        const uriMatch = raw.match(/^(?:itunes|applemusic):(album|track|playlist):([A-Za-z0-9._-]+)$/i);
+        if (uriMatch) return { type: uriMatch[1].toLowerCase(), id: uriMatch[2] };
+        const parsed = new URL(raw);
+        const trackId = parsed.searchParams.get('i');
+        if (trackId && /^\d+$/.test(trackId)) return { type: 'track', id: trackId };
+        const songMatch = parsed.pathname.match(/\/song(?:\/[^/]+)?\/(\d+)/);
+        if (songMatch) return { type: 'track', id: songMatch[1] };
+        const albumMatch = parsed.pathname.match(/\/album(?:\/[^/]+)?\/(\d+)/);
+        if (albumMatch) return { type: 'album', id: albumMatch[1] };
+        const playlistMatch = parsed.pathname.match(/\/playlist(?:\/[^/]+)?\/(pl\.[A-Za-z0-9._-]+)/);
+        if (playlistMatch) return { type: 'playlist', id: playlistMatch[1] };
+    } catch (e) {
+        return null;
+    }
+    return null;
 }
 
 function initUrlHistories() {
@@ -8229,6 +9296,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                 startDeezerSyncPolling(urlHash);
             } else if (state.is_spotify_public_playlist) {
                 startSpotifyPublicSyncPolling(urlHash);
+            } else if (state.is_itunes_link_playlist) {
+                startITunesLinkSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
             } else if (state.is_listenbrainz_playlist) {
@@ -8243,13 +9312,15 @@ function openYouTubeDiscoveryModal(urlHash) {
         const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
         const isSpotifyPublic = state.is_spotify_public_playlist;
+        const isITunesLink = state.is_itunes_link_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isMirrored = state.is_mirrored_playlist;
         const isLastfmRadio = typeof urlHash === 'string' && urlHash.startsWith('lastfm_radio_');
         const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
             isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
-                isDeezer ? '🎵 Deezer Playlist Discovery' :
+                isITunesLink ? '🎵 iTunes Link Discovery' :
+                    isDeezer ? '🎵 Deezer Playlist Discovery' :
                     isTidal ? '🎵 Tidal Playlist Discovery' :
                         isQobuz ? '🎵 Qobuz Playlist Discovery' :
                             isBeatport ? '🎵 Beatport Chart Discovery' :
@@ -8258,7 +9329,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                                         '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
             isSpotifyPublic ? 'Spotify' :
-                isDeezer ? 'Deezer' :
+                isITunesLink ? 'iTunes' :
+                    isDeezer ? 'Deezer' :
                     isTidal ? 'Tidal' :
                         isQobuz ? 'Qobuz' :
                             isBeatport ? 'Beatport' :
@@ -8272,7 +9344,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic, isLastfmRadio, isQobuz)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic, isLastfmRadio, isQobuz, isITunesLink)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -8445,6 +9517,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
     const isQobuz = state && state.is_qobuz_playlist;
     const isDeezer = state && state.is_deezer_playlist;
     const isSpotifyPublic = state && state.is_spotify_public_playlist;
+    const isITunesLink = state && state.is_itunes_link_playlist;
     const isBeatport = state && state.is_beatport_playlist;
     const isListenBrainz = state && state.is_listenbrainz_playlist;
 
@@ -8492,6 +9565,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isITunesLink) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -8511,6 +9586,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isITunesLink) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -8530,7 +9607,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button — reset and re-run discovery (only for sources with reset endpoints)
             if (isBeatport) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic && !isITunesLink) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -8608,6 +9685,18 @@ function getModalActionButtons(urlHash, phase, state = null) {
                         <span class="sync-stat percentage">(<span id="spotify-public-percentage-${urlHash}">0</span>%)</span>
                     </div>
                 `;
+            } else if (isITunesLink) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelITunesLinkSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="itunes-link-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="itunes-link-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="itunes-link-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="itunes-link-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="itunes-link-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
             } else if (isBeatport) {
                 return `
                     <button class="modal-btn modal-btn-danger" onclick="cancelBeatportSync('${urlHash}')">❌ Cancel Sync</button>
@@ -8647,6 +9736,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isITunesLink) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -8664,6 +9755,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isITunesLink) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -8674,7 +9767,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button (only for sources with reset endpoints)
             if (isBeatport) {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic && !isITunesLink) {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -8698,6 +9791,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isSpotifyPublic) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isITunesLink) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -8716,6 +9811,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isITunesLink) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -8726,7 +9823,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Rediscover button (only for sources with reset endpoints)
             if (isBeatport) {
                 dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
-            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic) {
+            } else if (!isListenBrainz && !isTidal && !isQobuz && !isDeezer && !isSpotifyPublic && !isITunesLink) {
                 dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
@@ -8737,8 +9834,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false, isLastfmRadio = false, isQobuz = false) {
-    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isQobuz ? 'Qobuz' : (isTidal ? 'Tidal' : 'YouTube')))))));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false, isLastfmRadio = false, isQobuz = false, isITunesLink = false) {
+    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isITunesLink ? 'iTunes' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isQobuz ? 'Qobuz' : (isTidal ? 'Tidal' : 'YouTube'))))))));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -8773,10 +9870,11 @@ function generateTableRowsFromState(state, urlHash) {
     const isQobuz = state.is_qobuz_playlist;
     const isDeezer = state.is_deezer_playlist;
     const isSpotifyPublic = state.is_spotify_public_playlist;
+    const isITunesLink = state.is_itunes_link_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isListenBrainz = state.is_listenbrainz_playlist;
     const isMirrored = state.is_mirrored_playlist;
-    const platform = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'spotify_public' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isQobuz ? 'qobuz' : (isBeatport ? 'beatport' : 'youtube'))))));
+    const platform = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'spotify_public' : (isITunesLink ? 'itunes_link' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isQobuz ? 'qobuz' : (isBeatport ? 'beatport' : 'youtube')))))));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
@@ -8938,11 +10036,12 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
             const platform = state?.is_mirrored_playlist ? 'mirrored' :
                 (state?.is_spotify_public_playlist ? 'spotify_public' :
+                    (state?.is_itunes_link_playlist ? 'itunes_link' :
                     (state?.is_deezer_playlist ? 'deezer' :
                         (state?.is_listenbrainz_playlist ? 'listenbrainz' :
                             (state?.is_tidal_playlist ? 'tidal' :
                                 (state?.is_qobuz_playlist ? 'qobuz' :
-                                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'))))));
+                                    (state?.is_beatport_playlist ? 'beatport' : 'youtube')))))));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -9016,11 +10115,12 @@ function closeYouTubeDiscoveryModal(urlHash) {
         const isQobuz = state.is_qobuz_playlist;
         const isDeezer = state.is_deezer_playlist;
         const isSpotifyPublic = state.is_spotify_public_playlist;
+        const isITunesLink = state.is_itunes_link_playlist;
         const isBeatport = state.is_beatport_playlist;
 
         // Reset to 'discovered' phase if modal is closed after completion (like Tidal does)
         if (state.phase === 'sync_complete' || state.phase === 'download_complete') {
-            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isQobuz ? 'Qobuz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))))} state after completion`);
+            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isITunesLink ? 'iTunes Link' : (isDeezer ? 'Deezer' : (isQobuz ? 'Qobuz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))))} state after completion`);
 
             if (isSpotifyPublic) {
                 // Spotify Public: Extract url_hash and reset state
@@ -9050,6 +10150,35 @@ function closeYouTubeDiscoveryModal(urlHash) {
                         });
                     } catch (error) {
                         console.warn('Error updating backend Spotify Public phase:', error);
+                    }
+                }
+            } else if (isITunesLink) {
+                const itunesUrlHash = state.itunes_link_playlist_id || null;
+                if (itunesUrlHash && itunesLinkPlaylistStates[itunesUrlHash]) {
+                    const preservedData = {
+                        playlist: itunesLinkPlaylistStates[itunesUrlHash].playlist,
+                        discovery_results: itunesLinkPlaylistStates[itunesUrlHash].discovery_results,
+                        spotify_matches: itunesLinkPlaylistStates[itunesUrlHash].spotify_matches,
+                        discovery_progress: itunesLinkPlaylistStates[itunesUrlHash].discovery_progress,
+                        convertedSpotifyPlaylistId: itunesLinkPlaylistStates[itunesUrlHash].convertedSpotifyPlaylistId
+                    };
+
+                    delete itunesLinkPlaylistStates[itunesUrlHash].download_process_id;
+                    delete itunesLinkPlaylistStates[itunesUrlHash].phase;
+
+                    Object.assign(itunesLinkPlaylistStates[itunesUrlHash], preservedData);
+                    itunesLinkPlaylistStates[itunesUrlHash].phase = 'discovered';
+
+                    updateITunesLinkCardPhase(itunesUrlHash, 'discovered');
+
+                    try {
+                        fetch(`/api/itunes-link/update_phase/${itunesUrlHash}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                    } catch (error) {
+                        console.warn('Error updating backend iTunes Link phase:', error);
                     }
                 }
             } else if (isDeezer) {
@@ -9394,7 +10523,7 @@ function updateYouTubeCardSyncProgress(urlHash, progress) {
 
 function updateYouTubeModalSyncProgress(urlHash, progress) {
     // Try all source-specific element ID prefixes
-    const prefixes = ['youtube', 'listenbrainz', 'tidal', 'deezer', 'spotify-public', 'beatport'];
+    const prefixes = ['youtube', 'listenbrainz', 'tidal', 'deezer', 'spotify-public', 'itunes-link', 'beatport'];
     let statusDisplay = null;
     let prefix = 'youtube';
     for (const p of prefixes) {

@@ -396,13 +396,16 @@ async function selectDiscoveryFixTrack(track) {
             // For Spotify Public, backend expects the url_hash
             const state = youtubePlaylistStates[identifier];
             backendIdentifier = state?.spotify_public_playlist_id || identifier;
+        } else if (platform === 'itunes_link') {
+            const state = youtubePlaylistStates[identifier];
+            backendIdentifier = state?.itunes_link_playlist_id || identifier;
         } else if (platform === 'beatport') {
             // For Beatport, backend expects url_hash (same as identifier)
             backendIdentifier = identifier;
         }
 
         // Mirrored playlists route through the YouTube endpoint (which already handles mirrored_ prefixes)
-        const apiPlatform = platform === 'mirrored' ? 'youtube' : (platform === 'spotify_public' ? 'spotify-public' : platform);
+        const apiPlatform = platform === 'mirrored' ? 'youtube' : (platform === 'spotify_public' ? 'spotify-public' : (platform === 'itunes_link' ? 'itunes-link' : platform));
 
         const requestBody = {
             identifier: backendIdentifier,
@@ -458,6 +461,8 @@ async function selectDiscoveryFixTrack(track) {
         } else if (platform === 'mirrored') {
             state = youtubePlaylistStates[identifier];
         } else if (platform === 'spotify_public') {
+            state = youtubePlaylistStates[identifier];
+        } else if (platform === 'itunes_link') {
             state = youtubePlaylistStates[identifier];
         }
 
@@ -561,6 +566,17 @@ async function selectDiscoveryFixTrack(track) {
                         });
                     }
                 }
+
+                if (platform === 'itunes_link' && state.itunes_link_playlist_id) {
+                    const itunesState = itunesLinkPlaylistStates?.[state.itunes_link_playlist_id];
+                    if (itunesState) {
+                        itunesState.spotifyMatches = state.spotifyMatches;
+                        updateITunesLinkCardProgress(state.itunes_link_playlist_id, {
+                            spotify_matches: state.spotifyMatches,
+                            spotify_total: spotify_total
+                        });
+                    }
+                }
             }
 
             // Update UI - refresh the table row
@@ -623,10 +639,19 @@ function updateDiscoveryModalSingleRow(platform, identifier, trackIndex) {
 }
 
 async function unmatchDiscoveryTrack(platform, identifier, trackIndex) {
+    const uiState = (typeof youtubePlaylistStates !== 'undefined' ? youtubePlaylistStates[identifier] : null)
+        || (typeof listenbrainzPlaylistStates !== 'undefined' ? listenbrainzPlaylistStates[identifier] : null);
+    const backendIdentifier = platform === 'spotify_public'
+        ? (uiState?.spotify_public_playlist_id || identifier)
+        : platform === 'itunes_link'
+            ? (uiState?.itunes_link_playlist_id || identifier)
+            : identifier;
+
     // Determine the correct API base for this platform
     const apiBase = platform === 'tidal' ? '/api/tidal'
         : platform === 'deezer' ? '/api/deezer'
-        : platform === 'spotify-public' ? '/api/spotify-public'
+        : (platform === 'spotify-public' || platform === 'spotify_public') ? '/api/spotify-public'
+        : (platform === 'itunes-link' || platform === 'itunes_link') ? '/api/itunes-link'
         : platform === 'beatport' ? '/api/beatport'
         : platform === 'listenbrainz' ? '/api/listenbrainz'
         : '/api/youtube';
@@ -635,7 +660,7 @@ async function unmatchDiscoveryTrack(platform, identifier, trackIndex) {
         const response = await fetch(`${apiBase}/discovery/unmatch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ identifier, track_index: trackIndex })
+            body: JSON.stringify({ identifier: backendIdentifier, track_index: trackIndex })
         });
         const data = await response.json();
         if (data.success) {
