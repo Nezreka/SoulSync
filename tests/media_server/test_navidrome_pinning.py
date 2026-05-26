@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.navidrome_client import NavidromeClient
+from core.navidrome_client import NavidromeAlbum, NavidromeClient
 
 
 @pytest.fixture
@@ -77,3 +77,22 @@ def test_get_all_album_ids_returns_set(nav_client):
 
     assert isinstance(result, set)
     assert result == {'nav-1', 'nav-2'}
+
+
+def test_navidrome_album_exposes_cover_art_url(nav_client):
+    album = NavidromeAlbum({
+        'id': 'album-1',
+        'name': 'Flower Boy',
+        'coverArt': 'cover-123',
+    }, nav_client)
+
+    assert album.thumb == '/rest/getCoverArt?id=cover-123'
+
+
+def test_navidrome_album_cover_art_falls_back_to_album_id(nav_client):
+    album = NavidromeAlbum({
+        'id': 'album-1',
+        'name': 'Flower Boy',
+    }, nav_client)
+
+    assert album.thumb == '/rest/getCoverArt?id=album-1'
