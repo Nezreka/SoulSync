@@ -690,6 +690,128 @@ def test_mirror_dict_spotify_authed_emits_matched_data():
     assert extra["matched_data"]["artists"] == [{"name": "Adele"}]
 
 
+def test_default_discover_tracks_is_no_op():
+    """Adapters whose tracks already carry provider IDs (Spotify,
+    Tidal, Qobuz, YouTube, Deezer, Spotify-public, iTunes-link,
+    SoulSync-Discovery) inherit the ABC default — return tracks
+    unchanged."""
+    track = NormalizedTrack(
+        position=0,
+        track_name="Song",
+        artist_name="Artist",
+        source_track_id="abc",
+        needs_discovery=False,
+    )
+    src = SpotifyPlaylistSource(lambda: None)
+    out = src.discover_tracks([track])
+    assert out == [track]
+
+
+def test_listenbrainz_discover_tracks_uses_callable():
+    """When the LB adapter is wired with a discover_callable, MB
+    tracks get matched_data populated; ``needs_discovery`` flips to
+    False on matches; non-matches stay as-is."""
+
+    def fake_discover(track_dicts):
+        # Match the first, leave second unmatched.
+        return [
+            {
+                "id": "matched-1",
+                "name": "Matched",
+                "artists": ["Artist 1"],
+                "album": {"name": "Album"},
+                "duration_ms": 200_000,
+                "image_url": "art",
+                "source": "spotify",
+                "_provider": "spotify",
+                "_confidence": 0.95,
+            },
+            None,
+        ]
+
+    src = ListenBrainzPlaylistSource(
+        lambda: None,
+        discover_callable=fake_discover,
+    )
+    tracks = [
+        NormalizedTrack(
+            position=0,
+            track_name="Song A",
+            artist_name="Artist 1",
+            source_track_id="mbid-1",
+            needs_discovery=True,
+        ),
+        NormalizedTrack(
+            position=1,
+            track_name="Song B",
+            artist_name="Artist 2",
+            source_track_id="mbid-2",
+            needs_discovery=True,
+        ),
+    ]
+    out = src.discover_tracks(tracks)
+    assert len(out) == 2
+
+    assert out[0].needs_discovery is False
+    assert out[0].source_track_id == "matched-1"
+    assert out[0].extra["discovered"] is True
+    assert out[0].extra["provider"] == "spotify"
+    assert out[0].extra["confidence"] == 0.95
+    assert out[0].extra["matched_data"]["id"] == "matched-1"
+
+    # Unmatched stays as-is.
+    assert out[1].needs_discovery is True
+    assert out[1].source_track_id == "mbid-2"
+    assert "matched_data" not in (out[1].extra or {})
+
+
+def test_listenbrainz_discover_tracks_no_callable_is_no_op():
+    """If no ``discover_callable`` is wired, the adapter returns the
+    list unchanged — refresh paths that haven't enabled discovery
+    still work."""
+    src = ListenBrainzPlaylistSource(lambda: None, discover_callable=None)
+    tracks = [
+        NormalizedTrack(
+            position=0,
+            track_name="T",
+            artist_name="A",
+            needs_discovery=True,
+        )
+    ]
+    assert src.discover_tracks(tracks) == tracks
+
+
+def test_lastfm_discover_tracks_shares_listenbrainz_implementation():
+    """Last.fm radio tracks have the same MB-metadata shape as LB
+    tracks, so the adapter reuses LB's ``discover_tracks``."""
+
+    def fake_discover(track_dicts):
+        return [{
+            "id": "lfm-matched",
+            "name": "Match",
+            "artists": ["Artist"],
+            "album": {"name": ""},
+            "duration_ms": 200_000,
+            "image_url": "",
+            "source": "spotify",
+            "_provider": "spotify",
+        }]
+
+    src = LastFMPlaylistSource(lambda: None, discover_callable=fake_discover)
+    tracks = [
+        NormalizedTrack(
+            position=0,
+            track_name="T",
+            artist_name="A",
+            needs_discovery=True,
+        )
+    ]
+    out = src.discover_tracks(tracks)
+    assert out[0].needs_discovery is False
+    assert out[0].source_track_id == "lfm-matched"
+    assert out[0].extra["matched_data"]["id"] == "lfm-matched"
+
+
 def test_mirror_dict_spotify_public_emits_spotify_hint():
     """Public-embed path: track ID known but album art / canonical
     metadata missing, so we emit a ``spotify_hint`` for the discovery

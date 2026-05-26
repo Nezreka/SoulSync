@@ -89,7 +89,13 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 )
                 continue
 
-            tracks = [to_mirror_track_dict(t) for t in detail.tracks]
+            # Sources that return MB-metadata-only tracks (LB, Last.fm)
+            # mark them ``needs_discovery=True``. Hand them to the
+            # adapter's matcher so the resulting mirror rows carry
+            # provider IDs + matched_data, ready for the sync pipeline.
+            detail_tracks = _maybe_discover(detail.tracks, source, deps)
+
+            tracks = [to_mirror_track_dict(t) for t in detail_tracks]
             refreshed += _commit_refresh(pl, source, source_id, tracks, db, deps, auto_id)
         except _SkipPlaylist:
             # Source-specific soft-skip (e.g. Tidal not authenticated).
@@ -103,6 +109,32 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 log_type='error',
             )
     return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
+
+
+def _maybe_discover(
+    tracks: List[Any],
+    source: str,
+    deps: AutomationDeps,
+) -> List[Any]:
+    """Run the adapter's ``discover_tracks`` when any track needs it.
+
+    Most sources are no-ops here (their tracks have provider IDs
+    already). LB / Last.fm are the ones that actually do work."""
+    if not tracks:
+        return tracks
+    if not any(getattr(t, "needs_discovery", False) for t in tracks):
+        return tracks
+    registry = deps.playlist_source_registry
+    if registry is None:
+        return tracks
+    adapter = registry.get_source(source)
+    if adapter is None:
+        return tracks
+    try:
+        return adapter.discover_tracks(tracks)
+    except Exception as exc:
+        deps.logger.warning(f"{source} discover_tracks failed: {exc}")
+        return tracks
 
 
 class _SkipPlaylist(Exception):

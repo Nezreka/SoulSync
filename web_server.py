@@ -991,6 +991,23 @@ def _register_automation_handlers():
         # mirrors is not yet wired (current handler skips them).
         return None
 
+    # Discovery callable for the LB / Last.fm adapters' ``discover_tracks``.
+    # Wraps the pure ``match_mb_tracks`` helper with the live matching
+    # engine + Spotify / iTunes clients. Adapter calls it per refresh
+    # when any track has ``needs_discovery=True``.
+    from core.discovery.matching import MBMatchDeps, match_mb_tracks
+
+    _mb_match_deps = MBMatchDeps(
+        matching_engine=matching_engine,
+        score_candidates=_discovery_score_candidates,
+        spotify_client_getter=lambda: spotify_client,
+        itunes_client_getter=_get_itunes_client,
+        prefer_spotify_getter=lambda: (_get_active_discovery_source() == 'spotify'),
+    )
+
+    def _discover_callable_for_registry(tracks):
+        return match_mb_tracks(tracks, _mb_match_deps)
+
     _playlist_source_registry = build_playlist_source_registry(
         spotify_client_getter=lambda: spotify_client,
         tidal_client_getter=lambda: tidal_client,
@@ -1002,6 +1019,7 @@ def _register_automation_handlers():
         lastfm_manager_getter=_lb_manager_for_registry,
         personalized_manager_getter=_build_personalized_manager,
         profile_id_getter=get_current_profile_id,
+        discover_callable=_discover_callable_for_registry,
     )
 
     _automation_deps = AutomationDeps(

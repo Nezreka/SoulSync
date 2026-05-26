@@ -24,8 +24,9 @@ Discovery flag:
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional
 
 
 # Canonical source identifiers used as the key in mirrored_playlists.source
@@ -110,21 +111,27 @@ class PlaylistDetail:
     tracks: List[NormalizedTrack] = field(default_factory=list)
 
 
-@runtime_checkable
-class PlaylistSource(Protocol):
+class PlaylistSource(ABC):
     """Contract every playlist source adapter implements.
 
     Capability flags let callers query the adapter's shape before
     invoking it (e.g. ``supports_listing=False`` for URL-only sources
     means the Sync page should render a paste-URL input instead of a
     playlist picker).
+
+    ABC rather than Protocol so we can ship a concrete default for
+    ``discover_tracks`` (sources without provider matching just return
+    the input list unchanged) — only the MB-metadata-only sources
+    (ListenBrainz, Last.fm radio) need to override.
     """
 
-    name: str
-    supports_listing: bool
-    supports_refresh: bool
-    requires_auth: bool
+    # Class-level attributes; subclasses pin them to concrete values.
+    name: str = ""
+    supports_listing: bool = True
+    supports_refresh: bool = True
+    requires_auth: bool = False
 
+    @abstractmethod
     def is_authenticated(self) -> bool:
         """Return True if the adapter can currently call its backend.
 
@@ -132,12 +139,14 @@ class PlaylistSource(Protocol):
         this is always True. For sources where auth check is expensive,
         the adapter may cache (existing clients already do this)."""
 
+    @abstractmethod
     def list_playlists(self) -> List[PlaylistMeta]:
         """Return all playlists the user has access to.
 
         For ``supports_listing=False`` sources, return ``[]`` and let
         the caller use ``get_playlist`` with a URL/ID directly."""
 
+    @abstractmethod
     def get_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
         """Fetch full playlist (meta + tracks) by source-native ID.
 
@@ -145,12 +154,30 @@ class PlaylistSource(Protocol):
         backed sources it's the native ID string. Returns ``None`` if
         the playlist isn't reachable (404, auth failure, etc.)."""
 
+    @abstractmethod
     def refresh_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
         """Re-fetch a playlist for the auto-refresh pipeline.
 
-        Default behavior is identical to ``get_playlist``. Sources whose
-        refresh has side effects (e.g. ListenBrainz cache update,
-        SoulSync Discovery regeneration) override this."""
+        Default behavior is usually identical to ``get_playlist``.
+        Sources whose refresh has side effects (e.g. ListenBrainz cache
+        update, SoulSync Discovery regeneration) do real work here."""
+
+    def discover_tracks(self, tracks: List[NormalizedTrack]) -> List[NormalizedTrack]:
+        """Match raw tracks against a provider (Spotify / iTunes / etc.).
+
+        Default no-op: returns ``tracks`` unchanged. Only the MB-
+        metadata-only sources (ListenBrainz, Last.fm radio) override
+        this — every other adapter already returns tracks with
+        ``needs_discovery=False`` and provider IDs filled in.
+
+        Matched tracks should have ``extra['discovered']=True`` +
+        ``extra['matched_data']`` populated so ``to_mirror_track_dict``
+        produces the canonical ``extra_data`` JSON shape downstream
+        consumers (mirrored-playlist DB, sync pipeline, wishlist)
+        already expect. Unmatched tracks should be returned as-is
+        with ``needs_discovery`` left True so the caller can decide
+        what to do (mark as wing-it, skip, retry later)."""
+        return tracks
 
 
 # ─── projection helpers ────────────────────────────────────────────────

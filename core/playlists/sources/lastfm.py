@@ -21,6 +21,10 @@ from core.playlists.sources.base import (
     PlaylistSource,
     SOURCE_LASTFM,
 )
+from core.playlists.sources.listenbrainz import (
+    DiscoverCallable,
+    ListenBrainzPlaylistSource,
+)
 
 
 LASTFM_PLAYLIST_TYPE = "lastfm_radio"
@@ -32,10 +36,19 @@ class LastFMPlaylistSource(PlaylistSource):
     supports_refresh = False  # Refresh requires re-running the radio generator
     requires_auth = True
 
-    def __init__(self, manager_getter: Callable[[], Any]):
+    def __init__(
+        self,
+        manager_getter: Callable[[], Any],
+        discover_callable: Optional[DiscoverCallable] = None,
+    ):
         """``manager_getter`` returns the profile's ``ListenBrainzManager``
-        (Last.fm radio playlists share that storage layer)."""
+        (Last.fm radio playlists share that storage layer).
+
+        ``discover_callable`` runs matching-engine + provider search;
+        Last.fm radio tracks are MB-metadata only, so this is needed
+        for ``discover_tracks`` to do real work."""
         self._manager_getter = manager_getter
+        self._discover_callable = discover_callable
 
     def _manager(self):
         return self._manager_getter()
@@ -84,6 +97,10 @@ class LastFMPlaylistSource(PlaylistSource):
         # wires up the regeneration; Phase 0 just returns the current
         # snapshot.
         return self.get_playlist(playlist_id)
+
+    # Discovery shares the LB adapter's implementation — same track
+    # shape (MB metadata), same matching needs.
+    discover_tracks = ListenBrainzPlaylistSource.discover_tracks
 
     # ---- projection helpers ------------------------------------------------
 
