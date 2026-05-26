@@ -55,13 +55,17 @@ class SpotifyPublicDiscoveryDeps:
     search_spotify_for_tidal_track: Callable
     build_discovery_wing_it_stub: Callable
     add_activity_item: Callable
+    source_label: str = "Spotify Public"
+    activity_label: str = "Spotify Link"
+    original_track_key: str = "spotify_public_track"
 
 
 def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDeps):
     """Background worker for Spotify Public discovery process (Spotify preferred, iTunes fallback)"""
     _ew_state = {}
     try:
-        _ew_state = deps.pause_enrichment_workers('Spotify Public discovery')
+        worker_label = f"{deps.source_label} discovery"
+        _ew_state = deps.pause_enrichment_workers(worker_label)
         state = deps.spotify_public_discovery_states[url_hash]
         playlist = state['playlist']
 
@@ -74,7 +78,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
         if not use_spotify:
             itunes_client_instance = deps.get_metadata_fallback_client()
 
-        logger.info(f"Starting Spotify Public discovery for: {playlist['name']} (using {discovery_source.upper()})")
+        logger.info(f"Starting {deps.source_label} discovery for: {playlist['name']} (using {discovery_source.upper()})")
 
         # Store discovery source in state for frontend
         state['discovery_source'] = discovery_source
@@ -126,7 +130,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
                             cached_album = cached_album.get('name', '')
 
                         result = {
-                            'spotify_public_track': {
+                            deps.original_track_key: {
                                 'id': track_id,
                                 'name': track_name,
                                 'artists': track_artists or [],
@@ -170,7 +174,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
 
                 # Create result entry
                 result = {
-                    'spotify_public_track': {
+                    deps.original_track_key: {
                         'id': track_id,
                         'name': track_name,
                         'artists': track_artists or [],
@@ -270,7 +274,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
 
                 # Auto Wing It fallback for unmatched tracks
                 if result['status_class'] == 'not-found':
-                    sp_t = result.get('spotify_public_track', {})
+                    sp_t = result.get(deps.original_track_key, {})
                     stub = deps.build_discovery_wing_it_stub(
                         sp_t.get('name', ''),
                         ', '.join(sp_t.get('artists', [])),
@@ -299,7 +303,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
                 logger.error(f"Error processing track {i+1}: {e}")
                 # Add error result
                 result = {
-                    'spotify_public_track': {
+                    deps.original_track_key: {
                         'name': sp_track.get('name', 'Unknown'),
                         'artists': sp_track.get('artists', []),
                     },
@@ -324,14 +328,14 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
 
         # Add activity for discovery completion
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"Spotify Link Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"{deps.activity_label} Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
-        logger.info(f"Spotify Public discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+        logger.info(f"{deps.source_label} discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 
     except Exception as e:
-        logger.error(f"Error in Spotify Public discovery worker: {e}")
+        logger.error(f"Error in {deps.source_label} discovery worker: {e}")
         if url_hash in deps.spotify_public_discovery_states:
             deps.spotify_public_discovery_states[url_hash]['phase'] = 'error'
             deps.spotify_public_discovery_states[url_hash]['status'] = f'error: {str(e)}'
     finally:
-        deps.resume_enrichment_workers(_ew_state, 'Spotify Public discovery')
+        deps.resume_enrichment_workers(_ew_state, f"{deps.source_label} discovery")

@@ -1006,6 +1006,9 @@
                             <button class="sync-tab-button" data-tab="spotify-public">
                                 <span class="tab-icon spotify-icon"></span> Spotify Link
                             </button>
+                            <button class="sync-tab-button" data-tab="itunes-link">
+                                <span class="tab-icon import-file-icon"></span> iTunes Link
+                            </button>
                             <button class="sync-tab-button" data-tab="tidal">
                                 <span class="tab-icon tidal-icon"></span> Tidal
                             </button>
@@ -1112,6 +1115,19 @@
                             <div class="url-history-bar" id="spotify-public-url-history" style="display:none"></div>
                             <div class="playlist-scroll-container" id="spotify-public-playlist-container">
                                 <div class="playlist-placeholder">Paste a Spotify playlist or album URL above to load tracks without needing Spotify API credentials.</div>
+                            </div>
+                        </div>
+
+                        <!-- iTunes Link Tab Content -->
+                        <div class="sync-tab-content" id="itunes-link-tab-content">
+                            <div class="youtube-input-section">
+                                <input type="text" id="itunes-link-url-input"
+                                    placeholder="Paste iTunes or Apple Music Album/Track URL...">
+                                <button id="itunes-link-parse-btn">Load</button>
+                            </div>
+                            <div class="url-history-bar" id="itunes-link-url-history" style="display:none"></div>
+                            <div class="playlist-scroll-container" id="itunes-link-playlist-container">
+                                <div class="playlist-placeholder">Paste an iTunes or Apple Music album/track URL above to load tracks.</div>
                             </div>
                         </div>
 
