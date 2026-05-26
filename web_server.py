@@ -961,6 +961,7 @@ def _register_automation_handlers():
 
     from core.automation.deps import AutomationDeps, AutomationState
     from core.automation.handlers import register_all as _register_extracted_handlers
+    from core.playlists.sources.bootstrap import build_playlist_source_registry
 
     # Mutable shared state previously lived as module-level globals
     # (`_scan_library_automation_id`, `_pipeline_running`, etc).
@@ -970,6 +971,38 @@ def _register_automation_handlers():
     _automation_state = AutomationState()
 
     from core.watchlist_scanner import get_watchlist_scanner as _get_watchlist_scanner_fn
+
+    # ListenBrainz / Last.fm are profile-scoped, so the manager getter
+    # resolves the current profile's manager on each call. iTunes-link
+    # parsing lives as a module helper rather than a class — wrap it in
+    # a callable that matches the adapter contract.
+    def _lb_manager_for_registry():
+        try:
+            manager, _username, _source = _get_profile_lb_manager()
+            return manager
+        except Exception:
+            return None
+
+    def _itunes_link_parser_for_registry(url):
+        # ``parse_itunes_link_endpoint`` is a Flask route handler; the
+        # actual parsing work needs the underlying helpers. For now
+        # we punt — Phase 2 will lift the parsing into a pure helper
+        # the adapter can call directly. Refresh of itunes_link
+        # mirrors is not yet wired (current handler skips them).
+        return None
+
+    _playlist_source_registry = build_playlist_source_registry(
+        spotify_client_getter=lambda: spotify_client,
+        tidal_client_getter=lambda: tidal_client,
+        qobuz_client_getter=_get_qobuz_client_for_sync,
+        deezer_client_getter=_get_deezer_client,
+        youtube_parser=parse_youtube_playlist,
+        itunes_link_parser=_itunes_link_parser_for_registry,
+        listenbrainz_manager_getter=_lb_manager_for_registry,
+        lastfm_manager_getter=_lb_manager_for_registry,
+        personalized_manager_getter=_build_personalized_manager,
+        profile_id_getter=get_current_profile_id,
+    )
 
     _automation_deps = AutomationDeps(
         engine=automation_engine,
@@ -992,6 +1025,7 @@ def _register_automation_handlers():
         get_deezer_client=_get_deezer_client,
         parse_youtube_playlist=parse_youtube_playlist,
         get_sync_states=lambda: sync_states,
+        playlist_source_registry=_playlist_source_registry,
         set_db_update_automation_id=_set_db_update_automation_id,
         get_db_update_state=lambda: db_update_state,
         db_update_lock=db_update_lock,

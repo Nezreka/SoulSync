@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 # create a new "source".
 SOURCE_SPOTIFY = "spotify"
 SOURCE_SPOTIFY_PUBLIC = "spotify_public"
+SOURCE_DEEZER = "deezer"
 SOURCE_TIDAL = "tidal"
 SOURCE_QOBUZ = "qobuz"
 SOURCE_YOUTUBE = "youtube"
@@ -44,6 +45,7 @@ SOURCE_SOULSYNC_DISCOVERY = "soulsync_discovery"
 ALL_SOURCES = (
     SOURCE_SPOTIFY,
     SOURCE_SPOTIFY_PUBLIC,
+    SOURCE_DEEZER,
     SOURCE_TIDAL,
     SOURCE_QOBUZ,
     SOURCE_YOUTUBE,
@@ -149,3 +151,67 @@ class PlaylistSource(Protocol):
         Default behavior is identical to ``get_playlist``. Sources whose
         refresh has side effects (e.g. ListenBrainz cache update,
         SoulSync Discovery regeneration) override this."""
+
+
+# ─── projection helpers ────────────────────────────────────────────────
+#
+# Adapters return NormalizedTrack objects; the mirrored-playlist DB
+# writer (``MusicDatabase.mirror_playlist``) accepts a list of dicts
+# with a specific shape. ``to_mirror_track_dict`` is the single,
+# tested projection between the two — kept here (not in the handler)
+# so every caller that writes mirrored tracks uses the same mapping.
+
+
+import json as _json
+
+
+def to_mirror_track_dict(track: NormalizedTrack) -> Dict[str, Any]:
+    """Project a NormalizedTrack into the shape ``mirror_playlist`` expects.
+
+    Adapter conventions consumed:
+
+    - ``track.extra['discovered']`` (bool) — when True, the adapter has
+      enough metadata to skip the discovery worker and write a fully-
+      populated ``matched_data`` block straight into ``extra_data``.
+      Spotify's authenticated API path sets this.
+    - ``track.extra['provider']`` (str) — provider name to record on
+      the matched_data block (e.g. 'spotify').
+    - ``track.extra['confidence']`` (float) — 0..1 match confidence;
+      defaults to 1.0 when ``discovered`` is True.
+    - ``track.extra['matched_data']`` (dict) — pre-built matched_data
+      payload. Overrides the auto-derived payload below.
+    - ``track.extra['spotify_hint']`` (dict) — public-embed scraper
+      path: the Spotify track ID + artists hint that lets the
+      discovery worker skip its search and go straight to enrichment.
+
+    When none of the above are present, the result has only the core
+    fields and no ``extra_data`` — the discovery worker handles the
+    track from scratch.
+    """
+    result: Dict[str, Any] = {
+        "track_name": track.track_name or "",
+        "artist_name": track.artist_name or "",
+        "album_name": track.album_name or "",
+        "duration_ms": int(track.duration_ms or 0),
+        "source_track_id": track.source_track_id or "",
+    }
+
+    extra = track.extra or {}
+    matched_data = extra.get("matched_data")
+    is_discovered = bool(extra.get("discovered"))
+    spotify_hint = extra.get("spotify_hint")
+
+    if is_discovered and matched_data:
+        result["extra_data"] = _json.dumps({
+            "discovered": True,
+            "provider": extra.get("provider") or "unknown",
+            "confidence": float(extra.get("confidence", 1.0)),
+            "matched_data": matched_data,
+        })
+    elif spotify_hint:
+        result["extra_data"] = _json.dumps({
+            "discovered": False,
+            "spotify_hint": spotify_hint,
+        })
+
+    return result

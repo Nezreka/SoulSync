@@ -8,7 +8,7 @@ library" to enumerate; the user pastes a URL and the adapter fetches.
 from __future__ import annotations
 
 import hashlib
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from core.playlists.sources.base import (
     NormalizedTrack,
@@ -77,19 +77,38 @@ class SpotifyPublicPlaylistSource(PlaylistSource):
 
     def _track_from_embed(self, track: dict, position: int) -> NormalizedTrack:
         artists = track.get("artists") or []
-        artist_name = ", ".join(
-            a.get("name", "") for a in artists if isinstance(a, dict)
-        ) or "Unknown Artist"
+        if artists and isinstance(artists[0], dict):
+            artist_name = artists[0].get("name", "") or "Unknown Artist"
+        elif artists:
+            artist_name = str(artists[0])
+        else:
+            artist_name = "Unknown Artist"
+        track_id = str(track.get("id", ""))
+        track_name = track.get("name", "")
+
+        # Public-embed data isn't canonical (no album art in the embed
+        # response), so we DON'T set ``discovered=True``. Instead, plant
+        # a ``spotify_hint`` so the downstream discovery worker can skip
+        # its search step and go straight to Spotify enrichment for the
+        # known track ID. Matches the pre-extraction handler behavior.
+        extra: Dict[str, Any] = {
+            "explicit": bool(track.get("is_explicit", False)),
+            "track_number": track.get("track_number"),
+        }
+        if track_id:
+            extra["spotify_hint"] = {
+                "id": track_id,
+                "name": track_name,
+                "artists": artists,
+            }
+
         return NormalizedTrack(
             position=position,
-            track_name=track.get("name", "Unknown Track"),
+            track_name=track_name,
             artist_name=artist_name,
             album_name=None,
             duration_ms=int(track.get("duration_ms", 0) or 0),
-            source_track_id=str(track.get("id", "")),
+            source_track_id=track_id,
             needs_discovery=False,
-            extra={
-                "explicit": bool(track.get("is_explicit", False)),
-                "track_number": track.get("track_number"),
-            },
+            extra=extra,
         )

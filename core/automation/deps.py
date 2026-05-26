@@ -152,3 +152,10 @@ class AutomationDeps:
     # PersonalizedPlaylistManager per run (cheap accessors inside,
     # no caching needed yet).
     build_personalized_manager: Callable[[], Any]
+
+    # --- Unified PlaylistSource registry ---
+    # Optional so test fixtures that don't exercise refresh_mirrored
+    # can keep their existing scaffolding. Production wiring in
+    # ``web_server.py`` always populates it via
+    # ``core.playlists.sources.bootstrap.build_playlist_source_registry``.
+    playlist_source_registry: Optional[Any] = None

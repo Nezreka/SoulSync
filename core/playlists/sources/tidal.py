@@ -84,7 +84,9 @@ class TidalPlaylistSource(PlaylistSource):
 
     def _track_from_tidal(self, track: Any, position: int) -> NormalizedTrack:
         artists = getattr(track, "artists", None) or []
-        artist_name = ", ".join(artists) if artists else "Unknown Artist"
+        # First artist only — matches the mirrored_playlist shape the
+        # legacy refresh_mirrored handler wrote.
+        artist_name = artists[0] if artists else "Unknown Artist"
         return NormalizedTrack(
             position=position,
             track_name=track.name,

@@ -7,7 +7,7 @@ client used everywhere else. Adapter projects Spotify's ``Playlist`` /
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.playlists.sources.base import (
     NormalizedTrack,
@@ -39,18 +39,25 @@ class SpotifyPlaylistSource(PlaylistSource):
         client = self._client()
         if client is None:
             return False
-        return bool(client.is_authenticated())
+        # ``is_spotify_authenticated`` is the Spotify-specific check;
+        # ``is_authenticated`` on SpotifyClient is a metadata-aware
+        # superset that returns True even when only the iTunes
+        # fallback is available. The adapter needs the strict check
+        # because it calls Spotify-only endpoints (get_user_playlists,
+        # get_playlist_by_id).
+        check = getattr(client, "is_spotify_authenticated", None) or client.is_authenticated
+        return bool(check())
 
     def list_playlists(self) -> List[PlaylistMeta]:
         client = self._client()
-        if client is None or not client.is_authenticated():
+        if client is None or not self.is_authenticated():
             return []
         playlists = client.get_user_playlists_metadata_only()
         return [self._meta_from_playlist(p) for p in playlists]
 
     def get_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
         client = self._client()
-        if client is None or not client.is_authenticated():
+        if client is None or not self.is_authenticated():
             return None
         playlist = client.get_playlist_by_id(playlist_id)
         if playlist is None:
@@ -81,19 +88,50 @@ class SpotifyPlaylistSource(PlaylistSource):
 
     def _track_from_spotify(self, track: Any, position: int) -> NormalizedTrack:
         artists = getattr(track, "artists", None) or []
-        artist_name = ", ".join(artists) if artists else "Unknown Artist"
+        artist_name = artists[0] if artists else "Unknown Artist"
+        track_id = str(track.id) if getattr(track, "id", None) else ""
+        track_name = track.name or ""
+        album_name = getattr(track, "album", "") or ""
+        duration_ms = int(getattr(track, "duration_ms", 0) or 0)
+        image_url = getattr(track, "image_url", None)
+
+        # Spotify's authenticated API IS canonical metadata — populate
+        # the discovered/matched_data block so to_mirror_track_dict emits
+        # the same extra_data shape downstream consumers (sync, wishlist)
+        # already expect from this path.
+        extra: Dict[str, Any] = {
+            "popularity": getattr(track, "popularity", 0),
+            "external_urls": getattr(track, "external_urls", None),
+            "preview_url": getattr(track, "preview_url", None),
+        }
+        if track_id:
+            album_obj: Dict[str, Any] = {"name": album_name}
+            if image_url:
+                album_obj["images"] = [{
+                    "url": image_url,
+                    "height": 600,
+                    "width": 600,
+                }]
+            extra["discovered"] = True
+            extra["provider"] = "spotify"
+            extra["confidence"] = 1.0
+            extra["matched_data"] = {
+                "id": track_id,
+                "name": track_name,
+                "artists": [{"name": str(a)} for a in artists],
+                "album": album_obj,
+                "duration_ms": duration_ms,
+                "image_url": image_url,
+            }
+
         return NormalizedTrack(
             position=position,
-            track_name=track.name,
-            artist_name=artist_name,
-            album_name=getattr(track, "album", None),
-            duration_ms=int(getattr(track, "duration_ms", 0) or 0),
-            source_track_id=str(track.id),
-            image_url=getattr(track, "image_url", None),
+            track_name=track_name,
+            artist_name=str(artist_name),
+            album_name=album_name or None,
+            duration_ms=duration_ms,
+            source_track_id=track_id,
+            image_url=image_url,
             needs_discovery=False,
-            extra={
-                "popularity": getattr(track, "popularity", 0),
-                "external_urls": getattr(track, "external_urls", None),
-                "preview_url": getattr(track, "preview_url", None),
-            },
+            extra=extra,
         )
