@@ -30272,6 +30272,40 @@ def get_listenbrainz_lastfm_radio():
 # LISTENBRAINZ PLAYLIST MANAGEMENT (Discovery System)
 # ========================================
 
+@app.route('/api/listenbrainz/series-detect', methods=['GET'])
+def get_listenbrainz_series_detect():
+    """Detect whether a LB playlist title belongs to a rotating series.
+
+    Auto-mirror uses this to decide whether the resulting mirror
+    row should point at a per-playlist MBID (one-off LB playlist)
+    or a synthetic series id (e.g. ``lb_weekly_jams_<user>``) that
+    rolls forward as ListenBrainz publishes new periods.
+
+    Query: ``?title=<raw LB playlist title>``
+    Response on a match:
+        ``{matched: true, series_id, canonical_name,
+           source: 'listenbrainz'|'lastfm'}``
+    Response on no match:
+        ``{matched: false}``
+    """
+    try:
+        from core.playlists.lb_series import detect_series
+
+        title = (request.args.get('title') or '').strip()
+        match = detect_series(title)
+        if match is None:
+            return jsonify({"matched": False})
+        return jsonify({
+            "matched": True,
+            "series_id": match.series_id,
+            "canonical_name": match.canonical_name,
+            "source": match.source_for_mirror,
+        })
+    except Exception as e:
+        logger.error(f"Error detecting LB series: {e}")
+        return jsonify({"matched": False, "error": str(e)}), 500
+
+
 def _lb_state_key(playlist_mbid, profile_id=None):
     """Build profile-scoped key for listenbrainz_playlist_states"""
     if profile_id is None:

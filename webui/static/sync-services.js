@@ -10813,8 +10813,18 @@ async function resetBeatportChart(urlHash) {
  * LB tracks only have provider IDs after discovery, so we mirror at
  * the end. Idempotent (UPSERT on source + source_playlist_id +
  * profile_id), so calling it twice is a no-op.
+ *
+ * Rotating-series collapse: if the playlist title belongs to a
+ * known LB series (Weekly Jams, Weekly Exploration, Top Discoveries,
+ * Top Missed Recordings), the mirror is created under a synthetic
+ * ``source_playlist_id`` like ``lb_weekly_jams_<user>`` with a
+ * canonical name. The next week / year UPSERTs into the same row,
+ * so users get one rolling mirror per series instead of accumulating
+ * one per period. Non-series LB playlists (user-created,
+ * collaborative, Last.fm radios for a specific seed) continue to
+ * mirror under their per-playlist MBID.
  */
-function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
+async function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
     try {
         const state = listenbrainzPlaylistStates[playlistMbid];
         if (!state || !state.playlist) return;
@@ -10861,13 +10871,40 @@ function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
         // Route them to ``source='lastfm'`` so the Auto-Sync manager
         // groups them under the Last.fm Radio section + the cascade-
         // delete hook targets the right mirror source.
-        const title = state.playlist.name || 'ListenBrainz Playlist';
-        const mirrorSource = title.startsWith('Last.fm Radio:') ? 'lastfm' : 'listenbrainz';
+        const rawTitle = state.playlist.name || 'ListenBrainz Playlist';
+        let mirrorSource = rawTitle.startsWith('Last.fm Radio:') ? 'lastfm' : 'listenbrainz';
+        let mirrorSourcePlaylistId = playlistMbid;
+        let mirrorName = rawTitle;
+
+        // Rolling-series detection — backend tells us whether the title
+        // belongs to a known rotating LB series. If so, collapse this
+        // mirror onto a synthetic id + canonical name so per-week /
+        // per-year duplicates roll up into one row.
+        try {
+            const seriesResp = await fetch(
+                `/api/listenbrainz/series-detect?title=${encodeURIComponent(rawTitle)}`
+            );
+            if (seriesResp.ok) {
+                const seriesData = await seriesResp.json();
+                if (seriesData && seriesData.matched) {
+                    mirrorSource = seriesData.source || mirrorSource;
+                    mirrorSourcePlaylistId = seriesData.series_id || mirrorSourcePlaylistId;
+                    mirrorName = seriesData.canonical_name || mirrorName;
+                    console.log(
+                        `🔁 [LB Series] '${rawTitle}' rolled into '${mirrorName}' ` +
+                        `(series id: ${mirrorSourcePlaylistId})`
+                    );
+                }
+            }
+        } catch (_) {
+            // Non-fatal — fall through to per-playlist mirror id.
+        }
+
         const ownerFallback = mirrorSource === 'lastfm' ? 'Last.fm' : 'ListenBrainz';
         mirrorPlaylist(
             mirrorSource,
-            playlistMbid,
-            title,
+            mirrorSourcePlaylistId,
+            mirrorName,
             tracks,
             {
                 owner: state.playlist.creator || ownerFallback,
@@ -10875,7 +10912,7 @@ function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
                 image_url: state.playlist.image_url || '',
             }
         );
-        console.log(`🪞 [${mirrorSource} Mirror] Mirrored '${title}' with ${tracks.length} matched tracks`);
+        console.log(`🪞 [${mirrorSource} Mirror] Mirrored '${mirrorName}' with ${tracks.length} matched tracks`);
     } catch (err) {
         console.warn('LB mirror-after-discovery failed:', err);
     }
