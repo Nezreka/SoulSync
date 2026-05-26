@@ -9025,6 +9025,32 @@ def batch_update_library_tracks():
 
 # ── Write Tags to File endpoints ──
 
+def _build_library_tag_db_data(track_data, album_genres=None):
+    """Build the metadata payload consumed by core.tag_writer."""
+    album_genres = album_genres or []
+    db_data = {
+        'title': track_data.get('title'),
+        'artist_name': track_data.get('artist_name'),
+        'track_artist': track_data.get('track_artist'),
+        'album_title': track_data.get('album_title'),
+        'year': track_data.get('year'),
+        'genres': album_genres,
+        'track_number': track_data.get('track_number'),
+        'disc_number': track_data.get('disc_number'),
+        'bpm': track_data.get('bpm'),
+        'track_count': track_data.get('track_count'),
+        'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
+    }
+
+    track_artist = track_data.get('track_artist')
+    if isinstance(track_artist, str) and ';' in track_artist:
+        artists_list = [name.strip() for name in track_artist.split(';') if name.strip()]
+        if artists_list:
+            db_data['artists_list'] = artists_list
+
+    return db_data
+
+
 @app.route('/api/library/track/<track_id>/tag-preview', methods=['GET'])
 def get_track_tag_preview(track_id):
     """Read current file tags and compare against DB metadata for a single track."""
@@ -9072,19 +9098,7 @@ def get_track_tag_preview(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build DB metadata dict for comparison
-        db_data = {
-            'title': track_data.get('title'),
-            'artist_name': track_data.get('artist_name'),
-            'track_artist': track_data.get('track_artist'),
-            'album_title': track_data.get('album_title'),
-            'year': track_data.get('year'),
-            'genres': album_genres,
-            'track_number': track_data.get('track_number'),
-            'disc_number': track_data.get('disc_number'),
-            'bpm': track_data.get('bpm'),
-            'track_count': track_data.get('track_count'),
-            'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
-        }
+        db_data = _build_library_tag_db_data(track_data, album_genres)
 
         diff = build_tag_diff(file_tags, db_data)
         has_changes = any(d['changed'] for d in diff)
@@ -9166,18 +9180,7 @@ def get_batch_tag_preview():
                     except (ValueError, TypeError):
                         album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                db_data = {
-                    'title': track_data.get('title'),
-                    'artist_name': track_data.get('artist_name'),
-                    'album_title': track_data.get('album_title'),
-                    'year': track_data.get('year'),
-                    'genres': album_genres,
-                    'track_number': track_data.get('track_number'),
-                    'disc_number': track_data.get('disc_number'),
-                    'bpm': track_data.get('bpm'),
-                    'track_count': track_data.get('track_count'),
-                    'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
-                }
+                db_data = _build_library_tag_db_data(track_data, album_genres)
 
                 diff = build_tag_diff(file_tags, db_data)
                 has_changes = any(d['changed'] for d in diff)
@@ -9249,17 +9252,7 @@ def write_track_tags(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build data for writer
-        db_data = {
-            'title': track_data.get('title'),
-            'artist_name': track_data.get('artist_name'),
-            'album_title': track_data.get('album_title'),
-            'year': track_data.get('year'),
-            'genres': album_genres,
-            'track_number': track_data.get('track_number'),
-            'disc_number': track_data.get('disc_number'),
-            'bpm': track_data.get('bpm'),
-            'track_count': track_data.get('track_count'),
-        }
+        db_data = _build_library_tag_db_data(track_data, album_genres)
 
         # Resolve cover URL
         cover_url = None
@@ -9408,17 +9401,7 @@ def write_tracks_tags_batch():
                         except (ValueError, TypeError):
                             album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                    db_data = {
-                        'title': track_data.get('title'),
-                        'artist_name': track_data.get('artist_name'),
-                        'album_title': track_data.get('album_title'),
-                        'year': track_data.get('year'),
-                        'genres': album_genres,
-                        'track_number': track_data.get('track_number'),
-                        'disc_number': track_data.get('disc_number'),
-                        'bpm': track_data.get('bpm'),
-                        'track_count': track_data.get('track_count'),
-                    }
+                    db_data = _build_library_tag_db_data(track_data, album_genres)
 
                     # Get pre-downloaded cover art for this track's album
                     art_data = None
