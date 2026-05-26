@@ -86,7 +86,16 @@ function autoSyncSourceLabel(source) {
 }
 
 function autoSyncCanSchedulePlaylist(playlist) {
-    return playlist && !['file', 'beatport'].includes(playlist.source || '');
+    if (!playlist) return false;
+    const src = playlist.source || '';
+    // ``file`` + ``beatport`` have no external refresh hook.
+    // ``lastfm`` is excluded because each Last.fm Radio playlist is a
+    // seed-track-specific similar-tracks snapshot that doesn't update
+    // on the Last.fm side — auto-syncing it would just re-discover the
+    // same 25 tracks every interval. Users mirror Last.fm radios once
+    // to grab the downloads, then move on; they belong in the
+    // Mirrored / Sync tab but not the Auto-Sync schedule board.
+    return !['file', 'beatport', 'lastfm'].includes(src);
 }
 
 function autoSyncIsPipelineAutomation(auto) {
