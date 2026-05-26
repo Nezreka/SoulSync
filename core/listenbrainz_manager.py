@@ -326,10 +326,42 @@ class ListenBrainzManager:
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
         logger.info(f"Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
+    def _retag_misrouted_lastfm_radio_mirrors(self, cursor):
+        """Re-tag mirrored_playlists rows that should be 'lastfm' but
+        were inserted as 'listenbrainz'.
+
+        Backfill for the Phase 1c.1 bug where the auto-mirror helper
+        hardcoded ``source='listenbrainz'`` regardless of playlist
+        origin. Last.fm Radio playlists carry a consistent
+        "Last.fm Radio: <seed>" title prefix from
+        ``save_lastfm_radio_playlist``, so any mirror row matching
+        that prefix should sit under the Last.fm group instead of
+        the ListenBrainz one. Idempotent — only updates rows that
+        are still misrouted."""
+        try:
+            cursor.execute(
+                """
+                UPDATE mirrored_playlists
+                SET source = 'lastfm'
+                WHERE source = 'listenbrainz'
+                  AND name LIKE 'Last.fm Radio:%'
+                """
+            )
+            if cursor.rowcount:
+                logger.info(
+                    f"Re-tagged {cursor.rowcount} Last.fm Radio mirror rows "
+                    "from source='listenbrainz' to source='lastfm'"
+                )
+        except Exception as exc:
+            logger.debug(f"Last.fm radio mirror retag skipped: {exc}")
+
     def _cleanup_old_playlists(self):
         """Remove old playlists, keeping only the 25 most recent per type"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
+
+        # One-shot backfill for legacy misrouting (see method docstring).
+        self._retag_misrouted_lastfm_radio_mirrors(cursor)
 
         # For each playlist type, keep only the N most recent
         # lastfm_radio keeps fewer since they're auto-regenerated weekly
