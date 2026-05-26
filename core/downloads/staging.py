@@ -78,6 +78,30 @@ def _extract_explicit_track_number(filename: str) -> int:
     return 0
 
 
+def _extract_release_filename_title(stem: str) -> str:
+    """Extract the trailing title segment from a release-style filename stem.
+
+    Slskd album bundles often arrive untagged with stems like
+    'Artist - Album - 03 - Title' or '03 - Title'. The full stem is too
+    noisy to fuzzy-match against a clean Spotify title, so when we
+    detect a bare track-number segment between ' - ' delimiters we
+    return the trailing segments as an extra match candidate.
+
+    Returns '' when no clear track-number signal is present so we don't
+    accidentally extract tails from real song titles that legitimately
+    contain ' - ' (e.g. 'Hold Me - Live').
+    """
+    if not stem:
+        return ''
+    parts = [p.strip() for p in stem.split(' - ') if p.strip()]
+    if len(parts) < 2:
+        return ''
+    for i, part in enumerate(parts):
+        if re.fullmatch(r'\d{1,3}', part) and i < len(parts) - 1:
+            return ' - '.join(parts[i + 1:]).strip()
+    return ''
+
+
 def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list[str]:
     """Return conservative title variants for release-file matching.
 
@@ -112,8 +136,10 @@ def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list
         flags=re.IGNORECASE,
     )
 
+    release_tail = _extract_release_filename_title(compacted_separators)
+
     variants: list[str] = []
-    for candidate in (raw, compacted_separators, without_feat, without_bonus):
+    for candidate in (raw, compacted_separators, without_feat, without_bonus, release_tail):
         normalized = normalize(candidate)
         if normalized and normalized not in variants:
             variants.append(normalized)

@@ -19,6 +19,7 @@ from core.wishlist.processing import (
     build_wishlist_source_context as _build_wishlist_source_context,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
     remove_completed_tracks_from_wishlist as _remove_completed_tracks_from_wishlist,
+    resolve_wishlist_source_type_for_batch as _resolve_wishlist_source_type_for_batch,
 )
 from core.wishlist.resolution import (
     check_and_remove_from_wishlist as _check_and_remove_from_wishlist,
@@ -107,10 +108,11 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         if permanently_failed_tracks:
             try:
                 wishlist_service = get_wishlist_service()
-                
+
                 # Create source_context identical to sync.py
                 source_context = _build_wishlist_source_context(batch)
-                
+                batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
+
                 # Process each failed track (matching sync.py's loop) with safety limit
                 max_failed_tracks = min(len(permanently_failed_tracks), 50)  # Safety limit
                 wing_it_skipped = 0
@@ -129,10 +131,10 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                             continue
 
                         logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
-                        
+
                         success = wishlist_service.add_failed_track_from_modal(
                             track_info=failed_track_info,
-                            source_type='playlist',
+                            source_type=batch_source_type,
                             source_context=source_context,
                             profile_id=batch.get('profile_id', 1)
                         )

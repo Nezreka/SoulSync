@@ -106,8 +106,6 @@ def ensure_wishlist_track_format(track_info):
     else:
         album = {
             'name': str(album_data) if album_data else track_info.get('name', 'Unknown Album'),
-            'album_type': 'single',
-            'total_tracks': 1,
             'release_date': '',
         }
     album.setdefault('images', [])
@@ -351,7 +349,7 @@ def extract_wishlist_track_from_modal_info(track_info: Dict[str, Any]) -> Option
                     "id": f"reconstructed_{hash(f'{slskd_result.artist}_{slskd_result.title}')}",
                     "name": getattr(slskd_result, "title", "Unknown Track"),
                     "artists": [{"name": getattr(slskd_result, "artist", "Unknown Artist")}],
-                    "album": {"name": album_name, "images": [], "album_type": "single", "total_tracks": 1},
+                    "album": {"name": album_name, "images": [], "album_type": "album", "total_tracks": 0},
                     "duration_ms": 0,
                     "reconstructed": True,
                 }

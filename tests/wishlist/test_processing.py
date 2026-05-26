@@ -108,6 +108,53 @@ def test_add_cancelled_tracks_to_failed_tracks_builds_entries():
     assert failed[0]["failure_reason"] == "Download cancelled"
 
 
+def test_resolve_wishlist_source_type_for_batch_returns_album_for_album_batch():
+    assert processing.resolve_wishlist_source_type_for_batch({"is_album_download": True}) == "album"
+
+
+def test_resolve_wishlist_source_type_for_batch_returns_playlist_otherwise():
+    assert processing.resolve_wishlist_source_type_for_batch({}) == "playlist"
+    assert processing.resolve_wishlist_source_type_for_batch({"is_album_download": False}) == "playlist"
+
+
+def test_build_wishlist_source_context_minimal_batch_skips_album_provenance():
+    """Non-album batches must not carry album_context (would mislead the
+    requeue logic into routing single-track sync failures through
+    album_path)."""
+    batch = {
+        "playlist_name": "My Mix",
+        "playlist_id": "pl-99",
+    }
+
+    context = processing.build_wishlist_source_context(batch)
+
+    assert context["playlist_name"] == "My Mix"
+    assert context["playlist_id"] == "pl-99"
+    assert context["added_from"] == "webui_modal"
+    assert "is_album_download" not in context
+    assert "album_context" not in context
+    assert "artist_context" not in context
+
+
+def test_build_wishlist_source_context_preserves_album_context_for_album_batches():
+    """Album batches must carry album_context/artist_context through to the
+    wishlist row so a later requeue has authoritative routing data instead
+    of having to reconstruct it from per-track album dicts."""
+    batch = {
+        "playlist_name": "Album: GNX",
+        "playlist_id": "library_redownload_abc",
+        "is_album_download": True,
+        "album_context": {"id": "alb-1", "name": "GNX", "total_tracks": 12},
+        "artist_context": {"id": "art-1", "name": "Kendrick Lamar"},
+    }
+
+    context = processing.build_wishlist_source_context(batch)
+
+    assert context["is_album_download"] is True
+    assert context["album_context"] == {"id": "alb-1", "name": "GNX", "total_tracks": 12}
+    assert context["artist_context"] == {"id": "art-1", "name": "Kendrick Lamar"}
+
+
 def test_recover_uncaptured_failed_tracks_builds_entries():
     batch = {"queue": ["a"]}
     download_tasks = {
@@ -364,3 +411,4 @@ def test_finalize_auto_wishlist_completion_with_no_tracks_added_still_resets_sta
         )
     ]
     assert db.connection.committed is True
+
