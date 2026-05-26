@@ -87,10 +87,20 @@ function renderListenBrainzSyncPlaylists() {
     }
 
     container.innerHTML = playlists.map(p => {
-        const mbid = p.playlist_mbid || p.id;
-        const title = p.title || p.name || 'ListenBrainz Playlist';
-        const creator = p.creator || 'ListenBrainz';
-        const count = p.track_count || 0;
+        // The Discover-page endpoints wrap each entry in JSPF shape:
+        //   { playlist: { identifier: 'https://.../<mbid>', title, creator,
+        //                 annotation: {track_count}, track: [...] } }
+        // Pull out the inner playlist object + extract the mbid from the URL.
+        const inner = p.playlist || p;
+        const mbid = (inner.identifier || '').split('/').pop() || inner.id || '';
+        const title = inner.title || inner.name || 'ListenBrainz Playlist';
+        const creator = inner.creator || 'ListenBrainz';
+        let count = 0;
+        if (inner.annotation && inner.annotation.track_count) {
+            count = inner.annotation.track_count;
+        } else if (Array.isArray(inner.track) && inner.track.length > 0) {
+            count = inner.track.length;
+        }
         // Reuse listenbrainzPlaylistStates so the modal state survives
         // tab switches (matches Discover-page behavior).
         const state = (typeof listenbrainzPlaylistStates !== 'undefined'
