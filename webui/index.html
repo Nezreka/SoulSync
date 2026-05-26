@@ -1030,6 +1030,9 @@
                             <button class="sync-tab-button" data-tab="listenbrainz-sync">
                                 <span class="tab-icon listenbrainz-icon"></span> ListenBrainz
                             </button>
+                            <button class="sync-tab-button" data-tab="lastfm-sync">
+                                <span class="tab-icon lastfm-icon"></span> Last.fm
+                            </button>
                             <button class="sync-tab-button" data-tab="import-file">
                                 <span class="tab-icon import-file-icon"></span> Import
                             </button>
@@ -1912,6 +1915,17 @@
                                         Import as Mirrored Playlist
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Last.fm Radio Sync Tab Content -->
+                        <div class="sync-tab-content" id="lastfm-sync-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Last.fm Radio Playlists</h3>
+                                <button class="refresh-button lastfm" id="lastfm-sync-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="lastfm-sync-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Last.fm Radio playlists. Generate new ones from the Discover page.</div>
                             </div>
                         </div>
 
@@ -7982,6 +7996,7 @@
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>

@@ -30253,6 +30253,7 @@ def get_listenbrainz_lastfm_radio():
                     "identifier": f"https://listenbrainz.org/playlist/{p['playlist_mbid']}",
                     "title": p['title'],
                     "creator": p['creator'],
+                    "track_count": p.get('track_count', 0),
                     "annotation": p.get('annotation', {}),
                     "track": [],
                 }

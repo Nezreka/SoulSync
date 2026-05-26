@@ -284,15 +284,28 @@ function _refreshOneLbSyncCard(card) {
 }
 
 function _refreshAllLbSyncCards() {
-    document.querySelectorAll('#listenbrainz-sync-tab-content .listenbrainz-playlist-card')
-        .forEach(_refreshOneLbSyncCard);
+    // Both LB and Last.fm-radio tabs render MB-track cards that share
+    // the ``listenbrainzPlaylistStates`` state machine (Last.fm radios
+    // are stored in the same listenbrainz_playlists table with
+    // ``playlist_type='lastfm_radio'``). The refresh loop iterates
+    // visible cards from either tab so we don't need a second loop.
+    document.querySelectorAll(
+        '#listenbrainz-sync-tab-content .listenbrainz-playlist-card, ' +
+        '#lastfm-sync-tab-content .lastfm-playlist-card'
+    ).forEach(_refreshOneLbSyncCard);
+}
+
+function _isMbStyleSyncTabActive() {
+    const lb = document.getElementById('listenbrainz-sync-tab-content');
+    const lfm = document.getElementById('lastfm-sync-tab-content');
+    return (lb && lb.classList.contains('active'))
+        || (lfm && lfm.classList.contains('active'));
 }
 
 function _startLbSyncCardRefreshLoop() {
     if (_lbSyncCardRefreshInterval) return;
     _lbSyncCardRefreshInterval = setInterval(() => {
-        const tab = document.getElementById('listenbrainz-sync-tab-content');
-        if (!tab || !tab.classList.contains('active')) {
+        if (!_isMbStyleSyncTabActive()) {
             _stopLbSyncCardRefreshLoop();
             return;
         }
