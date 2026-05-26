@@ -10855,18 +10855,27 @@ function _mirrorListenBrainzAfterDiscovery(playlistMbid) {
             return;
         }
 
+        // Last.fm Radio playlists live in the same listenbrainz_playlists
+        // table but are persisted by ``save_lastfm_radio_playlist`` with
+        // a "Last.fm Radio: <seed>" title prefix and ``playlist_type='lastfm_radio'``.
+        // Route them to ``source='lastfm'`` so the Auto-Sync manager
+        // groups them under the Last.fm Radio section + the cascade-
+        // delete hook targets the right mirror source.
+        const title = state.playlist.name || 'ListenBrainz Playlist';
+        const mirrorSource = title.startsWith('Last.fm Radio:') ? 'lastfm' : 'listenbrainz';
+        const ownerFallback = mirrorSource === 'lastfm' ? 'Last.fm' : 'ListenBrainz';
         mirrorPlaylist(
-            'listenbrainz',
+            mirrorSource,
             playlistMbid,
-            state.playlist.name || 'ListenBrainz Playlist',
+            title,
             tracks,
             {
-                owner: state.playlist.creator || 'ListenBrainz',
+                owner: state.playlist.creator || ownerFallback,
                 description: state.playlist.description || '',
                 image_url: state.playlist.image_url || '',
             }
         );
-        console.log(`🪞 [LB Mirror] Mirrored '${state.playlist.name}' with ${tracks.length} matched tracks`);
+        console.log(`🪞 [${mirrorSource} Mirror] Mirrored '${title}' with ${tracks.length} matched tracks`);
     } catch (err) {
         console.warn('LB mirror-after-discovery failed:', err);
     }
