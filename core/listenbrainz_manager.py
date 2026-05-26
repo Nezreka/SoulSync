@@ -326,6 +326,58 @@ class ListenBrainzManager:
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
         logger.info(f"Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
+    def _cleanup_per_period_series_mirrors(self, cursor):
+        """Delete mirrored_playlists rows that belong to a rotating LB
+        series but were created under the per-period MBID instead of
+        the new synthetic series id.
+
+        Background: pre-Phase-1c.2.1 the auto-mirror hook keyed mirrors
+        by the per-week (or per-year) MBID, so users accumulated one
+        mirror per period. The new flow collapses them into a single
+        rolling mirror per series. This sweeper removes the legacy
+        per-period rows so the Mirrored / Auto-Sync UIs only show the
+        consolidated rolling mirror. Idempotent — only matches titles
+        that were once per-period."""
+        # Each pattern's WHERE clause matches per-period titles
+        # ("Weekly Jams for X, week of YYYY-MM-DD ...") but NOT the
+        # canonical rolling-mirror titles ("ListenBrainz Weekly Jams").
+        per_period_title_patterns = [
+            ('listenbrainz', 'Weekly Jams for %, week of %'),
+            ('listenbrainz', 'Weekly Exploration for %, week of %'),
+            ('listenbrainz', 'Top Discoveries of % for %'),
+            ('listenbrainz', 'Top Missed Recordings of % for %'),
+        ]
+        try:
+            total = 0
+            for source, like in per_period_title_patterns:
+                cursor.execute(
+                    """
+                    SELECT id FROM mirrored_playlists
+                    WHERE source = ? AND name LIKE ?
+                    """,
+                    (source, like),
+                )
+                mirror_ids = [row[0] for row in cursor.fetchall()]
+                if not mirror_ids:
+                    continue
+                ph = ','.join('?' * len(mirror_ids))
+                cursor.execute(
+                    f"DELETE FROM mirrored_playlist_tracks WHERE playlist_id IN ({ph})",
+                    mirror_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM mirrored_playlists WHERE id IN ({ph})",
+                    mirror_ids,
+                )
+                total += len(mirror_ids)
+            if total:
+                logger.info(
+                    f"Removed {total} legacy per-period LB series mirrors "
+                    "(consolidated into rolling series mirrors)"
+                )
+        except Exception as exc:
+            logger.debug(f"Per-period series mirror cleanup skipped: {exc}")
+
     def _retag_misrouted_lastfm_radio_mirrors(self, cursor):
         """Re-tag mirrored_playlists rows that should be 'lastfm' but
         were inserted as 'listenbrainz'.
@@ -362,6 +414,9 @@ class ListenBrainzManager:
 
         # One-shot backfill for legacy misrouting (see method docstring).
         self._retag_misrouted_lastfm_radio_mirrors(cursor)
+        # Consolidate legacy per-week / per-year LB series mirrors into
+        # the new rolling series mirrors (Phase 1c.2.1).
+        self._cleanup_per_period_series_mirrors(cursor)
 
         # For each playlist type, keep only the N most recent
         # lastfm_radio keeps fewer since they're auto-regenerated weekly
