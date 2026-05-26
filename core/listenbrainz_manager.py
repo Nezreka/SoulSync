@@ -344,13 +344,15 @@ class ListenBrainzManager:
             try:
                 # Get IDs of playlists to delete (all except keep_count most recent)
                 cursor.execute("""
-                    SELECT id FROM listenbrainz_playlists
+                    SELECT id, playlist_mbid FROM listenbrainz_playlists
                     WHERE playlist_type = ? AND profile_id = ?
                     ORDER BY last_updated DESC
                     LIMIT -1 OFFSET ?
                 """, (playlist_type, self.profile_id, keep_count))
 
-                old_playlist_ids = [row[0] for row in cursor.fetchall()]
+                stale_rows = cursor.fetchall()
+                old_playlist_ids = [row[0] for row in stale_rows]
+                old_mbids = [row[1] for row in stale_rows if row[1]]
 
                 if old_playlist_ids:
                     # Delete tracks for old playlists
@@ -362,11 +364,65 @@ class ListenBrainzManager:
 
                     logger.info(f"Removed {len(old_playlist_ids)} old {playlist_type} playlists")
 
+                # Cascade delete: matching mirrored_playlists rows go too.
+                # LB Weekly Jams / Weekly Exploration get new MBIDs every
+                # week — without this, the user accumulates dead mirror
+                # rows that point at LB playlists the cache already pruned.
+                # Downloaded tracks stay in the library; only the mirror
+                # row + its track refs are removed.
+                if old_mbids:
+                    mirror_source = (
+                        'lastfm' if playlist_type == 'lastfm_radio' else 'listenbrainz'
+                    )
+                    self._cascade_delete_mirrored_for_mbids(cursor, old_mbids, mirror_source)
+
             except Exception as e:
                 logger.error(f"Error cleaning up {playlist_type} playlists: {e}")
 
         conn.commit()
         conn.close()
+
+    def _cascade_delete_mirrored_for_mbids(self, cursor, mbids, source):
+        """Delete mirrored_playlists rows whose source_playlist_id matches
+        any of ``mbids`` for this profile + source.
+
+        Runs on the same cursor as the caller so the cleanup lands in
+        the same transaction. Silent on failure (cleanup is best-effort
+        — losing the cache-prune-mirror link in rare edge cases is
+        preferable to crashing the LB update loop)."""
+        if not mbids:
+            return
+        try:
+            placeholders = ','.join('?' * len(mbids))
+            # Find matching mirror IDs first so we can delete tracks +
+            # row in two well-defined steps. ``mirrored_playlist_tracks``
+            # has no ON DELETE CASCADE constraint enforced unless PRAGMA
+            # foreign_keys is on, so do it explicitly.
+            cursor.execute(
+                f"""
+                SELECT id FROM mirrored_playlists
+                WHERE source = ? AND profile_id = ?
+                  AND source_playlist_id IN ({placeholders})
+                """,
+                (source, self.profile_id, *mbids),
+            )
+            mirror_ids = [row[0] for row in cursor.fetchall()]
+            if not mirror_ids:
+                return
+            mid_ph = ','.join('?' * len(mirror_ids))
+            cursor.execute(
+                f"DELETE FROM mirrored_playlist_tracks WHERE playlist_id IN ({mid_ph})",
+                mirror_ids,
+            )
+            cursor.execute(
+                f"DELETE FROM mirrored_playlists WHERE id IN ({mid_ph})",
+                mirror_ids,
+            )
+            logger.info(
+                f"Cascade-removed {len(mirror_ids)} stale {source} mirrored playlists"
+            )
+        except Exception as exc:
+            logger.warning(f"Cascade delete of mirrored {source} rows failed: {exc}")
 
     def save_lastfm_radio_playlist(self, seed_track: str, seed_artist: str, similar_tracks: List[Dict]) -> str:
         """
@@ -500,6 +556,21 @@ class ListenBrainzManager:
         """Delete a cached playlist and its tracks (CASCADE handles tracks via FK)"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
+
+        # Figure out the source flavor before deleting the row — the
+        # cascade below needs to know whether the matching mirror is
+        # ``source='listenbrainz'`` or ``source='lastfm'``.
+        playlist_type = ''
+        try:
+            cursor.execute(
+                "SELECT playlist_type FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
+                (playlist_mbid, self.profile_id),
+            )
+            row = cursor.fetchone()
+            playlist_type = row[0] if row else ''
+        except Exception:
+            pass
+
         # Delete tracks first (SQLite FK CASCADE requires PRAGMA foreign_keys=ON)
         cursor.execute("""
             DELETE FROM listenbrainz_tracks WHERE playlist_id IN (
@@ -510,6 +581,12 @@ class ListenBrainzManager:
             "DELETE FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
             (playlist_mbid, self.profile_id)
         )
+
+        # Cascade the delete into mirrored_playlists so the user's
+        # Mirrored tab doesn't accumulate dead LB rows.
+        mirror_source = 'lastfm' if playlist_type == 'lastfm_radio' else 'listenbrainz'
+        self._cascade_delete_mirrored_for_mbids(cursor, [playlist_mbid], mirror_source)
+
         conn.commit()
         conn.close()
 
