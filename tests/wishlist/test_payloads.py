@@ -106,6 +106,92 @@ def test_extract_spotify_track_from_modal_info_reconstructs_from_slskd_result():
     assert out["album"]["name"] == "Album Three"
 
 
+# ---------------------------------------------------------------------------
+# track_number / disc_number preservation through the wishlist payload
+# helpers — pins the bug A fix from PR 2/4. Pre-fix the helpers
+# defaulted missing numbers to 1, which locked every wishlist retry
+# to track 01 because the import pipeline's filename-extract fallback
+# only fires when the value is None (not the pre-filled 1).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_wishlist_track_format_preserves_real_track_number():
+    """Real track positions must survive the format helper. Pre-fix
+    the helper read ``track_info.get('track_number', 1)`` which always
+    returned 1 if the upstream payload had dropped the key — the
+    desired number was lost on every round-trip."""
+    track = {
+        "name": "No Sleep Till Brooklyn",
+        "artist": "Beastie Boys",
+        "album": {"name": "Licensed to Ill", "release_date": "1986-11-15"},
+        "track_number": 8,
+        "disc_number": 1,
+    }
+    out = payloads.ensure_wishlist_track_format(track)
+    assert out["track_number"] == 8
+    assert out["disc_number"] == 1
+
+
+def test_ensure_wishlist_track_format_keeps_missing_track_number_as_none():
+    """When the upstream payload doesn't carry a track number, the
+    helper must NOT pre-fill 1 — that poisons the chain and locks the
+    file to track 01. Leave None so the import pipeline's filename
+    fallback at ``core/imports/pipeline.py:652`` can fire."""
+    track = {
+        "name": "Mystery Track",
+        "artist": "Artist",
+        "album": {"name": "Album"},
+    }
+    out = payloads.ensure_wishlist_track_format(track)
+    assert out["track_number"] is None
+    assert out["disc_number"] is None
+
+
+def test_build_cancelled_task_wishlist_payload_preserves_track_number():
+    """Cancellation→re-add path was the worst offender — the payload
+    builder dropped track_number from the saved data entirely (didn't
+    even include the key). Next wishlist cycle saw missing key →
+    helper defaulted to 1 → file imported as 01. Now both the
+    cancellation payload AND the helper preserve real positions."""
+    task = {
+        "track_info": {
+            "id": "trk-1", "name": "Brass Monkey",
+            "artists": [{"name": "Beastie Boys"}],
+            "album": {"name": "Licensed to Ill", "release_date": "1986-11-15"},
+            "track_number": 11,
+            "disc_number": 1,
+        },
+        "playlist_name": "Wishlist",
+        "playlist_id": "p1",
+    }
+    out = payloads.build_cancelled_task_wishlist_payload(task)
+    td = out["track_data"]
+    assert td["track_number"] == 11
+    assert td["disc_number"] == 1
+    # Album release_date survives the round-trip so the path template
+    # renders the year in the folder name.
+    assert td["album"]["release_date"] == "1986-11-15"
+
+
+def test_build_cancelled_task_wishlist_payload_string_album_pulls_release_date_from_track_info():
+    """When the source ``album`` field is a bare string, the payload
+    builder constructs an album dict from scratch — it must pull
+    release_date / album_image_url / etc. from the adjacent
+    track_info fields rather than dropping them silently."""
+    task = {
+        "track_info": {
+            "id": "trk-2", "name": "Song",
+            "artists": [{"name": "Artist"}],
+            "album": "Bare String Album",
+            "release_date": "2020-06-01",
+        },
+    }
+    out = payloads.build_cancelled_task_wishlist_payload(task)
+    album = out["track_data"]["album"]
+    assert album["name"] == "Bare String Album"
+    assert album["release_date"] == "2020-06-01"
+
+
 def test_ensure_wishlist_track_format_defaults_non_dict_album_to_album_type():
     """When ``album`` arrives as a non-dict (legacy/reconstruction path) we
     must not stamp ``album_type='single'`` — that lies about the origin
