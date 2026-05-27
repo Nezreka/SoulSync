@@ -3484,7 +3484,18 @@ function processModalStatusUpdate(playlistId, data) {
     // Note: Wishlist modal visibility is now managed by handleWishlistButtonClick() only
     // Auto-show logic has been simplified to prevent conflicts
 
-    if (data.phase === 'analysis') {
+    if (data.phase === 'queued') {
+        // Submitted to the executor but no worker has picked it up yet.
+        // ``missing_download_executor`` is bounded (max_workers=3 by
+        // default) so wishlist runs with N > 3 sub-batches park the
+        // rest at this phase. Show distinct text so users don't think
+        // 26 batches are all in-flight at once.
+        const total = data.analysis_progress?.total || 0;
+        const elText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        const elFill = document.getElementById(`analysis-progress-fill-${playlistId}`);
+        if (elText) elText.textContent = `Queued — waiting for worker (${total} tracks)`;
+        if (elFill) elFill.style.width = '0%';
+    } else if (data.phase === 'analysis') {
         const progress = data.analysis_progress;
         const percent = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
         document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = `${percent}%`;

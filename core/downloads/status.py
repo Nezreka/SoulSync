@@ -265,7 +265,15 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
     if album_bundle:
         response_data['album_bundle'] = album_bundle
 
-    if response_data["phase"] == 'analysis':
+    if response_data["phase"] in ('analysis', 'queued'):
+        # Surface analysis_progress for both phases — ``queued`` rows
+        # haven't started analysis yet (processed=0) but the UI still
+        # needs ``total`` so it can render "Queued — N tracks". The
+        # master worker flips phase from ``queued`` to ``analysis`` on
+        # entry (see ``core/downloads/master.py:328``); the wishlist
+        # submission sites pre-populate ``analysis_total`` so the
+        # queued state isn't shape-mismatched against the analysis
+        # state for downstream consumers.
         response_data['analysis_progress'] = {
             'total': batch.get('analysis_total', 0),
             'processed': batch.get('analysis_processed', 0),
