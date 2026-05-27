@@ -12310,6 +12310,226 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: rgb(var(--accent-neon-rgb));
 }
 
+/* ───────────────────────────────────────────────────────────────────── */
+/* Weekly schedule board (PR 3 of schedule-types feature)               */
+/* ───────────────────────────────────────────────────────────────────── */
+
+.auto-sync-weekly-board {
+    /* 7 day columns slightly narrower than hourly buckets so they fit
+       without horizontal scroll on the standard modal width.
+       grid-template-columns: minmax(120px, 1fr) repeated 7 times. */
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
+}
+
+.auto-sync-weekly-column .auto-sync-column-head {
+    /* Day labels are short ("Mon", "Tue") so the head can breathe. */
+    text-align: center;
+}
+
+.auto-sync-weekly-card {
+    /* Click-to-edit affordance — visually distinct from the hourly
+       card which is non-interactive aside from the unschedule button. */
+    cursor: pointer;
+}
+
+.auto-sync-weekly-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.08);
+}
+
+.auto-sync-playlist.scheduled-elsewhere {
+    /* Visual hint when a playlist has an hourly schedule but the user
+       is on the weekly tab. Card still draggable; drop creates a
+       weekly schedule that replaces the hourly one. */
+    opacity: 0.7;
+    border-style: dashed;
+}
+
+/* ───────────────────────────────────────────────────────────────────── */
+/* Weekly editor popover                                                 */
+/* ───────────────────────────────────────────────────────────────────── */
+
+.auto-sync-weekly-editor-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: autoSyncWeeklyEditorFadeIn 0.15s ease-out;
+}
+
+@keyframes autoSyncWeeklyEditorFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.auto-sync-weekly-editor {
+    background: linear-gradient(160deg,
+        rgba(15, 20, 32, 0.96) 0%,
+        rgba(10, 14, 24, 0.96) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    border-radius: 20px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+    width: 100%;
+    max-width: 460px;
+    padding: 24px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: inherit;
+}
+
+.auto-sync-weekly-editor-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.auto-sync-weekly-editor-head h4 {
+    margin: 0;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.auto-sync-weekly-editor-playlist {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.auto-sync-weekly-editor-section {
+    margin-bottom: 16px;
+}
+
+.auto-sync-weekly-editor-section label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 6px;
+}
+
+.auto-sync-weekly-editor-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+}
+
+.auto-sync-weekly-day-toggle {
+    height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.auto-sync-weekly-day-toggle:hover {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.08);
+}
+
+.auto-sync-weekly-day-toggle.active {
+    border-color: rgba(var(--accent-rgb), 0.65);
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-weekly-editor-section input[type="time"],
+.auto-sync-weekly-editor-section input[type="text"] {
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.auto-sync-weekly-editor-section input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.65);
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+.auto-sync-weekly-editor-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.auto-sync-weekly-editor-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.auto-sync-weekly-editor-actions-right {
+    display: flex;
+    gap: 8px;
+}
+
+.auto-sync-weekly-editor-delete,
+.auto-sync-weekly-editor-cancel,
+.auto-sync-weekly-editor-save {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.auto-sync-weekly-editor-save {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-weekly-editor-save:hover {
+    background: rgba(var(--accent-rgb), 0.3);
+    border-color: rgba(var(--accent-rgb), 0.7);
+}
+
+.auto-sync-weekly-editor-cancel:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.auto-sync-weekly-editor-delete {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: rgba(239, 68, 68, 0.9);
+}
+
+.auto-sync-weekly-editor-delete:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.6);
+}
+
 .auto-sync-automation-list {
     min-height: 0;
     overflow-y: auto;
