@@ -743,7 +743,7 @@ class ListenBrainzManager:
             )
             row = cursor.fetchone()
             playlist_type = row[0] if row else ''
-        except Exception:
+        except Exception:  # noqa: S110 — best-effort lookup, delete proceeds either way
             pass
 
         # Delete tracks first (SQLite FK CASCADE requires PRAGMA foreign_keys=ON)

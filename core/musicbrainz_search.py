@@ -757,19 +757,43 @@ class MusicBrainzSearchClient:
         `search_tracks`'s structured-query dispatch (`Artist - Track`
         splitting, bare-name artist-first browse).
 
-        Uses bare-query mode (`strict=False`) — diacritic-folded, hits
-        alias/sortname indexes, no `AND`-clause that kills recall when
-        either side mis-matches. Score floor lowered to 20 (vs the search
-        tab's 80) so MB recordings whose title doesn't literally contain
-        the artist name still enter the candidate pool — the endpoint's
-        `rerank_tracks` pass then sorts by artist-match relevance. Without
-        this, queries like `Army of Me` + `Bjork` only surface covers
-        (score 73-100) and miss Björk's canonical recording (score 28).
+        When both fields are present: strict-first, bare-as-fallback. The
+        strict pass builds a field-scoped Lucene query (`recording:"<t>"
+        AND artist:"<a>"`) which anchors the artist and prunes title-
+        collision covers — fixes the "Coffee Break" + "Zeds Dead" case
+        where MB's title-text-biased scorer surfaced Emapea / Vidalias /
+        West One Orchestra ahead of the canonical Zeds Dead recording.
+        `min_score=0` on strict because the field-scoped query is itself
+        precise, and the endpoint's `rerank_tracks` pass does the final
+        ordering. Bare query runs only when strict returns nothing —
+        catches diacritic / alias mismatches (`Bjork` query vs canonical
+        `Björk` artist) where strict phrase match never hits.
+
+        When only one field is present: bare-query mode directly — same
+        recall-over-precision tradeoff the old single-path took.
+
+        Callers wanting MB-specific length-preference ordering (multi-
+        edition recordings where some lack length data) should pass
+        ``prefer_known_duration=True`` to ``rerank_tracks`` downstream
+        — a stable sort here would just be re-sorted away by the rerank
+        pass anyway.
         """
         if not track and not artist:
             return []
-        return self._search_tracks_text(track, artist or None, limit,
-                                        strict=False, min_score=20)
+
+        if track and artist:
+            results = self._search_tracks_text(
+                track, artist, limit, strict=True, min_score=0
+            )
+            if not results:
+                results = self._search_tracks_text(
+                    track, artist, limit, strict=False, min_score=20
+                )
+            return results
+
+        return self._search_tracks_text(
+            track, artist or None, limit, strict=False, min_score=20
+        )
 
     def _pick_representative_release(self, releases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Pick the best release out of a release-group's editions.
