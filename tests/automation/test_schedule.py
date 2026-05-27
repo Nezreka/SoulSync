@@ -61,13 +61,25 @@ def test_returns_none_for_non_dict_config():
     ('minutes', 60),
     ('hours',   3600),
     ('days',    86400),
-    ('weeks',   86400 * 7),
 ])
 def test_interval_units(unit, seconds_per_unit):
-    """Every supported unit scales the interval correctly."""
+    """Every supported unit scales the interval correctly. Kept in
+    lockstep with the engine's existing ``_calc_delay_seconds`` map
+    — see _INTERVAL_MULTIPLIERS docstring."""
     now = _utc(2026, 5, 27, 12, 0)
     result = next_run_at('schedule', {'interval': 3, 'unit': unit}, now)
     assert result == now + timedelta(seconds=3 * seconds_per_unit)
+
+
+def test_interval_weeks_unit_falls_back_to_hours_matching_engine():
+    """Engine's ``_calc_delay_seconds`` only recognises minutes / hours
+    / days — anything else defaults to hours. Drift between this helper
+    and the engine would silently mis-schedule rows whose config snuck
+    through with an unsupported unit. Pin the alignment until PR 2
+    collapses both paths through this function."""
+    now = _utc(2026, 5, 27, 12, 0)
+    # 'weeks' is not in our map; falls back to hours.
+    assert next_run_at('schedule', {'interval': 2, 'unit': 'weeks'}, now) == now + timedelta(hours=2)
 
 
 def test_interval_unknown_unit_defaults_to_hours():
@@ -178,6 +190,130 @@ def test_daily_unknown_tz_falls_back_to_utc():
                          now)
     # Treated as UTC → next run today at 15:00 UTC.
     assert result == _utc(2026, 5, 27, 15, 0)
+
+
+def test_unknown_tz_logs_warning_once(caplog):
+    """Silent fallback to UTC was a bug — user configures
+    'America/Los_Angeles' but tzdata is missing → schedule runs at the
+    wrong hour with no log line. Log once per unknown name so the
+    misconfiguration is debuggable from a single grep, and don't spam
+    the log on every poll cycle for the same row."""
+    import logging
+    from core.automation import schedule
+    schedule._UNKNOWN_TZ_WARNED.clear()  # fresh state for the test
+    now = _utc(2026, 5, 27, 12, 0)
+    with caplog.at_level(logging.WARNING, logger='soulsync.automation.schedule'):
+        # Two calls with the same bad name — only ONE warning emitted.
+        next_run_at('daily_time', {'time': '09:00', 'tz': 'Bogus/Tz'}, now)
+        next_run_at('daily_time', {'time': '09:00', 'tz': 'Bogus/Tz'}, now)
+    matching = [r for r in caplog.records if 'Bogus/Tz' in r.getMessage()]
+    assert len(matching) == 1
+    assert 'tzdata' in matching[0].getMessage().lower()
+
+
+def test_unknown_tz_warning_includes_helpful_hint():
+    """Log line must point the user at the two real causes: typo in
+    the IANA name, or missing tzdata on the host. Without that hint
+    the symptom (schedule running at UTC offset) is bewildering."""
+    import logging
+    from core.automation import schedule
+    schedule._UNKNOWN_TZ_WARNED.clear()
+    caplog_records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            caplog_records.append(record.getMessage())
+
+    handler = _Capture()
+    logger_obj = logging.getLogger('soulsync.automation.schedule')
+    logger_obj.addHandler(handler)
+    try:
+        next_run_at('daily_time', {'time': '09:00', 'tz': 'Made/Up'},
+                    _utc(2026, 5, 27, 12, 0))
+    finally:
+        logger_obj.removeHandler(handler)
+    assert any("'Made/Up'" in m for m in caplog_records)
+    assert any('IANA' in m for m in caplog_records)
+
+
+# ---------------------------------------------------------------------------
+# DST edge cases — pin that ``zoneinfo``'s default resolution handles
+# spring-forward gap + fall-back ambiguity sensibly. Both transitions
+# happen in the user's local tz, NOT in UTC, so the result UTC offset
+# changes across the boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_dst_spring_forward_lands_after_the_gap():
+    """In Los Angeles, 2026-03-08 02:30 doesn't exist — clocks jump
+    from 02:00 PST directly to 03:00 PDT. A schedule for 02:30 daily
+    that fires through this transition must NOT raise and must land
+    on a real instant. ``zoneinfo``'s default resolution maps the
+    gap to the post-jump side (treating 02:30 as 03:30 PDT), so the
+    UTC equivalent shifts by an hour relative to non-DST days."""
+    # 2026-03-08 00:00 UTC = 2026-03-07 16:00 PST (still PST).
+    # Schedule fires 02:30 LA daily. Next run on 03-07 was 02:30 PST
+    # = 10:30 UTC. We're querying after that → next run is 03-08
+    # 02:30 LA, which falls in the spring-forward gap. zoneinfo
+    # resolves to 03:30 PDT = 10:30 UTC (offset already shifted to
+    # PDT for the rest of the day post-transition).
+    now = _utc(2026, 3, 8, 0, 0)
+    result = next_run_at('daily_time',
+                         {'time': '02:30', 'tz': 'America/Los_Angeles'},
+                         now)
+    # Must be aware UTC, must NOT crash on the gap.
+    assert result is not None
+    assert result.tzinfo is not None
+    # Result is somewhere on 03-08 — exact time depends on zoneinfo's
+    # gap-resolution policy, but it must be on the right day and
+    # past ``now``.
+    assert result > now
+    assert result.date() == datetime(2026, 3, 8).date()
+
+
+def test_dst_fall_back_handles_ambiguous_local_time():
+    """2026-11-01 01:30 in Los Angeles happens TWICE (once at PDT
+    UTC-7, once at PST UTC-8 after the fall-back). A daily schedule
+    for 01:30 must resolve to ONE instant — ``zoneinfo``'s default
+    picks the first occurrence (PDT), so the UTC time is 08:30."""
+    # 2026-11-01 00:00 UTC = 2026-10-31 17:00 PDT.
+    # Next 01:30 LA is 2026-11-01 — ambiguous, zoneinfo defaults to
+    # the earlier (PDT) instant: 08:30 UTC.
+    now = _utc(2026, 11, 1, 0, 0)
+    result = next_run_at('daily_time',
+                         {'time': '01:30', 'tz': 'America/Los_Angeles'},
+                         now)
+    assert result is not None
+    # 01:30 PDT (UTC-7) → 08:30 UTC.
+    assert result == _utc(2026, 11, 1, 8, 30)
+
+
+def test_weekly_across_dst_boundary_keeps_local_wall_clock():
+    """User schedules "every Sunday at 09:00 LA". Crossing the
+    spring-forward DST boundary, the LOCAL wall clock stays at 09:00
+    even though the UTC equivalent shifts by an hour. Pre-DST Sunday
+    09:00 PST = 17:00 UTC; post-DST Sunday 09:00 PDT = 16:00 UTC."""
+    # Pre-DST Sunday: 2026-03-01.
+    pre_dst = _utc(2026, 3, 1, 10, 0)  # Sunday 02:00 PST already past 09:00? No — 02:00 < 09:00, so today still qualifies.
+    result_pre = next_run_at('weekly_time',
+                             {'time': '09:00', 'days': ['sun'],
+                              'tz': 'America/Los_Angeles'},
+                             pre_dst)
+    # 09:00 PST = 17:00 UTC.
+    assert result_pre == _utc(2026, 3, 1, 17, 0)
+
+    # Post-DST Sunday: 2026-03-15 (the 8th was DST switch day).
+    post_dst = _utc(2026, 3, 15, 10, 0)  # 03:00 PDT — before 09:00.
+    result_post = next_run_at('weekly_time',
+                              {'time': '09:00', 'days': ['sun'],
+                               'tz': 'America/Los_Angeles'},
+                              post_dst)
+    # 09:00 PDT = 16:00 UTC.
+    assert result_post == _utc(2026, 3, 15, 16, 0)
+    # Same local wall clock, different UTC — the kind of bug that
+    # caused the May 2026 "next in 8h" tz mismatch.
+    assert result_pre.hour == 17
+    assert result_post.hour == 16
 
 
 # ---------------------------------------------------------------------------
