@@ -245,24 +245,10 @@ class ListenBrainzManager:
                 (self.profile_id,),
             )
             titles = [row[0] for row in cursor.fetchall() if row[0]]
-            logger.info(
-                f"[LB Rolling] Bulk ensure walking {len(titles)} cached titles for profile {self.profile_id}"
-            )
-            from core.playlists.lb_series import detect_series
-            matched = 0
             for title in titles:
-                m = detect_series(title)
-                if m is not None:
-                    matched += 1
-                    logger.info(
-                        f"[LB Rolling] Title matched series: {title!r} -> {m.series_id}"
-                    )
                 self._ensure_rolling_series_mirror(cursor, title)
-            logger.info(
-                f"[LB Rolling] Bulk ensure done — {matched}/{len(titles)} titles matched a series"
-            )
         except Exception as exc:
-            logger.warning(f"Bulk rolling-mirror ensure skipped: {exc}")
+            logger.debug(f"Bulk rolling-mirror ensure skipped: {exc}")
 
     def _ensure_rolling_series_mirror(self, cursor, playlist_title: str):
         """Upsert a placeholder ``mirrored_playlists`` row for the
