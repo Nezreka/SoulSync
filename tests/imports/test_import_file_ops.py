@@ -5,14 +5,38 @@ from core.imports.file_ops import (
     cleanup_empty_directories,
     safe_move_file,
 )
-from core.imports.filename import extract_track_number_from_filename
+from core.imports.filename import (
+    extract_explicit_track_number,
+    extract_track_number_from_filename,
+)
 from core.imports.staging import read_staging_file_metadata
 
 
 def test_extract_track_number_from_filename_handles_common_patterns():
     assert extract_track_number_from_filename("01 - Song.mp3") == 1
     assert extract_track_number_from_filename("1-03 - Song.mp3") == 3
+    # Bare filename keeps the auto-import-friendly default of 1 — there's
+    # no upstream metadata to recover from in that flow.
     assert extract_track_number_from_filename("Artist - Song.mp3") == 1
+
+
+def test_extract_explicit_track_number_returns_zero_when_no_prefix():
+    """Staging readers need to distinguish 'track 1' from 'unknown'.
+
+    Pinned because:
+    - the legacy extractor defaults to 1 (auto-import semantics),
+    - staging file scanners that conflate the two end up writing every
+      file in an untagged album bundle to track_number=1.
+    """
+    # Bare titles with no numeric prefix → 0 (unknown).
+    assert extract_explicit_track_number("Artist - Song.mp3") == 0
+    assert extract_explicit_track_number("Cha-La Head-Cha-La.flac") == 0
+    assert extract_explicit_track_number("") == 0
+    # Real prefixes still parse correctly.
+    assert extract_explicit_track_number("01 - Song.mp3") == 1
+    assert extract_explicit_track_number("(03) Song.mp3") == 3
+    # Disc-track format requires a separator after the track number.
+    assert extract_explicit_track_number("1-07 - Song.mp3") == 7
 
 
 def test_safe_move_file_replaces_existing_destination(tmp_path):
@@ -90,6 +114,27 @@ def test_read_staging_file_metadata_falls_back_to_filename_track_number(monkeypa
     assert metadata["title"] == "07 - Song Two"
     assert metadata["track_number"] == 7
     assert metadata["disc_number"] == 1
+
+
+def test_read_staging_file_metadata_returns_zero_track_when_unknown(monkeypatch, tmp_path):
+    """Bare filename + no tags → track_number=0, not 1.
+
+    Pre-fix this returned 1 because the filename extractor's default
+    was 1. The bug caused every untagged file in an album-bundle
+    download to land in the staging cache with track_number=1, which
+    then short-circuited the downstream resolution chain that should
+    have picked up the real number from track_info.
+    """
+    file_path = tmp_path / "Cha-La Head-Cha-La.flac"
+    file_path.write_text("fake")
+
+    fake_mutagen = types.ModuleType("mutagen")
+    fake_mutagen.File = lambda path, easy=True: None
+    monkeypatch.setitem(sys.modules, "mutagen", fake_mutagen)
+
+    metadata = read_staging_file_metadata(str(file_path), file_path.name)
+
+    assert metadata["track_number"] == 0
 
 
 def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invalid(monkeypatch, tmp_path):
