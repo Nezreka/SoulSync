@@ -119,16 +119,26 @@ class WishlistGroupingResult:
 def group_wishlist_tracks_by_album(
     tracks: List[Dict[str, Any]],
     *,
-    min_tracks_per_album: int = 1,
+    min_tracks_per_album: int = 2,
 ) -> WishlistGroupingResult:
     """Group wishlist tracks by their owning album.
 
     ``min_tracks_per_album`` controls the threshold for promoting an
-    album to its own sub-batch. Default ``1`` means even a single
-    missing track gets the album-bundle treatment (which is what the
-    user wants for releases where they only need one track from the
-    album). Set higher to require multiple missing tracks before
-    engaging the bundle search.
+    album to its own sub-batch. Default ``2`` means an album needs at
+    least two missing tracks before the album-bundle search engages —
+    single-track items fall to ``residual_tracks`` and take the
+    classic per-track path. The 1-track case used to default to bundle
+    too, but real-world wishlists frequently look like "26 single
+    tracks from 26 different albums," and engaging bundle for each
+    one downloads ~85% of bandwidth as unwanted files, hammers slskd
+    with concurrent searches, and re-downloads the same album every
+    cycle when the staging-match step doesn't claim the requested
+    track. Bundle shines when several tracks from the same album are
+    missing — that's the case worth the bandwidth premium.
+
+    Override via the ``wishlist.album_bundle_min_tracks`` config key
+    or by passing ``min_tracks_per_album=N`` explicitly (kept for
+    tests + power users who want different behaviour).
     """
     result = WishlistGroupingResult()
     if not tracks:
