@@ -183,6 +183,34 @@ def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime 
     return context
 
 
+def _wishlist_run_has_siblings_still_active(
+    download_batches: Dict[str, Dict[str, Any]],
+    run_id: str,
+    completing_batch_id: str,
+) -> bool:
+    """Return True if any sibling batch sharing ``run_id`` is still
+    pre-terminal.
+
+    Used by ``finalize_auto_wishlist_completion`` to gate the run-
+    level cycle toggle. The caller already holds ``tasks_lock``.
+
+    The completing batch may or may not have its phase flipped to
+    'complete' yet by the time we land here; either way we skip it
+    in the sibling scan since we're handling its completion now."""
+    terminal_phases = {'complete', 'error', 'cancelled'}
+    for sibling_id, sibling in download_batches.items():
+        if sibling_id == completing_batch_id:
+            continue
+        if not isinstance(sibling, dict):
+            continue
+        if sibling.get('wishlist_run_id') != run_id:
+            continue
+        if sibling.get('phase') in terminal_phases:
+            continue
+        return True
+    return False
+
+
 def finalize_auto_wishlist_completion(
     batch_id: str,
     completion_summary: Dict[str, Any],
@@ -195,7 +223,17 @@ def finalize_auto_wishlist_completion(
     db_factory: Callable[[], Any],
     logger=logger,
 ) -> Dict[str, Any]:
-    """Finalize auto wishlist processing after a batch finishes."""
+    """Finalize auto wishlist processing after a batch finishes.
+
+    For wishlist runs that split into multiple sub-batches (Phase
+    1c.2.1: per-album bundle dispatch), the cycle toggle + state
+    reset only fire when the LAST sibling sub-batch of the same
+    ``wishlist_run_id`` completes. Earlier completions just record
+    their per-batch summary and return without toggling.
+
+    Back-compat: legacy single-batch runs (no ``wishlist_run_id``
+    field on the batch) keep the original toggle-immediately
+    behavior — the gate treats a missing run_id as "lone batch"."""
     tracks_added = completion_summary.get('tracks_added', 0)
     total_failed = completion_summary.get('total_failed', 0)
     logger.error(
@@ -204,6 +242,22 @@ def finalize_auto_wishlist_completion(
 
     if tracks_added > 0:
         add_activity_item("", "Wishlist Updated", f"{tracks_added} failed tracks added to wishlist", "Now")
+
+    # Run-level gate: if siblings of the same wishlist run are still
+    # active, defer cycle toggle + state reset until they finish.
+    with tasks_lock:
+        run_id = ''
+        if batch_id in download_batches:
+            run_id = download_batches[batch_id].get('wishlist_run_id') or ''
+        siblings_active = bool(run_id) and _wishlist_run_has_siblings_still_active(
+            download_batches, run_id, batch_id,
+        )
+    if siblings_active:
+        logger.info(
+            f"[Auto-Wishlist] Sub-batch {batch_id[:8]} done; waiting on sibling sub-batches "
+            f"of run {run_id[:8]} before toggling cycle"
+        )
+        return completion_summary
 
     try:
         with tasks_lock:
@@ -517,6 +571,13 @@ def _prepare_and_run_manual_wishlist_batch(
         for payload in payloads[1:]:
             payload['batch_id'] = str(uuid.uuid4())
 
+        # Reify "wishlist run" — one shared id stamped on every sub-
+        # batch this manual invocation produces. Mirrors the auto
+        # path. Note manual wishlist completion currently doesn't
+        # toggle the cycle (only auto does), but the id is set anyway
+        # so future code + UI grouping have a consistent hook.
+        wishlist_run_id = str(uuid.uuid4())
+
         # Materialize each sub-batch's row state up-front so the
         # frontend's polling can see them all under the original
         # batch's flow.
@@ -525,6 +586,7 @@ def _prepare_and_run_manual_wishlist_batch(
                 # Re-purpose the existing row for the first payload.
                 first = payloads[0]
                 runtime.download_batches[batch_id]['analysis_total'] = len(first['tracks'])
+                runtime.download_batches[batch_id]['wishlist_run_id'] = wishlist_run_id
                 if first['is_album']:
                     runtime.download_batches[batch_id]['is_album_download'] = True
                     runtime.download_batches[batch_id]['album_context'] = first['album_context']
@@ -549,6 +611,7 @@ def _prepare_and_run_manual_wishlist_batch(
                     'is_album_download': bool(payload['is_album']),
                     'album_context': payload['album_context'],
                     'artist_context': payload['artist_context'],
+                    'wishlist_run_id': wishlist_run_id,
                 }
 
         logger.info(
@@ -747,6 +810,12 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 else:
                     grouping = None
 
+                # Reify "wishlist run" — one shared id stamped on every
+                # sub-batch this invocation produces. The completion
+                # handler uses it to gate the once-per-run cycle toggle
+                # (so it doesn't fire N times for N sub-batches).
+                wishlist_run_id = str(uuid.uuid4())
+
                 if grouping and grouping.album_groups:
                     for album_idx, group in enumerate(grouping.album_groups):
                         album_batch_id = str(uuid.uuid4())
@@ -779,11 +848,12 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                                 'is_album_download': True,
                                 'album_context': group.album_context,
                                 'artist_context': group.artist_context,
+                                'wishlist_run_id': wishlist_run_id,
                             }
                         logger.info(
                             f"[Auto-Wishlist] Album sub-batch {album_idx + 1}/{len(grouping.album_groups)}: "
                             f"'{group.album_context.get('name')}' by '{group.artist_context.get('name')}' "
-                            f"({len(group.tracks)} tracks) → {album_batch_id}"
+                            f"({len(group.tracks)} tracks) → {album_batch_id} [run {wishlist_run_id[:8]}]"
                         )
                         _submitted_batches.append(album_batch_id)
                         runtime.missing_download_executor.submit(
@@ -818,6 +888,7 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                             'auto_processing_timestamp': runtime.current_time_fn(),
                             'current_cycle': current_cycle,
                             'profile_id': runtime.profile_id,
+                            'wishlist_run_id': wishlist_run_id,
                         }
                     _submitted_batches.append(batch_id)
                     runtime.missing_download_executor.submit(
@@ -826,7 +897,8 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     )
                     logger.info(
                         f"Starting wishlist residual batch {batch_id} with {len(residual_tracks)} tracks "
-                        f"({'singles' if current_cycle == 'singles' else 'unbucketed albums'})"
+                        f"({'singles' if current_cycle == 'singles' else 'unbucketed albums'}) "
+                        f"[run {wishlist_run_id[:8]}]"
                     )
 
                 _summary_parts: list[str] = []

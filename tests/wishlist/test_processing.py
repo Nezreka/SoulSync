@@ -182,6 +182,111 @@ def test_recover_uncaptured_failed_tracks_builds_entries():
     assert failed[0]["failure_reason"] == "boom"
 
 
+def test_finalize_auto_wishlist_completion_defers_toggle_when_siblings_active():
+    """When the completing batch shares a ``wishlist_run_id`` with
+    siblings still in pre-terminal phases, finalize must NOT toggle
+    the cycle yet — that only happens when the LAST sibling done.
+    Pinned to prevent the regression where every sub-batch's
+    completion fired its own cycle toggle (Phase 1c.2.1 split path)."""
+    db = _FakeDB()
+    automation_engine = _FakeAutomationEngine()
+    resets = []
+    activities = []
+    summary = {"tracks_added": 1, "total_failed": 1, "errors": 0}
+
+    # Two sub-batches share the same run id. The first finishes,
+    # the second is still 'analysis'.
+    download_batches = {
+        "batch-A": {"current_cycle": "albums", "wishlist_run_id": "run-1", "phase": "complete"},
+        "batch-B": {"current_cycle": "albums", "wishlist_run_id": "run-1", "phase": "analysis"},
+    }
+
+    processing.finalize_auto_wishlist_completion(
+        "batch-A",
+        summary,
+        download_batches=download_batches,
+        tasks_lock=_FakeLock(),
+        reset_processing_state=lambda: resets.append(True),
+        add_activity_item=lambda *args: activities.append(args),
+        automation_engine=automation_engine,
+        db_factory=lambda: db,
+        logger=_FakeLogger(),
+    )
+
+    # Activity log still fires (it's a per-batch record), but cycle
+    # toggle + state reset + automation emit are deferred.
+    assert activities == [("", "Wishlist Updated", "1 failed tracks added to wishlist", "Now")]
+    assert resets == []  # NOT reset yet — siblings still active
+    assert automation_engine.events == []  # NOT emitted yet
+    assert db.connection.cursor_obj.calls == []  # DB cycle-toggle NOT written
+
+
+def test_finalize_auto_wishlist_completion_toggles_when_last_sibling_done():
+    """When all siblings of the same run are in terminal phases (or
+    don't exist), the completing batch IS the last → cycle toggles
+    + state resets + automation event fires."""
+    db = _FakeDB()
+    automation_engine = _FakeAutomationEngine()
+    resets = []
+    summary = {"tracks_added": 1, "total_failed": 1, "errors": 0}
+
+    download_batches = {
+        # Both siblings already terminal — current batch is the last.
+        "batch-A": {"current_cycle": "albums", "wishlist_run_id": "run-1", "phase": "complete"},
+        "batch-B": {"current_cycle": "albums", "wishlist_run_id": "run-1", "phase": "complete"},
+        "batch-C": {"current_cycle": "albums", "wishlist_run_id": "run-1", "phase": "analysis"},  # the completing one
+    }
+
+    processing.finalize_auto_wishlist_completion(
+        "batch-C",
+        summary,
+        download_batches=download_batches,
+        tasks_lock=_FakeLock(),
+        reset_processing_state=lambda: resets.append(True),
+        add_activity_item=lambda *_a: None,
+        automation_engine=automation_engine,
+        db_factory=lambda: db,
+        logger=_FakeLogger(),
+    )
+
+    assert resets == [True]
+    assert db.connection.committed is True
+    assert db.connection.cursor_obj.calls[0][1] == ("singles",)
+    assert automation_engine.events  # event emitted
+
+
+def test_finalize_auto_wishlist_completion_legacy_no_run_id_toggles_immediately():
+    """Back-compat: a batch with NO ``wishlist_run_id`` (legacy
+    single-batch run from before Phase 1c.2.1) should keep firing
+    the toggle on its own completion regardless of any unrelated
+    batches in the dict."""
+    db = _FakeDB()
+    automation_engine = _FakeAutomationEngine()
+    resets = []
+    summary = {"tracks_added": 0, "total_failed": 0, "errors": 0}
+
+    download_batches = {
+        "batch-legacy": {"current_cycle": "albums"},  # no wishlist_run_id
+        # Even with another unrelated batch active, legacy should toggle.
+        "unrelated": {"current_cycle": "singles", "phase": "analysis"},
+    }
+
+    processing.finalize_auto_wishlist_completion(
+        "batch-legacy",
+        summary,
+        download_batches=download_batches,
+        tasks_lock=_FakeLock(),
+        reset_processing_state=lambda: resets.append(True),
+        add_activity_item=lambda *_a: None,
+        automation_engine=automation_engine,
+        db_factory=lambda: db,
+        logger=_FakeLogger(),
+    )
+
+    assert resets == [True]
+    assert db.connection.cursor_obj.calls[0][1] == ("singles",)
+
+
 def test_finalize_auto_wishlist_completion_toggles_cycle_and_resets_state():
     db = _FakeDB()
     automation_engine = _FakeAutomationEngine()
