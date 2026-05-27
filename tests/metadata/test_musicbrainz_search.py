@@ -1050,11 +1050,12 @@ def test_search_tracks_with_artist_falls_back_to_bare_when_strict_empty():
     assert tracks[0].id == 'rec-canonical'
 
 
-def test_search_tracks_with_artist_prefers_results_with_known_length():
-    """MB has multiple recordings per song (single release, album release,
-    compilations) and not every recording carries length data. Stable
-    sort moves length-known entries ahead of length-zero duplicates so
-    the user sees the actionable 3:04 row first, not the 0:00 sibling."""
+def test_search_tracks_with_artist_does_not_resort_by_length():
+    """Length-preference ordering lives downstream in
+    ``rerank_tracks(..., prefer_known_duration=True)`` — sorting here
+    would be re-sorted away by rerank anyway, so this method preserves
+    the order MB returned. Pin the contract: this method does not
+    re-shuffle by duration_ms."""
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_recording.return_value = [
@@ -1067,10 +1068,9 @@ def test_search_tracks_with_artist_prefers_results_with_known_length():
 
     tracks = client.search_tracks_with_artist('Coffee Break', 'Zeds Dead', limit=10)
 
-    # rec-with-length must surface first even though MB scored it lower
-    assert tracks[0].id == 'rec-with-length'
-    assert tracks[0].duration_ms == 184000
-    assert tracks[1].id == 'rec-no-length'
+    # MB's order is preserved here — rerank applies length-pref downstream.
+    assert tracks[0].id == 'rec-no-length'
+    assert tracks[1].id == 'rec-with-length'
 
 
 def test_search_tracks_with_artist_handles_missing_artist():

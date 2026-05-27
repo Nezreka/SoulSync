@@ -885,7 +885,7 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     // disabled in private-browsing modes.
     let _preferEnhanced = false;
     try {
-        _preferEnhanced = localStorage.getItem('soulsync-library-view-mode') === 'enhanced';
+        _preferEnhanced = localStorage.getItem(_libraryViewModeKey()) === 'enhanced';
     } catch (_) { /* localStorage unavailable */ }
 
     // Navigate to artist detail page
@@ -2925,8 +2925,21 @@ function toggleEnhancedView(enabled) {
     // Persist the choice so the next artist click (and the next page reload)
     // honours it instead of always reverting to Standard.
     try {
-        localStorage.setItem('soulsync-library-view-mode', enabled ? 'enhanced' : 'standard');
+        localStorage.setItem(_libraryViewModeKey(), enabled ? 'enhanced' : 'standard');
     } catch (_) { /* localStorage unavailable */ }
+}
+
+// localStorage key for the Enhanced/Standard toggle, scoped to the active
+// profile so different admin profiles can keep different defaults. Falls
+// back to an unsuffixed key when no profile is loaded (matches the original
+// behaviour for any pre-multi-profile saved value).
+function _libraryViewModeKey() {
+    const pid = (typeof currentProfile === 'object' && currentProfile && currentProfile.id != null)
+        ? currentProfile.id
+        : null;
+    return pid != null
+        ? `soulsync-library-view-mode:${pid}`
+        : 'soulsync-library-view-mode';
 }
 
 async function loadEnhancedViewData(artistId) {
