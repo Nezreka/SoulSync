@@ -392,3 +392,295 @@ describe('getMirroredSourceRef', () => {
         assert.equal(sb.getMirroredSourceRef({}), '');
     });
 });
+
+
+// =========================================================================
+// Weekly schedule helpers — PR 3 of the schedule-types feature.
+// =========================================================================
+
+
+describe('detectBrowserTimezone', () => {
+    test('returns IANA tz from Intl in the test runtime', () => {
+        const sb = makeSandbox();
+        // Node runs with a system tz; the resolved value must be a
+        // non-empty string (any IANA name is acceptable here).
+        const tz = sb.detectBrowserTimezone();
+        assert.equal(typeof tz, 'string');
+        assert.ok(tz.length > 0);
+    });
+});
+
+
+describe('autoSyncWeeklyTrigger', () => {
+    test('builds a clean payload from picker input', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({
+            time: '09:00',
+            days: ['mon', 'wed', 'fri'],
+            tz: 'America/Los_Angeles',
+        });
+        deepShapeEqual(result, {
+            time: '09:00',
+            days: ['mon', 'wed', 'fri'],
+            tz: 'America/Los_Angeles',
+        });
+    });
+
+    test('garbage time string defaults to 09:00', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({
+            time: 'lol', days: ['mon'], tz: 'UTC',
+        });
+        assert.equal(result.time, '09:00');
+    });
+
+    test('unrecognised weekday abbreviations dropped from payload', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({
+            time: '09:00',
+            days: ['mon', 'garbage', 'wed', 'mond'],
+            tz: 'UTC',
+        });
+        deepShapeEqual(result.days, ['mon', 'wed']);
+    });
+
+    test('missing tz falls back to browser-detected default', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({
+            time: '09:00', days: ['mon'],
+        });
+        assert.equal(typeof result.tz, 'string');
+        assert.ok(result.tz.length > 0);
+    });
+
+    test('empty argument object produces all-defaults payload', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({});
+        assert.equal(result.time, '09:00');
+        deepShapeEqual(result.days, []);
+        assert.equal(typeof result.tz, 'string');
+    });
+
+    test('non-array days param defaults to empty', () => {
+        const sb = makeSandbox();
+        const result = sb.autoSyncWeeklyTrigger({
+            time: '09:00', days: 'mon', tz: 'UTC',
+        });
+        deepShapeEqual(result.days, []);
+    });
+});
+
+
+describe('autoSyncWeeklyFromTrigger', () => {
+    test('round-trips with autoSyncWeeklyTrigger when days non-empty', () => {
+        const sb = makeSandbox();
+        const cfg = sb.autoSyncWeeklyTrigger({
+            time: '09:00', days: ['mon', 'wed'], tz: 'UTC',
+        });
+        const parsed = sb.autoSyncWeeklyFromTrigger(cfg);
+        deepShapeEqual(parsed, {
+            time: '09:00', days: ['mon', 'wed'], tz: 'UTC',
+        });
+    });
+
+    test('empty days list expands to every weekday', () => {
+        const sb = makeSandbox();
+        // Matches the next_run_at convention: empty days = every day.
+        // UI needs the expanded form so the schedule renders under all
+        // 7 day columns instead of looking unscheduled.
+        const parsed = sb.autoSyncWeeklyFromTrigger({
+            time: '14:00', days: [], tz: 'UTC',
+        });
+        deepShapeEqual(parsed.days,
+            ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+    });
+
+    test('uppercased / mixed-case day abbreviations normalised', () => {
+        const sb = makeSandbox();
+        const parsed = sb.autoSyncWeeklyFromTrigger({
+            time: '09:00', days: ['MON', 'Wed'], tz: 'UTC',
+        });
+        deepShapeEqual(parsed.days, ['mon', 'wed']);
+    });
+
+    test('null / undefined config returns null', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncWeeklyFromTrigger(null), null);
+        assert.equal(sb.autoSyncWeeklyFromTrigger(undefined), null);
+    });
+
+    test('garbage time falls back to 09:00', () => {
+        const sb = makeSandbox();
+        const parsed = sb.autoSyncWeeklyFromTrigger({
+            time: 'garbage', days: ['mon'], tz: 'UTC',
+        });
+        assert.equal(parsed.time, '09:00');
+    });
+
+    test('missing tz defaults to UTC (not browser tz)', () => {
+        // Trigger configs persisted in the DB without a tz field came
+        // from the legacy engine path that used server-local naive
+        // ``datetime.now()``. PR 2 routes those through the engine's
+        // ``_default_tz``, NOT the browser's. So parse-back must surface
+        // a stable default (UTC) — the UI should NOT silently rewrite
+        // an existing row's tz when the user opens the editor.
+        const sb = makeSandbox();
+        const parsed = sb.autoSyncWeeklyFromTrigger({
+            time: '09:00', days: ['mon'],
+        });
+        assert.equal(parsed.tz, 'UTC');
+    });
+});
+
+
+describe('buildAutoSyncScheduleState — weekly_time bucketing', () => {
+    test('weekly_time owned automation lands in weeklySchedules', () => {
+        const sb = makeSandbox();
+        const playlists = [{ id: 7, name: 'Daily Mix', source: 'spotify' }];
+        const automations = [{
+            id: 42,
+            name: 'Auto-Sync: Daily Mix',
+            enabled: true,
+            owned_by: 'auto_sync',
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '7', all: false },
+            trigger_type: 'weekly_time',
+            trigger_config: { time: '09:00', days: ['mon', 'wed', 'fri'], tz: 'America/Los_Angeles' },
+            next_run: '2026-06-01 16:00:00',
+        }];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.ok(state.weeklySchedules);
+        const sched = state.weeklySchedules[7];
+        assert.ok(sched, 'weekly schedule must surface in state.weeklySchedules[playlistId]');
+        assert.equal(sched.automation_id, 42);
+        assert.equal(sched.time, '09:00');
+        deepShapeEqual(sched.days, ['mon', 'wed', 'fri']);
+        assert.equal(sched.tz, 'America/Los_Angeles');
+        // And NOT in playlistSchedules (mutual exclusion at the bucket level).
+        assert.equal(state.playlistSchedules[7], undefined);
+    });
+
+    test('schedule (interval) automation stays in playlistSchedules', () => {
+        const sb = makeSandbox();
+        const playlists = [{ id: 7, name: 'Daily Mix', source: 'spotify' }];
+        const automations = [{
+            id: 42,
+            owned_by: 'auto_sync',
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '7', all: false },
+            trigger_type: 'schedule',
+            trigger_config: { interval: 6, unit: 'hours' },
+            enabled: true,
+        }];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.ok(state.playlistSchedules[7]);
+        assert.equal(state.weeklySchedules[7], undefined);
+    });
+
+    test('non-owned weekly_time automation falls through to automationPipelines', () => {
+        // Backward-compat: a hand-created weekly_time automation
+        // NOT owned by auto_sync must NOT hijack the Weekly Board
+        // — it stays as a regular automation pipeline visible on
+        // the Automation Pipelines tab.
+        const sb = makeSandbox();
+        const playlists = [{ id: 7, name: 'Daily Mix', source: 'spotify' }];
+        const automations = [{
+            id: 99,
+            name: 'My Custom Weekly Thing',
+            // No owned_by, no Auto-Sync: prefix, no Playlist Auto-Sync group.
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '7', all: false },
+            trigger_type: 'weekly_time',
+            trigger_config: { time: '09:00', days: ['mon'], tz: 'UTC' },
+            enabled: true,
+        }];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.equal(state.weeklySchedules[7], undefined);
+        assert.equal(state.playlistSchedules[7], undefined);
+        assert.equal(state.automationPipelines.length, 1);
+        assert.equal(state.automationPipelines[0].id, 99);
+    });
+
+    test('legacy-named (Auto-Sync: prefix) weekly_time still recognised', () => {
+        // Rows pre-dating the owned_by column should still be picked
+        // up by the legacy name/group fallback.
+        const sb = makeSandbox();
+        const playlists = [{ id: 7, name: 'Daily Mix', source: 'spotify' }];
+        const automations = [{
+            id: 99,
+            name: 'Auto-Sync: Daily Mix',  // legacy convention
+            group_name: 'Playlist Auto-Sync',
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '7', all: false },
+            trigger_type: 'weekly_time',
+            trigger_config: { time: '09:00', days: ['mon'], tz: 'UTC' },
+            enabled: true,
+        }];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.ok(state.weeklySchedules[7], 'legacy-named auto-sync row should bucket weekly');
+    });
+
+    test('garbage weekly_time config falls through to automationPipelines', () => {
+        // Defensive — a hand-edited row with malformed trigger_config
+        // should NOT crash state-build. autoSyncWeeklyFromTrigger
+        // returns null for non-object configs; the bucket logic
+        // routes nulls to automationPipelines as the catch-all.
+        const sb = makeSandbox();
+        const playlists = [{ id: 7, name: 'Daily Mix', source: 'spotify' }];
+        const automations = [{
+            id: 42,
+            owned_by: 'auto_sync',
+            action_type: 'playlist_pipeline',
+            action_config: { playlist_id: '7', all: false },
+            trigger_type: 'weekly_time',
+            trigger_config: null,
+            enabled: true,
+        }];
+        const state = sb.buildAutoSyncScheduleState(playlists, automations);
+        assert.equal(state.weeklySchedules[7], undefined);
+        assert.equal(state.automationPipelines.length, 1);
+    });
+});
+
+
+describe('autoSyncWeeklyLabel', () => {
+    test('multi-day schedule renders ordered day list with time', () => {
+        const sb = makeSandbox();
+        // Input intentionally in non-canonical order to verify sort.
+        const label = sb.autoSyncWeeklyLabel({
+            time: '09:00', days: ['fri', 'mon', 'wed'], tz: 'UTC',
+        });
+        assert.equal(label, 'Mon, Wed, Fri @ 09:00');
+    });
+
+    test('full-week schedule collapses to Daily', () => {
+        const sb = makeSandbox();
+        const label = sb.autoSyncWeeklyLabel({
+            time: '14:30',
+            days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+            tz: 'UTC',
+        });
+        assert.equal(label, 'Daily @ 14:30');
+    });
+
+    test('single-day schedule shows just that day', () => {
+        const sb = makeSandbox();
+        const label = sb.autoSyncWeeklyLabel({
+            time: '20:00', days: ['sun'], tz: 'UTC',
+        });
+        assert.equal(label, 'Sun @ 20:00');
+    });
+
+    test('null parsed value returns Unscheduled', () => {
+        const sb = makeSandbox();
+        assert.equal(sb.autoSyncWeeklyLabel(null), 'Unscheduled');
+    });
+
+    test('empty days array treated as daily (matches engine semantic)', () => {
+        const sb = makeSandbox();
+        const label = sb.autoSyncWeeklyLabel({
+            time: '09:00', days: [], tz: 'UTC',
+        });
+        assert.equal(label, 'Daily @ 09:00');
+    });
+});
