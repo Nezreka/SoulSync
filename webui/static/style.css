@@ -11809,10 +11809,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .auto-sync-playlist {
-    padding: 10px 12px;
-    margin-bottom: 6px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
 }
 
@@ -11823,6 +11823,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.18);
     flex-shrink: 0;
+    /* Pin the status dot to the first line of the name so multi-line
+     * playlist titles flow underneath it instead of pushing it down. */
+    margin-top: 6px;
 }
 
 .auto-sync-playlist.scheduled::before {
@@ -11867,24 +11870,27 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .auto-sync-playlist-name,
 .auto-sync-scheduled-name {
     color: #fff;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.35;
+    /* Wrap long names instead of truncating with ellipsis — the
+     * sidebar is narrow and long ListenBrainz / Spotify titles were
+     * getting clipped beyond recognition. */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .auto-sync-scheduled-name {
-    white-space: normal;
-    overflow-wrap: anywhere;
     line-height: 1.3;
 }
 
 .auto-sync-playlist-meta,
 .auto-sync-scheduled-meta {
-    margin-top: 2px;
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 10px;
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    line-height: 1.3;
 }
 
 .auto-sync-scheduled-meta {
