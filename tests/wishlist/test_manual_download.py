@@ -234,15 +234,17 @@ def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():
 
 def test_manual_wishlist_splits_into_per_album_sub_batches():
     """Manual wishlist run with multi-album content splits into one
-    sub-batch per album. Each sub-batch flips
-    ``is_album_download=True`` + populates album/artist context so
-    the slskd / Prowlarr album-bundle dispatch engages.
+    sub-batch per album that has at least the threshold of missing
+    tracks (default 2). Each sub-batch flips ``is_album_download=True``
+    + populates album/artist context so the slskd / Prowlarr
+    album-bundle dispatch engages.
 
     Pinned to verify the manual path matches the auto path's
     behavior — the user's first real-world test hit the manual
     flow, not the auto flow."""
     runtime, _service, _db, executor, _logger, _activity, batch_map, master_calls = _build_runtime(
         tracks=[
+            # Album one: 2 missing tracks → promotes to album-bundle.
             {
                 "id": "trk-a1",
                 "spotify_track_id": "trk-a1",
@@ -263,10 +265,21 @@ def test_manual_wishlist_splits_into_per_album_sub_batches():
                     "artists": [{"name": "Artist 1"}],
                 },
             },
+            # Album two: 2 missing tracks → also promotes.
             {
                 "id": "trk-b1",
                 "spotify_track_id": "trk-b1",
                 "name": "Song B1",
+                "artists": [{"name": "Artist 2"}],
+                "spotify_data": {
+                    "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
+                    "artists": [{"name": "Artist 2"}],
+                },
+            },
+            {
+                "id": "trk-b2",
+                "spotify_track_id": "trk-b2",
+                "name": "Song B2",
                 "artists": [{"name": "Artist 2"}],
                 "spotify_data": {
                     "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
@@ -294,9 +307,9 @@ def test_manual_wishlist_splits_into_per_album_sub_batches():
     assert second_args[0] in batch_map
     assert batch_map[second_args[0]].get("is_album_download") is True
 
-    # Track counts across the two sub-batches sum to the wishlist total.
+    # Track counts across the two sub-batches: 2 each at threshold=2.
     counts = sorted(len(args[2]) for args, _ in master_calls)
-    assert counts == [1, 2]
+    assert counts == [2, 2]
 
     # Both sub-batches carry album context populated from spotify_data.
     album_names = {
