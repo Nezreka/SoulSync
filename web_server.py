@@ -24349,6 +24349,20 @@ def update_youtube_discovery_match():
                     album_obj['image_url'] = image_url
                     album_obj['images'] = [{'url': image_url}]
 
+            # Manual fixes can come from any metadata source — the Fix-popup
+            # cascade queries the user's primary first, then Spotify / Deezer /
+            # iTunes / MusicBrainz as fallbacks. Each search endpoint stamps
+            # `source` on its results; the MBID-paste lookup doesn't, so fall
+            # back to the active discovery source. Hardcoding 'spotify' here
+            # used to make every non-Spotify manual match look like it had
+            # provider-drifted on the next prepare-discovery, triggering
+            # automatic re-discovery that overwrote the user's manual pick.
+            match_source = (
+                spotify_track.get('source')
+                or _get_active_discovery_source()
+                or 'spotify'
+            )
+
             matched_data = {
                 'id': spotify_track['id'],
                 'name': spotify_track['name'],
@@ -24356,7 +24370,7 @@ def update_youtube_discovery_match():
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
                 'image_url': image_url,
-                'source': 'spotify',
+                'source': match_source,
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
@@ -24366,6 +24380,13 @@ def update_youtube_discovery_match():
             logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
         except Exception as cache_err:
             logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
+            # match_source needs to exist for the mirrored-DB block below even
+            # if cache save failed — use the same fallback chain.
+            match_source = (
+                spotify_track.get('source')
+                or _get_active_discovery_source()
+                or 'spotify'
+            )
 
         # Persist manual fix to DB for mirrored playlists
         if identifier.startswith('mirrored_'):
@@ -24377,7 +24398,7 @@ def update_youtube_discovery_match():
                         db = get_database()
                         extra_data = {
                             'discovered': True,
-                            'provider': 'spotify',
+                            'provider': match_source,
                             'confidence': 1.0,
                             'matched_data': matched_data,
                             'manual_match': True,
@@ -33671,11 +33692,17 @@ def prepare_mirrored_discovery(playlist_id):
             extra = track.get('extra_data')
             if extra and extra.get('discovered'):
                 cached_provider = extra.get('provider', 'spotify')
+                is_manual = bool(extra.get('manual_match'))
 
                 # If the cached result was discovered by a different provider than the
                 # currently active one, treat it as pending so re-discovery uses the
                 # correct source (IDs, album data, images differ between providers).
-                if cached_provider != _current_provider:
+                # Manual matches are exempt: the user explicitly picked that record,
+                # so re-discovery would overwrite their intentional fix every cycle.
+                # Without this guard, fixing a track via the Fix popup correctly
+                # downloads it once, but the next Playlist Pipeline run re-marks it
+                # "Provider Changed" and reverts the manual map.
+                if cached_provider != _current_provider and not is_manual:
                     has_pending = True
                     dur = track.get('duration_ms', 0)
                     pre_discovered_results.append({
@@ -33757,11 +33784,16 @@ def prepare_mirrored_discovery(playlist_id):
                     'confidence': 0,
                 })
 
-        # Only treat as cached if at least one track was discovered by the current provider
+        # Treat as cached if at least one track was discovered by the current provider,
+        # OR if any track carries a manual_match (those are exempt from provider-drift
+        # re-discovery above, so they count as cached regardless of cached_provider).
         has_cached = any(
             t.get('extra_data') and
             (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) and
-            t['extra_data'].get('provider', 'spotify') == _current_provider
+            (
+                t['extra_data'].get('provider', 'spotify') == _current_provider
+                or t['extra_data'].get('manual_match')
+            )
             for t in tracks
         )
 
