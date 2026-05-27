@@ -166,6 +166,12 @@ class ListenBrainzManager:
             # Skip if track count hasn't changed (playlist content likely the same)
             if db_track_count == track_count:
                 logger.debug(f"Playlist '{title}' unchanged, skipping")
+                # Even on the skip path, make sure the rolling-series
+                # mirror placeholder exists — otherwise users whose LB
+                # cache never has "changed" updates would never see the
+                # rolling Auto-Sync entries appear.
+                self._ensure_rolling_series_mirror(cursor, title)
+                conn.commit()
                 conn.close()
                 return "skipped"
 
@@ -222,6 +228,27 @@ class ListenBrainzManager:
         conn.close()
 
         return result_type
+
+    def _ensure_rolling_mirrors_from_cache(self, cursor):
+        """Walk every cached LB playlist row + ensure its rolling
+        series mirror exists. Catch-all that runs regardless of which
+        ``_update_playlist`` paths fired (skipped vs updated vs new).
+
+        Cheap — one SELECT + per-row helper call, helper is
+        idempotent INSERT OR IGNORE."""
+        try:
+            cursor.execute(
+                """
+                SELECT DISTINCT title FROM listenbrainz_playlists
+                WHERE profile_id = ?
+                """,
+                (self.profile_id,),
+            )
+            titles = [row[0] for row in cursor.fetchall() if row[0]]
+            for title in titles:
+                self._ensure_rolling_series_mirror(cursor, title)
+        except Exception as exc:
+            logger.debug(f"Bulk rolling-mirror ensure skipped: {exc}")
 
     def _ensure_rolling_series_mirror(self, cursor, playlist_title: str):
         """Upsert a placeholder ``mirrored_playlists`` row for the
@@ -467,6 +494,13 @@ class ListenBrainzManager:
         # Consolidate legacy per-week / per-year LB series mirrors into
         # the new rolling series mirrors (Phase 1c.2.1).
         self._cleanup_per_period_series_mirrors(cursor)
+        # Safety net: ensure rolling mirror placeholders exist for every
+        # series with at least one cached LB playlist row. Catches the
+        # case where every ``_update_playlist`` call took the "skipped"
+        # short-circuit (unchanged track count) and so the ensure-hook
+        # in the per-playlist path never fired on first run after the
+        # rolling feature shipped.
+        self._ensure_rolling_mirrors_from_cache(cursor)
 
         # For each playlist type, keep only the N most recent.
         # Last.fm radios are per-seed-track snapshots that don't update
