@@ -102,9 +102,7 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
                 variant=record.variant,
                 profile_id=record.profile_id,
             )
-        except Exception:
-            # Manager already persists ``last_generation_error`` on
-            # failure; surface the existing snapshot regardless.
+        except Exception:  # noqa: S110 — manager persists last_generation_error on failure; surface existing snapshot
             pass
         return self.get_playlist(playlist_id)
 
