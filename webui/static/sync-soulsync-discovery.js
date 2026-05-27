@@ -181,19 +181,37 @@ async function handleSoulsyncDiscoverySyncCardClick(kind, variant, name, cardEl)
             };
         });
 
-        if (typeof mirrorPlaylist === 'function') {
-            mirrorPlaylist(
-                'soulsync_discovery',
-                syntheticId,
-                finalName,
-                mirrorTracks,
-                {
-                    owner: 'SoulSync',
-                    description: `Personalized ${kind}${variant ? ' · ' + variant : ''} — regenerates on Auto-Sync refresh.`,
-                    image_url: '',
-                },
-            );
+        // POST inline so we can capture the returned mirrored_playlists
+        // row id and open the detail modal afterward. ``mirrorPlaylist``
+        // (in stats-automations.js) is fire-and-forget and doesn't
+        // surface the id, which the next step needs.
+        const normalizedTracks = mirrorTracks.map(t => ({
+            track_name: t.track_name || '',
+            artist_name: t.artist_name || '',
+            album_name: t.album_name || '',
+            duration_ms: t.duration_ms || 0,
+            image_url: t.image_url || null,
+            source_track_id: t.source_track_id || '',
+            extra_data: t.extra_data || null,
+        }));
+        const mirrorResp = await fetch('/api/mirror-playlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source: 'soulsync_discovery',
+                source_playlist_id: syntheticId,
+                name: finalName,
+                tracks: normalizedTracks,
+                description: `Personalized ${kind}${variant ? ' · ' + variant : ''} — regenerates on Auto-Sync refresh.`,
+                owner: 'SoulSync',
+                image_url: '',
+            }),
+        });
+        const mirrorData = await mirrorResp.json();
+        if (!mirrorData.success) {
+            throw new Error(mirrorData.error || 'Mirror creation failed');
         }
+        const mirroredId = mirrorData.playlist_id;
 
         if (progEl) {
             progEl.textContent = `♪ ${tracks.length} / ✓ ${mirrorTracks.length} / mirrored`;
@@ -218,6 +236,17 @@ async function handleSoulsyncDiscoverySyncCardClick(kind, variant, name, cardEl)
 
         if (typeof showToast === 'function') {
             showToast(`Mirrored '${finalName}' with ${mirrorTracks.length} tracks`, 'success');
+        }
+
+        // Open the mirrored-playlist detail modal so the user lands on
+        // the tracks view + can trigger sync / download from there.
+        // Same flow the Mirrored tab uses when clicking a row.
+        if (mirroredId && typeof openMirroredPlaylistModal === 'function') {
+            try {
+                await openMirroredPlaylistModal(mirroredId);
+            } catch (e) {
+                console.warn('Could not open mirrored playlist detail:', e);
+            }
         }
     } catch (err) {
         if (btn) {
