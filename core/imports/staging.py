@@ -7,7 +7,10 @@ import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.imports.paths import docker_resolve_path
-from core.imports.filename import extract_track_number_from_filename
+from core.imports.filename import (
+    extract_explicit_track_number,
+    extract_track_number_from_filename,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("imports.staging")
@@ -103,12 +106,19 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     if not albumartist:
         albumartist = artist
 
-    track_number = extract_track_number_from_filename(filename or file_path)
+    # Use the strict extractor here: when the filename has no visible
+    # track-number prefix, return 0 instead of pretending it's track 1.
+    # Downstream consumers (staging match in core/downloads/staging.py)
+    # will then fall through to authoritative metadata (track_info from
+    # the original Spotify / API source) rather than locking the import
+    # to track_number=1 for every file in the bundle.
+    track_number = extract_explicit_track_number(filename or file_path)
     try:
-        # Preserve tag-based numbers when present, but still fall back to the filename parser.
         tag_track_number = _first_tag("tracknumber", "track_number")
         if tag_track_number:
-            track_number = int(str(tag_track_number).split("/")[0].strip() or track_number)
+            parsed_tag = int(str(tag_track_number).split("/")[0].strip())
+            if parsed_tag > 0:
+                track_number = parsed_tag
     except (TypeError, ValueError):
         pass
 
