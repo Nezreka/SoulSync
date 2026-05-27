@@ -642,28 +642,19 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             album_info=album_info,
             default=original_search.get('title', 'Unknown Track'),
         )
-        # Read with explicit None default — the upstream payload helpers
-        # (``core/wishlist/payloads.py``) now preserve missing track
-        # numbers as None instead of pre-filling 1. That lets the
-        # filename-extract fallback below actually fire on wishlist
-        # re-attempts whose source payload lost the position. Pre-fix,
-        # ``.get('track_number', 1)`` filled 1, the None-check below
-        # never matched, and every wishlist re-try imported as ``01 -``
-        # regardless of the source file's real track number.
-        track_number = album_info.get('track_number')
+        # Resolve track_number from the richest available source.
+        # See ``core/imports/track_number.py`` for the resolution
+        # chain — pure function, unit-tested in isolation, single
+        # place to fix the rule.
+        from core.imports.track_number import resolve_track_number
+        track_info_for_resolve = context.get('track_info') if isinstance(context, dict) else None
+        track_number = resolve_track_number(album_info, track_info_for_resolve, file_path)
         logger.debug(
-            "Final track_number processing: source=%s album_info_track_number=%s track_number=%s",
+            "Final track_number processing: source=%s album_info=%s resolved=%s",
             album_info.get('source', 'unknown'),
             album_info.get('track_number', 'NOT_FOUND'),
             track_number,
         )
-        if track_number is None:
-            track_number = extract_track_number_from_filename(file_path)
-            logger.info(
-                "Track number was None; extracted from filename=%r -> %s",
-                os.path.basename(file_path),
-                track_number,
-            )
         if not isinstance(track_number, int) or track_number < 1:
             logger.error(f"Invalid track number ({track_number}), defaulting to 1")
             track_number = 1
