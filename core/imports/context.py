@@ -418,8 +418,12 @@ def detect_album_info_web(context, artist_context=None):
             context,
             album_info={
                 "album_name": album_name,
-                "track_number": track_info.get("track_number", 1),
-                "disc_number": track_info.get("disc_number", 1),
+                # Preserve missing numbers as None so the import pipeline
+                # can fall through to ``extract_track_number_from_filename``
+                # at ``core/imports/pipeline.py:652`` instead of locking
+                # to track/disc 01 for every wishlist re-attempt.
+                "track_number": track_info.get("track_number"),
+                "disc_number": track_info.get("disc_number"),
                 "album_image_url": album_ctx.get("image_url", ""),
                 "confidence": 0.5,
             },

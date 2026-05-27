@@ -642,7 +642,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             album_info=album_info,
             default=original_search.get('title', 'Unknown Track'),
         )
-        track_number = album_info.get('track_number', 1)
+        # Read with explicit None default — the upstream payload helpers
+        # (``core/wishlist/payloads.py``) now preserve missing track
+        # numbers as None instead of pre-filling 1. That lets the
+        # filename-extract fallback below actually fire on wishlist
+        # re-attempts whose source payload lost the position. Pre-fix,
+        # ``.get('track_number', 1)`` filled 1, the None-check below
+        # never matched, and every wishlist re-try imported as ``01 -``
+        # regardless of the source file's real track number.
+        track_number = album_info.get('track_number')
         logger.debug(
             "Final track_number processing: source=%s album_info_track_number=%s track_number=%s",
             album_info.get('source', 'unknown'),
