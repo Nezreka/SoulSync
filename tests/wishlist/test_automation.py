@@ -228,7 +228,12 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
     assert submitted_args[2][0]["_original_index"] == 0
     assert len(batch_map) == 1
     batch = next(iter(batch_map.values()))
-    assert batch["phase"] == "analysis"
+    # ``queued`` is the initial state — the master worker flips it
+    # to ``analysis`` as its first action when the executor picks
+    # the batch up. Without this, wishlist runs with N > 3
+    # sub-batches all rendered "Analyzing..." simultaneously even
+    # though only 3 workers were running (UI lie).
+    assert batch["phase"] == "queued"
     assert batch["playlist_name"] == "Wishlist (Auto - Albums)"
     assert batch["analysis_total"] == 1
     assert any(kwargs.get("progress") == 50 for _args, kwargs in progress_calls)
