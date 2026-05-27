@@ -3764,6 +3764,17 @@ function initializeSyncPage() {
                     _startLbSyncCardRefreshLoop();
                 }
             }
+
+            // SoulSync Discovery Sync tab — personalized_playlists pre-
+            // matched, no discovery hop needed; click → refresh kind →
+            // mirror under synthetic id.
+            if (tabId === 'soulsync-discovery-sync') {
+                if (typeof loadSoulsyncDiscoverySyncPlaylists === 'function'
+                        && !window._soulsyncDiscoverySyncTabLoaded) {
+                    window._soulsyncDiscoverySyncTabLoaded = true;
+                    loadSoulsyncDiscoverySyncPlaylists();
+                }
+            }
         });
     });
 
