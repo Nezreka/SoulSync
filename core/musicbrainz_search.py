@@ -772,12 +772,11 @@ class MusicBrainzSearchClient:
         When only one field is present: bare-query mode directly — same
         recall-over-precision tradeoff the old single-path took.
 
-        Results are stable-sorted to prefer entries with non-zero
-        `duration_ms`. MB often has several recordings per song (single
-        release, album release, compilations, remasters) and not every
-        recording carries length data. Without this, the first match can
-        be a length-less duplicate while a sibling recording with the
-        real 3:04 sits two rows down.
+        Callers wanting MB-specific length-preference ordering (multi-
+        edition recordings where some lack length data) should pass
+        ``prefer_known_duration=True`` to ``rerank_tracks`` downstream
+        — a stable sort here would just be re-sorted away by the rerank
+        pass anyway.
         """
         if not track and not artist:
             return []
@@ -790,13 +789,11 @@ class MusicBrainzSearchClient:
                 results = self._search_tracks_text(
                     track, artist, limit, strict=False, min_score=20
                 )
-        else:
-            results = self._search_tracks_text(
-                track, artist or None, limit, strict=False, min_score=20
-            )
+            return results
 
-        results.sort(key=lambda t: 0 if (t.duration_ms or 0) > 0 else 1)
-        return results
+        return self._search_tracks_text(
+            track, artist or None, limit, strict=False, min_score=20
+        )
 
     def _pick_representative_release(self, releases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Pick the best release out of a release-group's editions.

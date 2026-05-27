@@ -295,6 +295,7 @@ def rerank_tracks(
     *,
     expected_title: str,
     expected_artist: str,
+    prefer_known_duration: bool = False,
 ) -> List[Track]:
     """Return a copy of ``tracks`` sorted by descending relevance
     score against the expected title + artist.
@@ -304,6 +305,15 @@ def rerank_tracks(
     fallback when two candidates score identically — the source's
     popularity signal is still useful as a tiebreak).
 
+    ``prefer_known_duration``: when True, recordings with non-zero
+    ``duration_ms`` are ranked ahead of duplicate-score recordings
+    that lack length data. Used for MusicBrainz which often has
+    several recordings per song (single edition, album edition,
+    compilations, remasters) where some carry length and some don't.
+    Sort key sits between score and the stable-order tiebreaker so
+    relevance still wins — length is only a tiebreaker on equal
+    scores, not a global re-shuffle.
+
     No-op when both ``expected_title`` and ``expected_artist`` are
     empty (no signal to rank against — return input order)."""
     if not expected_title and not expected_artist:
@@ -312,8 +322,12 @@ def rerank_tracks(
         (score_track(t, expected_title=expected_title, expected_artist=expected_artist), idx, t)
         for idx, t in enumerate(tracks)
     ]
-    # Sort by score desc; idx asc as tiebreaker preserves stable order.
-    scored.sort(key=lambda x: (-x[0], x[1]))
+    if prefer_known_duration:
+        # Sort key: score desc, has-length first (0 before 1), idx asc.
+        scored.sort(key=lambda x: (-x[0], 0 if (x[2].duration_ms or 0) > 0 else 1, x[1]))
+    else:
+        # Sort by score desc; idx asc as tiebreaker preserves stable order.
+        scored.sort(key=lambda x: (-x[0], x[1]))
     return [t for _score, _idx, t in scored]
 
 
