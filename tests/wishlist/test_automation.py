@@ -233,7 +233,104 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
     assert batch["analysis_total"] == 1
     assert any(kwargs.get("progress") == 50 for _args, kwargs in progress_calls)
     assert guard_events == ["enter", "exit"]
-    assert any("Starting automatic wishlist batch" in msg for msg in logger.info_messages)
+    # Track has no album id/name → falls to residual batch path
+    assert any("Starting wishlist residual batch" in msg for msg in logger.info_messages)
+
+
+def test_wishlist_albums_cycle_splits_into_per_album_batches():
+    """Multi-album wishlist run: each album emits its own sub-batch
+    with ``is_album_download=True`` + populated album/artist context.
+    Pinned so the album-bundle dispatch gate (which keys on those
+    fields) engages per album instead of falling through to per-track
+    on a single mixed batch."""
+    batch_map = {}
+    runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[
+            {
+                "name": "Song A1",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            {
+                "name": "Song A2",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            {
+                "name": "Song B1",
+                "artists": [{"name": "Artist 2"}],
+                "spotify_data": {
+                    "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
+                    "artists": [{"name": "Artist 2"}],
+                },
+            },
+        ],
+        cycle_value="albums",
+        count=3,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-multi-album")
+
+    # Two album groups → two sub-batches submitted (no residual).
+    assert len(executor.submissions) == 2
+    assert len(batch_map) == 2
+
+    # Each sub-batch must carry album-bundle dispatch context.
+    for batch in batch_map.values():
+        assert batch.get("is_album_download") is True
+        assert batch.get("album_context", {}).get("name") in {"Album One", "Album Two"}
+        assert batch.get("artist_context", {}).get("name") in {"Artist 1", "Artist 2"}
+
+    submitted_track_lists = [submitted_args[2] for _fn, submitted_args, _kw in executor.submissions]
+    track_counts = sorted(len(tracks) for tracks in submitted_track_lists)
+    assert track_counts == [1, 2]
+
+
+def test_wishlist_albums_cycle_residual_for_orphan_tracks():
+    """Tracks without resolvable album metadata fall to the classic
+    per-track residual batch (no ``is_album_download`` flag), while
+    sibling tracks with valid album info still get their own
+    album-bundle sub-batch."""
+    batch_map = {}
+    runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[
+            {
+                "name": "Real Album Track",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            {
+                # No album id, no album name — orphan
+                "name": "Orphan",
+                "artists": [{"name": "X"}],
+                "spotify_data": {"album": {"album_type": "album"}, "artists": [{"name": "X"}]},
+            },
+        ],
+        cycle_value="albums",
+        count=2,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-mixed")
+
+    assert len(executor.submissions) == 2  # 1 album batch + 1 residual
+
+    album_batches = [b for b in batch_map.values() if b.get("is_album_download")]
+    residual_batches = [b for b in batch_map.values() if not b.get("is_album_download")]
+    assert len(album_batches) == 1
+    assert len(residual_batches) == 1
+    assert album_batches[0]["album_context"]["name"] == "Album One"
+    assert residual_batches[0]["analysis_total"] == 1
 
 
 def test_process_wishlist_automatically_returns_early_when_already_processing():
