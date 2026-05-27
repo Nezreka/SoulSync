@@ -37,6 +37,15 @@ psutil==7.2.2
 # the app's tz knowledge to the build date.
 tzdata>=2024.1
 
+# Cross-platform IANA timezone detection — returns the server's local
+# tz as a string ('America/Los_Angeles', not 'PDT'). Consumed by the
+# automation engine to preserve historic behaviour for daily / weekly
+# trigger rows that don't carry an explicit ``tz`` field: the old
+# engine computed delays from naive ``datetime.now()``, which is
+# implicitly the server's local tz, so falling back to the same tz
+# keeps existing schedules running at the same wall-clock time.
+tzlocal>=5.0
+
 # YouTube support -- unpinned; yt-dlp must track upstream releases to stay functional
 yt-dlp>=2026.3.17
 
