@@ -84,6 +84,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
         if not task:
             return False
         used_sources = task.get('used_sources', set())
+        # User-initiated manual picks (candidates modal) bypass quarantine
+        # gates downstream. The user already accepted the risk by choosing
+        # the file; we trust their selection over AcoustID disagreement so
+        # repeated manual picks don't loop back into quarantine.
+        user_manual_pick = bool(task.get('_user_manual_pick', False))
     
     # Try each candidate until one succeeds (like GUI's fallback logic)
     for candidate_index, candidate in enumerate(candidates):
@@ -331,6 +336,20 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    if user_manual_pick:
+                        # The user explicitly picked this candidate via the
+                        # candidates modal — trust their metadata judgement
+                        # over AcoustID disagreement so manual picks don't
+                        # loop back into quarantine. Integrity + bit-depth
+                        # gates still run because those check the new file's
+                        # actual condition, not its identity.
+                        matched_downloads_context[context_key]['_skip_quarantine_check'] = 'acoustid'
+                        matched_downloads_context[context_key]['_user_manual_pick'] = True
+                        logger.info(
+                            "[Context] User manual pick — bypassing AcoustID for "
+                            "task=%s username=%s filename=%s",
+                            task_id, username, os.path.basename(filename),
+                        )
 
                     logger.info(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
                     logger.debug(f"[Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")

@@ -617,7 +617,7 @@ class AutomationEngine:
                     self._progress_finish_fn(automation_id, result)
                 except Exception as e:
                     logger.debug("scheduled progress finish (skipped): %s", e)
-            self._finish_run(auto, automation_id, result, error=None)
+            self._finish_run(auto, automation_id, result, error=None, retry_delay_seconds=300)
             return
 
         # Initialize progress tracking (skip if already done during delay)
@@ -664,7 +664,7 @@ class AutomationEngine:
 
         self._finish_run(auto, automation_id, result, error)
 
-    def _finish_run(self, auto, automation_id, result, error):
+    def _finish_run(self, auto, automation_id, result, error, retry_delay_seconds=None):
         """Update DB with run stats and reschedule."""
         next_run_str = None
         trigger_type = auto.get('trigger_type', '')
@@ -672,7 +672,9 @@ class AutomationEngine:
         if trigger_type in self._trigger_handlers:
             try:
                 trigger_config = json.loads(auto.get('trigger_config') or '{}')
-                if trigger_type == 'daily_time':
+                if retry_delay_seconds:
+                    next_run_str = _utc_after(retry_delay_seconds)
+                elif trigger_type == 'daily_time':
                     # Next run is tomorrow at the configured time (compute delay from local time, store as UTC)
                     time_str = trigger_config.get('time', '00:00')
                     hour, minute = map(int, time_str.split(':'))
@@ -997,6 +999,8 @@ class AutomationEngine:
         """Send message via Telegram Bot API."""
         bot_token = config.get('bot_token', '').strip()
         chat_id = config.get('chat_id', '').strip()
+        thread_id = config.get('thread_id', '').strip()
+        
         if not bot_token or not chat_id:
             raise ValueError("Bot token and chat ID are required for Telegram")
 
@@ -1005,9 +1009,16 @@ class AutomationEngine:
         for key, value in variables.items():
             message = message.replace('{' + key + '}', value)
 
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        if thread_id:
+            try:
+                payload["message_thread_id"] = int(thread_id)
+            except ValueError:
+                pass  # invalid — fall back to main chat
+
         resp = requests.post(
             f'https://api.telegram.org/bot{bot_token}/sendMessage',
-            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            json=payload,
             timeout=10,
         )
         data = resp.json() if resp.status_code == 200 else {}

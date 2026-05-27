@@ -106,6 +106,44 @@ def test_extract_spotify_track_from_modal_info_reconstructs_from_slskd_result():
     assert out["album"]["name"] == "Album Three"
 
 
+def test_ensure_wishlist_track_format_defaults_non_dict_album_to_album_type():
+    """When ``album`` arrives as a non-dict (legacy/reconstruction path) we
+    must not stamp ``album_type='single'`` — that lies about the origin
+    and routes the wishlist requeue through the single_path template
+    instead of album_path, dumping album tracks into the Singles tree.
+    Default to 'album' / total_tracks=0 (unknown) so downstream code can
+    fall through to the real release-type detection logic."""
+    track = {
+        "name": "Song",
+        "artist": "Artist One",
+        "album": "Album From Legacy String",
+    }
+
+    out = payloads.ensure_wishlist_track_format(track)
+
+    assert out["album"]["name"] == "Album From Legacy String"
+    assert out["album"]["album_type"] == "album"
+    assert out["album"]["total_tracks"] == 0
+
+
+def test_extract_spotify_track_from_modal_info_slskd_reconstruction_defaults_to_album():
+    """Slskd-result reconstruction is a last-resort path; defaulting to
+    ``album_type='single'`` corrupted the requeue routing for album
+    batches. Same fix as ensure_wishlist_track_format: default 'album'."""
+    track_info = {
+        "slskd_result": SimpleNamespace(
+            title="Song Three",
+            artist="Artist Three",
+            album="Album Three",
+        )
+    }
+
+    out = payloads.extract_spotify_track_from_modal_info(track_info)
+
+    assert out["album"]["album_type"] == "album"
+    assert out["album"]["total_tracks"] == 0
+
+
 def test_extract_wishlist_track_from_modal_info_uses_track_data_key():
     track_info = {
         "track_data": {

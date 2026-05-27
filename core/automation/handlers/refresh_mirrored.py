@@ -1,23 +1,43 @@
 """Automation handler: ``refresh_mirrored`` action.
 
-Lifted from ``web_server._register_automation_handlers`` (the
-``_auto_refresh_mirrored`` closure). Re-pulls track lists from each
-mirrored playlist's source (Spotify / Tidal / Deezer / YouTube),
-updates the local mirror DB, and emits a ``playlist_changed``
-automation event when the track set actually shifts.
+Re-pulls track lists from each mirrored playlist's source via the
+unified ``PlaylistSourceRegistry`` (Phase 1 of the Discover-to-Sync
+unification). The pre-extraction handler had ~190 lines of per-source
+if/elif branches; this version delegates to the adapter for each
+source, leaving the handler responsible only for:
 
-Source-specific branches (Spotify auth + public-embed fallback,
-``spotify_public`` URL→ID resolution, Deezer / Tidal / YouTube)
-remain identical to the pre-extraction closure — this is a
-mechanical lift, not a redesign.
+- filtering sources that can't be refreshed (``file``, ``beatport``),
+- extracting upstream URLs from the stored ``description`` for URL-
+  backed sources (``spotify_public``, ``youtube``),
+- the Spotify-public → authenticated-Spotify fallback (uses the
+  ``spotify`` adapter when the user is signed in so the mirror keeps
+  album art),
+- the Tidal-not-authenticated skip log type (vs error),
+- preserving existing per-track ``extra_data`` on tracks that survive
+  the refresh, and
+- emitting the ``playlist_changed`` automation event when the track
+  set actually shifts.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
+from core.playlists.source_refs import require_refresh_url
+from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
+from core.playlists.sources.base import (
+    SOURCE_SPOTIFY,
+    SOURCE_SPOTIFY_PUBLIC,
+    SOURCE_TIDAL,
+    SOURCE_YOUTUBE,
+)
+
+
+# Sources that store the upstream URL in ``description`` (because their
+# ``source_playlist_id`` is a deterministic hash, not the native ID).
+# The refresh path has to recover the URL before calling the adapter.
+_URL_BACKED_SOURCES = {SOURCE_SPOTIFY_PUBLIC, SOURCE_YOUTUBE}
 
 
 def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
@@ -44,7 +64,7 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
     playlists = [pl for pl in playlists if pl.get('source', '') not in ('file', 'beatport')]
 
     refreshed = 0
-    errors = []
+    errors: List[str] = []
     for idx, pl in enumerate(playlists):
         try:
             source = pl.get('source', '')
@@ -55,249 +75,32 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 phase=f'Refreshing: "{pl.get("name", "")}"',
                 current_item=pl.get('name', ''),
             )
-            tracks = None
 
-            if source == 'spotify':
-                # Try authenticated API first, fall back to public embed scraper.
-                if deps.spotify_client and deps.spotify_client.is_spotify_authenticated():
-                    playlist_obj = deps.spotify_client.get_playlist_by_id(source_id)
-                    if playlist_obj and playlist_obj.tracks:
-                        tracks = []
-                        for t in playlist_obj.tracks:
-                            artist_name = t.artists[0] if t.artists else ''
-                            track_dict = {
-                                'track_name': t.name or '',
-                                'artist_name': str(artist_name),
-                                'album_name': t.album or '',
-                                'duration_ms': t.duration_ms or 0,
-                                'source_track_id': t.id or '',
-                            }
-                            # Spotify data IS official — auto-mark as discovered.
-                            if t.id:
-                                _album_obj = {'name': t.album or ''}
-                                if getattr(t, 'image_url', None):
-                                    _album_obj['images'] = [{'url': t.image_url, 'height': 600, 'width': 600}]
-                                track_dict['extra_data'] = json.dumps({
-                                    'discovered': True,
-                                    'provider': 'spotify',
-                                    'confidence': 1.0,
-                                    'matched_data': {
-                                        'id': t.id,
-                                        'name': t.name or '',
-                                        'artists': [{'name': str(a)} for a in (t.artists or [])],
-                                        'album': _album_obj,
-                                        'duration_ms': t.duration_ms or 0,
-                                        'image_url': getattr(t, 'image_url', None),
-                                    }
-                                })
-                            tracks.append(track_dict)
-
-                # Fallback: public embed scraper (no auth needed).
-                if tracks is None:
-                    try:
-                        from core.spotify_public_scraper import scrape_spotify_embed
-                        embed_data = scrape_spotify_embed('playlist', source_id)
-                        if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
-                            embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
-                            tracks = []
-                            for t in embed_data['tracks']:
-                                artist_names = [a['name'] for a in t.get('artists', [])]
-                                artist_name = artist_names[0] if artist_names else ''
-                                track_dict = {
-                                    'track_name': t.get('name', ''),
-                                    'artist_name': artist_name,
-                                    'album_name': embed_album,
-                                    'duration_ms': t.get('duration_ms', 0),
-                                    'source_track_id': t.get('id', ''),
-                                }
-                                # Store Spotify track ID hint but don't mark discovered —
-                                # Discover step needs to run for proper album art.
-                                if t.get('id'):
-                                    track_dict['extra_data'] = json.dumps({
-                                        'discovered': False,
-                                        'spotify_hint': {
-                                            'id': t['id'],
-                                            'name': t.get('name', ''),
-                                            'artists': t.get('artists', []),
-                                        }
-                                    })
-                                tracks.append(track_dict)
-                    except Exception as e:
-                        deps.logger.warning(f"Spotify public scraper fallback failed for {source_id}: {e}")
-
-            elif source == 'spotify_public':
-                # source_playlist_id is an MD5 hash; extract actual Spotify ID from stored description (URL).
-                try:
-                    from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
-                    spotify_url = pl.get('description', '')
-                    parsed = parse_spotify_url(spotify_url) if spotify_url else None
-
-                    # If Spotify is authenticated, use the full API (auto-discovers with album art).
-                    if (parsed and parsed.get('type') == 'playlist'
-                            and deps.spotify_client and deps.spotify_client.is_spotify_authenticated()):
-                        playlist_obj = deps.spotify_client.get_playlist_by_id(parsed['id'])
-                        if playlist_obj and playlist_obj.tracks:
-                            tracks = []
-                            for t in playlist_obj.tracks:
-                                artist_name = t.artists[0] if t.artists else ''
-                                track_dict = {
-                                    'track_name': t.name or '',
-                                    'artist_name': str(artist_name),
-                                    'album_name': t.album or '',
-                                    'duration_ms': t.duration_ms or 0,
-                                    'source_track_id': t.id or '',
-                                }
-                                if t.id:
-                                    _album_obj = {'name': t.album or ''}
-                                    if getattr(t, 'image_url', None):
-                                        _album_obj['images'] = [{'url': t.image_url, 'height': 600, 'width': 600}]
-                                    track_dict['extra_data'] = json.dumps({
-                                        'discovered': True,
-                                        'provider': 'spotify',
-                                        'confidence': 1.0,
-                                        'matched_data': {
-                                            'id': t.id,
-                                            'name': t.name or '',
-                                            'artists': [{'name': str(a)} for a in (t.artists or [])],
-                                            'album': _album_obj,
-                                            'duration_ms': t.duration_ms or 0,
-                                            'image_url': getattr(t, 'image_url', None),
-                                        }
-                                    })
-                                tracks.append(track_dict)
-
-                    # Fallback: public embed scraper (no auth or album-type URL).
-                    if tracks is None and parsed:
-                        embed_data = scrape_spotify_embed(parsed['type'], parsed['id'])
-                        if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
-                            embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
-                            tracks = []
-                            for t in embed_data['tracks']:
-                                artist_names = [a['name'] for a in t.get('artists', [])]
-                                artist_name = artist_names[0] if artist_names else ''
-                                tracks.append({
-                                    'track_name': t.get('name', ''),
-                                    'artist_name': artist_name,
-                                    'album_name': embed_album,
-                                    'duration_ms': t.get('duration_ms', 0),
-                                    'source_track_id': t.get('id', ''),
-                                })
-                                # No extra_data — let preservation code keep existing discovery data.
-                except Exception as e:
-                    deps.logger.warning(f"Spotify public playlist refresh failed for {source_id}: {e}")
-
-            elif source == 'deezer':
-                try:
-                    deezer = deps.get_deezer_client()
-                    playlist_data = deezer.get_playlist(source_id)
-                    if playlist_data and playlist_data.get('tracks'):
-                        tracks = []
-                        for t in playlist_data['tracks']:
-                            artist_name = t['artists'][0] if t.get('artists') else ''
-                            tracks.append({
-                                'track_name': t.get('name', ''),
-                                'artist_name': str(artist_name),
-                                'album_name': t.get('album', ''),
-                                'duration_ms': t.get('duration_ms', 0),
-                                'source_track_id': str(t.get('id', '')),
-                            })
-                except Exception as e:
-                    deps.logger.warning(f"Deezer playlist refresh failed for {source_id}: {e}")
-
-            elif source == 'tidal':
-                if not deps.tidal_client or not deps.tidal_client.is_authenticated():
-                    deps.logger.warning(f"Tidal not authenticated — skipping refresh for '{pl.get('name', '')}'")
-                    deps.update_progress(
-                        auto_id,
-                        log_line=f'Skipped "{pl.get("name", "")}" — Tidal not authenticated',
-                        log_type='skip',
-                    )
-                    continue
-                full_playlist = deps.tidal_client.get_playlist(source_id)
-                if full_playlist and full_playlist.tracks:
-                    tracks = []
-                    for t in full_playlist.tracks:
-                        artist_name = t.artists[0] if t.artists else ''
-                        tracks.append({
-                            'track_name': t.name or '',
-                            'artist_name': str(artist_name),
-                            'album_name': t.album or '',
-                            'duration_ms': t.duration_ms or 0,
-                            'source_track_id': t.id or '',
-                        })
-
-            elif source == 'youtube':
-                # source_playlist_id is now a deterministic hash; use stored description (original URL) for refresh.
-                yt_url = pl.get('description', '') or f"https://www.youtube.com/playlist?list={source_id}"
-                playlist_data = deps.parse_youtube_playlist(yt_url)
-                if playlist_data and playlist_data.get('tracks'):
-                    tracks = []
-                    for t in playlist_data['tracks']:
-                        artist_name = t['artists'][0] if t.get('artists') else ''
-                        tracks.append({
-                            'track_name': t.get('name', ''),
-                            'artist_name': str(artist_name),
-                            'album_name': '',
-                            'duration_ms': t.get('duration_ms', 0),
-                            'source_track_id': t.get('id', ''),
-                        })
-
-            if tracks is not None:
-                # Compare old vs new track IDs to detect changes.
-                old_tracks = db.get_mirrored_playlist_tracks(pl['id']) if pl.get('id') else []
-                old_ids = {t.get('source_track_id') for t in old_tracks if t.get('source_track_id')}
-                new_ids = {t.get('source_track_id') for t in tracks if t.get('source_track_id')}
-
-                # Preserve existing discovery extra_data for tracks that still exist.
-                old_extra_map = db.get_mirrored_tracks_extra_data_map(pl['id']) if pl.get('id') else {}
-                for t in tracks:
-                    sid = t.get('source_track_id', '')
-                    if sid and sid in old_extra_map and 'extra_data' not in t:
-                        t['extra_data'] = old_extra_map[sid]
-
-                db.mirror_playlist(
-                    source=source,
-                    source_playlist_id=source_id,
-                    name=pl['name'],
-                    tracks=tracks,
-                    profile_id=pl.get('profile_id', 1),
-                    owner=pl.get('owner'),
-                    image_url=pl.get('image_url'),
+            detail = _fetch_detail(source, source_id, pl, deps, auto_id)
+            if detail is None:
+                # _fetch_detail already logged the specific failure;
+                # mark the playlist as a generic refresh error so the
+                # automation result tally matches the legacy handler.
+                errors.append(f"{pl.get('name', '?')}: no tracks returned from source")
+                deps.update_progress(
+                    auto_id,
+                    log_line=f'Refresh failed: "{pl.get("name", "")}" - no tracks returned from source',
+                    log_type='error',
                 )
-                refreshed += 1
+                continue
 
-                # Emit playlist_changed if tracks actually changed.
-                if old_ids != new_ids:
-                    added_count = len(new_ids - old_ids)
-                    removed_count = len(old_ids - new_ids)
-                    deps.logger.info(
-                        f"[AUTOMATION] Playlist changed: '{pl.get('name', '')}' — "
-                        f"{added_count} added, {removed_count} removed (old={len(old_ids)}, new={len(new_ids)})"
-                    )
-                    deps.update_progress(
-                        auto_id,
-                        log_line=f'"{pl.get("name", "")}" — {added_count} added, {removed_count} removed',
-                        log_type='success',
-                    )
-                    try:
-                        if deps.engine:
-                            deps.engine.emit('playlist_changed', {
-                                'playlist_name': pl.get('name', ''),
-                                'playlist_id': str(pl.get('id', '')),
-                                'old_count': str(len(old_ids)),
-                                'new_count': str(len(new_ids)),
-                                'added': str(added_count),
-                                'removed': str(removed_count),
-                            })
-                    except Exception as e:
-                        deps.logger.debug("playlist_synced automation emit failed: %s", e)
-                else:
-                    deps.logger.warning(f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
-                    deps.update_progress(
-                        auto_id,
-                        log_line=f'No changes: "{pl.get("name", "")}"',
-                        log_type='skip',
-                    )
+            # Sources that return MB-metadata-only tracks (LB, Last.fm)
+            # mark them ``needs_discovery=True``. Hand them to the
+            # adapter's matcher so the resulting mirror rows carry
+            # provider IDs + matched_data, ready for the sync pipeline.
+            detail_tracks = _maybe_discover(detail.tracks, source, deps)
+
+            tracks = [to_mirror_track_dict(t) for t in detail_tracks]
+            refreshed += _commit_refresh(pl, source, source_id, tracks, db, deps, auto_id)
+        except _SkipPlaylist:
+            # Source-specific soft-skip (e.g. Tidal not authenticated).
+            # Logging was already emitted; do not count as error.
+            continue
         except Exception as e:
             errors.append(f"{pl.get('name', '?')}: {str(e)}")
             deps.update_progress(
@@ -306,3 +109,204 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 log_type='error',
             )
     return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
+
+
+def _maybe_discover(
+    tracks: List[Any],
+    source: str,
+    deps: AutomationDeps,
+) -> List[Any]:
+    """Run the adapter's ``discover_tracks`` when any track needs it.
+
+    Most sources are no-ops here (their tracks have provider IDs
+    already). LB / Last.fm are the ones that actually do work."""
+    if not tracks:
+        return tracks
+    if not any(getattr(t, "needs_discovery", False) for t in tracks):
+        return tracks
+    registry = deps.playlist_source_registry
+    if registry is None:
+        return tracks
+    adapter = registry.get_source(source)
+    if adapter is None:
+        return tracks
+    try:
+        return adapter.discover_tracks(tracks)
+    except Exception as exc:
+        deps.logger.warning(f"{source} discover_tracks failed: {exc}")
+        return tracks
+
+
+class _SkipPlaylist(Exception):
+    """Internal sentinel: source-specific soft-skip (e.g. not authed).
+
+    The per-playlist loop catches it specifically so the skip isn't
+    counted in the error tally — matches the pre-extraction behavior
+    where ``continue`` was used inline."""
+
+
+def _fetch_detail(
+    source: str,
+    source_id: str,
+    pl: Dict[str, Any],
+    deps: AutomationDeps,
+    auto_id: Optional[str],
+) -> Optional[PlaylistDetail]:
+    """Resolve the playlist's tracks through the registry.
+
+    Handler-level branches (URL extraction, Spotify-public→authed
+    fallback, Tidal not-authed skip) live here; everything else
+    delegates to the adapter."""
+    registry = deps.playlist_source_registry
+    if registry is None:
+        return None
+
+    # URL-backed sources: pull the upstream URL out of `description`.
+    playlist_input = source_id
+    if source in _URL_BACKED_SOURCES:
+        # ``require_refresh_url`` raises ValueError on missing URL.
+        # The outer try/except in the loop catches it and reports as
+        # an error — matching the pre-extraction behavior.
+        playlist_input = require_refresh_url(
+            source, pl.get('description', ''), pl.get('name', '')
+        )
+
+    # Spotify-public refresh: prefer the authenticated Spotify API
+    # when the user is signed in. Better album art, matches the
+    # pre-extraction handler. Falls through to the public scraper on
+    # auth failure or non-playlist URL types (e.g. album URLs).
+    if source == SOURCE_SPOTIFY_PUBLIC:
+        detail = _try_spotify_authed_for_public(playlist_input, deps)
+        if detail is not None:
+            return detail
+
+    # Tidal not-authed: soft-skip with a 'skip' log line, not an error.
+    if source == SOURCE_TIDAL:
+        tidal_source = registry.get_source(SOURCE_TIDAL)
+        if tidal_source is None or not tidal_source.is_authenticated():
+            deps.logger.warning(
+                f"Tidal not authenticated — skipping refresh for '{pl.get('name', '')}'"
+            )
+            deps.update_progress(
+                auto_id,
+                log_line=f'Skipped "{pl.get("name", "")}" — Tidal not authenticated',
+                log_type='skip',
+            )
+            raise _SkipPlaylist
+
+    adapter = registry.get_source(source)
+    if adapter is None:
+        return None
+    try:
+        return adapter.refresh_playlist(playlist_input)
+    except Exception as exc:
+        deps.logger.warning(
+            f"{source} playlist refresh failed for {playlist_input}: {exc}"
+        )
+        return None
+
+
+def _try_spotify_authed_for_public(
+    spotify_url: str, deps: AutomationDeps
+) -> Optional[PlaylistDetail]:
+    """Best-effort: use the authenticated Spotify adapter on a public URL.
+
+    Returns ``None`` to signal "fall through to the public-scraper
+    adapter" — never raises. Only applies to ``playlist``-type URLs;
+    album URLs fall through unconditionally."""
+    if not spotify_url:
+        return None
+    spotify_client = deps.spotify_client
+    if spotify_client is None or not spotify_client.is_spotify_authenticated():
+        return None
+    try:
+        from core.spotify_public_scraper import parse_spotify_url
+        parsed = parse_spotify_url(spotify_url)
+    except Exception:
+        return None
+    if not parsed or parsed.get('type') != 'playlist':
+        return None
+    adapter = deps.playlist_source_registry.get_source(SOURCE_SPOTIFY)
+    if adapter is None:
+        return None
+    try:
+        return adapter.refresh_playlist(parsed['id'])
+    except Exception as exc:
+        deps.logger.debug(f"Spotify authed fallback for public mirror failed: {exc}")
+        return None
+
+
+def _commit_refresh(
+    pl: Dict[str, Any],
+    source: str,
+    source_id: str,
+    tracks: List[Dict[str, Any]],
+    db: Any,
+    deps: AutomationDeps,
+    auto_id: Optional[str],
+) -> int:
+    """Persist the refreshed track list + emit playlist_changed when delta.
+
+    Returns 1 when a refresh successfully landed, 0 otherwise. The
+    caller is responsible for incrementing the running tally."""
+    old_tracks = db.get_mirrored_playlist_tracks(pl['id']) if pl.get('id') else []
+    old_ids = {t.get('source_track_id') for t in old_tracks if t.get('source_track_id')}
+    new_ids = {t.get('source_track_id') for t in tracks if t.get('source_track_id')}
+
+    # Preserve existing extra_data (matched_data + discovery state)
+    # for tracks that still exist in the refreshed snapshot, unless
+    # the adapter already provided fresh extra_data for that track.
+    old_extra_map = (
+        db.get_mirrored_tracks_extra_data_map(pl['id']) if pl.get('id') else {}
+    )
+    for t in tracks:
+        sid = t.get('source_track_id', '')
+        if sid and sid in old_extra_map and 'extra_data' not in t:
+            t['extra_data'] = old_extra_map[sid]
+
+    db.mirror_playlist(
+        source=source,
+        source_playlist_id=source_id,
+        name=pl['name'],
+        tracks=tracks,
+        profile_id=pl.get('profile_id', 1),
+        description=pl.get('description'),
+        owner=pl.get('owner'),
+        image_url=pl.get('image_url'),
+    )
+
+    if old_ids != new_ids:
+        added = len(new_ids - old_ids)
+        removed = len(old_ids - new_ids)
+        deps.logger.info(
+            f"[AUTOMATION] Playlist changed: '{pl.get('name', '')}' — "
+            f"{added} added, {removed} removed (old={len(old_ids)}, new={len(new_ids)})"
+        )
+        deps.update_progress(
+            auto_id,
+            log_line=f'"{pl.get("name", "")}" — {added} added, {removed} removed',
+            log_type='success',
+        )
+        try:
+            if deps.engine:
+                deps.engine.emit('playlist_changed', {
+                    'playlist_name': pl.get('name', ''),
+                    'playlist_id': str(pl.get('id', '')),
+                    'old_count': str(len(old_ids)),
+                    'new_count': str(len(new_ids)),
+                    'added': str(added),
+                    'removed': str(removed),
+                })
+        except Exception as e:
+            deps.logger.debug("playlist_synced automation emit failed: %s", e)
+    else:
+        deps.logger.warning(
+            f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})"
+        )
+        deps.update_progress(
+            auto_id,
+            log_line=f'No changes: "{pl.get("name", "")}"',
+            log_type='skip',
+        )
+
+    return 1

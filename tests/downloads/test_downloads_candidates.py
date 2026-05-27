@@ -419,6 +419,48 @@ def test_candidates_with_equal_confidence_both_tried():
     assert deps.download_orchestrator.download_calls[0][1] == "a.flac"
 
 
+def test_user_manual_pick_injects_acoustid_bypass_into_post_process_context():
+    """Issue #701: when the user picks a specific candidate via the
+    candidates modal, the download_selected_candidate endpoint sets
+    `_user_manual_pick=True` on the task. The candidates helper must
+    propagate that into the stored post-process context as
+    `_skip_quarantine_check='acoustid'`; without it the manual pick
+    loops straight back into quarantine whenever AcoustID disagrees
+    with the user's selection."""
+    deps = _build_deps()
+    _seed_task("t_manual_pick")
+    download_tasks["t_manual_pick"]["_user_manual_pick"] = True
+
+    candidates = [_Candidate(filename="picked.flac", confidence=0.99)]
+    track = _Track()
+
+    result = dc.attempt_download_with_candidates("t_manual_pick", candidates, track, batch_id="b1", deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::picked.flac"]
+    assert ctx["_skip_quarantine_check"] == "acoustid"
+    assert ctx["_user_manual_pick"] is True
+
+
+def test_auto_search_pick_does_not_inject_acoustid_bypass():
+    """The bypass is ONLY for user-initiated manual picks. Auto-search
+    candidate picks (which run during the normal download flow) must
+    still get AcoustID verification — they're the canonical guard
+    against the wrong-file leak that quarantine exists to catch."""
+    deps = _build_deps()
+    _seed_task("t_auto_pick")  # No _user_manual_pick flag set
+
+    candidates = [_Candidate(filename="auto.flac", confidence=0.99)]
+    track = _Track()
+
+    result = dc.attempt_download_with_candidates("t_auto_pick", candidates, track, batch_id="b1", deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::auto.flac"]
+    assert "_skip_quarantine_check" not in ctx
+    assert "_user_manual_pick" not in ctx
+
+
 def test_equal_confidence_candidates_prefer_better_peer_quality():
     """Equal-confidence Soulseek candidates use peer quality as the tiebreaker."""
     deps = _build_deps()

@@ -125,6 +125,19 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     if existing_extra.get('wing_it_fallback'):
                         # Wing It stub — always re-attempt to find a real match
                         undiscovered_tracks.append(track)
+                    elif existing_extra.get('manual_match'):
+                        # User explicitly picked this match via the Fix popup.
+                        # Manual fixes are authoritative: they may lack
+                        # track_number / album.id / release_date (the Fix-popup
+                        # save shape is intentionally lean — search-result rows
+                        # don't include track_number, and the MBID-lookup flat
+                        # shape doesn't carry album.id), but re-running discovery
+                        # against the active source would overwrite the user's
+                        # deliberate pick with whatever the auto-search ranks
+                        # first. Skip — pipeline only re-discovers when the user
+                        # has cleared the match.
+                        pl_skipped += 1
+                        total_skipped += 1
                     else:
                         # Check if matched_data is complete — old discoveries may be missing
                         # track_number/release_date due to the Track dataclass stripping them.

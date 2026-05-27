@@ -356,26 +356,6 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         if force_download_all:
             logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
 
-        # Album-bundle gate for torrent / usenet single-source mode.
-        # See ``core/downloads/album_bundle_dispatch`` for the full
-        # narrow-gate rationale. Returns True iff the master worker
-        # should stop (gate fired and failed); False = engaged-and-
-        # succeeded OR didn't engage, both fall through to per-track.
-        _bundle_state = _BatchStateAccessImpl()
-        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
-        if _album_bundle_source and _album_bundle_source != 'soulseek':
-            if _album_bundle_dispatch.try_dispatch(
-                batch_id=batch_id,
-                is_album=batch_is_album,
-                album_context=batch_album_context,
-                artist_context=batch_artist_context,
-                config_get=deps.config_manager.get,
-                plugin_resolver=deps.download_orchestrator.client,
-                state=_bundle_state,
-                source_override=_album_bundle_source,
-            ):
-                return
-
         # Allow duplicate tracks across albums — when enabled, only skip tracks already
         # owned in THIS album, not tracks owned in other albums
         allow_duplicates = deps.config_manager.get('wishlist.allow_duplicate_tracks', True)
@@ -670,6 +650,25 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
+
+        # Album-bundle sources download a whole release into private staging,
+        # then the normal per-track workers claim those staged files. Run this
+        # only after analysis has found missing tracks; otherwise an already
+        # owned album would still trigger a release download.
+        _bundle_state = _BatchStateAccessImpl()
+        _album_bundle_source = _resolve_album_bundle_source(deps.config_manager)
+        if _album_bundle_source and _album_bundle_source != 'soulseek':
+            if _album_bundle_dispatch.try_dispatch(
+                batch_id=batch_id,
+                is_album=batch_is_album,
+                album_context=batch_album_context,
+                artist_context=batch_artist_context,
+                config_get=deps.config_manager.get,
+                plugin_resolver=deps.download_orchestrator.client,
+                state=_bundle_state,
+                source_override=_album_bundle_source,
+            ):
+                return
 
         # === ALBUM PRE-FLIGHT: Search for complete album folder before track-by-track ===
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)

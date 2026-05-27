@@ -495,6 +495,74 @@ def test_staging_title_match_keeps_wrong_versions_separate(tmp_path):
     assert 'staging_t_wrong_version' not in matched_downloads_context
 
 
+def test_staging_title_match_handles_untagged_release_filename(tmp_path):
+    """Album-bundle slskd downloads often arrive without ID3 tags.
+
+    When that happens the staging cache falls back to the file stem
+    for the title (e.g. 'Kendrick Lamar - GNX - 03 - Reincarnated').
+    The full stem is too noisy to fuzzy-match against the clean
+    Spotify title at the 0.80 threshold, so the variant generator
+    pulls out the trailing-title segment when a track-number block
+    is present between ' - ' delimiters.
+    """
+    src_file = tmp_path / 'staging' / 'Kendrick Lamar - GNX - 03 - Reincarnated.flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {
+                'full_path': str(src_file),
+                'title': 'Kendrick Lamar - GNX - 03 - Reincarnated',
+                'artist': 'Kendrick Lamar',
+                'track_number': 3,
+            },
+        ],
+    )
+    _seed_task('t_untagged', track_info={
+        '_is_explicit_album_download': True,
+        '_explicit_album_context': {'id': 'alb', 'name': 'GNX'},
+        '_explicit_artist_context': {'id': 'art', 'name': 'Kendrick Lamar'},
+    })
+
+    result = ds.try_staging_match(
+        't_untagged', 'b1',
+        _Track(name='Reincarnated', artists=['Kendrick Lamar']),
+        deps,
+    )
+
+    assert result is True
+    assert matched_downloads_context['staging_t_untagged']['track_info']['track_number'] == 3
+
+
+def test_staging_title_match_keeps_dash_titles_intact(tmp_path):
+    """The trailing-title variant must not fire when there's no track-number
+    segment — otherwise a legit title like 'Hold Me - Live' would generate
+    a 'Live' variant and false-match unrelated 'Live' stems on disk.
+    """
+    src_file = tmp_path / 'staging' / 'Live.flac'
+    src_file.parent.mkdir()
+    src_file.touch()
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[
+            {'full_path': str(src_file), 'title': 'Live', 'artist': 'Other Artist'},
+        ],
+    )
+    _seed_task('t_dash')
+
+    result = ds.try_staging_match(
+        't_dash', 'b1',
+        _Track(name='Hold Me - Live', artists=['Some Artist']),
+        deps,
+    )
+
+    assert result is False
+    assert 'staging_t_dash' not in matched_downloads_context
+
+
 def test_fallback_context_synthesizes_from_track(tmp_path):
     """Without explicit context, synthesizes spotify_artist/album from the track."""
     src_file = tmp_path / 'staging' / 'Hello.flac'
