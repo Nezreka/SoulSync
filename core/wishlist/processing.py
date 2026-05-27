@@ -857,7 +857,19 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                         )
                         with runtime.tasks_lock:
                             runtime.download_batches[album_batch_id] = {
-                                'phase': 'analysis',
+                                # ``queued`` until the master worker
+                                # picks the batch up from the
+                                # ``missing_download_executor`` pool
+                                # (max_workers=3 by default). The worker
+                                # flips phase to ``analysis`` as its
+                                # first action — see
+                                # ``core/downloads/master.py:328``.
+                                # Pre-fix the row was created with
+                                # ``analysis`` directly, so a wishlist
+                                # run with N > 3 sub-batches looked like
+                                # all N were working when really only
+                                # 3 were running.
+                                'phase': 'queued',
                                 'playlist_id': playlist_id,
                                 'playlist_name': album_batch_name,
                                 'queue': [],
@@ -904,7 +916,9 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     playlist_name = f"Wishlist (Auto - {current_cycle.capitalize()})"
                     with runtime.tasks_lock:
                         runtime.download_batches[batch_id] = {
-                            'phase': 'analysis',
+                            # See album sub-batch above — ``queued``
+                            # until the master worker picks it up.
+                            'phase': 'queued',
                             'playlist_id': playlist_id,
                             'playlist_name': playlist_name,
                             'queue': [],

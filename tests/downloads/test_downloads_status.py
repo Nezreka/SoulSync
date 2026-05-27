@@ -91,6 +91,25 @@ def test_analysis_phase_includes_analysis_progress_and_results():
     assert out['analysis_results'] == [{'track_index': 0, 'found': True}]
 
 
+def test_queued_phase_surfaces_analysis_progress_for_ui_count():
+    """A batch in ``queued`` state hasn't been picked up by the
+    executor yet, so analysis_processed is 0. The UI still needs
+    ``analysis_total`` so it can render "Queued — N tracks" instead
+    of showing an empty card. Pre-fix the queued phase fell through
+    to the default branch and the UI lost the track count entirely."""
+    deps, _ = _build_deps()
+    batch = {
+        'phase': 'queued',
+        'analysis_total': 17,
+        'analysis_processed': 0,
+        'analysis_results': [],
+    }
+    out = st.build_batch_status_data('b1', batch, {}, deps)
+    assert out['phase'] == 'queued'
+    assert out['analysis_progress'] == {'total': 17, 'processed': 0}
+    assert out['analysis_results'] == []
+
+
 def test_album_downloading_phase_exposes_bundle_progress_without_task_safety_valve():
     deps, _ = _build_deps(config=_FakeConfig({'soulseek.download_timeout': 1}))
     download_tasks['t1'] = {
