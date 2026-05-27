@@ -232,6 +232,80 @@ def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():
     assert activity_calls == [("", "Wishlist Download Started", "2 tracks", "Now")]
 
 
+def test_manual_wishlist_splits_into_per_album_sub_batches():
+    """Manual wishlist run with multi-album content splits into one
+    sub-batch per album. Each sub-batch flips
+    ``is_album_download=True`` + populates album/artist context so
+    the slskd / Prowlarr album-bundle dispatch engages.
+
+    Pinned to verify the manual path matches the auto path's
+    behavior — the user's first real-world test hit the manual
+    flow, not the auto flow."""
+    runtime, _service, _db, executor, _logger, _activity, batch_map, master_calls = _build_runtime(
+        tracks=[
+            {
+                "id": "trk-a1",
+                "spotify_track_id": "trk-a1",
+                "name": "Song A1",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            {
+                "id": "trk-a2",
+                "spotify_track_id": "trk-a2",
+                "name": "Song A2",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            {
+                "id": "trk-b1",
+                "spotify_track_id": "trk-b1",
+                "name": "Song B1",
+                "artists": [{"name": "Artist 2"}],
+                "spotify_data": {
+                    "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
+                    "artists": [{"name": "Artist 2"}],
+                },
+            },
+        ]
+    )
+
+    payload, status = processing.start_manual_wishlist_download_batch(runtime)
+    assert status == 200
+    _run_submitted_bg_job(executor)
+
+    # Two album groups → two master-worker calls.
+    assert len(master_calls) == 2
+
+    # First sub-batch uses the caller-allocated batch_id.
+    first_args, _ = master_calls[0]
+    assert first_args[0] == payload["batch_id"]
+    assert batch_map[payload["batch_id"]].get("is_album_download") is True
+
+    # Second sub-batch gets a fresh uuid; its row exists in batch_map.
+    second_args, _ = master_calls[1]
+    assert second_args[0] != payload["batch_id"]
+    assert second_args[0] in batch_map
+    assert batch_map[second_args[0]].get("is_album_download") is True
+
+    # Track counts across the two sub-batches sum to the wishlist total.
+    counts = sorted(len(args[2]) for args, _ in master_calls)
+    assert counts == [1, 2]
+
+    # Both sub-batches carry album context populated from spotify_data.
+    album_names = {
+        batch_map[args[0]]["album_context"]["name"]
+        for args, _ in master_calls
+    }
+    assert album_names == {"Album One", "Album Two"}
+
+
 def test_bg_job_marks_batch_complete_when_wishlist_genuinely_empty():
     """If the wishlist is empty before the manual click, the bg job marks the batch complete."""
     runtime, _service, _db, executor, _logger, _activity, batch_map, master_calls = _build_runtime(
