@@ -21,36 +21,30 @@ from utils.logging_config import get_logger
 logger = get_logger("usenet.sabnzbd")
 
 
-# SAB queue states + history states → adapter-uniform set. Covers
-# every Status value from SAB's ``sabnzbd/api.py`` plus the legacy
-# short-form codes ("pp" for post-processing, "trying" for retry) and
-# the prop_* variants returned for items that bounce between paused
-# and failed during retry. Anything unmapped lands on "error" via
-# ``_map_state``'s default — the album-bundle poll helper treats that
-# default as a transient miss so a brand-new unmapped state can't
-# infinite-loop the poll the way "pp" used to.
+# SAB Status enum (sabnzbd/constants.py:~95-118) → adapter-uniform set.
+# SAB emits PascalCase strings (``Idle``, ``Downloading``, ...) under
+# the slot ``status`` field; this map is keyed lowercase because
+# ``_map_state`` normalises before lookup. Anything unmapped lands on
+# ``error`` via ``_map_state``'s default — the album-bundle poll
+# helper treats that default as a transient miss so a brand-new
+# unmapped state can't infinite-loop the poll.
 _SAB_QUEUE_STATE_MAP = {
     "idle":         "queued",
     "queued":       "queued",
     "grabbing":     "queued",
+    "propagating":  "queued",
     "fetching":     "downloading",
     "downloading":  "downloading",
-    "trying":       "downloading",
     "paused":       "paused",
-    "prop_paused":  "paused",
     "checking":     "verifying",
     "quickcheck":   "verifying",
     "verifying":    "verifying",
     "repairing":    "repairing",
     "extracting":   "extracting",
-    "unpacking":    "extracting",
     "moving":       "extracting",
     "running":      "extracting",
-    "pp":           "extracting",
-    "postprocessing": "extracting",
     "completed":    "completed",
     "failed":       "failed",
-    "prop_failed":  "failed",
     "deleted":      "failed",
 }
 

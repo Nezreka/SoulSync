@@ -59,7 +59,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from config.settings import config_manager
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
-    DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    TransientMissCounter,
     copy_audio_files_atomically,
     get_poll_interval,
     get_poll_timeout,
@@ -303,8 +303,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # adapters don't have an SAB-style queue→history transition,
         # but the same tolerance keeps a one-off connection failure
         # from killing an otherwise-healthy download.
-        transient_misses = 0
-        miss_threshold = DEFAULT_TRANSIENT_MISS_THRESHOLD
+        misses = TransientMissCounter()
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -315,17 +314,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 status = None
 
             if status is None:
-                transient_misses += 1
-                if transient_misses >= miss_threshold:
+                if misses.record_miss():
                     self._mark_error(
                         download_id,
-                        f"Torrent disappeared from client (no status after {miss_threshold} polls)",
+                        f"Torrent disappeared from client (no status after {misses.threshold} polls)",
                     )
                     return
                 time.sleep(_POLL_INTERVAL_SECONDS)
                 continue
 
-            transient_misses = 0
+            misses.reset()
 
             with self._lock:
                 row = self.active_downloads.get(download_id)

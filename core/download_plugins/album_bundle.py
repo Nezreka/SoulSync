@@ -182,8 +182,50 @@ def atomic_copy_to_staging(src: Path, dest: Path) -> bool:
 # removes the slot from the queue before adding it to history, and on a
 # busy server (par2 verify + unrar) that window can be several poll
 # intervals. At the default 2s interval, 5 retries = ~10s of tolerance
-# before we give up and emit a terminal failure.
+# before we give up and emit a terminal failure. Override via
+# ``download_source.album_bundle_transient_miss_threshold`` for users
+# whose servers need more headroom (very large multi-disc box sets,
+# slow disks, etc.).
 DEFAULT_TRANSIENT_MISS_THRESHOLD = 5
+
+
+def get_transient_miss_threshold() -> int:
+    """Return the configured transient-miss threshold for poll loops."""
+    raw = config_manager.get('download_source.album_bundle_transient_miss_threshold',
+                             DEFAULT_TRANSIENT_MISS_THRESHOLD)
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_TRANSIENT_MISS_THRESHOLD
+
+
+class TransientMissCounter:
+    """Bounded retry counter for adapter status reads.
+
+    Both the album-bundle poll (in ``poll_album_download``) and the
+    per-track download threads in ``usenet.py`` / ``torrent.py`` need
+    the same "tolerate N consecutive missing or unmapped reads before
+    declaring the job gone" logic. Lifted into one class so the rule
+    is in one place and unit-testable in isolation — the per-track
+    paths used to carry inline counters that mirrored this logic by
+    hand, which is exactly the kind of duplication that drifts."""
+
+    def __init__(self, threshold: Optional[int] = None) -> None:
+        self.threshold = threshold if threshold is not None else get_transient_miss_threshold()
+        self.misses = 0
+
+    def record_miss(self) -> bool:
+        """Bump the miss counter. Returns True when the counter has
+        reached the threshold (caller should give up)."""
+        self.misses += 1
+        return self.misses >= self.threshold
+
+    def reset(self) -> None:
+        """Successful read — reset the counter back to zero."""
+        self.misses = 0
 
 
 def poll_album_download(
@@ -238,7 +280,7 @@ def poll_album_download(
     interval = poll_interval if poll_interval is not None else get_poll_interval()
     deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
     last_save_path: Optional[str] = None
-    transient_misses = 0
+    misses = TransientMissCounter(transient_miss_threshold)
 
     def _fail(reason: str) -> None:
         try:
@@ -259,11 +301,10 @@ def poll_album_download(
             status = None
 
         if status is None:
-            transient_misses += 1
-            if transient_misses >= transient_miss_threshold:
+            if misses.record_miss():
                 logger.error(
                     "%s '%s' missing from client for %d consecutive polls — giving up",
-                    log_prefix, title, transient_misses,
+                    log_prefix, title, misses.misses,
                 )
                 _fail('Disappeared from client (no status after retries)')
                 return None
@@ -275,7 +316,7 @@ def poll_album_download(
         # as a continuing transient miss below, so it must NOT reset
         # here — otherwise a persistently-unmapped state loops forever.
         if status.state != 'error':
-            transient_misses = 0
+            misses.reset()
 
         emit('downloading', progress=status.progress, downloaded=status.downloaded,
              speed=status.download_speed)
@@ -298,8 +339,7 @@ def poll_album_download(
                 "%s '%s' returned unmapped state — treating as transient",
                 log_prefix, title,
             )
-            transient_misses += 1
-            if transient_misses >= transient_miss_threshold:
+            if misses.record_miss():
                 _fail('Client returned unmapped state repeatedly')
                 return None
 
@@ -340,10 +380,12 @@ __all__ = [
     "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_POLL_TIMEOUT_SECONDS",
     "DEFAULT_TRANSIENT_MISS_THRESHOLD",
+    "TransientMissCounter",
     "atomic_copy_to_staging",
     "copy_audio_files_atomically",
     "get_poll_interval",
     "get_poll_timeout",
+    "get_transient_miss_threshold",
     "pick_best_album_release",
     "poll_album_download",
     "quality_score",

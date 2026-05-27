@@ -306,7 +306,83 @@ def test_get_poll_timeout_falls_back_on_garbage() -> None:
 # ---------------------------------------------------------------------------
 
 
-from core.download_plugins.album_bundle import poll_album_download
+from core.download_plugins.album_bundle import (
+    DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    TransientMissCounter,
+    get_transient_miss_threshold,
+    poll_album_download,
+)
+
+
+# ---------------------------------------------------------------------------
+# TransientMissCounter — shared retry-counter used by every poll loop.
+# ---------------------------------------------------------------------------
+
+
+def test_counter_starts_at_zero_and_uses_default_threshold():
+    """No config override → uses DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    starts at zero misses."""
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = DEFAULT_TRANSIENT_MISS_THRESHOLD
+        counter = TransientMissCounter()
+        assert counter.threshold == DEFAULT_TRANSIENT_MISS_THRESHOLD
+        assert counter.misses == 0
+
+
+def test_counter_honors_explicit_threshold_over_config():
+    """Explicit threshold takes precedence over the config-driven default."""
+    counter = TransientMissCounter(threshold=3)
+    assert counter.threshold == 3
+
+
+def test_counter_record_miss_returns_false_until_threshold():
+    """record_miss returns True only on the iteration that pushes
+    the count to threshold — earlier calls return False so the caller
+    knows to keep polling."""
+    counter = TransientMissCounter(threshold=3)
+    assert counter.record_miss() is False  # 1
+    assert counter.record_miss() is False  # 2
+    assert counter.record_miss() is True   # 3 → at threshold
+
+
+def test_counter_reset_zeros_count():
+    """A successful read between transient misses resets the counter
+    so isolated network blips don't accumulate toward the threshold."""
+    counter = TransientMissCounter(threshold=3)
+    counter.record_miss()
+    counter.record_miss()
+    counter.reset()
+    assert counter.misses == 0
+    # After reset we should need a full threshold of fresh misses again.
+    assert counter.record_miss() is False
+    assert counter.record_miss() is False
+    assert counter.record_miss() is True
+
+
+def test_get_transient_miss_threshold_uses_default_when_unset():
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = DEFAULT_TRANSIENT_MISS_THRESHOLD
+        assert get_transient_miss_threshold() == DEFAULT_TRANSIENT_MISS_THRESHOLD
+
+
+def test_get_transient_miss_threshold_honors_config_override():
+    """Users with very slow servers (huge multi-disc box sets, slow
+    disks) need to bump the tolerance window."""
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = 20
+        assert get_transient_miss_threshold() == 20
+
+
+def test_get_transient_miss_threshold_falls_back_on_garbage():
+    """Non-positive / non-numeric config values fall back to the
+    default — same defensive pattern as get_poll_interval."""
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = 'oops'
+        assert get_transient_miss_threshold() == DEFAULT_TRANSIENT_MISS_THRESHOLD
+        cm.get.return_value = 0
+        assert get_transient_miss_threshold() == DEFAULT_TRANSIENT_MISS_THRESHOLD
+        cm.get.return_value = -3
+        assert get_transient_miss_threshold() == DEFAULT_TRANSIENT_MISS_THRESHOLD
 
 
 @dataclass
