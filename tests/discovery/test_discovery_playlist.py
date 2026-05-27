@@ -232,6 +232,36 @@ def test_unmatched_by_user_respected():
     assert deps._db.extra_data_writes == []
 
 
+def test_manual_match_skipped_even_when_matched_data_incomplete():
+    """manual_match=True must skip the incomplete-matched_data re-discovery
+    branch. The Fix-popup save shape is intentionally lean — search-result
+    rows don't carry track_number, and the MBID-lookup flat shape doesn't
+    carry album.id / release_date — so a manual fix always looks 'incomplete'
+    to the old check and used to be re-discovered every pipeline run,
+    overwriting the user's deliberate pick with whatever the auto-search
+    ranked first. Pin the fix: manual matches stay put."""
+    extra = {
+        'discovered': True,
+        'manual_match': True,
+        'provider': 'musicbrainz',
+        'matched_data': {
+            'id': 'mb-rec-id',
+            'name': 'Coffee Break',
+            'artists': ['Zeds Dead'],
+            'album': {'name': 'Coffee Break'},  # no id, no release_date
+            'source': 'musicbrainz',
+            # no track_number — Fix-popup shape never has it
+        },
+    }
+    tracks = [_track(track_id=1, extra_data=extra)]
+    deps = _build_deps(tracks_by_playlist={'p1': tracks})
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    # No extra_data writes — the manual match wasn't overwritten
+    assert deps._db.extra_data_writes == []
+
+
 # ---------------------------------------------------------------------------
 # Cache hit short-circuit
 # ---------------------------------------------------------------------------
