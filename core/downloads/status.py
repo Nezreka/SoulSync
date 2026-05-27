@@ -476,7 +476,16 @@ def build_single_batch_status(batch_id: str, deps: StatusDeps) -> tuple[Optional
 
 
 def build_batched_status(requested_batch_ids: list, deps: StatusDeps) -> dict:
-    """For /api/download_status/batch. Returns the full response dict (always 200)."""
+    """For /api/download_status/batch. Returns the full response dict (always 200).
+
+    When a requested batch carries a ``wishlist_run_id`` (Phase 1c.2.1
+    per-album split), the response merges in every sibling sub-batch
+    of the same run via ``merge_wishlist_run_status``. The merged view
+    lands keyed under the originally-requested ``batch_id`` so the
+    frontend modal (which polls one batch id) sees every sibling's
+    tasks + progress without needing to know about the split."""
+    from core.downloads.wishlist_aggregator import merge_wishlist_run_status
+
     live_transfers_lookup = deps.get_cached_transfer_data()
     response: dict[str, Any] = {"batches": {}}
 
@@ -489,11 +498,49 @@ def build_batched_status(requested_batch_ids: list, deps: StatusDeps) -> dict:
         else:
             target_batches = download_batches.copy()
 
+        # Pre-index sibling batch ids by wishlist_run_id so the per-
+        # batch loop below can find them in O(1). Snapshot under the
+        # held lock; subsequent dict mutations don't matter for this
+        # build.
+        run_id_to_batch_ids: dict[str, list[str]] = {}
+        for bid, batch_row in download_batches.items():
+            run_id = (batch_row or {}).get('wishlist_run_id') if isinstance(batch_row, dict) else None
+            if run_id:
+                run_id_to_batch_ids.setdefault(str(run_id), []).append(bid)
+
         for batch_id, batch in target_batches.items():
             try:
-                response["batches"][batch_id] = build_batch_status_data(
+                primary_status = build_batch_status_data(
                     batch_id, batch, live_transfers_lookup, deps,
                 )
+
+                # Wishlist-run merge — kicks in only when this batch
+                # has a run_id AND at least one sibling exists. Falls
+                # through to legacy single-batch shape otherwise.
+                run_id = batch.get('wishlist_run_id') if isinstance(batch, dict) else None
+                sibling_ids = run_id_to_batch_ids.get(str(run_id), []) if run_id else []
+                if run_id and len(sibling_ids) > 1:
+                    sibling_statuses = []
+                    for sib_id in sibling_ids:
+                        if sib_id == batch_id:
+                            continue
+                        sib_batch = download_batches.get(sib_id)
+                        if not isinstance(sib_batch, dict):
+                            continue
+                        try:
+                            sibling_statuses.append(
+                                build_batch_status_data(
+                                    sib_id, sib_batch, live_transfers_lookup, deps,
+                                )
+                            )
+                        except Exception as sib_err:
+                            logger.warning(
+                                f"[Wishlist Run] Sibling status build failed for {sib_id}: {sib_err}"
+                            )
+                    merged = merge_wishlist_run_status(primary_status, sibling_statuses)
+                    response["batches"][batch_id] = merged
+                else:
+                    response["batches"][batch_id] = primary_status
             except Exception as batch_error:
                 logger.error(f"Error processing batch {batch_id}: {batch_error}")
                 response["batches"][batch_id] = {"error": str(batch_error)}
