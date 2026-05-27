@@ -66,17 +66,41 @@ def test_two_siblings_merge_tasks_with_reindexed_track_index():
     assert [t['task_id'] for t in merged['tasks']] == ['task-a1', 'task-a2', 'task-b1']
 
 
-def test_phase_aggregation_least_complete_pre_terminal_wins():
-    """analysis + downloading + complete → analysis."""
+def test_phase_aggregation_most_advanced_live_phase_wins():
+    """analysis + downloading + complete → downloading. Modal's task
+    table is phase-gated to downloading/complete/error so we must
+    surface that phase the moment any sibling has tasks, else the
+    modal stays in bundle/analysis UI and tasks stay invisible."""
     primary = _status('complete')
     sibling1 = _status('downloading')
     sibling2 = _status('analysis')
     merged = merge_wishlist_run_status(primary, [sibling1, sibling2])
-    assert merged['phase'] == 'analysis'
+    assert merged['phase'] == 'downloading'
 
 
-def test_phase_aggregation_album_downloading_wins_over_downloading():
+def test_phase_aggregation_downloading_wins_over_album_downloading():
+    """Regression test for the parallel-bundle modal-blank bug:
+    one sibling past its bundle into the task stage means the
+    modal MUST be in 'downloading' phase, otherwise the task
+    rows for the advanced sibling don't render and the user
+    sees nothing while both albums actually download on slskd."""
     primary = _status('downloading')
+    sibling = _status('album_downloading')
+    merged = merge_wishlist_run_status(primary, [sibling])
+    assert merged['phase'] == 'downloading'
+
+
+def test_phase_aggregation_all_album_downloading_stays_album_downloading():
+    """No sibling has reached the task stage yet — bundle progress
+    UI is the right thing to show."""
+    primary = _status('album_downloading')
+    sibling = _status('album_downloading')
+    merged = merge_wishlist_run_status(primary, [sibling])
+    assert merged['phase'] == 'album_downloading'
+
+
+def test_phase_aggregation_album_downloading_wins_over_analysis():
+    primary = _status('analysis')
     sibling = _status('album_downloading')
     merged = merge_wishlist_run_status(primary, [sibling])
     assert merged['phase'] == 'album_downloading'

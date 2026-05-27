@@ -23,8 +23,11 @@ Design notes:
   remap is applied to tasks too.
 - ``task_id`` is a uuid per task — no collision concern across
   siblings.
-- Phase aggregation surfaces the LEAST-complete pre-terminal phase
-  so the modal stays "alive" until every sibling is done. Sticky
+- Phase aggregation surfaces the MOST advanced live phase so the
+  modal renders task rows the moment any sibling reaches the task
+  stage. The earlier "least-complete" rule made the modal appear
+  frozen during parallel album_downloading because the task table
+  is phase-gated to ``downloading``/``complete``/``error``. Sticky
   ``error`` so failures don't get hidden by a running sibling.
 - ``album_bundle`` is picked from whichever sibling currently has
   an active bundle download — gives the user a useful progress
@@ -36,12 +39,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
-_PHASE_PRIORITY = (
-    'analysis',
-    'album_downloading',
-    'downloading',
-    'complete',
-)
 _ACTIVE_BUNDLE_STATES = frozenset({
     'searching',
     'downloading',
@@ -53,25 +50,40 @@ _ACTIVE_BUNDLE_STATES = frozenset({
 def _aggregate_phases(phases: List[str]) -> str:
     """Pick the merged phase for a multi-sibling wishlist run.
 
+    Surfaces the MOST advanced live phase across the run so the
+    modal renders task progress the moment any sibling reaches
+    the task stage. Earlier ("least complete") aggregation hid
+    downloading tasks behind the bundle progress UI when any
+    sibling was still in ``album_downloading``, so the modal
+    appeared frozen for the entire duration of the slowest
+    sibling's bundle phase.
+
     Rules:
-    - ``error`` is sticky — if any sibling errored, surface error.
-    - Otherwise return the LEAST-complete pre-terminal phase in
-      priority order (analysis < album_downloading < downloading
-      < complete).
-    - If all siblings are ``complete``, return ``complete``.
-    - Fallback to the first non-empty phase if nothing matches a
-      known priority.
+
+    - ``error`` is sticky — if any sibling errored, surface error
+      so the user notices the failure even mid-run.
+    - ``downloading``/``complete`` (the phases that produce a
+      task table on the modal side) WIN over earlier phases.
+      Any sibling at this stage means "show tasks now". All-
+      complete returns ``complete``; mixed complete + downloading
+      stays ``downloading`` so the modal keeps polling.
+    - ``album_downloading`` wins over ``analysis`` only when no
+      sibling has reached the task stage.
+    - ``analysis`` is the last resort.
     """
     phases = [p for p in phases if p]
     if not phases:
         return 'unknown'
     if 'error' in phases:
         return 'error'
-    for p in _PHASE_PRIORITY:
-        if p in phases:
-            if p == 'complete':
-                return 'complete' if all(s == 'complete' for s in phases) else 'downloading'
-            return p
+    if all(p == 'complete' for p in phases):
+        return 'complete'
+    if any(p in ('downloading', 'complete') for p in phases):
+        return 'downloading'
+    if 'album_downloading' in phases:
+        return 'album_downloading'
+    if 'analysis' in phases:
+        return 'analysis'
     return phases[0]
 
 
