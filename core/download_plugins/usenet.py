@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
-    DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    TransientMissCounter,
     copy_audio_files_atomically,
     pick_best_album_release,
     poll_album_download,
@@ -229,14 +229,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
 
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
-        # Tolerate transient None / 'error' (unmapped state) reads —
-        # SAB removes a job from the queue before adding it to history,
-        # and on a busy server that gap can span several polls. Same
-        # bug class as the album-bundle path; see
-        # ``core/download_plugins/album_bundle.py:poll_album_download``
-        # docstring for the longer rationale.
-        transient_misses = 0
-        miss_threshold = DEFAULT_TRANSIENT_MISS_THRESHOLD
+        # Tolerate transient None / unmapped 'error' reads — SAB
+        # removes a job from the queue before adding it to history,
+        # and on busy servers that gap spans several polls. See
+        # ``album_bundle.TransientMissCounter`` for the shared rule.
+        misses = TransientMissCounter()
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -247,18 +244,17 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 status = None
 
             if status is None:
-                transient_misses += 1
-                if transient_misses >= miss_threshold:
+                if misses.record_miss():
                     self._mark_error(
                         download_id,
-                        f"Usenet job disappeared from client (no status after {miss_threshold} polls)",
+                        f"Usenet job disappeared from client (no status after {misses.threshold} polls)",
                     )
                     return
                 time.sleep(_POLL_INTERVAL_SECONDS)
                 continue
 
             if status.state != 'error':
-                transient_misses = 0
+                misses.reset()
 
             with self._lock:
                 row = self.active_downloads.get(download_id)
@@ -283,8 +279,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     "Usenet poll: '%s' returned unmapped state — treating as transient",
                     job_id,
                 )
-                transient_misses += 1
-                if transient_misses >= miss_threshold:
+                if misses.record_miss():
                     self._mark_error(
                         download_id,
                         "Usenet client returned unmapped state repeatedly",
