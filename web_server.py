@@ -22610,7 +22610,7 @@ _APPLE_MUSIC_BUNDLE_SCRAPE_CAP = 8
 def _parse_itunes_link_url(url):
     """Return {'type': 'album'|'track'|'playlist', 'id': str} for supported Apple links."""
     import re
-    from urllib.parse import parse_qs, urlparse
+    from urllib.parse import parse_qs
 
     raw = (url or '').strip()
     if not raw:

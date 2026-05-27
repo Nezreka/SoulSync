@@ -233,7 +233,7 @@ class ListenBrainzPlaylistSource(PlaylistSource):
             return tracks
 
         out = list(tracks)
-        for slot_idx, result in zip(match_indices, matched):
+        for slot_idx, result in zip(match_indices, matched, strict=False):
             if not result:
                 continue
             track = out[slot_idx]
@@ -270,7 +270,7 @@ class ListenBrainzPlaylistSource(PlaylistSource):
             return None
         try:
             manager.update_all_playlists()
-        except Exception:
+        except Exception:  # noqa: S110 — caller falls back to last cached playlist on refresh failure
             pass
         return self.get_playlist(playlist_id)
 
