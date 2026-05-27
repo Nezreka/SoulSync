@@ -20,6 +20,33 @@ module_logger = get_logger("wishlist.processing")
 logger = module_logger
 
 
+# Album-bundle is wasteful for single-track wishlist items (downloads
+# the entire album to claim one file), so the bundle path only engages
+# when an album has ``N`` or more missing tracks in the wishlist. Default
+# 2 catches the "this user is missing several tracks from one album"
+# case while keeping single-track-per-album items on the cheaper
+# per-track flow. Configurable via ``wishlist.album_bundle_min_tracks``
+# for users who want different behaviour.
+_DEFAULT_ALBUM_BUNDLE_MIN_TRACKS = 2
+
+
+def _resolve_album_bundle_threshold() -> int:
+    """Return the configured min-tracks-per-album threshold for the
+    wishlist album-bundle grouper. Falls back to the default when the
+    config key is missing or carries garbage — same defensive shape as
+    the rest of the config-driven knobs in core/."""
+    try:
+        from config.settings import config_manager
+        raw = config_manager.get('wishlist.album_bundle_min_tracks',
+                                 _DEFAULT_ALBUM_BUNDLE_MIN_TRACKS)
+        value = int(raw)
+        if value >= 1:
+            return value
+    except Exception:  # noqa: S110 — defensive config-read fallback; uses default below
+        pass
+    return _DEFAULT_ALBUM_BUNDLE_MIN_TRACKS
+
+
 @dataclass
 class WishlistAutoProcessingRuntime:
     """Dependencies needed to run automatic wishlist processing outside the controller."""
@@ -533,7 +560,10 @@ def _prepare_and_run_manual_wishlist_batch(
         # Tracks the grouper can't bucket fall through to a residual
         # batch with the classic per-track flow.
         from core.wishlist.album_grouping import group_wishlist_tracks_by_album
-        grouping = group_wishlist_tracks_by_album(wishlist_tracks)
+        grouping = group_wishlist_tracks_by_album(
+            wishlist_tracks,
+            min_tracks_per_album=_resolve_album_bundle_threshold(),
+        )
 
         # Build the final payload list (batch_id, tracks, album_context,
         # artist_context, is_album). The first payload re-uses the
@@ -806,7 +836,10 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 _submitted_batches: list[str] = []
                 if current_cycle == 'albums':
                     from core.wishlist.album_grouping import group_wishlist_tracks_by_album
-                    grouping = group_wishlist_tracks_by_album(wishlist_tracks)
+                    grouping = group_wishlist_tracks_by_album(
+                        wishlist_tracks,
+                        min_tracks_per_album=_resolve_album_bundle_threshold(),
+                    )
                 else:
                     grouping = None
 
