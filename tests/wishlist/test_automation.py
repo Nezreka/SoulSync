@@ -292,6 +292,13 @@ def test_wishlist_albums_cycle_splits_into_per_album_batches():
     track_counts = sorted(len(tracks) for tracks in submitted_track_lists)
     assert track_counts == [1, 2]
 
+    # All sub-batches of one wishlist invocation share a single
+    # ``wishlist_run_id`` so the completion handler can gate the
+    # cycle toggle on "all siblings done".
+    run_ids = {batch.get("wishlist_run_id") for batch in batch_map.values()}
+    assert len(run_ids) == 1
+    assert next(iter(run_ids))  # non-empty string
+
 
 def test_wishlist_albums_cycle_residual_for_orphan_tracks():
     """Tracks without resolvable album metadata fall to the classic
