@@ -22,7 +22,34 @@ from unittest.mock import patch
 
 import pytest
 
-from core.discogs_client import DiscogsClient
+from core.discogs_client import DiscogsClient, _clean_discogs_artist_name
+
+
+# ---------------------------------------------------------------------------
+# _clean_discogs_artist_name — disambiguation suffix helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('Madonna', 'Madonna'),
+    ('Madonna (3)', 'Madonna'),         # legacy (N) suffix
+    ('Madonna*', 'Madonna'),            # newer asterisk suffix
+    ('John Smith*', 'John Smith'),
+    ('Bullet (2)', 'Bullet'),
+    ('Foo (12)', 'Foo'),                # double-digit (N)
+    ('Baz**', 'Baz'),                   # repeated asterisks
+    ('Qux*   ', 'Qux'),                 # trailing whitespace after *
+    ('Artist (3) *', 'Artist'),         # both suffixes, space-separated
+    ('Foo (3)*', 'Foo'),                # both suffixes, no space
+    ('No Suffix Here', 'No Suffix Here'),
+    ('', ''),
+    (None, ''),
+    ('   ', ''),
+])
+def test_clean_discogs_artist_name(raw, expected):
+    """Helper strips both `(N)` and trailing `*` disambiguation suffixes
+    from Discogs artist names. Closes #634."""
+    assert _clean_discogs_artist_name(raw) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +130,28 @@ def test_get_user_collection_strips_discogs_disambiguation_suffix(authed_client)
         result = authed_client.get_user_collection()
 
     assert result[0]['artist_name'] == 'Madonna'
+
+
+def test_get_user_collection_strips_discogs_asterisk_disambiguation(authed_client):
+    """Discogs also appends '*' (asterisk) as a disambiguation suffix
+    for the newer naming convention (e.g. 'John Smith*'). Without
+    stripping, library folders would land on disk named 'John Smith*'
+    and downstream matchers wouldn't equate it to the canonical name
+    other providers return. Closes #634."""
+    fake_response = {
+        'pagination': {'pages': 1, 'page': 1},
+        'releases': [
+            {'id': 1, 'basic_information': {
+                'title': 'X', 'artists': [{'name': 'John Smith*'}],
+                'cover_image': '', 'year': 2020,
+            }},
+        ],
+    }
+    with patch.object(authed_client, '_api_get',
+                      side_effect=lambda e, p=None: ({'username': 'u'} if e == '/oauth/identity' else fake_response)):
+        result = authed_client.get_user_collection()
+
+    assert result[0]['artist_name'] == 'John Smith'
 
 
 def test_get_user_collection_handles_missing_year(authed_client):
