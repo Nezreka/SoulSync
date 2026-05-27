@@ -292,18 +292,67 @@ def track_object_to_dict(track_object) -> Dict[str, Any]:
             else:
                 artists_list.append({"name": str(artist)})
 
-        album_name = "Unknown Album"
-        if hasattr(track_object, "album") and track_object.album:
-            if hasattr(track_object.album, "name"):
-                album_name = track_object.album.name
-            else:
-                album_name = str(track_object.album)
+        # Build the album dict by preserving every field the track
+        # object carries about its album. Pre-fix only ``name`` was
+        # surfaced — release_date / images / album_type / total_tracks
+        # / id / artists were all silently dropped during the
+        # Track→dict conversion that runs whenever the wishlist payload
+        # arrives as a Track dataclass (vs. a raw spotify_data dict).
+        # That regression poisoned every wishlist row added from a
+        # Track object: stored album={'name': X} only, so downstream
+        # path-template rendering had no year and post-process had no
+        # track count for relative-position math.
+        album_attr = getattr(track_object, "album", None) if hasattr(track_object, "album") else None
+        if isinstance(album_attr, dict):
+            # Album was already a dict on the track object — preserve
+            # every key the source put there.
+            album_dict = dict(album_attr)
+            album_dict.setdefault("name", "Unknown Album")
+        elif album_attr is not None and hasattr(album_attr, "name"):
+            # Album was a sub-object — pull every common field across
+            # the Spotify / Deezer / iTunes Album dataclass shapes.
+            album_dict = {
+                "name": getattr(album_attr, "name", "") or "Unknown Album",
+            }
+            for src_attr, dest_key in (
+                ("id", "id"),
+                ("release_date", "release_date"),
+                ("album_type", "album_type"),
+                ("total_tracks", "total_tracks"),
+                ("total_discs", "total_discs"),
+                ("artists", "artists"),
+                ("images", "images"),
+                ("image_url", "image_url"),
+            ):
+                val = getattr(album_attr, src_attr, None)
+                if val not in (None, "", [], 0):
+                    album_dict[dest_key] = val
+        else:
+            # Album was a bare string OR truthy-but-untyped — pull
+            # adjacent track-object attrs to flesh it out.
+            album_name = str(album_attr) if album_attr else "Unknown Album"
+            album_dict = {"name": album_name}
+            for src_attr, dest_key in (
+                ("release_date", "release_date"),
+                ("album_id", "id"),
+                ("album_type", "album_type"),
+                ("total_tracks", "total_tracks"),
+            ):
+                val = getattr(track_object, src_attr, None)
+                if val not in (None, "", [], 0):
+                    album_dict[dest_key] = val
+            # ``image_url`` lives on the track object on the Deezer /
+            # iTunes Track dataclasses — surface as album.images so the
+            # path template's artwork hook can find it.
+            img = getattr(track_object, "image_url", None)
+            if img and "images" not in album_dict:
+                album_dict["images"] = [{"url": img}]
 
         result = {
             "id": getattr(track_object, "id", None),
             "name": getattr(track_object, "name", "Unknown Track"),
             "artists": artists_list,
-            "album": {"name": album_name},
+            "album": album_dict,
             "duration_ms": getattr(track_object, "duration_ms", 0),
             "preview_url": getattr(track_object, "preview_url", None),
             "external_urls": getattr(track_object, "external_urls", {}),
