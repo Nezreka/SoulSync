@@ -19416,12 +19416,19 @@ def search_musicbrainz_tracks():
 
         # Local rerank — same helper Deezer / iTunes use. Penalises
         # cover / karaoke / tribute patterns + boosts exact-artist match.
+        # `prefer_known_duration=True` is MB-specific: MB has multiple
+        # recordings per song (single / album / compilation / remaster
+        # editions) and not every recording carries length data. The
+        # flag promotes length-known recordings ahead of length-less
+        # duplicates when relevance scores tie, so the user sees the
+        # actionable 3:04 row before the 0:00 sibling.
         if track_q or artist_q:
             from core.metadata.relevance import rerank_tracks
             tracks = rerank_tracks(
                 tracks,
                 expected_title=track_q,
                 expected_artist=artist_q,
+                prefer_known_duration=True,
             )
 
         tracks_dict = [{
@@ -22603,7 +22610,7 @@ _APPLE_MUSIC_BUNDLE_SCRAPE_CAP = 8
 def _parse_itunes_link_url(url):
     """Return {'type': 'album'|'track'|'playlist', 'id': str} for supported Apple links."""
     import re
-    from urllib.parse import parse_qs, urlparse
+    from urllib.parse import parse_qs
 
     raw = (url or '').strip()
     if not raw:
@@ -24315,6 +24322,20 @@ def update_youtube_discovery_match():
         logger.info(f"Manual match updated: youtube - {identifier} - track {track_index}")
         logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
+        # See core.discovery.manual_match — Fix-popup matches can come from
+        # any metadata source (primary first, then Spotify / Deezer / iTunes
+        # / MusicBrainz as fallbacks). Hardcoding 'spotify' here used to
+        # make every non-Spotify manual match look provider-drifted on the
+        # next prepare-discovery, which triggered automatic re-discovery
+        # that overwrote the user's pick. Computed once before the try
+        # block so both the cache-save path AND the mirrored-DB save below
+        # (in the except fallback case) see the same value.
+        from core.discovery.manual_match import derive_manual_match_provider
+        match_source = derive_manual_match_provider(
+            spotify_track, _get_active_discovery_source()
+        )
+        matched_data = None
+
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
             # Get original track name from the YouTube/source track data
@@ -24356,7 +24377,7 @@ def update_youtube_discovery_match():
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
                 'image_url': image_url,
-                'source': 'spotify',
+                'source': match_source,
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
@@ -24367,8 +24388,11 @@ def update_youtube_discovery_match():
         except Exception as cache_err:
             logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
-        # Persist manual fix to DB for mirrored playlists
-        if identifier.startswith('mirrored_'):
+        # Persist manual fix to DB for mirrored playlists. Skips when the
+        # cache-save block raised before matched_data was constructed —
+        # without the payload there's nothing to persist, and re-deriving
+        # it here would duplicate the construction logic above.
+        if matched_data is not None and identifier.startswith('mirrored_'):
             try:
                 tracks = state['playlist']['tracks']
                 if track_index < len(tracks):
@@ -24377,7 +24401,7 @@ def update_youtube_discovery_match():
                         db = get_database()
                         extra_data = {
                             'discovered': True,
-                            'provider': 'spotify',
+                            'provider': match_source,
                             'confidence': 1.0,
                             'matched_data': matched_data,
                             'manual_match': True,
@@ -33667,15 +33691,20 @@ def prepare_mirrored_discovery(playlist_id):
         pre_discovered_count = 0
         has_pending = False
 
+        from core.discovery.manual_match import is_drifted_for_redo
+
         for idx, track in enumerate(tracks):
             extra = track.get('extra_data')
             if extra and extra.get('discovered'):
                 cached_provider = extra.get('provider', 'spotify')
 
-                # If the cached result was discovered by a different provider than the
-                # currently active one, treat it as pending so re-discovery uses the
-                # correct source (IDs, album data, images differ between providers).
-                if cached_provider != _current_provider:
+                # See core.discovery.manual_match.is_drifted_for_redo —
+                # provider-drift triggers re-discovery so the active source's
+                # IDs / artwork take effect, but manual matches are exempt:
+                # re-running would overwrite the user's deliberate pick with
+                # whatever auto-search ranks first. Pre-fix, every Playlist
+                # Pipeline run clobbered manual fixes for exactly this reason.
+                if is_drifted_for_redo(extra, _current_provider):
                     has_pending = True
                     dur = track.get('duration_ms', 0)
                     pre_discovered_results.append({
@@ -33757,11 +33786,14 @@ def prepare_mirrored_discovery(playlist_id):
                     'confidence': 0,
                 })
 
-        # Only treat as cached if at least one track was discovered by the current provider
+        # Treat as cached when at least one track has a non-drifted cached
+        # discovery — same predicate the per-track loop above uses (inverse
+        # polarity), so a future field change only has to land in
+        # core.discovery.manual_match.is_drifted_for_redo.
         has_cached = any(
             t.get('extra_data') and
             (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) and
-            t['extra_data'].get('provider', 'spotify') == _current_provider
+            not is_drifted_for_redo(t['extra_data'], _current_provider)
             for t in tracks
         )
 
