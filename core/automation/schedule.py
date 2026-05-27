@@ -58,12 +58,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-try:
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-except ImportError:  # pragma: no cover — zoneinfo ships with 3.9+
-    ZoneInfo = None
-    ZoneInfoNotFoundError = Exception
+from utils.logging_config import get_logger
+
+logger = get_logger("automation.schedule")
+
+
+# Unknown-tz names already warned about in this process — avoids
+# spamming the log on every poll cycle for the same misconfigured row.
+_UNKNOWN_TZ_WARNED: set = set()
 
 
 # Weekday abbreviation → ``datetime.weekday()`` index (Mon=0..Sun=6).
@@ -74,11 +78,16 @@ _WEEKDAY_MAP = {
     'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6,
 }
 
+# Interval multipliers — kept aligned with the engine's existing
+# ``_calc_delay_seconds`` in ``core/automation_engine.py``. Adding
+# entries here without also updating the engine would silently drift:
+# this function would honour the new unit while the live engine path
+# defaults it to hours. Keep the maps in sync until PR 2 collapses the
+# engine through this function.
 _INTERVAL_MULTIPLIERS = {
     'minutes': 60,
     'hours':   60 * 60,
     'days':    60 * 60 * 24,
-    'weeks':   60 * 60 * 24 * 7,
 }
 
 
@@ -256,15 +265,24 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 
 def _resolve_tz(name: Optional[str]):
-    """Look up an IANA tz by name. Falls back to UTC when zoneinfo
-    isn't available (3.8 / minimal images) or the name is unknown."""
+    """Look up an IANA tz by name. Falls back to UTC when the name is
+    unknown — ``ZoneInfoNotFoundError`` is the symptom of either a
+    typo in the tz string or ``tzdata`` missing on the host. Logged
+    once per unknown name so the user can see WHY their schedule
+    isn't running in the timezone they configured."""
     if not name:
-        return timezone.utc
-    if ZoneInfo is None:
         return timezone.utc
     try:
         return ZoneInfo(name)
     except ZoneInfoNotFoundError:
+        if name not in _UNKNOWN_TZ_WARNED:
+            _UNKNOWN_TZ_WARNED.add(name)
+            logger.warning(
+                "Unknown timezone %r — schedule will run against UTC. "
+                "Check the spelling (IANA format like 'America/Los_Angeles') "
+                "or install the `tzdata` package on minimal hosts.",
+                name,
+            )
         return timezone.utc
 
 
