@@ -306,13 +306,20 @@ def rerank_tracks(
     popularity signal is still useful as a tiebreak).
 
     ``prefer_known_duration``: when True, recordings with non-zero
-    ``duration_ms`` are ranked ahead of duplicate-score recordings
-    that lack length data. Used for MusicBrainz which often has
-    several recordings per song (single edition, album edition,
-    compilations, remasters) where some carry length and some don't.
-    Sort key sits between score and the stable-order tiebreaker so
-    relevance still wins — length is only a tiebreaker on equal
-    scores, not a global re-shuffle.
+    ``duration_ms`` get a score boost. Used for MusicBrainz, which
+    often has several recordings per song (single edition, album
+    edition, compilations, remasters) where some carry length data
+    and some don't. The boost is set above the album_type weight
+    spread so length-known recordings can beat length-less
+    siblings even when the sibling sits on a higher-weighted
+    album-type — real case: Zeds Dead "Coffee Break" canonical
+    recording lives on the Single release (album_type='single',
+    weight 0.85) while a length-less sibling lives on an Album
+    release (weight 1.0). Without the boost, the length-less album
+    edition wins and the user sees 0:00 instead of 3:04. Cover /
+    karaoke penalties dominate the boost (their penalty is 0.05)
+    so a length-known tribute still loses to a length-less
+    canonical match.
 
     No-op when both ``expected_title`` and ``expected_artist`` are
     empty (no signal to rank against — return input order)."""
@@ -323,11 +330,18 @@ def rerank_tracks(
         for idx, t in enumerate(tracks)
     ]
     if prefer_known_duration:
-        # Sort key: score desc, has-length first (0 before 1), idx asc.
-        scored.sort(key=lambda x: (-x[0], 0 if (x[2].duration_ms or 0) > 0 else 1, x[1]))
-    else:
-        # Sort by score desc; idx asc as tiebreaker preserves stable order.
-        scored.sort(key=lambda x: (-x[0], x[1]))
+        # Multiplier sized above the album-type weight spread (album 1.0
+        # vs single 0.85 = ~18%) so length-known recordings can overcome
+        # the album-vs-single penalty when scores would otherwise tie on
+        # title + artist match. Penalty multipliers (cover/karaoke=0.05,
+        # variant=0.85) still dominate, so this only flips order among
+        # close-relevance siblings — exactly the MB-duplicate case.
+        scored = [
+            (score * 1.25 if (t.duration_ms or 0) > 0 else score, idx, t)
+            for score, idx, t in scored
+        ]
+    # Sort by score desc; idx asc as tiebreaker preserves stable order.
+    scored.sort(key=lambda x: (-x[0], x[1]))
     return [t for _score, _idx, t in scored]
 
 
