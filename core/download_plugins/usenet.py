@@ -22,8 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
+    DEFAULT_TRANSIENT_MISS_THRESHOLD,
     copy_audio_files_atomically,
     pick_best_album_release,
+    poll_album_download,
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.torrent import (
@@ -227,6 +229,14 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
 
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
+        # Tolerate transient None / 'error' (unmapped state) reads —
+        # SAB removes a job from the queue before adding it to history,
+        # and on a busy server that gap can span several polls. Same
+        # bug class as the album-bundle path; see
+        # ``core/download_plugins/album_bundle.py:poll_album_download``
+        # docstring for the longer rationale.
+        transient_misses = 0
+        miss_threshold = DEFAULT_TRANSIENT_MISS_THRESHOLD
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -237,8 +247,18 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 status = None
 
             if status is None:
-                self._mark_error(download_id, "Usenet job disappeared from client")
-                return
+                transient_misses += 1
+                if transient_misses >= miss_threshold:
+                    self._mark_error(
+                        download_id,
+                        f"Usenet job disappeared from client (no status after {miss_threshold} polls)",
+                    )
+                    return
+                time.sleep(_POLL_INTERVAL_SECONDS)
+                continue
+
+            if status.state != 'error':
+                transient_misses = 0
 
             with self._lock:
                 row = self.active_downloads.get(download_id)
@@ -258,6 +278,18 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             if status.state == 'failed':
                 self._mark_error(download_id, status.error or "Usenet client reported failure")
                 return
+            if status.state == 'error':
+                logger.warning(
+                    "Usenet poll: '%s' returned unmapped state — treating as transient",
+                    job_id,
+                )
+                transient_misses += 1
+                if transient_misses >= miss_threshold:
+                    self._mark_error(
+                        download_id,
+                        "Usenet client returned unmapped state repeatedly",
+                    )
+                    return
 
             time.sleep(_POLL_INTERVAL_SECONDS)
 
@@ -408,8 +440,21 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             return result
 
         _emit('downloading', release=picked.title)
-        save_path = self._poll_album_download(adapter, job_id, picked.title, _emit)
+        save_path = poll_album_download(
+            get_status=lambda: run_async(adapter.get_status(job_id)),
+            title=picked.title,
+            emit=_emit,
+            # Usenet completes into history as 'completed'; no 'seeding'
+            # equivalent. Failed is explicit on history failures.
+            complete_states=frozenset(['completed']),
+            failed_states=frozenset(['failed']),
+            is_shutdown=self.shutdown_check,
+            log_prefix='[Usenet album]',
+        )
         if save_path is None:
+            # poll_album_download already emitted the terminal 'failed'
+            # state on every failure path (timeout / disappeared /
+            # explicit failure / unmapped). UI is unstuck either way.
             result['error'] = 'Usenet download failed or timed out'
             return result
 
@@ -433,29 +478,3 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         result['files'] = copied
         return result
 
-    def _poll_album_download(self, adapter, job_id, title, emit) -> Optional[str]:
-        deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
-        last_save_path: Optional[str] = None
-        while time.monotonic() < deadline:
-            if self.shutdown_check and self.shutdown_check():
-                return None
-            try:
-                status = run_async(adapter.get_status(job_id))
-            except Exception as e:
-                logger.warning("[Usenet album] Poll error: %s", e)
-                status = None
-            if status is None:
-                logger.error("[Usenet album] '%s' disappeared from client", title)
-                return None
-            emit('downloading', progress=status.progress, downloaded=status.downloaded,
-                 speed=status.download_speed)
-            if status.save_path:
-                last_save_path = status.save_path
-            if status.state in _COMPLETE_STATES:
-                return last_save_path
-            if status.state == 'failed':
-                logger.error("[Usenet album] '%s' failed: %s", title, status.error)
-                return None
-            time.sleep(_POLL_INTERVAL_SECONDS)
-        logger.error("[Usenet album] '%s' timed out", title)
-        return None

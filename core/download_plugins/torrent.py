@@ -59,10 +59,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from config.settings import config_manager
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
+    DEFAULT_TRANSIENT_MISS_THRESHOLD,
     copy_audio_files_atomically,
     get_poll_interval,
     get_poll_timeout,
     pick_best_album_release,
+    poll_album_download,
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
@@ -297,6 +299,12 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
+        # Tolerate transient None reads — covers network blips. Torrent
+        # adapters don't have an SAB-style queue→history transition,
+        # but the same tolerance keeps a one-off connection failure
+        # from killing an otherwise-healthy download.
+        transient_misses = 0
+        miss_threshold = DEFAULT_TRANSIENT_MISS_THRESHOLD
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -307,9 +315,17 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 status = None
 
             if status is None:
-                # Adapter forgot about the torrent — probably user-removed.
-                self._mark_error(download_id, "Torrent disappeared from client")
-                return
+                transient_misses += 1
+                if transient_misses >= miss_threshold:
+                    self._mark_error(
+                        download_id,
+                        f"Torrent disappeared from client (no status after {miss_threshold} polls)",
+                    )
+                    return
+                time.sleep(_POLL_INTERVAL_SECONDS)
+                continue
+
+            transient_misses = 0
 
             with self._lock:
                 row = self.active_downloads.get(download_id)
@@ -494,10 +510,32 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = 'Torrent client refused the release'
             return result
 
-        # Phase 3: poll until complete.
+        # Phase 3: poll until complete. The lifted helper handles
+        # transient missing windows (uncommon for torrents — adapters
+        # don't have a queue→history transition like SAB — but the
+        # same path also catches network blips that would otherwise
+        # take down the whole download) and always emits a terminal
+        # 'failed' state on failure paths so the UI doesn't freeze on
+        # the last 'downloading' emit.
         _emit('downloading', release=picked.title)
-        save_path = self._poll_album_download(adapter, torrent_id, picked.title, _emit)
+        save_path = poll_album_download(
+            get_status=lambda: run_async(adapter.get_status(torrent_id)),
+            title=picked.title,
+            emit=_emit,
+            # Torrent adapters flip to 'seeding' on completion (files
+            # on disk, share-ratio progress) — both states count as
+            # terminal success.
+            complete_states=frozenset(['seeding', 'completed']),
+            # qBit / Transmission / Deluge surface a real 'error'
+            # state when the torrent itself errors (tracker, missing
+            # files, etc.). That's distinct from the unmapped-state
+            # default-'error' fallback the helper treats as transient.
+            failed_states=frozenset(['error']),
+            is_shutdown=self.shutdown_check,
+            log_prefix='[Torrent album]',
+        )
         if save_path is None:
+            # poll_album_download already emitted terminal 'failed'.
             result['error'] = 'Torrent download failed or timed out'
             return result
 
@@ -522,34 +560,6 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         result['files'] = copied
         return result
 
-    def _poll_album_download(self, adapter, torrent_id, title, emit) -> Optional[str]:
-        """Poll the adapter until the torrent is complete. Returns
-        the save path or ``None`` on timeout / failure."""
-        deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
-        last_save_path: Optional[str] = None
-        while time.monotonic() < deadline:
-            if self.shutdown_check and self.shutdown_check():
-                return None
-            try:
-                status = run_async(adapter.get_status(torrent_id))
-            except Exception as e:
-                logger.warning("[Torrent album] Poll error: %s", e)
-                status = None
-            if status is None:
-                logger.error("[Torrent album] '%s' disappeared from client", title)
-                return None
-            emit('downloading', progress=status.progress, downloaded=status.downloaded,
-                 speed=status.download_speed)
-            if status.save_path:
-                last_save_path = status.save_path
-            if status.state in _COMPLETE_STATES:
-                return last_save_path
-            if status.state == 'error':
-                logger.error("[Torrent album] '%s' errored: %s", title, status.error)
-                return None
-            time.sleep(_POLL_INTERVAL_SECONDS)
-        logger.error("[Torrent album] '%s' timed out", title)
-        return None
 
 
 # ---------------------------------------------------------------------------
