@@ -1000,33 +1000,84 @@ def test_get_recording_flat_swallows_client_errors():
 # search_tracks_with_artist — Fix-popup cascade adapter
 # ---------------------------------------------------------------------------
 
-def test_search_tracks_with_artist_uses_bare_query_mode():
-    """The Fix-popup cascade needs MB's bare-query mode so diacritics and
-    bracketed suffixes don't kill recall. The adapter must pass strict=False
-    through to the underlying search_recording call."""
+def test_search_tracks_with_artist_strict_first_when_both_fields():
+    """Both fields present → strict field-scoped Lucene query first
+    (`recording:"<t>" AND artist:"<a>"`). Fixes the "Coffee Break" +
+    "Zeds Dead" case where bare query lets MB's title-text-biased
+    scorer surface unrelated covers ahead of the canonical recording."""
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_recording.return_value = [
-        {'id': 'rec-1', 'title': 'Army of Me', 'score': 95,
-         'releases': [{'id': 'rel-1', 'title': 'Post', 'date': '1995'}],
-         'artist-credit': [{'name': 'Björk'}]},
+        {'id': 'rec-1', 'title': 'Coffee Break', 'score': 95,
+         'length': 184000,
+         'releases': [{'id': 'rel-1', 'title': 'Coffee Break', 'date': '2015'}],
+         'artist-credit': [{'name': 'Zeds Dead'}]},
     ]
 
-    tracks = client.search_tracks_with_artist('Army of Me', 'Björk', limit=10)
+    tracks = client.search_tracks_with_artist('Coffee Break', 'Zeds Dead', limit=10)
 
-    # strict=False is the critical bit — fuzzy recall, not phrase precision
+    # strict=True is the critical bit — anchors artist via Lucene AND clause
     client._client.search_recording.assert_called_once_with(
-        'Army of Me', artist_name='Björk', limit=10, strict=False
+        'Coffee Break', artist_name='Zeds Dead', limit=10, strict=True
     )
     assert len(tracks) == 1
-    assert tracks[0].name == 'Army of Me'
-    assert 'Björk' in tracks[0].artists
+    assert tracks[0].name == 'Coffee Break'
+    assert 'Zeds Dead' in tracks[0].artists
+
+
+def test_search_tracks_with_artist_falls_back_to_bare_when_strict_empty():
+    """Strict phrase match misses diacritic / alias cases ("Bjork" query
+    vs canonical "Björk" artist). When strict returns nothing, fall
+    through to bare query so rerank can still surface the right answer."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.side_effect = [
+        [],  # strict pass → no hits (Lucene phrase match fails on diacritic)
+        [    # bare pass → recall via alias index
+            {'id': 'rec-canonical', 'title': 'Army of Me', 'score': 28,
+             'releases': [], 'artist-credit': [{'name': 'Björk'}]},
+        ],
+    ]
+
+    tracks = client.search_tracks_with_artist('Army of Me', 'Bjork', limit=10)
+
+    assert client._client.search_recording.call_count == 2
+    first_call = client._client.search_recording.call_args_list[0]
+    second_call = client._client.search_recording.call_args_list[1]
+    assert first_call.kwargs['strict'] is True
+    assert second_call.kwargs['strict'] is False
+    assert len(tracks) == 1
+    assert tracks[0].id == 'rec-canonical'
+
+
+def test_search_tracks_with_artist_prefers_results_with_known_length():
+    """MB has multiple recordings per song (single release, album release,
+    compilations) and not every recording carries length data. Stable
+    sort moves length-known entries ahead of length-zero duplicates so
+    the user sees the actionable 3:04 row first, not the 0:00 sibling."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-no-length', 'title': 'Coffee Break', 'score': 100,
+         'releases': [], 'artist-credit': [{'name': 'Zeds Dead'}]},
+        {'id': 'rec-with-length', 'title': 'Coffee Break', 'score': 90,
+         'length': 184000,
+         'releases': [], 'artist-credit': [{'name': 'Zeds Dead'}]},
+    ]
+
+    tracks = client.search_tracks_with_artist('Coffee Break', 'Zeds Dead', limit=10)
+
+    # rec-with-length must surface first even though MB scored it lower
+    assert tracks[0].id == 'rec-with-length'
+    assert tracks[0].duration_ms == 184000
+    assert tracks[1].id == 'rec-no-length'
 
 
 def test_search_tracks_with_artist_handles_missing_artist():
-    """Track-only query (no artist) still works — empty string becomes
-    None, and the underlying client searches recordings without an
-    artist filter."""
+    """Track-only query (no artist) still works — single-field path takes
+    bare-query mode directly (no strict-first round-trip since there's no
+    artist to anchor). Empty string becomes None so MB drops the AND
+    clause."""
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_recording.return_value = [
@@ -1036,7 +1087,6 @@ def test_search_tracks_with_artist_handles_missing_artist():
 
     client.search_tracks_with_artist('Some Song', '', limit=5)
 
-    # Empty artist → None passed to the client so MB drops the AND clause
     client._client.search_recording.assert_called_once_with(
         'Some Song', artist_name=None, limit=5, strict=False
     )
@@ -1051,33 +1101,33 @@ def test_search_tracks_with_artist_empty_returns_empty_list():
     client._client.search_recording.assert_not_called()
 
 
-def test_search_tracks_with_artist_keeps_low_score_for_rerank():
-    """Cascade path uses a low score floor (20) so MB recordings whose
-    title doesn't literally contain the artist name still enter the
-    candidate pool — the endpoint's rerank pass surfaces them by
-    artist-match relevance. Real example: "Army of Me" + "Bjork" — the
-    canonical Björk recording scores 28 in MB (title doesn't contain
-    "Bjork"), while title-collision covers like "Army of Me (Bjork)"
-    score 73-100. Strict 80 floor drops the right answer."""
+def test_search_tracks_with_artist_bare_fallback_keeps_low_score_for_rerank():
+    """When strict returns nothing and we fall through to bare, the bare
+    pass uses a low score floor (20) so MB recordings whose title doesn't
+    literally contain the artist name still enter the candidate pool —
+    the endpoint's rerank pass surfaces them by artist-match relevance.
+    Real example: "Army of Me" + "Bjork" — strict fails on the diacritic
+    mismatch, bare picks up the canonical Björk recording at score 28
+    while filtering true noise at score 5."""
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
-    client._client.search_recording.return_value = [
-        {'id': 'rec-cover', 'title': 'Army of Me (Bjork)', 'score': 100,
-         'releases': [], 'artist-credit': [{'name': 'HIRS Collective'}]},
-        {'id': 'rec-canonical', 'title': 'Army of Me', 'score': 28,
-         'releases': [], 'artist-credit': [{'name': 'Björk'}]},
-        {'id': 'rec-noise', 'title': 'Bjork', 'score': 5,
-         'releases': [], 'artist-credit': [{'name': 'Random'}]},
+    client._client.search_recording.side_effect = [
+        [],  # strict pass → no hits
+        [    # bare pass
+            {'id': 'rec-cover', 'title': 'Army of Me (Bjork)', 'score': 100,
+             'releases': [], 'artist-credit': [{'name': 'HIRS Collective'}]},
+            {'id': 'rec-canonical', 'title': 'Army of Me', 'score': 28,
+             'releases': [], 'artist-credit': [{'name': 'Björk'}]},
+            {'id': 'rec-noise', 'title': 'Bjork', 'score': 5,
+             'releases': [], 'artist-credit': [{'name': 'Random'}]},
+        ],
     ]
 
     tracks = client.search_tracks_with_artist('Army of Me', 'Bjork', limit=50)
 
     ids = [t.id for t in tracks]
-    # Score=28 canonical Björk recording is kept — the endpoint's rerank
-    # will surface it by artist match.
     assert 'rec-canonical' in ids
     assert 'rec-cover' in ids
-    # Score=5 is below the 20 floor — true garbage still filtered out.
     assert 'rec-noise' not in ids
 
 
@@ -1120,7 +1170,10 @@ def test_search_tracks_text_strict_param_default_true():
 
 def test_search_tracks_with_artist_swallows_client_errors():
     """MB client raising must not crash the endpoint — return [] so the
-    Fix-popup cascade falls through to the next source."""
+    Fix-popup cascade falls through to the next source. Both strict and
+    bare passes swallow exceptions independently, so a strict-pass raise
+    still lets the bare-pass run; a bare-pass raise after empty strict
+    returns []."""
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_recording.side_effect = RuntimeError('network down')
