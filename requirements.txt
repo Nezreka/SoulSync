@@ -28,6 +28,15 @@ beautifulsoup4==4.14.3
 # System monitoring
 psutil==7.2.2
 
+# IANA timezone data — required by ``zoneinfo`` on Windows hosts and
+# minimal Docker base images that ship without the system tz database.
+# Consumed by ``core/automation/schedule.py`` for daily / weekly /
+# monthly schedule next-run computation in the user's local timezone.
+# Loose-pinned because IANA tz data changes a few times a year for
+# real-world DST policy updates; pinning to one snapshot would freeze
+# the app's tz knowledge to the build date.
+tzdata>=2024.1
+
 # YouTube support -- unpinned; yt-dlp must track upstream releases to stay functional
 yt-dlp>=2026.3.17
 
