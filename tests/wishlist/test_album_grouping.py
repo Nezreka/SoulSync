@@ -55,20 +55,19 @@ def test_single_album_groups_all_tracks_together():
 
 
 def test_multiple_albums_emit_separate_groups():
+    """Two tracks in alb1 promotes that album to a group at the default
+    threshold of 2; alb2's one solo track falls to residual."""
     tracks = [
         _wt('Song A', 'Artist 1', 'alb1', 'Album 1'),
         _wt('Song B', 'Artist 1', 'alb1', 'Album 1'),
         _wt('Song C', 'Artist 2', 'alb2', 'Album 2'),
     ]
     res = group_wishlist_tracks_by_album(tracks)
-    assert len(res.album_groups) == 2
-    keys = {g.album_key for g in res.album_groups}
-    assert keys == {'alb1', 'alb2'}
-    for g in res.album_groups:
-        if g.album_key == 'alb1':
-            assert len(g.tracks) == 2
-        else:
-            assert len(g.tracks) == 1
+    assert len(res.album_groups) == 1
+    assert res.album_groups[0].album_key == 'alb1'
+    assert len(res.album_groups[0].tracks) == 2
+    assert len(res.residual_tracks) == 1
+    assert res.residual_tracks[0]['track_name'] == 'Song C'
 
 
 def test_missing_album_metadata_falls_through_to_residual():
@@ -99,9 +98,9 @@ def test_missing_artist_demotes_to_residual():
 
 
 def test_min_tracks_threshold_demotes_solos():
-    """When ``min_tracks_per_album=2``, single-track albums fall to
-    residual so the user doesn't fire a bundle search for a 1-track
-    rip when per-track would do."""
+    """When ``min_tracks_per_album=2`` (the default), single-track
+    albums fall to residual so the user doesn't fire a bundle search
+    for a 1-track rip when per-track would do."""
     tracks = [
         _wt('Solo Track', 'Artist 1', 'alb1', 'Album 1'),
         _wt('Song A', 'Artist 2', 'alb2', 'Album 2'),
@@ -114,12 +113,44 @@ def test_min_tracks_threshold_demotes_solos():
     assert res.residual_tracks[0]['track_name'] == 'Solo Track'
 
 
-def test_default_threshold_promotes_solo_albums():
-    """Default ``min_tracks_per_album=1`` — even one missing track
-    triggers the album-bundle path. Matches the user's stated
-    preference (don't gate on track count)."""
+def test_default_threshold_demotes_solo_albums():
+    """Default ``min_tracks_per_album=2`` — a wishlist with one missing
+    track from one album falls to residual so the per-track flow
+    handles it instead of engaging album-bundle for a single file.
+    Real-world reason: typical wishlist looks like "26 single tracks
+    from 26 different albums" and bundling each one downloads ~85%
+    bandwidth as unwanted files, hammers slskd with concurrent
+    searches, and re-downloads the same album every cycle when the
+    staging-match step doesn't claim the requested track."""
     tracks = [_wt('Solo', 'Artist 1', 'alb1', 'Album 1')]
     res = group_wishlist_tracks_by_album(tracks)
+    assert res.album_groups == []
+    assert len(res.residual_tracks) == 1
+    assert res.residual_tracks[0]['track_name'] == 'Solo'
+
+
+def test_default_threshold_promotes_multi_track_albums():
+    """Default still promotes albums with 2+ missing tracks — the
+    album-bundle path is the right tool when several files from the
+    same release are missing (downloading 5 tracks to claim 2 still
+    beats five separate per-track searches against the same album)."""
+    tracks = [
+        _wt('Song A', 'Artist', 'alb1', 'Album'),
+        _wt('Song B', 'Artist', 'alb1', 'Album'),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    assert len(res.album_groups) == 1
+    assert len(res.album_groups[0].tracks) == 2
+    assert res.residual_tracks == []
+
+
+def test_explicit_threshold_one_restores_solo_promotion():
+    """Power users / tests can opt back into the old "bundle even one
+    track" behaviour by passing ``min_tracks_per_album=1`` explicitly.
+    Default change is opt-out via the public kwarg, not a removed
+    capability."""
+    tracks = [_wt('Solo', 'Artist 1', 'alb1', 'Album 1')]
+    res = group_wishlist_tracks_by_album(tracks, min_tracks_per_album=1)
     assert len(res.album_groups) == 1
     assert res.residual_tracks == []
 
@@ -154,6 +185,8 @@ def test_nested_track_data_payloads_normalized():
             },
         },
     }]
-    res = group_wishlist_tracks_by_album(tracks)
+    # Use threshold=1 here — the test is about payload-shape parsing,
+    # not the threshold rule, so don't conflate the two.
+    res = group_wishlist_tracks_by_album(tracks, min_tracks_per_album=1)
     assert len(res.album_groups) == 1
     assert res.album_groups[0].album_key == 'a'
