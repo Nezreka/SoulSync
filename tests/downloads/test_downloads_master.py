@@ -526,6 +526,36 @@ def test_no_missing_with_auto_wishlist_submits_completion(monkeypatch):
     assert args == ('B7',)
 
 
+def test_no_missing_album_does_not_dispatch_torrent_bundle(monkeypatch):
+    """Release-level sources must wait until analysis confirms missing tracks."""
+    album = _DBAlbum(id_=42, title='Test Album')
+    db = _FakeDB(album=album, album_tracks=[_DBTrack('T1')])
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'torrent'}),
+        soulseek=_FakePluginWrapper({'torrent': plugin}),
+    )
+    _seed_batch(
+        'B7a',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+
+    mw.run_full_missing_tracks_process(
+        'B7a',
+        'album:1',
+        [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}],
+        deps,
+    )
+
+    assert plugin.calls == []
+    assert download_batches['B7a']['phase'] == 'complete'
+    assert 'album_bundle_source' not in download_batches['B7a']
+
+
 # ---------------------------------------------------------------------------
 # Album fast path
 # ---------------------------------------------------------------------------
@@ -860,6 +890,36 @@ def test_hybrid_first_torrent_uses_album_bundle_before_per_track(monkeypatch):
 
     assert len(plugin.calls) == 1
     assert download_batches['B27']['album_bundle_source'] == 'torrent'
+
+
+def test_album_bundle_fallback_clears_private_staging(monkeypatch):
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek({
+        'success': False,
+        'fallback': True,
+        'error': 'No release passed validation',
+    })
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': 'torrent'}),
+        soulseek=_FakePluginWrapper({'torrent': plugin}),
+    )
+    _seed_batch(
+        'B29',
+        is_album_download=True,
+        album_context={'name': 'Test Album', 'total_tracks': 1},
+        artist_context={'name': 'Artist'},
+    )
+    tracks = [{'name': 'T1', 'artists': ['Artist'], 'track_number': 1}]
+
+    mw.run_full_missing_tracks_process('B29', 'album:1', tracks, deps)
+
+    assert len(plugin.calls) == 1
+    assert download_batches['B29']['album_bundle_state'] == 'fallback'
+    assert download_batches['B29']['album_bundle_private_staging'] is False
+    assert download_batches['B29']['album_bundle_staging_path'] is None
+    assert len(download_batches['B29']['queue']) == 1
 
 
 # ---------------------------------------------------------------------------

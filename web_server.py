@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.1"
+_SOULSYNC_BASE_VERSION = "2.6.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -305,7 +305,20 @@ _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
 @app.context_processor
 def _inject_static_cache_bust():
-    return {'static_v': _STATIC_CACHE_BUST}
+    static_v = _STATIC_CACHE_BUST
+    if DEV_STATIC_NO_CACHE:
+        try:
+            static_dir = Path(app.static_folder)
+            mtimes = [
+                p.stat().st_mtime_ns
+                for p in static_dir.rglob('*')
+                if p.is_file() and p.suffix.lower() in {'.css', '.js'}
+            ]
+            if mtimes:
+                static_v = str(max(mtimes))
+        except Exception:
+            static_v = _STATIC_CACHE_BUST
+    return {'static_v': static_v}
 
 
 @app.context_processor
@@ -919,6 +932,12 @@ except Exception as e:
 
 # --- Automation Progress Tracking ---
 _scan_library_automation_id = None
+_automation_deps = None
+
+# Playlist-native manual pipeline runs share the automation dependency
+# bundle, but keep their own small progress state for the playlist UI.
+playlist_pipeline_progress_states = {}
+playlist_pipeline_progress_lock = threading.Lock()
 
 
 def _register_automation_handlers():
@@ -935,11 +954,14 @@ def _register_automation_handlers():
     closures still live below until subsequent commits in the same
     branch finish the lift.
     """
+    global _automation_deps
+
     if not automation_engine:
         return
 
     from core.automation.deps import AutomationDeps, AutomationState
     from core.automation.handlers import register_all as _register_extracted_handlers
+    from core.playlists.sources.bootstrap import build_playlist_source_registry
 
     # Mutable shared state previously lived as module-level globals
     # (`_scan_library_automation_id`, `_pipeline_running`, etc).
@@ -949,6 +971,56 @@ def _register_automation_handlers():
     _automation_state = AutomationState()
 
     from core.watchlist_scanner import get_watchlist_scanner as _get_watchlist_scanner_fn
+
+    # ListenBrainz / Last.fm are profile-scoped, so the manager getter
+    # resolves the current profile's manager on each call. iTunes-link
+    # parsing lives as a module helper rather than a class — wrap it in
+    # a callable that matches the adapter contract.
+    def _lb_manager_for_registry():
+        try:
+            manager, _username, _source = _get_profile_lb_manager()
+            return manager
+        except Exception:
+            return None
+
+    def _itunes_link_parser_for_registry(url):
+        # ``parse_itunes_link_endpoint`` is a Flask route handler; the
+        # actual parsing work needs the underlying helpers. For now
+        # we punt — Phase 2 will lift the parsing into a pure helper
+        # the adapter can call directly. Refresh of itunes_link
+        # mirrors is not yet wired (current handler skips them).
+        return None
+
+    # Discovery callable for the LB / Last.fm adapters' ``discover_tracks``.
+    # Wraps the pure ``match_mb_tracks`` helper with the live matching
+    # engine + Spotify / iTunes clients. Adapter calls it per refresh
+    # when any track has ``needs_discovery=True``.
+    from core.discovery.matching import MBMatchDeps, match_mb_tracks
+
+    _mb_match_deps = MBMatchDeps(
+        matching_engine=matching_engine,
+        score_candidates=_discovery_score_candidates,
+        spotify_client_getter=lambda: spotify_client,
+        itunes_client_getter=_get_itunes_client,
+        prefer_spotify_getter=lambda: (_get_active_discovery_source() == 'spotify'),
+    )
+
+    def _discover_callable_for_registry(tracks):
+        return match_mb_tracks(tracks, _mb_match_deps)
+
+    _playlist_source_registry = build_playlist_source_registry(
+        spotify_client_getter=lambda: spotify_client,
+        tidal_client_getter=lambda: tidal_client,
+        qobuz_client_getter=_get_qobuz_client_for_sync,
+        deezer_client_getter=_get_deezer_client,
+        youtube_parser=parse_youtube_playlist,
+        itunes_link_parser=_itunes_link_parser_for_registry,
+        listenbrainz_manager_getter=_lb_manager_for_registry,
+        lastfm_manager_getter=_lb_manager_for_registry,
+        personalized_manager_getter=_build_personalized_manager,
+        profile_id_getter=get_current_profile_id,
+        discover_callable=_discover_callable_for_registry,
+    )
 
     _automation_deps = AutomationDeps(
         engine=automation_engine,
@@ -971,6 +1043,7 @@ def _register_automation_handlers():
         get_deezer_client=_get_deezer_client,
         parse_youtube_playlist=parse_youtube_playlist,
         get_sync_states=lambda: sync_states,
+        playlist_source_registry=_playlist_source_registry,
         set_db_update_automation_id=_set_db_update_automation_id,
         get_db_update_state=lambda: db_update_state,
         db_update_lock=db_update_lock,
@@ -9004,6 +9077,32 @@ def batch_update_library_tracks():
 
 # ── Write Tags to File endpoints ──
 
+def _build_library_tag_db_data(track_data, album_genres=None):
+    """Build the metadata payload consumed by core.tag_writer."""
+    album_genres = album_genres or []
+    db_data = {
+        'title': track_data.get('title'),
+        'artist_name': track_data.get('artist_name'),
+        'track_artist': track_data.get('track_artist'),
+        'album_title': track_data.get('album_title'),
+        'year': track_data.get('year'),
+        'genres': album_genres,
+        'track_number': track_data.get('track_number'),
+        'disc_number': track_data.get('disc_number'),
+        'bpm': track_data.get('bpm'),
+        'track_count': track_data.get('track_count'),
+        'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
+    }
+
+    track_artist = track_data.get('track_artist')
+    if isinstance(track_artist, str) and ';' in track_artist:
+        artists_list = [name.strip() for name in track_artist.split(';') if name.strip()]
+        if artists_list:
+            db_data['artists_list'] = artists_list
+
+    return db_data
+
+
 @app.route('/api/library/track/<track_id>/tag-preview', methods=['GET'])
 def get_track_tag_preview(track_id):
     """Read current file tags and compare against DB metadata for a single track."""
@@ -9051,19 +9150,7 @@ def get_track_tag_preview(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build DB metadata dict for comparison
-        db_data = {
-            'title': track_data.get('title'),
-            'artist_name': track_data.get('artist_name'),
-            'track_artist': track_data.get('track_artist'),
-            'album_title': track_data.get('album_title'),
-            'year': track_data.get('year'),
-            'genres': album_genres,
-            'track_number': track_data.get('track_number'),
-            'disc_number': track_data.get('disc_number'),
-            'bpm': track_data.get('bpm'),
-            'track_count': track_data.get('track_count'),
-            'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
-        }
+        db_data = _build_library_tag_db_data(track_data, album_genres)
 
         diff = build_tag_diff(file_tags, db_data)
         has_changes = any(d['changed'] for d in diff)
@@ -9145,18 +9232,7 @@ def get_batch_tag_preview():
                     except (ValueError, TypeError):
                         album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                db_data = {
-                    'title': track_data.get('title'),
-                    'artist_name': track_data.get('artist_name'),
-                    'album_title': track_data.get('album_title'),
-                    'year': track_data.get('year'),
-                    'genres': album_genres,
-                    'track_number': track_data.get('track_number'),
-                    'disc_number': track_data.get('disc_number'),
-                    'bpm': track_data.get('bpm'),
-                    'track_count': track_data.get('track_count'),
-                    'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
-                }
+                db_data = _build_library_tag_db_data(track_data, album_genres)
 
                 diff = build_tag_diff(file_tags, db_data)
                 has_changes = any(d['changed'] for d in diff)
@@ -9228,17 +9304,7 @@ def write_track_tags(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build data for writer
-        db_data = {
-            'title': track_data.get('title'),
-            'artist_name': track_data.get('artist_name'),
-            'album_title': track_data.get('album_title'),
-            'year': track_data.get('year'),
-            'genres': album_genres,
-            'track_number': track_data.get('track_number'),
-            'disc_number': track_data.get('disc_number'),
-            'bpm': track_data.get('bpm'),
-            'track_count': track_data.get('track_count'),
-        }
+        db_data = _build_library_tag_db_data(track_data, album_genres)
 
         # Resolve cover URL
         cover_url = None
@@ -9387,17 +9453,7 @@ def write_tracks_tags_batch():
                         except (ValueError, TypeError):
                             album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                    db_data = {
-                        'title': track_data.get('title'),
-                        'artist_name': track_data.get('artist_name'),
-                        'album_title': track_data.get('album_title'),
-                        'year': track_data.get('year'),
-                        'genres': album_genres,
-                        'track_number': track_data.get('track_number'),
-                        'disc_number': track_data.get('disc_number'),
-                        'bpm': track_data.get('bpm'),
-                        'track_count': track_data.get('track_count'),
-                    }
+                    db_data = _build_library_tag_db_data(track_data, album_genres)
 
                     # Get pre-downloaded cover art for this track's album
                     art_data = None
@@ -18554,6 +18610,15 @@ def start_missing_tracks_process(playlist_id):
             spotify_public_discovery_states[sp_url_hash]['converted_spotify_playlist_id'] = playlist_id
             logger.info(f"Linked Spotify Public playlist {sp_url_hash} to download process {batch_id} (converted ID: {playlist_id})")
 
+    # Link iTunes Link playlist to download process if this is an iTunes Link playlist
+    if playlist_id.startswith('itunes_link_'):
+        itunes_url_hash = playlist_id.replace('itunes_link_', '')
+        if itunes_url_hash in itunes_link_discovery_states:
+            itunes_link_discovery_states[itunes_url_hash]['download_process_id'] = batch_id
+            itunes_link_discovery_states[itunes_url_hash]['phase'] = 'downloading'
+            itunes_link_discovery_states[itunes_url_hash]['converted_spotify_playlist_id'] = playlist_id
+            logger.info(f"Linked iTunes Link playlist {itunes_url_hash} to download process {batch_id} (converted ID: {playlist_id})")
+
     # Link Deezer playlist to download process if this is a Deezer playlist
     if playlist_id.startswith('deezer_'):
         deezer_playlist_id = playlist_id.replace('deezer_', '')
@@ -19351,12 +19416,19 @@ def search_musicbrainz_tracks():
 
         # Local rerank — same helper Deezer / iTunes use. Penalises
         # cover / karaoke / tribute patterns + boosts exact-artist match.
+        # `prefer_known_duration=True` is MB-specific: MB has multiple
+        # recordings per song (single / album / compilation / remaster
+        # editions) and not every recording carries length data. The
+        # flag promotes length-known recordings ahead of length-less
+        # duplicates when relevance scores tie, so the user sees the
+        # actionable 3:04 row before the 0:00 sibling.
         if track_q or artist_q:
             from core.metadata.relevance import rerank_tracks
             tracks = rerank_tracks(
                 tracks,
                 expected_title=track_q,
                 expected_artist=artist_q,
+                prefer_known_duration=True,
             )
 
         tracks_dict = [{
@@ -22526,6 +22598,361 @@ def cancel_qobuz_sync(playlist_id):
 spotify_public_discovery_states = {}  # Key: url_hash, Value: discovery state
 spotify_public_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spotify_public_discovery")
 
+# Global state for iTunes/Apple Music link imports
+itunes_link_discovery_states = {}  # Key: url_hash, Value: discovery state
+itunes_link_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="itunes_link_discovery")
+_apple_music_token_cache = {'token': None, 'fetched_at': 0}
+_apple_music_token_lock = threading.Lock()
+_APPLE_MUSIC_TOKEN_TTL = 6 * 60 * 60  # seconds
+_APPLE_MUSIC_JWT_RE = re.compile(r'eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+')
+_APPLE_MUSIC_BUNDLE_SCRAPE_CAP = 8
+
+def _parse_itunes_link_url(url):
+    """Return {'type': 'album'|'track'|'playlist', 'id': str} for supported Apple links."""
+    import re
+    from urllib.parse import parse_qs
+
+    raw = (url or '').strip()
+    if not raw:
+        return None
+
+    uri_match = re.match(r'^(?:itunes|applemusic):(album|track|playlist):([A-Za-z0-9._-]+)$', raw, re.IGNORECASE)
+    if uri_match:
+        return {'type': uri_match.group(1).lower(), 'id': uri_match.group(2), 'country': 'us'}
+
+    parsed = urlparse(raw)
+    host = (parsed.netloc or '').lower()
+    path = parsed.path or ''
+    query = parse_qs(parsed.query or '')
+
+    if 'itunes.apple.com' not in host and 'music.apple.com' not in host:
+        return None
+
+    # Apple Music track links are album URLs with ?i=<trackId>.
+    track_id = (query.get('i') or [None])[0]
+    if track_id and str(track_id).isdigit():
+        return {'type': 'track', 'id': str(track_id), 'country': _apple_music_country_from_path(path)}
+
+    song_match = re.search(r'/song(?:/[^/]+)?/(\d+)', path)
+    if song_match:
+        return {'type': 'track', 'id': song_match.group(1), 'country': _apple_music_country_from_path(path)}
+
+    album_match = re.search(r'/album(?:/[^/]+)?/(\d+)', path)
+    if album_match:
+        return {'type': 'album', 'id': album_match.group(1), 'country': _apple_music_country_from_path(path)}
+
+    playlist_match = re.search(r'/playlist(?:/[^/]+)?/(pl\.[A-Za-z0-9._-]+)', path)
+    if playlist_match:
+        return {'type': 'playlist', 'id': playlist_match.group(1), 'country': _apple_music_country_from_path(path)}
+
+    return None
+
+
+def _apple_music_country_from_path(path):
+    import re
+    match = re.match(r'^/([a-z]{2})(?:/|$)', path or '', re.IGNORECASE)
+    return match.group(1).lower() if match else 'us'
+
+
+def _itunes_album_image_url(album_data):
+    images = album_data.get('images') or []
+    if images and isinstance(images[0], dict):
+        return images[0].get('url', '')
+    return ''
+
+
+def _itunes_track_to_link_track(track_data, fallback_album=None):
+    artists = track_data.get('artists') or []
+    if artists and isinstance(artists[0], dict):
+        artists = [a.get('name', '') for a in artists if a.get('name')]
+    elif isinstance(artists, str):
+        artists = [artists]
+
+    album = track_data.get('album') or fallback_album or {}
+    if isinstance(album, str):
+        album = {'name': album, 'images': []}
+
+    return {
+        'id': str(track_data.get('id') or track_data.get('trackId') or ''),
+        'name': track_data.get('name') or track_data.get('trackName') or '',
+        'artists': artists,
+        'album': album,
+        'duration_ms': track_data.get('duration_ms') or track_data.get('trackTimeMillis') or 0,
+        'explicit': track_data.get('explicit') or track_data.get('trackExplicitness') == 'explicit',
+        'track_number': track_data.get('track_number') or track_data.get('trackNumber') or 0,
+        'disc_number': track_data.get('disc_number') or track_data.get('discNumber') or 1,
+        'external_urls': track_data.get('external_urls') or {'itunes': track_data.get('trackViewUrl', '')},
+        '_source': 'itunes'
+    }
+
+
+def _apple_music_artwork_images(artwork):
+    if not isinstance(artwork, dict):
+        return []
+    template = artwork.get('url') or ''
+    if not template:
+        return []
+    sizes = [600, 300, 100]
+    images = []
+    for size in sizes:
+        url = template.replace('{w}', str(size)).replace('{h}', str(size))
+        url = url.replace('{f}', 'jpg').replace('{c}', '')
+        images.append({'url': url, 'height': size, 'width': size})
+    return images
+
+
+def _apple_music_song_to_link_track(song):
+    attrs = (song or {}).get('attributes') or {}
+    album_images = _apple_music_artwork_images(attrs.get('artwork'))
+    album = {
+        'id': attrs.get('albumId') or '',
+        'name': attrs.get('albumName') or '',
+        'images': album_images,
+        'release_date': attrs.get('releaseDate') or '',
+        'album_type': 'album',
+    }
+    return {
+        'id': str((song or {}).get('id') or ''),
+        'name': attrs.get('name') or '',
+        'artists': [attrs.get('artistName') or 'Unknown Artist'],
+        'album': album,
+        'duration_ms': attrs.get('durationInMillis') or 0,
+        'explicit': attrs.get('contentRating') == 'explicit',
+        'track_number': attrs.get('trackNumber') or 0,
+        'disc_number': attrs.get('discNumber') or 1,
+        'external_urls': {'itunes': attrs.get('url') or ''},
+        '_source': 'itunes'
+    }
+
+
+def _looks_like_apple_music_token(token):
+    """Decode JWT payload and confirm Apple media-api claims before trusting."""
+    import base64
+    import json
+
+    if not token or token.count('.') != 2:
+        return False
+    try:
+        payload_b64 = token.split('.')[1]
+        padding = '=' * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+    except Exception:
+        return False
+    # Apple media-api tokens carry root_https_origin (distinctive) or are
+    # Apple-issued JWTs with iss + iat + exp claims.
+    if payload.get('root_https_origin'):
+        return True
+    if payload.get('iss') and payload.get('iat') and payload.get('exp'):
+        return True
+    return False
+
+
+def _extract_apple_music_web_token(html_text, session=None):
+    import html
+    import json
+    from urllib.parse import unquote, urljoin
+
+    if not html_text:
+        return None
+
+    meta_match = re.search(
+        r'<meta[^>]+name=["\']desktop-music-app/config/environment["\'][^>]+content=["\']([^"\']+)["\']',
+        html_text,
+        re.IGNORECASE,
+    )
+    if meta_match:
+        try:
+            raw = html.unescape(meta_match.group(1))
+            data = json.loads(unquote(raw))
+            token = ((data.get('MEDIA_API') or {}).get('token')
+                     or (data.get('media-api') or {}).get('token'))
+            if token and _looks_like_apple_music_token(token):
+                return token
+        except Exception as e:
+            logger.debug(f"Apple Music token meta parse failed: {e}")
+
+    inline_match = re.search(r'"token"\s*:\s*"(' + _APPLE_MUSIC_JWT_RE.pattern + r')"', html_text)
+    if inline_match and _looks_like_apple_music_token(inline_match.group(1)):
+        return inline_match.group(1)
+
+    if session is None:
+        return None
+
+    script_srcs = re.findall(
+        r'<script[^>]+src=["\']([^"\']+\.js)["\']',
+        html_text,
+        re.IGNORECASE,
+    )
+    prioritized = sorted(
+        script_srcs,
+        key=lambda s: 0 if re.search(r'(index|chunk|main|app)[^/]*\.js$', s, re.IGNORECASE) else 1,
+    )
+    attempted = 0
+    for src in prioritized:
+        if attempted >= _APPLE_MUSIC_BUNDLE_SCRAPE_CAP:
+            break
+        attempted += 1
+        try:
+            js_url = urljoin('https://music.apple.com/', src)
+            js_resp = session.get(js_url, timeout=15)
+            js_resp.raise_for_status()
+            for match in _APPLE_MUSIC_JWT_RE.finditer(js_resp.text):
+                candidate = match.group(0)
+                if _looks_like_apple_music_token(candidate):
+                    return candidate
+        except Exception as e:
+            logger.debug(f"Apple Music bundle scrape failed for {src}: {e}")
+            continue
+    return None
+
+
+def _get_apple_music_web_token(session, page_text, force_refresh=False):
+    with _apple_music_token_lock:
+        if not force_refresh:
+            cached = _apple_music_token_cache.get('token')
+            fetched_at = _apple_music_token_cache.get('fetched_at', 0)
+            if cached and (time.time() - fetched_at) < _APPLE_MUSIC_TOKEN_TTL:
+                return cached
+        token = _extract_apple_music_web_token(page_text, session=session)
+        if token:
+            _apple_music_token_cache['token'] = token
+            _apple_music_token_cache['fetched_at'] = time.time()
+        elif force_refresh:
+            _apple_music_token_cache['token'] = None
+            _apple_music_token_cache['fetched_at'] = 0
+        return token
+
+
+def _invalidate_apple_music_token():
+    with _apple_music_token_lock:
+        _apple_music_token_cache['token'] = None
+        _apple_music_token_cache['fetched_at'] = 0
+
+
+def _apple_music_amp_get(session, page_text_provider, web_headers, page_url, api_url, params):
+    """GET amp-api with current cached token; on 401 invalidate + refetch token + retry once."""
+    def build_headers(tok):
+        return {
+            'Accept': 'application/json',
+            'Origin': 'https://music.apple.com',
+            'Referer': page_url,
+            'User-Agent': web_headers['User-Agent'],
+            'Authorization': f"Bearer {tok}",
+        }
+
+    token = _get_apple_music_web_token(session, page_text_provider())
+    if not token:
+        raise ValueError("Could not read Apple Music web token")
+    resp = session.get(api_url, headers=build_headers(token), params=params, timeout=20)
+    if resp.status_code == 401:
+        _invalidate_apple_music_token()
+        page = session.get(page_url, headers=web_headers, timeout=20)
+        page.raise_for_status()
+        token = _get_apple_music_web_token(session, page.text, force_refresh=True)
+        if not token:
+            raise ValueError("Could not read Apple Music web token")
+        resp = session.get(api_url, headers=build_headers(token), params=params, timeout=20)
+    resp.raise_for_status()
+    return resp
+
+
+def _fetch_apple_music_playlist(url, playlist_id, country):
+    import requests
+    from urllib.parse import urljoin
+
+    session = requests.Session()
+    web_headers = {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    cached_page_text = {'value': None}
+
+    def page_text_provider():
+        if cached_page_text['value'] is None:
+            page = session.get(url, headers=web_headers, timeout=20)
+            page.raise_for_status()
+            cached_page_text['value'] = page.text
+        return cached_page_text['value']
+
+    country = (country or 'us').lower()
+    api_url = f"https://amp-api.music.apple.com/v1/catalog/{country}/playlists/{playlist_id}"
+    playlist_resp = _apple_music_amp_get(session, page_text_provider, web_headers, url, api_url, {'l': 'en-US'})
+    playlist_payload = playlist_resp.json()
+    playlist_item = (playlist_payload.get('data') or [{}])[0]
+    playlist_attrs = playlist_item.get('attributes') or {}
+
+    tracks = []
+    tracks_url = f"{api_url}/tracks"
+    params = {'l': 'en-US'}
+    while tracks_url:
+        tracks_resp = _apple_music_amp_get(session, page_text_provider, web_headers, url, tracks_url, params)
+        tracks_payload = tracks_resp.json()
+        tracks.extend(_apple_music_song_to_link_track(song) for song in tracks_payload.get('data') or [])
+        next_path = tracks_payload.get('next')
+        tracks_url = urljoin('https://amp-api.music.apple.com', next_path) if next_path else None
+        params = None
+
+    images = _apple_music_artwork_images(playlist_attrs.get('artwork'))
+    return {
+        'id': playlist_id,
+        'type': 'playlist',
+        'name': playlist_attrs.get('name') or 'Apple Music Playlist',
+        'subtitle': playlist_attrs.get('curatorName') or playlist_attrs.get('editorialNotes', {}).get('standard') or 'Apple Music',
+        'url': url,
+        'track_count': len(tracks),
+        'image_url': images[0]['url'] if images else '',
+        'tracks': tracks,
+    }
+
+
+def _build_itunes_link_state(response_data):
+    return {
+        'playlist': response_data,
+        'phase': 'fresh',
+        'status': 'fresh',
+        'discovery_progress': 0,
+        'spotify_matches': 0,
+        'spotify_total': len(response_data.get('tracks') or []),
+        'discovery_results': [],
+        'sync_playlist_id': None,
+        'converted_spotify_playlist_id': None,
+        'download_process_id': None,
+        'created_at': time.time(),
+        'last_accessed': time.time(),
+        'discovery_future': None,
+        'sync_progress': {}
+    }
+
+
+def _convert_link_results_to_spotify_tracks(discovery_results, label):
+    spotify_tracks = []
+    for result in discovery_results:
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data.get('duration_ms', 0)
+            }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
+            spotify_tracks.append(track)
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            spotify_tracks.append({
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            })
+    logger.info(f"Converted {len(spotify_tracks)} {label} matches to Spotify tracks for sync")
+    return spotify_tracks
+
 @app.route('/api/spotify/parse-public', methods=['POST'])
 def parse_spotify_public_endpoint():
     """Parse a public Spotify playlist or album URL without API auth"""
@@ -23141,6 +23568,453 @@ def cancel_spotify_public_sync(url_hash):
 
 
 # ===================================================================
+# ITUNES LINK DISCOVERY API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/itunes-link/parse', methods=['POST'])
+def parse_itunes_link_endpoint():
+    """Parse an iTunes/Apple Music album or track URL into a virtual playlist."""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+
+        if not url:
+            return jsonify({"error": "iTunes URL is required"}), 400
+
+        parsed = _parse_itunes_link_url(url)
+        if not parsed:
+            return jsonify({"error": "Invalid iTunes or Apple Music link. Album and track links are supported."}), 400
+
+        client = _get_itunes_client()
+        tracks = []
+        image_url = ''
+        subtitle = 'iTunes'
+        name = ''
+
+        if parsed['type'] == 'playlist':
+            response_data = _fetch_apple_music_playlist(url, parsed['id'], parsed.get('country') or 'us')
+            tracks = response_data.get('tracks') or []
+            image_url = response_data.get('image_url', '')
+            subtitle = response_data.get('subtitle', 'Apple Music')
+            name = response_data.get('name', '')
+        elif parsed['type'] == 'album':
+            album = client.get_album(parsed['id'], include_tracks=True)
+            if not album:
+                return jsonify({"error": "iTunes album not found"}), 404
+            album_tracks = ((album.get('tracks') or {}).get('items') or [])
+            tracks = [_itunes_track_to_link_track(t, fallback_album={
+                'id': album.get('id'),
+                'name': album.get('name', ''),
+                'images': album.get('images') or [],
+                'release_date': album.get('release_date', ''),
+                'album_type': album.get('album_type', 'album')
+            }) for t in album_tracks]
+            name = album.get('name', '')
+            artists = album.get('artists') or []
+            subtitle = ', '.join(a.get('name', '') for a in artists if isinstance(a, dict)) or 'iTunes'
+            image_url = _itunes_album_image_url(album)
+        else:
+            track = client.get_track_details(parsed['id'])
+            if not track:
+                return jsonify({"error": "iTunes track not found"}), 404
+            tracks = [_itunes_track_to_link_track(track)]
+            name = track.get('name', '')
+            subtitle = ', '.join(track.get('artists') or []) or 'iTunes'
+            album = track.get('album') or {}
+            if isinstance(album, dict):
+                name = f"{track.get('name', '')} - {subtitle}".strip(' -')
+
+        if not tracks:
+            return jsonify({"error": "No tracks found for this iTunes link"}), 400
+
+        import hashlib
+        canonical = f"itunes:{parsed['type']}:{parsed['id']}"
+        url_hash = hashlib.md5(canonical.encode()).hexdigest()[:12]
+
+        if parsed['type'] == 'playlist':
+            response_data['url_hash'] = url_hash
+            response_data['track_count'] = len(tracks)
+        else:
+            response_data = {
+                'id': parsed['id'],
+                'type': parsed['type'],
+                'name': name or f"iTunes {parsed['type'].title()}",
+                'subtitle': subtitle,
+                'url': url,
+                'url_hash': url_hash,
+                'track_count': len(tracks),
+                'image_url': image_url,
+                'tracks': tracks
+            }
+
+        if url_hash not in itunes_link_discovery_states:
+            itunes_link_discovery_states[url_hash] = _build_itunes_link_state(response_data)
+        else:
+            itunes_link_discovery_states[url_hash]['playlist'] = response_data
+            itunes_link_discovery_states[url_hash]['last_accessed'] = time.time()
+
+        logger.info(f"iTunes {parsed['type']} parsed: {response_data['name']} ({len(tracks)} tracks)")
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error parsing iTunes link: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/discovery/start/<url_hash>', methods=['POST'])
+def start_itunes_link_discovery(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes link not found. Please load the URL first."}), 404
+
+        state = itunes_link_discovery_states[url_hash]
+        if state['phase'] == 'discovering':
+            return jsonify({"error": "Discovery already in progress"}), 400
+
+        if not state.get('playlist'):
+            return jsonify({"error": "iTunes link data missing. Please load the URL again."}), 404
+
+        state['phase'] = 'discovering'
+        state['status'] = 'discovering'
+        state['last_accessed'] = time.time()
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+
+        playlist_name = state['playlist']['name']
+        track_count = len(state['playlist']['tracks'])
+        add_activity_item("", "iTunes Link Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+
+        future = itunes_link_discovery_executor.submit(_run_itunes_link_discovery_worker, url_hash)
+        state['discovery_future'] = future
+
+        logger.info(f"Started discovery for iTunes Link: {playlist_name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        logger.error(f"Error starting iTunes Link discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/discovery/status/<url_hash>', methods=['GET'])
+def get_itunes_link_discovery_status(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link discovery not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        return jsonify({
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        })
+    except Exception as e:
+        logger.error(f"Error getting iTunes Link discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _update_itunes_link_discovery_result(identifier, track_index, spotify_track):
+    state = itunes_link_discovery_states.get(identifier)
+    if not state:
+        return None, ('Discovery state not found', 404)
+    if track_index >= len(state['discovery_results']):
+        return None, ('Invalid track index', 400)
+
+    result = state['discovery_results'][track_index]
+    old_status = result.get('status')
+    result['status'] = 'Found'
+    result['status_class'] = 'found'
+    result['spotify_track'] = spotify_track['name']
+    result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+    result['spotify_album'] = spotify_track['album']
+    result['spotify_id'] = spotify_track['id']
+    result['duration'] = '0:00'
+    duration_ms = spotify_track.get('duration_ms', 0)
+    if duration_ms:
+        result['duration'] = f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}"
+    result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+    result['wing_it_fallback'] = False
+    result['manual_match'] = True
+    if old_status not in ('found', 'Found'):
+        state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+    return result, None
+
+
+@app.route('/api/itunes-link/discovery/update_match', methods=['POST'])
+def update_itunes_link_discovery_match():
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        result, error = _update_itunes_link_discovery_result(identifier, track_index, spotify_track)
+        if error:
+            message, status = error
+            return jsonify({'error': message}), status
+
+        try:
+            original_track = result.get('itunes_link_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            original_artist = original_artists[0] if original_artists else ''
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0,
+                result['spotify_data'], original_name, original_artist
+            )
+        except Exception as cache_err:
+            logger.error(f"Error saving iTunes Link manual fix to discovery cache: {cache_err}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        logger.error(f"Error updating iTunes Link discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/itunes-link/playlists/states', methods=['GET'])
+def get_itunes_link_playlist_states():
+    try:
+        current_time = time.time()
+        states = []
+        for url_hash, state in itunes_link_discovery_states.items():
+            state['last_accessed'] = current_time
+            states.append({
+                'playlist_id': url_hash,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'last_accessed': state['last_accessed']
+            })
+        return jsonify({"states": states})
+    except Exception as e:
+        logger.error(f"Error getting iTunes Link playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/state/<url_hash>', methods=['GET'])
+def get_itunes_link_playlist_state(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        return jsonify({
+            'playlist_id': url_hash,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'last_accessed': state['last_accessed']
+        })
+    except Exception as e:
+        logger.error(f"Error getting iTunes Link state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/reset/<url_hash>', methods=['POST'])
+def reset_itunes_link_playlist(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        if state.get('discovery_future'):
+            state['discovery_future'].cancel()
+        state.update({
+            'phase': 'fresh',
+            'status': 'fresh',
+            'discovery_results': [],
+            'discovery_progress': 0,
+            'spotify_matches': 0,
+            'sync_playlist_id': None,
+            'converted_spotify_playlist_id': None,
+            'download_process_id': None,
+            'sync_progress': {},
+            'discovery_future': None,
+            'last_accessed': time.time()
+        })
+        return jsonify({"success": True, "message": "iTunes Link reset to fresh phase"})
+    except Exception as e:
+        logger.error(f"Error resetting iTunes Link: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/delete/<url_hash>', methods=['POST'])
+def delete_itunes_link_playlist(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        if state.get('discovery_future'):
+            state['discovery_future'].cancel()
+        del itunes_link_discovery_states[url_hash]
+        return jsonify({"success": True, "message": "iTunes Link deleted"})
+    except Exception as e:
+        logger.error(f"Error deleting iTunes Link: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/update_phase/<url_hash>', methods=['POST'])
+def update_itunes_link_playlist_phase(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        data = request.get_json()
+        new_phase = data.get('phase') if data else None
+        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+        state = itunes_link_discovery_states[url_hash]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+        if 'download_process_id' in data:
+            state['download_process_id'] = data['download_process_id']
+        if 'converted_spotify_playlist_id' in data:
+            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+        return jsonify({"success": True, "old_phase": old_phase, "new_phase": new_phase})
+    except Exception as e:
+        logger.error(f"Error updating iTunes Link phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _build_itunes_link_discovery_deps():
+    return _discovery_spotify_public.SpotifyPublicDiscoveryDeps(
+        spotify_public_discovery_states=itunes_link_discovery_states,
+        spotify_client=spotify_client,
+        pause_enrichment_workers=_pause_enrichment_workers,
+        resume_enrichment_workers=_resume_enrichment_workers,
+        get_active_discovery_source=_get_active_discovery_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_discovery_cache_key=_get_discovery_cache_key,
+        get_database=get_database,
+        validate_discovery_cache_artist=_validate_discovery_cache_artist,
+        search_spotify_for_tidal_track=_search_spotify_for_tidal_track,
+        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        add_activity_item=add_activity_item,
+        source_label="iTunes Link",
+        activity_label="iTunes Link",
+        original_track_key="itunes_link_track",
+    )
+
+
+def _run_itunes_link_discovery_worker(url_hash):
+    return _discovery_spotify_public.run_spotify_public_discovery_worker(
+        url_hash, _build_itunes_link_discovery_deps()
+    )
+
+
+@app.route('/api/itunes-link/sync/start/<url_hash>', methods=['POST'])
+def start_itunes_link_sync(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
+            return jsonify({"error": "iTunes Link not ready for sync"}), 400
+
+        spotify_tracks = _convert_link_results_to_spotify_tracks(state['discovery_results'], 'iTunes Link')
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        sync_playlist_id = f"itunes_link_{url_hash}"
+        playlist_name = state['playlist']['name']
+        add_activity_item("", "iTunes Link Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        playlist_image_url = state['playlist'].get('image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, playlist_name, spotify_tracks, None, get_current_profile_id(), playlist_image_url)
+        active_sync_workers[sync_playlist_id] = future
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        logger.error(f"Error starting iTunes Link sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/sync/status/<url_hash>', methods=['GET'])
+def get_itunes_link_sync_status(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            add_activity_item("", "Sync Complete", f"iTunes Link '{state['playlist']['name']}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'
+            add_activity_item("", "Sync Failed", f"iTunes Link '{state['playlist']['name']}' sync failed", "Now")
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error getting iTunes Link sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes-link/sync/cancel/<url_hash>', methods=['POST'])
+def cancel_itunes_link_sync(url_hash):
+    try:
+        if url_hash not in itunes_link_discovery_states:
+            return jsonify({"error": "iTunes Link not found"}), 404
+        state = itunes_link_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+        if sync_playlist_id:
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+        return jsonify({"success": True, "message": "iTunes Link sync cancelled"})
+    except Exception as e:
+        logger.error(f"Error cancelling iTunes Link sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
 # YOUTUBE PLAYLIST API ENDPOINTS
 # ===================================================================
 
@@ -23313,6 +24187,7 @@ def get_youtube_discovery_status(url_hash):
 @app.route('/api/tidal/discovery/unmatch', methods=['POST'])
 @app.route('/api/deezer/discovery/unmatch', methods=['POST'])
 @app.route('/api/spotify-public/discovery/unmatch', methods=['POST'])
+@app.route('/api/itunes-link/discovery/unmatch', methods=['POST'])
 @app.route('/api/beatport/discovery/unmatch', methods=['POST'])
 @app.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
 def unmatch_discovery_track():
@@ -23330,6 +24205,7 @@ def unmatch_discovery_track():
                  or tidal_discovery_states.get(identifier)
                  or deezer_discovery_states.get(identifier)
                  or spotify_public_discovery_states.get(identifier)
+                 or itunes_link_discovery_states.get(identifier)
                  or beatport_chart_states.get(identifier)
                  or listenbrainz_playlist_states.get(identifier))
 
@@ -23446,6 +24322,20 @@ def update_youtube_discovery_match():
         logger.info(f"Manual match updated: youtube - {identifier} - track {track_index}")
         logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
+        # See core.discovery.manual_match — Fix-popup matches can come from
+        # any metadata source (primary first, then Spotify / Deezer / iTunes
+        # / MusicBrainz as fallbacks). Hardcoding 'spotify' here used to
+        # make every non-Spotify manual match look provider-drifted on the
+        # next prepare-discovery, which triggered automatic re-discovery
+        # that overwrote the user's pick. Computed once before the try
+        # block so both the cache-save path AND the mirrored-DB save below
+        # (in the except fallback case) see the same value.
+        from core.discovery.manual_match import derive_manual_match_provider
+        match_source = derive_manual_match_provider(
+            spotify_track, _get_active_discovery_source()
+        )
+        matched_data = None
+
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
             # Get original track name from the YouTube/source track data
@@ -23487,7 +24377,7 @@ def update_youtube_discovery_match():
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
                 'image_url': image_url,
-                'source': 'spotify',
+                'source': match_source,
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
@@ -23498,8 +24388,11 @@ def update_youtube_discovery_match():
         except Exception as cache_err:
             logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
-        # Persist manual fix to DB for mirrored playlists
-        if identifier.startswith('mirrored_'):
+        # Persist manual fix to DB for mirrored playlists. Skips when the
+        # cache-save block raised before matched_data was constructed —
+        # without the payload there's nothing to persist, and re-deriving
+        # it here would duplicate the construction logic above.
+        if matched_data is not None and identifier.startswith('mirrored_'):
             try:
                 tracks = state['playlist']['tracks']
                 if track_index < len(tracks):
@@ -23508,7 +24401,7 @@ def update_youtube_discovery_match():
                         db = get_database()
                         extra_data = {
                             'discovered': True,
-                            'provider': 'spotify',
+                            'provider': match_source,
                             'confidence': 1.0,
                             'matched_data': matched_data,
                             'manual_match': True,
@@ -29117,6 +30010,7 @@ def _get_lb_discover_playlists(playlist_type):
                 "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
                 "title": playlist['title'],
                 "creator": playlist['creator'],
+                "track_count": playlist.get('track_count', 0),
                 "annotation": playlist.get('annotation', {}),
                 "track": []
             }
@@ -29383,6 +30277,7 @@ def get_listenbrainz_lastfm_radio():
                     "identifier": f"https://listenbrainz.org/playlist/{p['playlist_mbid']}",
                     "title": p['title'],
                     "creator": p['creator'],
+                    "track_count": p.get('track_count', 0),
                     "annotation": p.get('annotation', {}),
                     "track": [],
                 }
@@ -29400,6 +30295,40 @@ def get_listenbrainz_lastfm_radio():
 # ========================================
 # LISTENBRAINZ PLAYLIST MANAGEMENT (Discovery System)
 # ========================================
+
+@app.route('/api/listenbrainz/series-detect', methods=['GET'])
+def get_listenbrainz_series_detect():
+    """Detect whether a LB playlist title belongs to a rotating series.
+
+    Auto-mirror uses this to decide whether the resulting mirror
+    row should point at a per-playlist MBID (one-off LB playlist)
+    or a synthetic series id (e.g. ``lb_weekly_jams_<user>``) that
+    rolls forward as ListenBrainz publishes new periods.
+
+    Query: ``?title=<raw LB playlist title>``
+    Response on a match:
+        ``{matched: true, series_id, canonical_name,
+           source: 'listenbrainz'|'lastfm'}``
+    Response on no match:
+        ``{matched: false}``
+    """
+    try:
+        from core.playlists.lb_series import detect_series
+
+        title = (request.args.get('title') or '').strip()
+        match = detect_series(title)
+        if match is None:
+            return jsonify({"matched": False})
+        return jsonify({
+            "matched": True,
+            "series_id": match.series_id,
+            "canonical_name": match.canonical_name,
+            "source": match.source_for_mirror,
+        })
+    except Exception as e:
+        logger.error(f"Error detecting LB series: {e}")
+        return jsonify({"matched": False, "error": str(e)}), 500
+
 
 def _lb_state_key(playlist_mbid, profile_id=None):
     """Build profile-scoped key for listenbrainz_playlist_states"""
@@ -32183,15 +33112,26 @@ def mirror_playlist_endpoint():
 def get_mirrored_playlists_endpoint():
     """List all mirrored playlists for the active profile."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        # Single batched query instead of N per-playlist round-trips. Used to
+        # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
+        # playlists that's 1.5s of modal load time just for status counts.
+        batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
         for pl in playlists:
-            counts = database.get_mirrored_playlist_status_counts(pl['id'])
+            counts = batch_counts.get(pl['id'], {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0})
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
             pl['wishlisted_count'] = counts['wishlisted']
             pl['in_library_count'] = counts['in_library']
+            source_ref = describe_mirrored_source_ref(pl)
+            pl['source_ref'] = source_ref.source_ref
+            pl['source_ref_kind'] = source_ref.source_ref_kind
+            pl['source_ref_status'] = source_ref.source_ref_status
+            pl['source_ref_error'] = source_ref.source_ref_error
+            pl['pipeline_state'] = _snapshot_playlist_pipeline_state(pl['id'])
         return jsonify(playlists)
     except Exception as e:
         logger.error(f"Error getting mirrored playlists: {e}")
@@ -32201,14 +33141,298 @@ def get_mirrored_playlists_endpoint():
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
     try:
+        from core.playlists.source_refs import describe_mirrored_source_ref
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
+        source_ref = describe_mirrored_source_ref(playlist)
+        playlist['source_ref'] = source_ref.source_ref
+        playlist['source_ref_kind'] = source_ref.source_ref_kind
+        playlist['source_ref_status'] = source_ref.source_ref_status
+        playlist['source_ref_error'] = source_ref.source_ref_error
+        playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
         return jsonify(playlist)
     except Exception as e:
         logger.error(f"Error getting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/source-ref', methods=['PATCH'])
+def update_mirrored_playlist_source_ref_endpoint(playlist_id):
+    """Update the upstream source link/id for a mirrored playlist."""
+    try:
+        data = request.get_json() or {}
+        source_ref = data.get('source_ref') or data.get('source_playlist_id') or data.get('url')
+
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        try:
+            from core.playlists.source_refs import normalize_mirrored_source_ref
+            normalized = normalize_mirrored_source_ref(
+                playlist.get('source'),
+                source_ref,
+                playlist.get('description') or '',
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        existing = [
+            pl for pl in database.get_mirrored_playlists(profile_id=playlist.get('profile_id', 1))
+            if (
+                pl.get('source') == playlist.get('source')
+                and str(pl.get('source_playlist_id')) == str(normalized.source_playlist_id)
+                and int(pl.get('id')) != int(playlist_id)
+            )
+        ]
+        if existing:
+            return jsonify({
+                "error": f"That source is already mirrored as '{existing[0].get('name', 'another playlist')}'"
+            }), 409
+
+        ok = database.update_mirrored_playlist_source_ref(
+            playlist_id,
+            normalized.source_playlist_id,
+            normalized.description,
+        )
+        if not ok:
+            return jsonify({"error": "Failed to update source reference"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist source reference: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _playlist_pipeline_state_key(playlist_id):
+    return f"mirrored_{int(playlist_id)}"
+
+
+def _snapshot_playlist_pipeline_state(playlist_id):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        state = playlist_pipeline_progress_states.get(key)
+        return dict(state) if state else None
+
+
+def _replace_playlist_pipeline_state(playlist_id, state):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        playlist_pipeline_progress_states[key] = dict(state)
+        return dict(playlist_pipeline_progress_states[key])
+
+
+def _update_playlist_pipeline_progress(playlist_id, **kwargs):
+    key = _playlist_pipeline_state_key(playlist_id)
+    with playlist_pipeline_progress_lock:
+        state = playlist_pipeline_progress_states.setdefault(key, {
+            'run_id': key,
+            'playlist_id': int(playlist_id),
+            'status': 'running',
+            'progress': 0,
+            'phase': 'Starting pipeline...',
+            'log': [],
+            'started_at': time.time(),
+            'finished_at': None,
+            'result': None,
+            'error': None,
+        })
+        for field in ('status', 'progress', 'phase', 'result', 'error'):
+            if field in kwargs:
+                state[field] = kwargs[field]
+        if 'log_line' in kwargs and kwargs.get('log_line'):
+            state.setdefault('log', []).append({
+                'message': kwargs.get('log_line'),
+                'type': kwargs.get('log_type') or 'info',
+                'timestamp': time.time(),
+            })
+            state['log'] = state['log'][-80:]
+        if state.get('status') in ('finished', 'error', 'skipped') and not state.get('finished_at'):
+            state['finished_at'] = time.time()
+        return dict(state)
+
+
+class _PlaylistPipelineDepsProxy:
+    """Forward automation deps while routing progress into playlist UI state."""
+
+    def __init__(self, base_deps, playlist_id):
+        self._base_deps = base_deps
+        self._playlist_id = playlist_id
+
+    def __getattr__(self, name):
+        return getattr(self._base_deps, name)
+
+    def update_progress(self, _automation_id, **kwargs):
+        _update_playlist_pipeline_progress(self._playlist_id, **kwargs)
+
+
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False):
+    try:
+        if _automation_deps is None:
+            raise RuntimeError("Automation dependencies are not available")
+
+        from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
+        from core.automation.handlers.sync_playlist import auto_sync_playlist
+        from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
+        from core.playlists.pipeline import run_mirrored_playlist_pipeline
+
+        deps = _PlaylistPipelineDepsProxy(_automation_deps, playlist_id)
+        result = run_mirrored_playlist_pipeline(
+            {
+                'playlist_id': str(playlist_id),
+                'all': False,
+                'skip_wishlist': bool(skip_wishlist),
+                '_automation_id': _playlist_pipeline_state_key(playlist_id),
+            },
+            deps,
+            refresh_fn=auto_refresh_mirrored,
+            sync_one_fn=auto_sync_playlist,
+            sync_and_wishlist_fn=run_sync_and_wishlist,
+        )
+
+        status = result.get('status')
+        if status == 'completed':
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='finished',
+                progress=100,
+                phase='Pipeline complete',
+                result=result,
+            )
+        elif status == 'skipped':
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='skipped',
+                progress=100,
+                phase='Pipeline already running',
+                error=result.get('reason') or 'Pipeline already running',
+                result=result,
+                log_line=result.get('reason') or 'Pipeline already running',
+                log_type='warning',
+            )
+        else:
+            _update_playlist_pipeline_progress(
+                playlist_id,
+                status='error',
+                progress=100,
+                phase='Pipeline error',
+                error=result.get('error') or 'Pipeline failed',
+                result=result,
+            )
+    except Exception as e:
+        logger.error(f"Manual mirrored playlist pipeline failed for {playlist_id}: {e}")
+        _update_playlist_pipeline_progress(
+            playlist_id,
+            status='error',
+            progress=100,
+            phase='Pipeline error',
+            error=str(e),
+            log_line=f'Pipeline failed: {e}',
+            log_type='error',
+        )
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/run', methods=['POST'])
+def run_mirrored_playlist_pipeline_endpoint(playlist_id):
+    """Run the all-in-one mirrored playlist pipeline from the playlist UI."""
+    try:
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        if playlist.get('source') in ('file', 'beatport'):
+            return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
+        if _automation_deps is None:
+            return jsonify({"error": "Playlist pipeline is not available"}), 503
+        if _automation_deps.state.is_pipeline_running():
+            return jsonify({"error": "A playlist pipeline is already running"}), 409
+
+        data = request.get_json(silent=True) or {}
+        state = _replace_playlist_pipeline_state(playlist_id, {
+            'run_id': _playlist_pipeline_state_key(playlist_id),
+            'playlist_id': int(playlist_id),
+            'playlist_name': playlist.get('name') or '',
+            'status': 'running',
+            'progress': 0,
+            'phase': 'Starting pipeline...',
+            'log': [{
+                'message': f"Starting pipeline for {playlist.get('name') or playlist_id}",
+                'type': 'info',
+                'timestamp': time.time(),
+            }],
+            'started_at': time.time(),
+            'finished_at': None,
+            'result': None,
+            'error': None,
+        })
+
+        threading.Thread(
+            target=_run_mirrored_playlist_pipeline_for_ui,
+            args=(playlist_id, bool(data.get('skip_wishlist', False))),
+            daemon=True,
+            name=f"playlist-pipeline-{playlist_id}",
+        ).start()
+
+        return jsonify({"success": True, "state": state})
+    except Exception as e:
+        logger.error(f"Error starting mirrored playlist pipeline: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/status', methods=['GET'])
+def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
+    """Return the latest manual pipeline progress for a mirrored playlist."""
+    try:
+        state = _snapshot_playlist_pipeline_state(playlist_id)
+        if not state:
+            return jsonify({
+                "run_id": _playlist_pipeline_state_key(playlist_id),
+                "playlist_id": int(playlist_id),
+                "status": "idle",
+                "progress": 0,
+                "phase": "Idle",
+                "log": [],
+                "result": None,
+                "error": None,
+            })
+        return jsonify(state)
+    except Exception as e:
+        logger.error(f"Error getting mirrored playlist pipeline status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/playlist-pipeline/history', methods=['GET'])
+def get_playlist_pipeline_history_endpoint():
+    """Return persisted run history for mirrored playlist pipeline executions."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        limit = min(max(int(request.args.get('limit', 50)), 1), 100)
+        offset = max(int(request.args.get('offset', 0)), 0)
+        playlist_id_raw = request.args.get('playlist_id')
+        playlist_id = int(playlist_id_raw) if playlist_id_raw else None
+        data = database.get_playlist_pipeline_run_history(
+            profile_id=profile_id,
+            playlist_id=playlist_id,
+            limit=limit,
+            offset=offset,
+        )
+        for entry in data.get('history', []):
+            for key in ('before_json', 'after_json', 'result_json', 'log_lines'):
+                if entry.get(key):
+                    try:
+                        entry[key] = json.loads(entry[key])
+                    except (json.JSONDecodeError, TypeError):
+                        entry[key] = [] if key == 'log_lines' else {}
+                else:
+                    entry[key] = [] if key == 'log_lines' else {}
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting playlist pipeline history: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])
@@ -32467,15 +33691,20 @@ def prepare_mirrored_discovery(playlist_id):
         pre_discovered_count = 0
         has_pending = False
 
+        from core.discovery.manual_match import is_drifted_for_redo
+
         for idx, track in enumerate(tracks):
             extra = track.get('extra_data')
             if extra and extra.get('discovered'):
                 cached_provider = extra.get('provider', 'spotify')
 
-                # If the cached result was discovered by a different provider than the
-                # currently active one, treat it as pending so re-discovery uses the
-                # correct source (IDs, album data, images differ between providers).
-                if cached_provider != _current_provider:
+                # See core.discovery.manual_match.is_drifted_for_redo —
+                # provider-drift triggers re-discovery so the active source's
+                # IDs / artwork take effect, but manual matches are exempt:
+                # re-running would overwrite the user's deliberate pick with
+                # whatever auto-search ranks first. Pre-fix, every Playlist
+                # Pipeline run clobbered manual fixes for exactly this reason.
+                if is_drifted_for_redo(extra, _current_provider):
                     has_pending = True
                     dur = track.get('duration_ms', 0)
                     pre_discovered_results.append({
@@ -32557,11 +33786,14 @@ def prepare_mirrored_discovery(playlist_id):
                     'confidence': 0,
                 })
 
-        # Only treat as cached if at least one track was discovered by the current provider
+        # Treat as cached when at least one track has a non-drifted cached
+        # discovery — same predicate the per-track loop above uses (inverse
+        # polarity), so a future field change only has to land in
+        # core.discovery.manual_match.is_drifted_for_redo.
         has_cached = any(
             t.get('extra_data') and
             (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) and
-            t['extra_data'].get('provider', 'spotify') == _current_provider
+            not is_drifted_for_redo(t['extra_data'], _current_provider)
             for t in tracks
         )
 
@@ -35299,6 +36531,7 @@ def _emit_discovery_progress_loop():
         'beatport': lambda: beatport_chart_states,
         'listenbrainz': lambda: listenbrainz_playlist_states,
         'spotify_public': lambda: spotify_public_discovery_states,
+        'itunes_link': lambda: itunes_link_discovery_states,
     }
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)

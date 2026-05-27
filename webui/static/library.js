@@ -879,6 +879,15 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     const bulkBar = document.getElementById('enhanced-bulk-bar');
     if (bulkBar) bulkBar.classList.remove('visible');
 
+    // Restore persisted view preference. Non-admins can't see / toggle the
+    // Enhanced control so only honour the saved choice for admins; default
+    // is still Standard. Wrapped in try/catch because localStorage can be
+    // disabled in private-browsing modes.
+    let _preferEnhanced = false;
+    try {
+        _preferEnhanced = localStorage.getItem(_libraryViewModeKey()) === 'enhanced';
+    } catch (_) { /* localStorage unavailable */ }
+
     // Navigate to artist detail page
     navigateToPage('artist-detail', {
         artistId,
@@ -895,6 +904,13 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
 
     // Load artist data
     loadArtistDetailData(artistId, artistName);
+
+    // Apply persisted Enhanced view after the standard data load is kicked off.
+    // toggleEnhancedView() triggers its own loadEnhancedViewData() in parallel;
+    // the brief Standard render is hidden as soon as the toggle flips.
+    if (_preferEnhanced && isEnhancedAdmin()) {
+        toggleEnhancedView(true);
+    }
 }
 
 function _updateArtistDetailBackButtonLabel() {
@@ -2905,6 +2921,25 @@ function toggleEnhancedView(enabled) {
         const bulkBar = document.getElementById('enhanced-bulk-bar');
         if (bulkBar) bulkBar.classList.remove('visible');
     }
+
+    // Persist the choice so the next artist click (and the next page reload)
+    // honours it instead of always reverting to Standard.
+    try {
+        localStorage.setItem(_libraryViewModeKey(), enabled ? 'enhanced' : 'standard');
+    } catch (_) { /* localStorage unavailable */ }
+}
+
+// localStorage key for the Enhanced/Standard toggle, scoped to the active
+// profile so different admin profiles can keep different defaults. Falls
+// back to an unsuffixed key when no profile is loaded (matches the original
+// behaviour for any pre-multi-profile saved value).
+function _libraryViewModeKey() {
+    const pid = (typeof currentProfile === 'object' && currentProfile && currentProfile.id != null)
+        ? currentProfile.id
+        : null;
+    return pid != null
+        ? `soulsync-library-view-mode:${pid}`
+        : 'soulsync-library-view-mode';
 }
 
 async function loadEnhancedViewData(artistId) {
@@ -5297,6 +5332,99 @@ function _pollRedownloadProgress(taskId, overlay) {
             if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
         }
     }, 300000);
+}
+
+async function redownloadLibraryAlbum(album, artistName, btn) {
+    const albumName = album.title || '';
+    const spotifyAlbumId = album.spotify_album_id || '';
+
+    if (!spotifyAlbumId && !albumName) {
+        showToast('No album ID or name available for redownload', 'warning');
+        return;
+    }
+
+    const origText = btn ? btn.innerHTML : '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let response;
+        if (spotifyAlbumId) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
+        }
+
+        if (!response || !response.ok) {
+            const query = `${artistName || ''} ${albumName}`.trim();
+            const searchResp = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (!searchResp.ok) throw new Error('Album search failed');
+            const searchData = await searchResp.json();
+            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
+            if (!found || !found.id) {
+                showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                return;
+            }
+            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
+        }
+
+        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+
+        const albumData = await response.json();
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks found for "${albumName}"`, 'warning');
+            return;
+        }
+
+        const resolvedId = albumData.id || spotifyAlbumId || album.id;
+        const virtualPlaylistId = `library_redownload_${resolvedId}`;
+        const playlistName = `[${artistName || 'Unknown'}] ${albumData.name}`;
+
+        const enrichedTracks = albumData.tracks.map(track => ({
+            ...track,
+            album: {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks
+            }
+        }));
+
+        const enhancedArtist = artistDetailPageState.enhancedData?.artist;
+        const artistObject = {
+            id: artistDetailPageState.currentArtistId || `library_${artistName || album.id}`,
+            name: artistName || '',
+            image_url: enhancedArtist?.thumb_url || ''
+        };
+        const fullAlbumObject = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            image_url: albumData.images?.[0]?.url || null,
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumData.artists || [{ name: artistName || '' }]
+        };
+
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
+        );
+
+        const albumType = fullAlbumObject.album_type || 'album';
+        registerArtistDownload(artistObject, fullAlbumObject, virtualPlaylistId, albumType);
+
+    } catch (error) {
+        console.error('Redownload album error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+    }
 }
 
 async function deleteLibraryAlbum(albumId) {

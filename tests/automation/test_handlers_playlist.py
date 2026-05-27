@@ -26,9 +26,11 @@ import pytest
 
 from core.automation.deps import AutomationDeps, AutomationState
 from core.automation.handlers.discover_playlist import auto_discover_playlist
+from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
+from core.playlists.sources.bootstrap import build_playlist_source_registry
 
 
 # ─── shared scaffolding ──────────────────────────────────────────────
@@ -73,6 +75,22 @@ class _StubDB:
 
 
 def _build_deps(**overrides) -> AutomationDeps:
+    # Build a default registry from whatever clients the test passed.
+    # The refresh_mirrored handler reads from deps.playlist_source_registry
+    # exclusively, so the registry must mirror the passed clients to
+    # preserve the pre-refactor test behavior.
+    _spotify = overrides.get('spotify_client')
+    _tidal = overrides.get('tidal_client')
+    _get_deezer = overrides.get('get_deezer_client', lambda: None)
+    _parse_youtube = overrides.get('parse_youtube_playlist', lambda url: None)
+    _registry = build_playlist_source_registry(
+        spotify_client_getter=lambda: _spotify,
+        tidal_client_getter=lambda: _tidal,
+        qobuz_client_getter=lambda: None,
+        deezer_client_getter=_get_deezer,
+        youtube_parser=_parse_youtube,
+    )
+
     defaults = dict(
         engine=object(),
         state=AutomationState(),
@@ -93,6 +111,7 @@ def _build_deps(**overrides) -> AutomationDeps:
         load_sync_status_file=lambda: {},
         get_deezer_client=lambda: None,
         parse_youtube_playlist=lambda url: None,
+        playlist_source_registry=_registry,
         get_sync_states=lambda: {},
         set_db_update_automation_id=lambda v: None,
         get_db_update_state=lambda: {},
@@ -189,6 +208,17 @@ class _StubSpotifyTrack:
 @dataclass
 class _StubSpotifyPlaylist:
     tracks: list
+    # Adapter-side projection reads metadata fields off the playlist
+    # object (the real ``core.spotify_client.Playlist`` dataclass).
+    # Provide minimal defaults so the stub stays a one-liner at call
+    # sites that only care about tracks.
+    id: str = 'spot-id'
+    name: str = 'My Spot'
+    description: Optional[str] = ''
+    owner: str = 'me'
+    public: bool = True
+    collaborative: bool = False
+    total_tracks: int = 0
 
 
 class _StubSpotifyClient:
@@ -265,6 +295,285 @@ class TestRefreshMirrored:
         assert result['status'] == 'completed'
         assert result['errors'] == '1'
         assert result['refreshed'] == '0'
+
+    def test_spotify_public_missing_source_url_is_reported_as_error(self):
+        db = _StubDB(playlists=[
+            {'id': 1, 'name': 'No URL', 'source': 'spotify_public', 'source_playlist_id': 'hash'},
+        ])
+        progress = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '1'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '0'
+        assert result['errors'] == '1'
+        assert db.mirror_calls == []
+        assert any(p.get('log_type') == 'error' and 'missing its original source URL' in p.get('log_line', '') for p in progress)
+
+    def test_tidal_not_authenticated_emits_skip_not_error(self):
+        """Soft-skip preserves the legacy log_type='skip' contract — the
+        run still counts as completed with 0 errors so the automation
+        doesn't surface a Tidal-down condition as a refresh failure."""
+        class _UnauthedTidal:
+            def is_authenticated(self):
+                return False
+
+        db = _StubDB(playlists=[
+            {'id': 7, 'name': 'My Tidal', 'source': 'tidal',
+             'source_playlist_id': 'tid-id', 'profile_id': 1},
+        ])
+        progress = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            tidal_client=_UnauthedTidal(),
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '7'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '0'
+        assert result['errors'] == '0'  # skip, not error
+        assert db.mirror_calls == []
+        assert any(
+            p.get('log_type') == 'skip' and 'Tidal not authenticated' in p.get('log_line', '')
+            for p in progress
+        )
+
+    def test_deezer_refresh_writes_plain_tracks_no_matched_data(self):
+        class _StubDeezer:
+            def is_authenticated(self):
+                return True
+
+            def get_user_playlists(self):
+                return []
+
+            def get_playlist(self, playlist_id):
+                return {
+                    'id': playlist_id,
+                    'name': 'Deez',
+                    'description': '',
+                    'track_count': 1,
+                    'image_url': '',
+                    'owner': '',
+                    'tracks': [{
+                        'id': 'dz1',
+                        'name': 'Track',
+                        'artists': ['Deez Artist'],
+                        'album': 'Deez Album',
+                        'duration_ms': 200_000,
+                    }],
+                }
+
+        db = _StubDB(playlists=[
+            {'id': 9, 'name': 'Deez Mix', 'source': 'deezer',
+             'source_playlist_id': 'dz-id', 'profile_id': 1},
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            get_deezer_client=lambda: _StubDeezer(),
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '9'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '1'
+        assert len(db.mirror_calls) == 1
+        call = db.mirror_calls[0]
+        assert call['source'] == 'deezer'
+        assert len(call['tracks']) == 1
+        # Deezer tracks don't carry discovery state — no extra_data.
+        assert 'extra_data' not in call['tracks'][0]
+        assert call['tracks'][0]['source_track_id'] == 'dz1'
+
+    def test_youtube_refresh_reads_url_from_description(self):
+        """URL-backed sources store the hash in source_playlist_id and
+        the canonical URL in description. The handler has to pull the
+        URL out before passing to the adapter."""
+        parsed_calls = []
+
+        def _fake_parser(url):
+            parsed_calls.append(url)
+            return {
+                'id': 'yt_pl',
+                'name': 'YT Mix',
+                'url': url,
+                'track_count': 1,
+                'tracks': [{
+                    'id': 'vid1',
+                    'name': 'Track',
+                    'artists': ['Channel'],
+                    'duration_ms': 240_000,
+                }],
+            }
+
+        db = _StubDB(playlists=[
+            {
+                'id': 11,
+                'name': 'YT Mix',
+                'source': 'youtube',
+                'source_playlist_id': 'hashhash',
+                'description': 'https://youtube.com/playlist?list=yt_pl',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            parse_youtube_playlist=_fake_parser,
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '11'}, deps)
+
+        assert result['refreshed'] == '1'
+        # Parser was called with the URL from description, not the hash.
+        assert parsed_calls == ['https://youtube.com/playlist?list=yt_pl']
+        assert db.mirror_calls[0]['tracks'][0]['source_track_id'] == 'vid1'
+
+    def test_listenbrainz_refresh_runs_discovery_and_writes_matched_data(self):
+        """End-to-end: LB cached playlist → adapter projects to
+        NormalizedTrack with needs_discovery=True → refresh_mirrored
+        calls source.discover_tracks → matched_data lands in
+        extra_data on the mirror DB row."""
+        from core.playlists.sources.bootstrap import build_playlist_source_registry
+        from core.playlists.sources.listenbrainz import ListenBrainzPlaylistSource
+
+        class _StubLBManager:
+            def get_cached_playlists(self, playlist_type):
+                if playlist_type == 'created_for_user':
+                    return [{
+                        'playlist_mbid': 'lb-1',
+                        'title': 'LB Weekly',
+                        'creator': 'ListenBrainz',
+                        'track_count': 1,
+                        'annotation': {},
+                        'last_updated': '2026-05-26',
+                    }]
+                return []
+
+            def get_playlist_type(self, mbid):
+                return 'created_for_user' if mbid == 'lb-1' else ''
+
+            def get_cached_tracks(self, mbid):
+                if mbid == 'lb-1':
+                    return [{
+                        'track_name': 'MB Song',
+                        'artist_name': 'MB Artist',
+                        'album_name': 'MB Album',
+                        'duration_ms': 240_000,
+                        'recording_mbid': 'rec-1',
+                        'release_mbid': 'rel-1',
+                        'album_cover_url': '',
+                        'additional_metadata': {},
+                    }]
+                return []
+
+            def update_all_playlists(self):
+                pass
+
+        discovery_calls = []
+
+        def fake_discover(track_dicts):
+            discovery_calls.append(list(track_dicts))
+            return [{
+                'id': 'sp-matched',
+                'name': 'Matched',
+                'artists': ['Spotify Artist'],
+                'album': {'name': 'Spotify Album'},
+                'duration_ms': 240_000,
+                'image_url': 'art',
+                'source': 'spotify',
+                '_provider': 'spotify',
+                '_confidence': 0.93,
+            }]
+
+        # Build a registry with the LB adapter pre-wired with discovery.
+        # The default _build_deps registry won't have discovery wired,
+        # so we override it for this test.
+        registry = build_playlist_source_registry(
+            spotify_client_getter=lambda: None,
+            tidal_client_getter=lambda: None,
+            qobuz_client_getter=lambda: None,
+            deezer_client_getter=lambda: None,
+            listenbrainz_manager_getter=lambda: _StubLBManager(),
+            discover_callable=fake_discover,
+        )
+
+        db = _StubDB(playlists=[
+            {
+                'id': 33,
+                'name': 'LB Weekly',
+                'source': 'listenbrainz',
+                'source_playlist_id': 'lb-1',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(get_database=lambda: db)
+        # Replace the default registry with the one wired up above.
+        # AutomationDeps is a frozen dataclass-like — re-assign via
+        # object.__setattr__ since it's a plain dataclass.
+        object.__setattr__(deps, 'playlist_source_registry', registry)
+
+        result = auto_refresh_mirrored({'playlist_id': '33'}, deps)
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '1'
+        # discover_tracks ran once, with the single MB track.
+        assert len(discovery_calls) == 1
+        assert discovery_calls[0][0]['track_name'] == 'MB Song'
+        assert discovery_calls[0][0]['artist_name'] == 'MB Artist'
+
+        # Mirror DB row carries the matched_data extra_data.
+        call = db.mirror_calls[0]
+        assert call['source'] == 'listenbrainz'
+        assert len(call['tracks']) == 1
+        track = call['tracks'][0]
+        assert track['source_track_id'] == 'sp-matched'
+        extra = json.loads(track['extra_data'])
+        assert extra['discovered'] is True
+        assert extra['provider'] == 'spotify'
+        assert extra['matched_data']['id'] == 'sp-matched'
+
+    def test_spotify_public_uses_authed_spotify_when_signed_in(self):
+        """The handler-level fallback chain: when Spotify is authed
+        AND the public URL is a playlist URL, prefer the authed API so
+        the mirror gets album-art-bearing matched_data instead of the
+        bare scraper output."""
+        track = _StubSpotifyTrack(
+            id='auth-trk', name='From Auth', artists=['Artist'],
+            album='Album', duration_ms=200_000, image_url='img',
+        )
+        spotify = _StubSpotifyClient(_StubSpotifyPlaylist(
+            tracks=[track], id='auth-pid', name='Auth',
+        ))
+
+        db = _StubDB(playlists=[
+            {
+                'id': 22,
+                'name': 'Pub',
+                'source': 'spotify_public',
+                'source_playlist_id': 'hash',
+                'description': 'https://open.spotify.com/playlist/abc123def456',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(
+            get_database=lambda: db,
+            spotify_client=spotify,
+        )
+
+        result = auto_refresh_mirrored({'playlist_id': '22'}, deps)
+
+        assert result['refreshed'] == '1'
+        call = db.mirror_calls[0]
+        # Track came from the authed Spotify path → carries matched_data.
+        extra = json.loads(call['tracks'][0]['extra_data'])
+        assert extra['discovered'] is True
+        assert extra['provider'] == 'spotify'
+        assert extra['matched_data']['id'] == 'auth-trk'
 
 
 # ─── sync_playlist ───────────────────────────────────────────────────
@@ -368,6 +677,19 @@ class TestSyncPlaylist:
 
 
 class TestPlaylistPipeline:
+    def test_pipeline_skips_when_shared_lock_is_already_running(self):
+        deps = _build_deps()
+        deps.state.set_pipeline_running(True)
+
+        result = auto_playlist_pipeline({'all': True}, deps)
+
+        assert result == {
+            'status': 'skipped',
+            'reason': 'playlist_pipeline is already running',
+            '_manages_own_progress': True,
+        }
+        assert deps.state.pipeline_running is True
+
     def test_no_playlist_specified_returns_error(self):
         deps = _build_deps()
         result = auto_playlist_pipeline({}, deps)
@@ -398,3 +720,26 @@ class TestPlaylistPipeline:
         assert result['status'] == 'error'
         assert result['_manages_own_progress'] is True
         assert deps.state.pipeline_running is False
+
+    def test_shared_sync_tail_counts_background_sync_errors(self):
+        progress = []
+        sync_states = {
+            'auto_mirror_1': {'status': 'error', 'error': 'media server unavailable'},
+        }
+        deps = _build_deps(
+            get_sync_states=lambda: sync_states,
+            update_progress=lambda *a, **k: progress.append(k),
+        )
+
+        result = run_sync_and_wishlist(
+            deps,
+            'auto-1',
+            [{'id': 1, 'name': 'Broken'}],
+            sync_one_fn=lambda _pl: {'status': 'started'},
+            sync_id_for_fn=lambda _pl: 'auto_mirror_1',
+            skip_wishlist=True,
+        )
+
+        assert result['errors'] == 1
+        assert result['synced'] == 0
+        assert any(p.get('log_type') == 'error' and 'media server unavailable' in p.get('log_line', '') for p in progress)

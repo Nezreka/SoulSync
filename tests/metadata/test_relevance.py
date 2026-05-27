@@ -50,6 +50,7 @@ def _track(
     album: str = 'Unknown',
     album_type: str = 'album',
     track_id: str = 't',
+    duration_ms: int = 200000,
 ) -> Track:
     """Tiny Track factory — keeps test bodies focused on the
     fields under test."""
@@ -58,7 +59,7 @@ def _track(
         name=name,
         artists=[artist],
         album=album,
-        duration_ms=200000,
+        duration_ms=duration_ms,
         album_type=album_type,
     )
 
@@ -365,6 +366,56 @@ class TestRerankTracks:
         b = _track('Track', artist='Artist', track_id='second')
         ranked = rerank_tracks([a, b], expected_title='Track', expected_artist='Artist')
         assert [t.id for t in ranked] == ['first', 'second']
+
+    def test_prefer_known_duration_promotes_length_known_on_ties(self):
+        """MB has multiple recordings per song where some lack length
+        data. With ``prefer_known_duration=True`` and equal relevance
+        scores, the recording with non-zero duration_ms must surface
+        ahead of the length-less sibling."""
+        no_length = _track('Track', artist='Artist', track_id='no-len', duration_ms=0)
+        with_length = _track('Track', artist='Artist', track_id='with-len', duration_ms=184000)
+        ranked = rerank_tracks(
+            [no_length, with_length],
+            expected_title='Track',
+            expected_artist='Artist',
+            prefer_known_duration=True,
+        )
+        assert [t.id for t in ranked] == ['with-len', 'no-len']
+
+    def test_prefer_known_duration_does_not_override_relevance(self):
+        """Length-preference is a TIEBREAKER, not a global resort. A
+        length-less track that scores higher on relevance must still
+        win — only equal-score pairs use length as the deciding bit."""
+        # Wrong-artist length-known: scored low. Right-artist length-less:
+        # scored high.
+        length_known_cover = _track(
+            'Track', artist='Karaoke Channel', album='Karaoke Hits',
+            album_type='compilation', track_id='cover', duration_ms=184000,
+        )
+        length_less_real = _track(
+            'Track', artist='Real Artist', track_id='real', duration_ms=0,
+        )
+        ranked = rerank_tracks(
+            [length_known_cover, length_less_real],
+            expected_title='Track',
+            expected_artist='Real Artist',
+            prefer_known_duration=True,
+        )
+        assert ranked[0].id == 'real', "relevance must beat length-pref"
+
+    def test_prefer_known_duration_default_off(self):
+        """Default behaviour unchanged — length-preference is opt-in
+        for MB callers; Spotify / iTunes / Deezer don't need it
+        because their search results always include length."""
+        no_length = _track('Track', artist='Artist', track_id='no-len', duration_ms=0)
+        with_length = _track('Track', artist='Artist', track_id='with-len', duration_ms=184000)
+        ranked = rerank_tracks(
+            [no_length, with_length],
+            expected_title='Track',
+            expected_artist='Artist',
+        )
+        # Default: stable input order, no length-pref re-shuffle.
+        assert [t.id for t in ranked] == ['no-len', 'with-len']
 
 
 # ---------------------------------------------------------------------------

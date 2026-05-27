@@ -15,8 +15,32 @@ _TRACK_PATTERNS = (
 
 
 def extract_track_number_from_filename(filename: str, title: str = None) -> int:
-    """Extract track number from a filename. Returns 1 if not found."""
-    basename = os.path.splitext(os.path.basename(filename))[0].strip()
+    """Extract track number from a filename. Returns 1 if not found.
+
+    Use ``extract_explicit_track_number`` instead when the caller needs
+    to distinguish "track 1" from "unknown" — staging-file readers in
+    particular MUST NOT conflate a bare title (no numeric prefix) with
+    track 1, or every untagged album-bundle file gets imported as
+    ``track_number=1`` and downstream callers can't recover the real
+    number from authoritative metadata (Spotify track list, etc.).
+    """
+    num = extract_explicit_track_number(filename)
+    return num if num > 0 else 1
+
+
+def extract_explicit_track_number(filename: str) -> int:
+    """Extract a track number only when the filename visibly carries one.
+
+    Returns the parsed track number when the basename starts with a
+    recognizable numeric prefix (``"01 - Title"``, ``"1-03 Title"``,
+    ``"(01) Title"``, ``"[01] Title"``); returns ``0`` when no such
+    prefix is present. This is the contract staging readers want —
+    "unknown" must stay unknown so a downstream consumer with better
+    info (Spotify metadata, MusicBrainz, etc.) can fill it in.
+    """
+    basename = os.path.splitext(os.path.basename(str(filename or "")))[0].strip()
+    if not basename:
+        return 0
 
     match = re.match(r"^\d[\-\.](\d{1,2})\s*[\-\.]\s*", basename)
     if match:
@@ -30,7 +54,7 @@ def extract_track_number_from_filename(filename: str, title: str = None) -> int:
         if 1 <= num <= 999:
             return num
 
-    return 1
+    return 0
 
 
 def parse_filename_metadata(filename: str) -> Dict[str, Any]:

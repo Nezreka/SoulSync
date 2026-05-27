@@ -166,6 +166,12 @@ class ListenBrainzManager:
             # Skip if track count hasn't changed (playlist content likely the same)
             if db_track_count == track_count:
                 logger.debug(f"Playlist '{title}' unchanged, skipping")
+                # Even on the skip path, make sure the rolling-series
+                # mirror placeholder exists — otherwise users whose LB
+                # cache never has "changed" updates would never see the
+                # rolling Auto-Sync entries appear.
+                self._ensure_rolling_series_mirror(cursor, title)
+                conn.commit()
                 conn.close()
                 return "skipped"
 
@@ -209,10 +215,81 @@ class ListenBrainzManager:
         if tracks:
             self._cache_tracks(playlist_id, playlist_mbid, tracks, cursor)
 
+        # Ensure a rolling-series mirror row exists for known LB series
+        # (Weekly Jams / Weekly Exploration / Top Discoveries / Top
+        # Missed Recordings). The Auto-Sync sidebar then surfaces the
+        # rolling entry as schedulable even before the user has
+        # explicitly discovered any per-period card — first scheduled
+        # refresh fills tracks via the LB adapter's synthetic-id
+        # resolution.
+        self._ensure_rolling_series_mirror(cursor, title)
+
         conn.commit()
         conn.close()
 
         return result_type
+
+    def _ensure_rolling_mirrors_from_cache(self, cursor):
+        """Walk every cached LB playlist row + ensure its rolling
+        series mirror exists. Catch-all that runs regardless of which
+        ``_update_playlist`` paths fired (skipped vs updated vs new).
+
+        Cheap — one SELECT + per-row helper call, helper is
+        idempotent INSERT OR IGNORE."""
+        try:
+            cursor.execute(
+                """
+                SELECT DISTINCT title FROM listenbrainz_playlists
+                WHERE profile_id = ?
+                """,
+                (self.profile_id,),
+            )
+            titles = [row[0] for row in cursor.fetchall() if row[0]]
+            for title in titles:
+                self._ensure_rolling_series_mirror(cursor, title)
+        except Exception as exc:
+            logger.debug(f"Bulk rolling-mirror ensure skipped: {exc}")
+
+    def _ensure_rolling_series_mirror(self, cursor, playlist_title: str):
+        """Upsert a placeholder ``mirrored_playlists`` row for the
+        rolling series this title belongs to.
+
+        Idempotent — uses ``INSERT OR IGNORE``, so existing rolling
+        mirrors (which may already have discovered tracks) are not
+        touched. No-op for non-series titles (Last.fm radios,
+        user-created playlists, collaborative playlists)."""
+        try:
+            # Defer import to avoid a top-level dependency loop — the
+            # series detector lives in core.playlists which itself
+            # transitively imports manager-flavor helpers.
+            from core.playlists.lb_series import detect_series
+            match = detect_series(playlist_title or "")
+            if match is None:
+                return
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO mirrored_playlists
+                    (source, source_playlist_id, name, description, owner, image_url, track_count, profile_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    match.source_for_mirror,
+                    match.series_id,
+                    match.canonical_name,
+                    "Rolling ListenBrainz series — refresh resolves to the latest period automatically.",
+                    "ListenBrainz",
+                    "",
+                    0,
+                    self.profile_id,
+                ),
+            )
+            if cursor.rowcount:
+                logger.info(
+                    f"Pre-created rolling mirror placeholder '{match.canonical_name}' "
+                    f"(series id: {match.series_id})"
+                )
+        except Exception as exc:
+            logger.debug(f"Rolling-series mirror ensure skipped: {exc}")
 
     def _cache_tracks(self, playlist_id: int, playlist_mbid: str, tracks: List[Dict], cursor):
         """
@@ -326,31 +403,131 @@ class ListenBrainzManager:
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
         logger.info(f"Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
+    def _cleanup_per_period_series_mirrors(self, cursor):
+        """Delete mirrored_playlists rows that belong to a rotating LB
+        series but were created under the per-period MBID instead of
+        the new synthetic series id.
+
+        Background: pre-Phase-1c.2.1 the auto-mirror hook keyed mirrors
+        by the per-week (or per-year) MBID, so users accumulated one
+        mirror per period. The new flow collapses them into a single
+        rolling mirror per series. This sweeper removes the legacy
+        per-period rows so the Mirrored / Auto-Sync UIs only show the
+        consolidated rolling mirror. Idempotent — only matches titles
+        that were once per-period."""
+        # Each pattern's WHERE clause matches per-period titles
+        # ("Weekly Jams for X, week of YYYY-MM-DD ...") but NOT the
+        # canonical rolling-mirror titles ("ListenBrainz Weekly Jams").
+        per_period_title_patterns = [
+            ('listenbrainz', 'Weekly Jams for %, week of %'),
+            ('listenbrainz', 'Weekly Exploration for %, week of %'),
+            ('listenbrainz', 'Top Discoveries of % for %'),
+            ('listenbrainz', 'Top Missed Recordings of % for %'),
+        ]
+        try:
+            total = 0
+            for source, like in per_period_title_patterns:
+                cursor.execute(
+                    """
+                    SELECT id FROM mirrored_playlists
+                    WHERE source = ? AND name LIKE ?
+                    """,
+                    (source, like),
+                )
+                mirror_ids = [row[0] for row in cursor.fetchall()]
+                if not mirror_ids:
+                    continue
+                ph = ','.join('?' * len(mirror_ids))
+                cursor.execute(
+                    f"DELETE FROM mirrored_playlist_tracks WHERE playlist_id IN ({ph})",
+                    mirror_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM mirrored_playlists WHERE id IN ({ph})",
+                    mirror_ids,
+                )
+                total += len(mirror_ids)
+            if total:
+                logger.info(
+                    f"Removed {total} legacy per-period LB series mirrors "
+                    "(consolidated into rolling series mirrors)"
+                )
+        except Exception as exc:
+            logger.debug(f"Per-period series mirror cleanup skipped: {exc}")
+
+    def _retag_misrouted_lastfm_radio_mirrors(self, cursor):
+        """Re-tag mirrored_playlists rows that should be 'lastfm' but
+        were inserted as 'listenbrainz'.
+
+        Backfill for the Phase 1c.1 bug where the auto-mirror helper
+        hardcoded ``source='listenbrainz'`` regardless of playlist
+        origin. Last.fm Radio playlists carry a consistent
+        "Last.fm Radio: <seed>" title prefix from
+        ``save_lastfm_radio_playlist``, so any mirror row matching
+        that prefix should sit under the Last.fm group instead of
+        the ListenBrainz one. Idempotent — only updates rows that
+        are still misrouted."""
+        try:
+            cursor.execute(
+                """
+                UPDATE mirrored_playlists
+                SET source = 'lastfm'
+                WHERE source = 'listenbrainz'
+                  AND name LIKE 'Last.fm Radio:%'
+                """
+            )
+            if cursor.rowcount:
+                logger.info(
+                    f"Re-tagged {cursor.rowcount} Last.fm Radio mirror rows "
+                    "from source='listenbrainz' to source='lastfm'"
+                )
+        except Exception as exc:
+            logger.debug(f"Last.fm radio mirror retag skipped: {exc}")
+
     def _cleanup_old_playlists(self):
         """Remove old playlists, keeping only the 25 most recent per type"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
-        # For each playlist type, keep only the N most recent
-        # lastfm_radio keeps fewer since they're auto-regenerated weekly
+        # One-shot backfill for legacy misrouting (see method docstring).
+        self._retag_misrouted_lastfm_radio_mirrors(cursor)
+        # Consolidate legacy per-week / per-year LB series mirrors into
+        # the new rolling series mirrors (Phase 1c.2.1).
+        self._cleanup_per_period_series_mirrors(cursor)
+        # Safety net: ensure rolling mirror placeholders exist for every
+        # series with at least one cached LB playlist row. Catches the
+        # case where every ``_update_playlist`` call took the "skipped"
+        # short-circuit (unchanged track count) and so the ensure-hook
+        # in the per-playlist path never fired on first run after the
+        # rolling feature shipped.
+        self._ensure_rolling_mirrors_from_cache(cursor)
+
+        # For each playlist type, keep only the N most recent.
+        # Last.fm radios are per-seed-track snapshots that don't update
+        # on the Last.fm side — capping the cache (and via the cascade
+        # below, the matching mirror rows) keeps the Mirrored tab from
+        # accumulating one row per random seed track the user ever
+        # picked. 10 is the user-facing limit.
         playlist_type_limits = {
             'created_for': 25,
             'user': 25,
             'collaborative': 25,
-            'lastfm_radio': 5,
+            'lastfm_radio': 10,
         }
 
         for playlist_type, keep_count in playlist_type_limits.items():
             try:
                 # Get IDs of playlists to delete (all except keep_count most recent)
                 cursor.execute("""
-                    SELECT id FROM listenbrainz_playlists
+                    SELECT id, playlist_mbid FROM listenbrainz_playlists
                     WHERE playlist_type = ? AND profile_id = ?
                     ORDER BY last_updated DESC
                     LIMIT -1 OFFSET ?
                 """, (playlist_type, self.profile_id, keep_count))
 
-                old_playlist_ids = [row[0] for row in cursor.fetchall()]
+                stale_rows = cursor.fetchall()
+                old_playlist_ids = [row[0] for row in stale_rows]
+                old_mbids = [row[1] for row in stale_rows if row[1]]
 
                 if old_playlist_ids:
                     # Delete tracks for old playlists
@@ -362,11 +539,65 @@ class ListenBrainzManager:
 
                     logger.info(f"Removed {len(old_playlist_ids)} old {playlist_type} playlists")
 
+                # Cascade delete: matching mirrored_playlists rows go too.
+                # LB Weekly Jams / Weekly Exploration get new MBIDs every
+                # week — without this, the user accumulates dead mirror
+                # rows that point at LB playlists the cache already pruned.
+                # Downloaded tracks stay in the library; only the mirror
+                # row + its track refs are removed.
+                if old_mbids:
+                    mirror_source = (
+                        'lastfm' if playlist_type == 'lastfm_radio' else 'listenbrainz'
+                    )
+                    self._cascade_delete_mirrored_for_mbids(cursor, old_mbids, mirror_source)
+
             except Exception as e:
                 logger.error(f"Error cleaning up {playlist_type} playlists: {e}")
 
         conn.commit()
         conn.close()
+
+    def _cascade_delete_mirrored_for_mbids(self, cursor, mbids, source):
+        """Delete mirrored_playlists rows whose source_playlist_id matches
+        any of ``mbids`` for this profile + source.
+
+        Runs on the same cursor as the caller so the cleanup lands in
+        the same transaction. Silent on failure (cleanup is best-effort
+        — losing the cache-prune-mirror link in rare edge cases is
+        preferable to crashing the LB update loop)."""
+        if not mbids:
+            return
+        try:
+            placeholders = ','.join('?' * len(mbids))
+            # Find matching mirror IDs first so we can delete tracks +
+            # row in two well-defined steps. ``mirrored_playlist_tracks``
+            # has no ON DELETE CASCADE constraint enforced unless PRAGMA
+            # foreign_keys is on, so do it explicitly.
+            cursor.execute(
+                f"""
+                SELECT id FROM mirrored_playlists
+                WHERE source = ? AND profile_id = ?
+                  AND source_playlist_id IN ({placeholders})
+                """,
+                (source, self.profile_id, *mbids),
+            )
+            mirror_ids = [row[0] for row in cursor.fetchall()]
+            if not mirror_ids:
+                return
+            mid_ph = ','.join('?' * len(mirror_ids))
+            cursor.execute(
+                f"DELETE FROM mirrored_playlist_tracks WHERE playlist_id IN ({mid_ph})",
+                mirror_ids,
+            )
+            cursor.execute(
+                f"DELETE FROM mirrored_playlists WHERE id IN ({mid_ph})",
+                mirror_ids,
+            )
+            logger.info(
+                f"Cascade-removed {len(mirror_ids)} stale {source} mirrored playlists"
+            )
+        except Exception as exc:
+            logger.warning(f"Cascade delete of mirrored {source} rows failed: {exc}")
 
     def save_lastfm_radio_playlist(self, seed_track: str, seed_artist: str, similar_tracks: List[Dict]) -> str:
         """
@@ -500,6 +731,21 @@ class ListenBrainzManager:
         """Delete a cached playlist and its tracks (CASCADE handles tracks via FK)"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
+
+        # Figure out the source flavor before deleting the row — the
+        # cascade below needs to know whether the matching mirror is
+        # ``source='listenbrainz'`` or ``source='lastfm'``.
+        playlist_type = ''
+        try:
+            cursor.execute(
+                "SELECT playlist_type FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
+                (playlist_mbid, self.profile_id),
+            )
+            row = cursor.fetchone()
+            playlist_type = row[0] if row else ''
+        except Exception:  # noqa: S110 — best-effort lookup, delete proceeds either way
+            pass
+
         # Delete tracks first (SQLite FK CASCADE requires PRAGMA foreign_keys=ON)
         cursor.execute("""
             DELETE FROM listenbrainz_tracks WHERE playlist_id IN (
@@ -510,6 +756,12 @@ class ListenBrainzManager:
             "DELETE FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
             (playlist_mbid, self.profile_id)
         )
+
+        # Cascade the delete into mirrored_playlists so the user's
+        # Mirrored tab doesn't accumulate dead LB rows.
+        mirror_source = 'lastfm' if playlist_type == 'lastfm_radio' else 'listenbrainz'
+        self._cascade_delete_mirrored_for_mbids(cursor, [playlist_mbid], mirror_source)
+
         conn.commit()
         conn.close()
 

@@ -56,6 +56,14 @@ class AutomationState:
         with self.lock:
             return self.pipeline_running
 
+    def try_start_pipeline(self) -> bool:
+        """Atomically mark the shared playlist pipeline as running."""
+        with self.lock:
+            if self.pipeline_running:
+                return False
+            self.pipeline_running = True
+            return True
+
     def set_scan_library_id(self, automation_id: Optional[str]) -> None:
         with self.lock:
             self.scan_library_automation_id = automation_id
@@ -144,3 +152,10 @@ class AutomationDeps:
     # PersonalizedPlaylistManager per run (cheap accessors inside,
     # no caching needed yet).
     build_personalized_manager: Callable[[], Any]
+
+    # --- Unified PlaylistSource registry ---
+    # Optional so test fixtures that don't exercise refresh_mirrored
+    # can keep their existing scaffolding. Production wiring in
+    # ``web_server.py`` always populates it via
+    # ``core.playlists.sources.bootstrap.build_playlist_source_registry``.
+    playlist_source_registry: Optional[Any] = None
