@@ -2923,6 +2923,7 @@
    ====================================== */
 
 @media (max-width: 768px) {
+    .library-artist-radio-btn,
     .library-artist-watchlist-btn,
     .library-artist-enhance-btn {
         padding: 8px 14px;
@@ -2930,6 +2931,7 @@
         gap: 6px;
     }
 
+    .library-artist-radio-btn .radio-icon,
     .library-artist-watchlist-btn .watchlist-icon,
     .library-artist-enhance-btn .enhance-icon {
         font-size: 12px;
