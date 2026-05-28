@@ -45,19 +45,26 @@ class TestUpgradeArtUrl:
         url = 'https://cdn-images.dzcdn.net/images/cover/abc/1000x1000-000000-80-0-0.jpg'
         assert '1900x1900' in _upgrade_art_url(url)
 
-    def test_caa_thumbnail_upgraded_to_original(self):
-        # MusicBrainz art arrives as /front-250 (and -500/-1200) thumbnails;
-        # /front is the original full-resolution upload.
+    def test_caa_thumbnail_upgraded_to_1200(self):
+        # MusicBrainz art arrives as the /front-250 thumbnail; upgrade to the
+        # 1200px CDN thumbnail (NOT the flaky bare /front original).
         url = 'https://coverartarchive.org/release/abc-123/front-250'
-        assert _upgrade_art_url(url) == 'https://coverartarchive.org/release/abc-123/front'
+        assert _upgrade_art_url(url) == 'https://coverartarchive.org/release/abc-123/front-1200'
 
-    def test_caa_500_and_release_group_scope_upgraded(self):
+    def test_caa_500_scope_and_idempotent(self):
         assert _upgrade_art_url('https://coverartarchive.org/release/x/front-500') \
-            == 'https://coverartarchive.org/release/x/front'
+            == 'https://coverartarchive.org/release/x/front-1200'
+        # release-group scope works the same.
+        assert _upgrade_art_url('https://coverartarchive.org/release-group/y/front-250') \
+            == 'https://coverartarchive.org/release-group/y/front-1200'
+        # Idempotent — an already-1200 URL stays put.
         assert _upgrade_art_url('https://coverartarchive.org/release-group/y/front-1200') \
-            == 'https://coverartarchive.org/release-group/y/front'
+            == 'https://coverartarchive.org/release-group/y/front-1200'
 
-    def test_caa_already_original_unchanged(self):
+    def test_caa_bare_front_left_alone(self):
+        # The bare /front original is intentionally NOT what we want; the
+        # sized-thumbnail regex doesn't touch it (and it never reaches the
+        # helper in practice — _cover_art_url always emits /front-250).
         url = 'https://coverartarchive.org/release/abc/front'
         assert _upgrade_art_url(url) == url
 
