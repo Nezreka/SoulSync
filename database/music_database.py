@@ -9984,6 +9984,24 @@ class MusicDatabase:
                 cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
                 artist_row = cursor.fetchone()
                 if not artist_row:
+                    # `artist_id` may be a *source* ID (e.g. a MusicBrainz MBID
+                    # from a search result) rather than the integer library PK.
+                    # The /api/artist-detail route resolves this upstream via
+                    # find_library_artist_for_source, but the enhanced-view and
+                    # quality-analysis endpoints call this method directly with
+                    # whatever ID the page holds — for a library artist opened
+                    # from a non-library search result that's the source ID, so
+                    # the page 404'd. Resolve by matching any per-service ID
+                    # column (single source of truth: SOURCE_ID_FIELD).
+                    from core.artist_source_lookup import SOURCE_ID_FIELD
+                    id_columns = list(dict.fromkeys(SOURCE_ID_FIELD.values()))
+                    where = ' OR '.join(f"{col} = ?" for col in id_columns)
+                    cursor.execute(
+                        f"SELECT * FROM artists WHERE {where} LIMIT 1",
+                        tuple(str(artist_id) for _ in id_columns),
+                    )
+                    artist_row = cursor.fetchone()
+                if not artist_row:
                     return {'success': False, 'error': f'Artist with ID {artist_id} not found'}
 
                 artist_name = artist_row['name']
