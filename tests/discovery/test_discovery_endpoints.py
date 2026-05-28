@@ -14,6 +14,9 @@ from core.discovery.endpoints import (
     convert_results_to_spotify_tracks,
     cancel_sync,
     delete_playlist_state,
+    get_sync_status,
+    playlist_name_strict as _pl_name_strict,
+    playlist_name_safe as _pl_name_safe,
 )
 
 
@@ -259,3 +262,135 @@ def test_delete_exception_returns_500():
     assert "error" in body
     # state NOT deleted because the exception fired before del
     assert 'pl' in states
+
+
+# ---------------------------------------------------------------------------
+# playlist-name accessors
+# ---------------------------------------------------------------------------
+
+class _Obj:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_name_attr_or_unknown():
+    from core.discovery.endpoints import playlist_name_attr_or_unknown as g
+    assert g({'playlist': _Obj('My PL')}) == 'My PL'
+    assert g({'playlist': {'name': 'dict'}}) == 'Unknown Playlist'  # dict has no .name attr
+    assert g({}) == 'Unknown Playlist'
+    assert g({'playlist': None}) == 'Unknown Playlist'
+
+
+def test_name_strict():
+    from core.discovery.endpoints import playlist_name_strict as g
+    assert g({'playlist': {'name': 'X'}}) == 'X'
+    import pytest
+    with pytest.raises(KeyError):
+        g({})  # strict -> raises, matching originals
+
+
+def test_name_safe():
+    from core.discovery.endpoints import playlist_name_safe as g
+    assert g({'playlist': {'name': 'X'}}) == 'X'
+    assert g({}) == 'Unknown Playlist'
+    assert g({'playlist': {}}) == 'Unknown Playlist'
+
+
+# ---------------------------------------------------------------------------
+# get_sync_status
+# ---------------------------------------------------------------------------
+
+def _activity_recorder():
+    calls = []
+
+    def add_activity_item(user, action, desc, when):
+        calls.append((user, action, desc, when))
+
+    return calls, add_activity_item
+
+
+def _status_kwargs(infra, add_activity_item, *, not_found_message='nf',
+                   error_label='Tidal', activity_subject='Tidal playlist',
+                   name_getter=None):
+    return dict(
+        not_found_message=not_found_message, error_label=error_label,
+        activity_subject=activity_subject,
+        playlist_name_getter=name_getter or _pl_name_safe,
+        add_activity_item=add_activity_item,
+        sync_lock=infra['sync_lock'], sync_states=infra['sync_states'],
+    )
+
+
+def test_status_not_found():
+    infra = _cancel_infra()
+    calls, add = _activity_recorder()
+    body, code = get_sync_status({}, 'missing',
+                                 **_status_kwargs(infra, add, not_found_message='Tidal playlist not found'))
+    assert code == 404 and body == {"error": "Tidal playlist not found"}
+    assert calls == []
+
+
+def test_status_no_sync_in_progress():
+    infra = _cancel_infra()
+    calls, add = _activity_recorder()
+    states = {'pl': {'phase': 'discovered'}}  # no sync_playlist_id
+    body, code = get_sync_status(states, 'pl', **_status_kwargs(infra, add))
+    assert code == 404 and body == {"error": "No sync in progress"}
+
+
+def test_status_running_returns_shape_without_mutation_or_activity():
+    infra = _cancel_infra()
+    infra['sync_states']['sp1'] = {"status": "running", "progress": {"n": 2}}
+    calls, add = _activity_recorder()
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1'}}
+    body, code = get_sync_status(states, 'pl', **_status_kwargs(infra, add))
+    assert code == 200
+    assert body == {
+        'phase': 'syncing', 'sync_status': 'running',
+        'progress': {"n": 2}, 'complete': False, 'error': None,
+    }
+    assert states['pl']['phase'] == 'syncing'  # unchanged
+    assert calls == []
+
+
+def test_status_finished_sets_complete_and_posts_activity():
+    infra = _cancel_infra()
+    infra['sync_states']['sp1'] = {"status": "finished", "progress": {"done": 9}}
+    calls, add = _activity_recorder()
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1',
+                     'playlist': {'name': 'Mix'}}}
+    body, code = get_sync_status(states, 'pl', **_status_kwargs(
+        infra, add, activity_subject='Spotify Link playlist',
+        name_getter=_pl_name_strict))
+    assert code == 200
+    assert body['complete'] is True
+    assert states['pl']['phase'] == 'sync_complete'
+    assert states['pl']['sync_progress'] == {"done": 9}
+    assert calls == [("", "Sync Complete", "Spotify Link playlist 'Mix' synced successfully", "Now")]
+
+
+def test_status_error_reverts_and_posts_failed_activity():
+    infra = _cancel_infra()
+    infra['sync_states']['sp1'] = {"status": "error", "error": "boom"}
+    calls, add = _activity_recorder()
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1',
+                     'playlist': {'name': 'Mix'}}}
+    body, code = get_sync_status(states, 'pl', **_status_kwargs(
+        infra, add, activity_subject='YouTube playlist', name_getter=_pl_name_safe))
+    assert code == 200
+    assert body['error'] == "boom"
+    assert states['pl']['phase'] == 'discovered'
+    assert calls == [("", "Sync Failed", "YouTube playlist 'Mix' sync failed", "Now")]
+
+
+def test_status_strict_getter_missing_playlist_raises_500_after_partial_mutation():
+    infra = _cancel_infra()
+    infra['sync_states']['sp1'] = {"status": "finished", "progress": {}}
+    calls, add = _activity_recorder()
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1'}}  # no 'playlist'
+    body, code = get_sync_status(states, 'pl', **_status_kwargs(
+        infra, add, error_label='Deezer', name_getter=_pl_name_strict))
+    assert code == 500 and "error" in body
+    # phase was set to sync_complete BEFORE the strict getter raised (1:1).
+    assert states['pl']['phase'] == 'sync_complete'
+    assert calls == []  # activity never posted

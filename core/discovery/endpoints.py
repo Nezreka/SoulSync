@@ -157,3 +157,95 @@ def delete_playlist_state(
     except Exception as e:
         logger.error(f"Error deleting {label} playlist: {e}")
         return {"error": str(e)}, 500
+
+
+# --- playlist-name accessors -------------------------------------------------
+# The per-source sync-status handlers read the display name three different
+# ways. Each is reproduced verbatim so the 1:1 behavior (including which ones
+# raise vs. fall back to 'Unknown Playlist') is preserved.
+
+def playlist_name_attr_or_unknown(state: Dict[str, Any]) -> str:
+    """Tidal: playlist is an object — use ``.name`` or 'Unknown Playlist'."""
+    pl = state.get('playlist')
+    return pl.name if pl and hasattr(pl, 'name') else 'Unknown Playlist'
+
+
+def playlist_name_strict(state: Dict[str, Any]) -> str:
+    """Deezer / Qobuz / Spotify-Public / iTunes-Link: strict dict access —
+    raises (→ 500) if 'playlist' is missing, exactly like the originals."""
+    return state['playlist']['name']
+
+
+def playlist_name_safe(state: Dict[str, Any]) -> str:
+    """YouTube / ListenBrainz: safe dict access, defaulting to 'Unknown
+    Playlist'."""
+    return state.get('playlist', {}).get('name', 'Unknown Playlist')
+
+
+def get_sync_status(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    not_found_message: str,
+    error_label: str,
+    activity_subject: str,
+    playlist_name_getter,
+    sync_lock: Any,
+    sync_states: Dict[str, Any],
+    add_activity_item,
+) -> Tuple[Dict[str, Any], int]:
+    """Report sync status for one discovery playlist, posting an activity-feed
+    item when the sync finishes or errors.
+
+    1:1 lift of the ``get_<source>_sync_status`` bodies (Tidal, Deezer, Qobuz,
+    Spotify-Public, iTunes-Link, YouTube, ListenBrainz). Per-source variation
+    is captured by the parameters:
+
+    - ``not_found_message`` — the 404 string (iTunes-Link drops "playlist").
+    - ``error_label`` — used in the except log ("Error getting <X> sync status").
+    - ``activity_subject`` — the activity-feed prefix; note Spotify-Public uses
+      "Spotify Link playlist" while its error_label is "Spotify Public".
+    - ``playlist_name_getter`` — one of the accessors above (attr/strict/safe);
+      the strict one can raise, matching the originals (→ 500). The state's
+      phase/sync_progress are mutated BEFORE the name is read, so a raising
+      getter leaves the same partial mutation the original did.
+
+    Beatport is NOT routed here — it returns a different payload (``status``
+    not ``sync_status``, includes ``sync_id``, no lock, ``chart`` key).
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return {"error": "No sync in progress"}, 404
+
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error'),
+        }
+
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            playlist_name = playlist_name_getter(state)
+            add_activity_item("", "Sync Complete", f"{activity_subject} '{playlist_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'
+            playlist_name = playlist_name_getter(state)
+            add_activity_item("", "Sync Failed", f"{activity_subject} '{playlist_name}' sync failed", "Now")
+
+        return response, 200
+    except Exception as e:
+        logger.error(f"Error getting {error_label} sync status: {e}")
+        return {"error": str(e)}, 500
