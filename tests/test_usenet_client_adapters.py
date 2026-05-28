@@ -165,6 +165,95 @@ def test_sab_parse_history_slot_marks_failures() -> None:
     assert success.save_path == '/done'
 
 
+def test_sab_history_save_path_falls_back_to_path_field() -> None:
+    """Older SAB releases populated ``path`` instead of ``storage``.
+    The adapter must fall through the field-name chain so we pick it
+    up either way."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'z', 'name': 'Z', 'status': 'Completed',
+        'bytes': 0, 'path': '/legacy/sab/path',
+    })
+    assert slot.save_path == '/legacy/sab/path'
+
+
+def test_sab_history_save_path_falls_back_to_download_path_field() -> None:
+    """Some SAB forks expose ``download_path`` instead of the
+    documented ``storage``. Same fallback chain catches it."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'z2', 'name': 'Z2', 'status': 'Completed',
+        'bytes': 0, 'download_path': '/fork/dl',
+    })
+    assert slot.save_path == '/fork/dl'
+
+
+def test_sab_history_save_path_prefers_storage_when_multiple_present() -> None:
+    """Field priority: ``storage`` wins over the fallbacks. The
+    documented final-path key must be preferred so SAB upgrades
+    don't subtly change the resolved path."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'p', 'name': 'P', 'status': 'Completed',
+        'bytes': 0,
+        'storage': '/final/storage',
+        'path': '/legacy/path',
+        'download_path': '/fork/dl',
+        'dirname': '/dirname',
+    })
+    assert slot.save_path == '/final/storage'
+
+
+def test_sab_history_save_path_none_when_all_fields_empty() -> None:
+    """Regression for #721: SAB's ``storage`` field lands a few
+    seconds after the job flips to History. During that window
+    EVERY known path field can be empty. The adapter must return
+    ``save_path=None`` (not a stale string) so
+    ``poll_album_download``'s retry loop can engage and wait for
+    the next poll where ``storage`` lands."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'gap', 'name': 'Forty Licks', 'status': 'Completed',
+        'bytes': 0,
+        # No storage / path / download_path / dirname.
+    })
+    assert slot.state == 'completed'
+    assert slot.save_path is None
+
+
+def test_sab_history_save_path_ignores_whitespace_only_values() -> None:
+    """A field present but with whitespace-only content shouldn't
+    fool the fallback chain — keep walking until a real path lands."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'ws', 'name': 'W', 'status': 'Completed',
+        'bytes': 0,
+        'storage': '   ',
+        'path': '\t',
+        'download_path': '/actual/path',
+    })
+    assert slot.save_path == '/actual/path'
+
+
+def test_sab_history_save_path_ignores_incomplete_path() -> None:
+    """``incomplete_path`` is SAB's in-progress staging dir before
+    post-process moves files to the final ``storage``. Using it as
+    a save_path fallback would bypass ``poll_album_download``'s
+    retry window AND point the bundle plugin at the wrong dir —
+    the in-progress staging files might be gone by the time we
+    walk it, or they might be partially-extracted. Safer to return
+    ``None`` so the poll retries until ``storage`` lands. Pinned
+    here so a future "let's add another fallback" change doesn't
+    silently re-introduce the foot-gun."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'inc', 'name': 'Inc', 'status': 'Completed',
+        'bytes': 0,
+        'incomplete_path': '/sab/incomplete/job',
+    })
+    assert slot.save_path is None
+
+
 def test_sab_add_nzb_via_url_returns_first_nzo_id() -> None:
     adapter = _sab_with_config()
     with patch('core.usenet_clients.sabnzbd.http_requests.get',
