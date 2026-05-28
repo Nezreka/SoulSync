@@ -5536,19 +5536,50 @@ def _build_search_deps():
     )
 
 
+@app.route('/api/search/sources', methods=['GET'])
+def search_sources():
+    """Return the list of active download sources available for basic search.
+
+    In single-source mode returns that one source. In hybrid mode returns
+    every source in the configured chain so the frontend can render a
+    source-picker chip row and let the user search specific sources.
+
+    Response shape: ``{"mode": "hybrid"|<source>, "sources": [{"name": str,
+    "display_name": str}]}``
+    """
+    if not download_orchestrator:
+        return jsonify({"mode": "soulseek", "sources": [{"name": "soulseek", "display_name": "Soulseek"}]})
+    mode = download_orchestrator.mode
+    if mode == 'hybrid':
+        chain = download_orchestrator._resolve_source_chain()
+        sources = [
+            {"name": s, "display_name": download_orchestrator.registry.display_name(s)}
+            for s in chain
+        ]
+    else:
+        sources = [{"name": mode, "display_name": download_orchestrator.registry.display_name(mode)}]
+    return jsonify({"mode": mode, "sources": sources})
+
+
 @app.route('/api/search', methods=['POST'])
 def search_music():
-    """Basic Soulseek file search."""
+    """Basic download-source file search.
+
+    Accepts an optional ``source`` body param to target a specific source
+    in hybrid mode (e.g. ``"soulseek"``, ``"tidal"``). When omitted, uses
+    the active source (single-source mode) or the first hybrid source.
+    """
     data = request.get_json()
     query = data.get('query')
     if not query:
         return jsonify({"error": "No search query provided."}), 400
 
-    logger.info(f"Web UI Search initiated for: '{query}'")
+    requested_source = (data.get('source') or '').strip().lower() or None
+    logger.info(f"Web UI Search initiated for: '{query}'" + (f" (source={requested_source})" if requested_source else ""))
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     try:
-        results = _search_basic.run_basic_soulseek_search(query, download_orchestrator, run_async)
+        results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
         return jsonify({"results": results})
     except Exception as e:
