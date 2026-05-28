@@ -62248,54 +62248,347 @@ body.reduce-effects .dash-card::after {
     padding: 10px 12px;
 }
 
-/* Enrichment / rate monitor — single row of compact tiles */
-.dash-card[data-card="enrichment"] .rate-monitor-grid {
-    display: grid;
-    grid-template-columns: repeat(10, minmax(0, 1fr));
-    gap: 8px;
-    padding: 4px 0 0;
+/* Enrichment / rate monitor — VU-meter equalizer bars.
+ *
+ * Each service is a vertical bar capsule arranged in a flex row,
+ * so the row stays symmetric at any service count (no orphan grid
+ * cells when the service list isn't divisible by the column count).
+ * Bar fill height = current rate / limit, with a 4% floor so idle
+ * bars still show a sliver of accent.
+ *
+ * Variables on the host element:
+ *   --eq-accent  service brand color (set per-bar from JS)
+ *   --eq-track-h vertical track height (responsive override below)
+ */
+.dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
+    --eq-track-h: 168px;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 14px 4px 6px;
 }
 
-.dash-card[data-card="enrichment"] .rate-gauge-card {
-    padding: 10px 8px 8px;
-    gap: 4px;
-    min-height: 0;
+.rate-eq {
+    --eq-accent: #888;
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    text-align: center;
+    position: relative;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.dash-card[data-card="enrichment"] .rate-gauge-svg {
-    width: 100%;
-    height: auto;
-    display: block;
+.rate-eq:focus-visible {
+    outline: 2px solid var(--eq-accent);
+    outline-offset: 4px;
+    border-radius: 14px;
 }
 
-.dash-card[data-card="enrichment"] .gauge-card-header {
+.rate-eq:hover {
+    transform: translateY(-2px);
+}
+
+/* Track: glassy vertical capsule with subtle vignette */
+.rate-eq-track {
+    position: relative;
+    flex: 0 0 auto;
+    height: var(--eq-track-h);
+    border-radius: 12px;
+    background:
+        linear-gradient(180deg,
+            rgba(255, 255, 255, 0.02) 0%,
+            rgba(255, 255, 255, 0.04) 40%,
+            rgba(0, 0, 0, 0.25) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        inset 0 -10px 24px rgba(0, 0, 0, 0.35);
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.rate-eq:hover .rate-eq-track {
+    border-color: color-mix(in srgb, var(--eq-accent) 45%, rgba(255, 255, 255, 0.12));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -10px 24px rgba(0, 0, 0, 0.35),
+        0 0 24px color-mix(in srgb, var(--eq-accent) 22%, transparent);
+}
+
+/* Horizontal tick marks — like a real VU meter */
+.rate-eq-ticks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+        180deg,
+        transparent 0 11px,
+        rgba(255, 255, 255, 0.04) 11px 12px
+    );
+    mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 100%);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 100%);
+}
+
+/* The actual fill — accent gradient growing from the bottom */
+.rate-eq-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4%;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--eq-accent) 90%, white 10%) 0%,
+            var(--eq-accent) 35%,
+            color-mix(in srgb, var(--eq-accent) 65%, transparent) 100%);
+    border-radius: 0 0 11px 11px;
+    transition: height 0.55s cubic-bezier(0.34, 1.2, 0.5, 1);
+    overflow: hidden;
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+        0 0 20px color-mix(in srgb, var(--eq-accent) 35%, transparent);
+}
+
+/* Bright glow strip at the top of the fill — the "VU peak" line */
+.rate-eq-tip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: color-mix(in srgb, var(--eq-accent) 30%, white 70%);
+    box-shadow:
+        0 0 6px color-mix(in srgb, var(--eq-accent) 80%, white),
+        0 0 14px color-mix(in srgb, var(--eq-accent) 60%, transparent);
+    opacity: 0.85;
+}
+
+/* Vertical shimmer scan — runs continuously when active */
+.rate-eq-shimmer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(180deg,
+        transparent 0%,
+        color-mix(in srgb, white 22%, transparent) 50%,
+        transparent 100%);
+    opacity: 0;
+    transition: opacity 0.4s;
+}
+
+.rate-eq.active .rate-eq-shimmer {
+    opacity: 1;
+    animation: rate-eq-shimmer-scan 2.6s linear infinite;
+}
+
+@keyframes rate-eq-shimmer-scan {
+    0%   { transform: translateY(120%); opacity: 0; }
+    18%  { opacity: 1; }
+    82%  { opacity: 1; }
+    100% { transform: translateY(-120%); opacity: 0; }
+}
+
+/* Active state — fill pulses subtly so the "alive" services radiate */
+.rate-eq.active .rate-eq-fill {
+    animation: rate-eq-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes rate-eq-pulse {
+    0%, 100% {
+        box-shadow:
+            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+            0 0 18px color-mix(in srgb, var(--eq-accent) 30%, transparent);
+    }
+    50% {
+        box-shadow:
+            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+            0 0 32px color-mix(in srgb, var(--eq-accent) 55%, transparent);
+    }
+}
+
+/* Idle floor: keep the 4% sliver visibly alive — a slow breathe so
+   the row reads as standby, not dead. */
+.rate-eq:not(.active) .rate-eq-fill {
+    animation: rate-eq-idle 4.2s ease-in-out infinite;
+}
+
+@keyframes rate-eq-idle {
+    0%, 100% { opacity: 0.65; }
+    50%      { opacity: 0.95; }
+}
+
+/* Rate-limited state overrides accent with red + faster pulse */
+.rate-eq.rate-limited .rate-eq-fill,
+.rate-eq.danger .rate-eq-fill {
+    background:
+        linear-gradient(180deg,
+            #ff8a8a 0%,
+            #ef4444 35%,
+            rgba(239, 68, 68, 0.5) 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 200, 200, 0.7),
+        0 0 24px rgba(239, 68, 68, 0.5);
+}
+
+.rate-eq.rate-limited .rate-eq-tip,
+.rate-eq.danger .rate-eq-tip {
+    background: #ffd6d6;
+    box-shadow: 0 0 8px #ef4444, 0 0 18px rgba(239, 68, 68, 0.6);
+}
+
+.rate-eq.rate-limited .rate-eq-fill {
+    animation: rate-eq-warn 1.1s ease-in-out infinite;
+}
+
+@keyframes rate-eq-warn {
+    0%, 100% { filter: brightness(1); }
+    50%      { filter: brightness(1.4); }
+}
+
+/* Big floating count number — overlay on the track, top-center */
+.rate-eq-value {
+    position: absolute;
+    top: 8px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rate-eq.active .rate-eq-value {
+    color: color-mix(in srgb, var(--eq-accent) 25%, white 75%);
+    text-shadow:
+        0 0 10px color-mix(in srgb, var(--eq-accent) 50%, transparent),
+        0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* Meta: state pill + service name under the bar */
+.rate-eq-meta {
+    display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    text-align: center;
+    gap: 4px;
+    line-height: 1.1;
 }
 
-.dash-card[data-card="enrichment"] .gauge-card-name {
+.rate-eq-name {
     font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.78);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    letter-spacing: 0.01em;
+}
+
+.rate-eq-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.55);
 }
 
-.dash-card[data-card="enrichment"] .gauge-card-status {
-    font-size: 8px;
-    padding: 1px 5px;
-    line-height: 1.3;
+.rate-eq-state-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.7;
 }
 
-.dash-card[data-card="enrichment"] .gauge-card-stats {
-    display: none;
+.rate-eq-state[data-status="running"] {
+    color: #6ee7a7;
+    border-color: rgba(110, 231, 167, 0.25);
+    background: rgba(110, 231, 167, 0.08);
+}
+.rate-eq-state[data-status="running"] .rate-eq-state-dot {
+    background: #6ee7a7;
+    box-shadow: 0 0 6px #6ee7a7;
+    animation: rate-eq-dot-pulse 1.4s ease-in-out infinite;
 }
 
-.dash-card[data-card="enrichment"] .gauge-budget-bar {
-    display: none;
+.rate-eq-state[data-status="paused"] {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.25);
+    background: rgba(251, 191, 36, 0.08);
+}
+
+.rate-eq-state[data-status="idle"] {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.rate-eq-state[data-status="not_configured"] {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.rate-eq.rate-limited .rate-eq-state {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes rate-eq-dot-pulse {
+    0%, 100% { box-shadow: 0 0 4px currentColor; }
+    50%      { box-shadow: 0 0 10px currentColor, 0 0 18px currentColor; }
+}
+
+/* Responsive — tighten the bars on narrower viewports */
+@media (max-width: 1499px) {
+    .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
+        --eq-track-h: 156px;
+    }
+}
+
+@media (max-width: 1099px) {
+    .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
+        --eq-track-h: 140px;
+        gap: 4px;
+    }
+    .rate-eq-value { font-size: 16px; }
+    .rate-eq-name  { font-size: 10px; }
+    .rate-eq-state { font-size: 8px; padding: 1px 6px; }
+}
+
+@media (max-width: 720px) {
+    .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
+        --eq-track-h: 124px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    .rate-eq { flex: 0 0 calc(20% - 4px); }
+}
+
+@media (max-width: 480px) {
+    .rate-eq { flex: 0 0 calc(25% - 4px); }
+    .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
+        --eq-track-h: 108px;
+    }
 }
 
 /* Active downloads container */
