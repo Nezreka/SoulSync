@@ -62289,34 +62289,64 @@ body.reduce-effects .dash-card::after {
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Avatar disc — circular brand-color chip above the bar, glyph
- * centered. Anchors each capsule to its service so the row reads
- * as identifiable rather than 11 anonymous bars. */
+/* Avatar disc — circular chip above the bar carrying the service's
+ * real brand logo. Dark glass backdrop with a thin accent ring +
+ * accent-colored drop-shadow halo so the logo gets its breathing
+ * room without losing the per-service color cue. ``--fallback``
+ * variant kicks in via the ``<img>`` onerror handler when a CDN URL
+ * breaks, restoring the accent-gradient + initial-letter look. */
 .rate-eq-avatar {
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     margin: 0 auto;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    color: rgba(255, 255, 255, 0.95);
+    background:
+        radial-gradient(circle at 30% 25%,
+            rgba(255, 255, 255, 0.08),
+            rgba(0, 0, 0, 0.35) 70%);
+    border: 1px solid color-mix(in srgb, var(--eq-accent) 50%, rgba(255, 255, 255, 0.12));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
+        0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
+    transition: box-shadow 0.3s, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    flex: 0 0 auto;
+    overflow: hidden;
+    position: relative;
+}
+
+.rate-eq-avatar-logo {
+    width: 75%;
+    height: 75%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+    /* The brand-color drop-shadow pops the logo against the dark
+     * disc so even dark / multi-tone logos retain the per-service
+     * cue without washing out. */
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))
+            drop-shadow(0 0 4px color-mix(in srgb, var(--eq-accent) 35%, transparent));
+}
+
+/* Fallback variant — restores the original accent-gradient disc +
+ * initial-letter glyph when the brand logo URL fails to load. */
+.rate-eq-avatar--fallback {
     background:
         radial-gradient(circle at 30% 25%,
             color-mix(in srgb, var(--eq-accent) 65%, white 35%),
             var(--eq-accent) 55%,
             color-mix(in srgb, var(--eq-accent) 55%, black 45%) 100%);
-    border: 1px solid color-mix(in srgb, var(--eq-accent) 55%, transparent);
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.25),
-        0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
-        0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
+}
+
+.rate-eq-avatar-glyph {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.95);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-    transition: box-shadow 0.3s, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    flex: 0 0 auto;
 }
 
 .rate-eq.active .rate-eq-avatar {
@@ -62733,7 +62763,8 @@ body.reduce-effects .dash-card::after {
     .rate-eq-value  { font-size: 16px; }
     .rate-eq-name   { font-size: 10px; }
     .rate-eq-state  { font-size: 8px; padding: 1px 6px; }
-    .rate-eq-avatar { width: 26px; height: 26px; font-size: 10px; }
+    .rate-eq-avatar { width: 28px; height: 28px; }
+    .rate-eq-avatar-glyph { font-size: 10px; }
 }
 
 @media (max-width: 720px) {
@@ -62750,7 +62781,8 @@ body.reduce-effects .dash-card::after {
     .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
         --eq-track-h: 108px;
     }
-    .rate-eq-avatar { width: 24px; height: 24px; font-size: 9px; }
+    .rate-eq-avatar { width: 26px; height: 26px; }
+    .rate-eq-avatar-glyph { font-size: 9px; }
 }
 
 /* Active downloads container */
