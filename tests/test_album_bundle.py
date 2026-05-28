@@ -594,6 +594,95 @@ def test_poll_shutdown_returns_none_without_terminal_emit() -> None:
     assert 'failed' not in [c[0] for c in calls]
 
 
+def test_poll_tolerates_completed_with_late_save_path_arrival() -> None:
+    """Regression for #721 (Forty Licks stuck at 61%).
+
+    SAB History flips ``status`` to 'Completed' a few seconds before
+    its post-processing pipeline writes the final ``storage`` field.
+    Pre-fix the poll returned ``None`` on the first such read, the
+    bundle plugin marked the batch failed, and the UI froze on the
+    last 'downloading' emit. Now the poll tolerates up to
+    ``transient_miss_threshold`` consecutive "completed but no
+    save_path" reads, so SAB has a window to finish writing the
+    path. When it lands, return it normally."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter([
+        # Queue phase — SAB still downloading.
+        _Status(state='downloading', progress=0.61),
+        # History phase — flipped to Completed but storage not yet
+        # populated. Pre-fix this branch returned None immediately.
+        _Status(state='completed', save_path=None, progress=1.0),
+        _Status(state='completed', save_path=None, progress=1.0),
+        # SAB finished post-process; storage now set.
+        _Status(state='completed', save_path='/dl/forty-licks', progress=1.0),
+    ])
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Forty Licks',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=5,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=60.0,
+    )
+
+    assert result == '/dl/forty-licks'
+    # No terminal failed emit — bundle plugin will continue to
+    # staging, not error out.
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_gives_up_when_completed_with_no_save_path_persists() -> None:
+    """If SAB stays on 'Completed' but ``storage`` never lands past
+    the threshold, fail loudly with an explicit error pointing at
+    the missing save_path field — instead of silently sitting on
+    the last 'downloading' UI emit until the 6-hour deadline."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(state='completed', save_path=None, progress=1.0),
+        title='Forty Licks',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    err = failed_calls[0][1].get('error', '').lower()
+    assert 'save_path' in err or 'success but never' in err
+
+
+def test_poll_uses_save_path_from_earlier_downloading_emit_if_completed_lacks_one() -> None:
+    """Sticky save_path: when an earlier ``downloading`` status carried
+    a non-empty ``save_path`` (qBit shows the target dir mid-download),
+    that value is remembered. A later ``completed`` read with an empty
+    save_path still resolves cleanly because the sticky value applies.
+    Important so torrent clients (which set save_path from the start)
+    don't trip the completed-no-path retry."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter([
+        _Status(state='downloading', save_path='/qb/album-target', progress=0.5),
+        _Status(state='completed', save_path=None, progress=1.0),
+    ])
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Some Album',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=60.0,
+    )
+
+    assert result == '/qb/album-target'
+    assert 'failed' not in [c[0] for c in calls]
+
+
 def test_poll_torrent_seeding_counts_as_complete() -> None:
     """Torrent plugin passes ``complete_states={'seeding', 'completed'}``
     because qBit / Transmission flip the torrent to 'seeding' on

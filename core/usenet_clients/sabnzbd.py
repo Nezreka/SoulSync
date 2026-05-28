@@ -235,6 +235,7 @@ class SABnzbdAdapter:
         # History entries are post-download — progress is 1.0 unless failed.
         sab_state = (slot.get('status') or '').lower()
         is_failed = sab_state == 'failed'
+        save_path = self._extract_history_save_path(slot)
         return UsenetStatus(
             id=str(slot.get('nzo_id') or ''),
             name=slot.get('name') or '',
@@ -243,10 +244,52 @@ class SABnzbdAdapter:
             size=int(slot.get('bytes') or 0),
             downloaded=int(slot.get('bytes') or 0) if not is_failed else 0,
             download_speed=0,
-            save_path=slot.get('storage') or slot.get('path'),
+            save_path=save_path,
             category=slot.get('category'),
             error=slot.get('fail_message') if is_failed else None,
         )
+
+    # SAB version differences: ``storage`` is the documented final-path
+    # field on recent versions, but older builds populated ``path``
+    # instead, and some forks use ``download_path`` or ``dirname``.
+    # ``storage`` is also empty for the first few seconds after a job
+    # flips to History — SAB writes the path AFTER its post-processing
+    # move completes. Issue #721 (Forty Licks stuck at 61%): the bundle
+    # poll returned save_path=None on the first ``Completed`` read, the
+    # plugin marked the batch failed, and the UI never unstuck. The
+    # ``poll_album_download`` retry loop now tolerates a short window
+    # of completed-but-no-path; this helper widens the field net so
+    # we pick the path up whenever ANY of the known SAB keys carries it.
+    _HISTORY_SAVE_PATH_KEYS = (
+        'storage',
+        'path',
+        'download_path',
+        'dirname',
+    )
+    # ``incomplete_path`` is intentionally NOT in this list. SAB
+    # populates it BEFORE the post-process move, so it would always
+    # resolve on the first ``Completed`` read — bypassing
+    # ``poll_album_download``'s new retry window, and pointing the
+    # bundle plugin at the in-progress staging dir instead of the
+    # final destination. The poll's retry loop is the safer place to
+    # handle the SAB History→storage write gap.
+
+    def _extract_history_save_path(self, slot: dict) -> Optional[str]:
+        for key in self._HISTORY_SAVE_PATH_KEYS:
+            value = slot.get(key)
+            if value and isinstance(value, str) and value.strip():
+                return value
+        # Loud diagnostic when the bundle poll is about to fail on this:
+        # users on SAB versions / forks with novel field names need to
+        # see this in the logs so we can grow ``_HISTORY_SAVE_PATH_KEYS``.
+        logger.debug(
+            "[SAB] History slot for nzo_id=%s has no save_path in any "
+            "of the known fields %r — slot keys: %r",
+            slot.get('nzo_id'),
+            self._HISTORY_SAVE_PATH_KEYS,
+            sorted(slot.keys()),
+        )
+        return None
 
     @staticmethod
     def _safe_float(value) -> Optional[float]:
