@@ -287,14 +287,15 @@ def _upgrade_art_url(art_url: str) -> str:
         except Exception as e:
             logger.debug("upgrade deezer image url failed: %s", e)
     elif "coverartarchive.org" in art_url:
-        # MusicBrainz art comes in as Cover Art Archive thumbnails
-        # (/front-250, also -500/-1200 — see musicbrainz_search._cover_art_url).
-        # The bare /front is the original full-resolution upload, which always
-        # exists when any front art does, so rewrite the size segment back to
-        # it. Critical for MB-as-source users: without this, embedded art is
-        # the 250px search thumbnail. `_fetch_art_bytes` falls back to the
-        # sized URL if /front is ever refused.
-        return re.sub(r"/front-\d+", "/front", art_url)
+        # MusicBrainz art arrives as Cover Art Archive thumbnails
+        # (/front-250 — see musicbrainz_search._cover_art_url). Upgrade to the
+        # 1200px thumbnail: a huge jump from 240p yet still served by CAA's own
+        # CDN. Deliberately NOT the bare /front original — that redirects to
+        # archive.org, which is flaky (intermittent 500s/timeouts) and can be
+        # multi-MB, nasty to embed in every track. 1200 is the sweet spot of
+        # quality + reliability. `_fetch_art_bytes` falls back to the original
+        # sized URL if /front-1200 is ever refused.
+        return re.sub(r"/front-\d+", "/front-1200", art_url)
     return art_url
 
 
@@ -342,7 +343,8 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         release_mbid = metadata.get("musicbrainz_release_id")
         if release_mbid and cfg.get("metadata_enhancement.prefer_caa_art", False):
             try:
-                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
+                # 1200px CDN thumbnail, not the flaky bare /front original.
+                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
                 req = urllib.request.Request(caa_url, headers={"Accept": "image/*"})
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
@@ -412,7 +414,8 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
         image_data = None
         if release_mbid and prefer_caa:
             try:
-                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
+                # 1200px CDN thumbnail, not the flaky bare /front original.
+                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
                 req = urllib.request.Request(caa_url, headers={"Accept": "image/*"})
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
