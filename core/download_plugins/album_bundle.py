@@ -281,6 +281,18 @@ def poll_album_download(
     deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
     last_save_path: Optional[str] = None
     misses = TransientMissCounter(transient_miss_threshold)
+    # Separate counter for "client reports terminal-success state but no
+    # save_path field has landed yet." SAB History flips ``status`` to
+    # 'Completed' a few seconds before its post-processing pipeline
+    # writes the final ``storage`` field — see issue #721 (Forty Licks
+    # stuck at 61%): SAB shows Completed in the UI, but
+    # ``_parse_history_slot`` returns ``save_path=None`` for those few
+    # seconds because ``storage`` isn't populated yet. Pre-fix the
+    # poll returned ``None`` on the first such read, the bundle
+    # plugin marked the batch failed, but the UI still displayed the
+    # last ``downloading`` progress emit. Now we retry up to the
+    # same threshold so SAB has a window to write the path.
+    completed_no_path_misses = TransientMissCounter(transient_miss_threshold)
 
     def _fail(reason: str) -> None:
         try:
@@ -324,7 +336,34 @@ def poll_album_download(
             last_save_path = status.save_path
 
         if status.state in complete_states:
-            return last_save_path
+            if last_save_path:
+                completed_no_path_misses.reset()
+                return last_save_path
+            # Terminal-success state but no save_path landed yet.
+            # SAB History flips ``Completed`` a few seconds before
+            # ``storage`` is populated — give the adapter a few more
+            # polls before declaring this a hard failure. Without this
+            # tolerance, every TAR / unrar-bearing usenet release
+            # would race the path-write window and randomly fail.
+            if completed_no_path_misses.record_miss():
+                logger.error(
+                    "%s '%s' reported terminal success but no save_path landed "
+                    "after %d consecutive polls — bundle cannot stage. Adapter "
+                    "may need new history-slot fallback fields (storage / path "
+                    "/ download_path / dirname). Last status: state=%r progress=%r",
+                    log_prefix, title, completed_no_path_misses.misses,
+                    status.state, status.progress,
+                )
+                _fail('Client reported success but never provided a save_path')
+                return None
+            logger.info(
+                "%s '%s' is %s on the client but save_path not yet set — "
+                "retrying (poll %d/%d)",
+                log_prefix, title, status.state,
+                completed_no_path_misses.misses, completed_no_path_misses.threshold,
+            )
+            sleep(interval)
+            continue
         if status.state in failed_states:
             error = getattr(status, 'error', None) or 'Client reported failure'
             logger.error("%s '%s' failed: %s", log_prefix, title, error)
