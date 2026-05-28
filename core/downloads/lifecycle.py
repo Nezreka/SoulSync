@@ -49,15 +49,28 @@ def _safe_batch_dirname(batch_id: str) -> str:
     return safe or 'batch'
 
 
-def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
-    """Best-effort cleanup for torrent/usenet private staging copies.
+_ALBUM_BUNDLE_CLEANED_SOURCES = ('soulseek', 'torrent', 'usenet')
 
-    The torrent/usenet clients keep their own completed download folders.
-    This only removes SoulSync's per-batch copy under album-bundle staging.
+
+def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
+    """Best-effort cleanup for album-bundle private staging copies.
+
+    Fires when a batch reaches a terminal state. SoulSync's per-batch
+    copy lives at ``storage/album_bundle_staging/<batch_id>/`` —
+    safe to remove because by the time the batch is "complete" the
+    per-track workers have already claimed their files out of staging
+    via ``try_staging_match`` and moved them to the Transfer dir.
+
+    Pre-fix this only ran for torrent / usenet bundles because the
+    comment was "slskd keeps its own completed folders" — but the
+    Soulseek bundle path ALSO copies files into the private staging
+    dir (``soulseek_client.py:1599``), so slskd bundle copies were
+    leaking forever. Coverage extended to all three bundle-capable
+    sources.
     """
     if not batch.get('album_bundle_private_staging'):
         return
-    if (batch.get('album_bundle_source') or '').lower() not in ('torrent', 'usenet'):
+    if (batch.get('album_bundle_source') or '').lower() not in _ALBUM_BUNDLE_CLEANED_SOURCES:
         return
 
     staging_path = batch.get('album_bundle_staging_path')
@@ -83,6 +96,76 @@ def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
         logger.info("[Album Bundle] Cleaned private staging folder for batch %s: %s", batch_id, staging_path)
     except Exception as exc:
         logger.warning("[Album Bundle] Could not clean private staging folder %s: %s", staging_path, exc)
+
+
+def sweep_orphan_album_bundle_staging(
+    staging_root: str,
+    *,
+    active_batch_ids: Optional[set] = None,
+) -> int:
+    """Remove orphan per-batch dirs from album-bundle staging.
+
+    An orphan is a ``<staging_root>/<dirname>`` subdir whose ``dirname``
+    matches no batch_id in the current ``download_batches`` runtime
+    state. Happens when:
+
+    - The app crashed mid-bundle (cleanup never fired).
+    - A batch errored on a non-completion code path.
+    - A pre-extension Soulseek bundle (where cleanup was gated to
+      torrent/usenet) left a copy behind.
+
+    Intended to run ONCE at server startup, before any new batch can
+    register an active staging dir. That guarantees ``active_batch_ids``
+    is genuinely empty / pre-existing; we don't race a starting batch.
+
+    Returns the count of dirs removed. Safe-by-design:
+    - Only touches subdirs of the configured staging root.
+    - Each candidate goes through the same ``_safe_batch_dirname``
+      name-guard as the per-batch cleanup, so escape-via-symlink
+      isn't possible.
+    - Refuses to act on non-directories.
+    - ``shutil.rmtree`` errors are logged, not raised — sweep must
+      not crash app startup over a permission glitch.
+    """
+    if not staging_root:
+        return 0
+    root = Path(staging_root)
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    active = active_batch_ids if active_batch_ids is not None else set()
+    # Normalize active batch ids to their on-disk dirname form so the
+    # set lookup matches what's actually on disk.
+    active_dirnames = {_safe_batch_dirname(bid) for bid in active if bid}
+
+    removed = 0
+    try:
+        entries = list(root.iterdir())
+    except OSError as exc:
+        logger.warning("[Album Bundle Sweep] Could not list staging root %s: %s", staging_root, exc)
+        return 0
+
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        # The directory name MUST match what _safe_batch_dirname
+        # produces — anything else was hand-created and we leave it
+        # alone. Defensive against stray dirs the user might have
+        # placed in the staging root.
+        if entry.name != _safe_batch_dirname(entry.name):
+            continue
+        if entry.name in active_dirnames:
+            continue
+        try:
+            shutil.rmtree(entry)
+            removed += 1
+            logger.info("[Album Bundle Sweep] Removed orphan staging dir: %s", entry)
+        except OSError as exc:
+            logger.warning("[Album Bundle Sweep] Could not remove orphan staging dir %s: %s", entry, exc)
+
+    if removed:
+        logger.info("[Album Bundle Sweep] Cleaned %d orphan staging dir(s) under %s", removed, staging_root)
+    return removed
 
 
 @dataclass
