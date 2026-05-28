@@ -56108,7 +56108,6 @@ tr.tag-diff-same {
     gap: 12px;
     padding: 12px 16px;
     min-width: 280px;
-    max-width: 360px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 14px;
@@ -62240,7 +62239,7 @@ body.reduce-effects .dash-card::after {
     overflow-y: auto;
     overflow-x: hidden;
     padding: 4px 2px;
-    max-height: 260px;
+    max-height: 350px;
 }
 
 .dash-card[data-card="syncs"] .sync-history-card {
