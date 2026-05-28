@@ -23890,46 +23890,36 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Library Artist Watchlist Button */
 
+/* Artist-hero action buttons share the Download Discography look:
+   accent gradient fill, accent border, accent-light text, compact sizing,
+   subtle shimmer, lift + glow on hover. The watchlist .watching state keeps
+   its amber "already watching" signal; everything else is uniform. */
 .library-artist-watchlist-btn {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    padding: 10px 20px;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 7px 16px;
+    font-size: 12px;
+    font-weight: 700;
     letter-spacing: 0.02em;
-    color: rgba(255, 255, 255, 0.85);
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    color: rgb(var(--accent-light-rgb));
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.25s ease;
     outline: none;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    position: relative;
+    font-family: inherit;
     overflow: hidden;
-    backdrop-filter: blur(8px);
-}
-
-.library-artist-watchlist-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.library-artist-watchlist-btn:hover:not(:disabled)::before {
-    opacity: 1;
 }
 
 .library-artist-watchlist-btn:hover:not(:disabled) {
-    color: #ffffff;
-    border-color: rgba(var(--accent-rgb), 0.35);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.2), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.25) 0%, rgba(var(--accent-rgb), 0.1) 100%);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.2);
 }
 
 .library-artist-watchlist-btn:active:not(:disabled) {
@@ -23938,14 +23928,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .library-artist-watchlist-btn .watchlist-icon {
-    font-size: 14px;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 13px;
+    transition: transform 0.25s ease;
     position: relative;
     z-index: 1;
 }
 
 .library-artist-watchlist-btn:hover:not(:disabled) .watchlist-icon {
-    transform: scale(1.15);
+    transform: scale(1.12);
 }
 
 .library-artist-watchlist-btn .watchlist-text {
@@ -23954,20 +23944,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .library-artist-watchlist-btn.watching {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15) 0%, rgba(255, 193, 7, 0.05) 100%);
     color: #ffc107;
-    border-color: rgba(255, 193, 7, 0.25);
-    box-shadow: 0 0 12px rgba(255, 193, 7, 0.08);
-}
-
-.library-artist-watchlist-btn.watching::before {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.25) 0%, rgba(255, 193, 7, 0.08) 100%);
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15) 0%, rgba(255, 193, 7, 0.05) 100%);
+    border-color: rgba(255, 193, 7, 0.3);
 }
 
 .library-artist-watchlist-btn.watching:hover:not(:disabled) {
-    color: #ffffff;
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 4px 20px rgba(255, 193, 7, 0.25), 0 0 0 1px rgba(255, 193, 7, 0.15);
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.25) 0%, rgba(255, 193, 7, 0.1) 100%);
+    border-color: rgba(255, 193, 7, 0.45);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2);
 }
 
 .library-artist-watchlist-btn:disabled {
@@ -23980,45 +23966,31 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* ─── Enhance Quality Button ─── */
 
 .library-artist-enhance-btn {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    padding: 10px 20px;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 7px 16px;
+    font-size: 12px;
+    font-weight: 700;
     letter-spacing: 0.02em;
-    color: rgba(79, 195, 247, 0.9);
-    background: linear-gradient(135deg, rgba(79, 195, 247, 0.08) 0%, rgba(79, 195, 247, 0.02) 100%);
-    border: 1px solid rgba(79, 195, 247, 0.15);
-    border-radius: 12px;
+    color: rgb(129, 212, 250);
+    background: linear-gradient(135deg, rgba(79, 195, 247, 0.15) 0%, rgba(79, 195, 247, 0.05) 100%);
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.25s ease;
     outline: none;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    position: relative;
+    font-family: inherit;
     overflow: hidden;
-    backdrop-filter: blur(8px);
-}
-
-.library-artist-enhance-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    background: linear-gradient(135deg, rgba(79, 195, 247, 0.22) 0%, rgba(100, 220, 255, 0.08) 100%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.library-artist-enhance-btn:hover::before {
-    opacity: 1;
 }
 
 .library-artist-enhance-btn:hover {
-    color: #ffffff;
-    border-color: rgba(79, 195, 247, 0.4);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(79, 195, 247, 0.2), 0 0 0 1px rgba(79, 195, 247, 0.1);
+    background: linear-gradient(135deg, rgba(79, 195, 247, 0.25) 0%, rgba(79, 195, 247, 0.12) 100%);
+    border-color: rgba(79, 195, 247, 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(79, 195, 247, 0.25);
 }
 
 .library-artist-enhance-btn:active {
@@ -24027,14 +23999,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .library-artist-enhance-btn .enhance-icon {
-    font-size: 14px;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 13px;
+    transition: transform 0.25s ease;
     position: relative;
     z-index: 1;
 }
 
 .library-artist-enhance-btn:hover .enhance-icon {
-    transform: scale(1.2) rotate(8deg);
+    transform: scale(1.12);
 }
 
 .library-artist-enhance-btn .enhance-text {
@@ -24082,45 +24054,31 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* ─── Artist Radio Button ─── */
 
 .library-artist-radio-btn {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    padding: 10px 20px;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 7px 16px;
+    font-size: 12px;
+    font-weight: 700;
     letter-spacing: 0.02em;
-    color: rgba(255, 255, 255, 0.85);
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    color: rgb(196, 181, 253);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.25s ease;
     outline: none;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    position: relative;
+    font-family: inherit;
     overflow: hidden;
-    backdrop-filter: blur(8px);
-}
-
-.library-artist-radio-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.library-artist-radio-btn:hover::before {
-    opacity: 1;
 }
 
 .library-artist-radio-btn:hover {
-    color: #ffffff;
-    border-color: rgba(var(--accent-rgb), 0.35);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.2), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.25) 0%, rgba(139, 92, 246, 0.12) 100%);
+    border-color: rgba(139, 92, 246, 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.25);
 }
 
 .library-artist-radio-btn:active {
@@ -24129,14 +24087,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .library-artist-radio-btn .radio-icon {
-    font-size: 14px;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 13px;
+    transition: transform 0.25s ease;
     position: relative;
     z-index: 1;
 }
 
 .library-artist-radio-btn:hover .radio-icon {
-    transform: scale(1.15);
+    transform: scale(1.12);
 }
 
 .library-artist-radio-btn .radio-text {
@@ -46910,7 +46868,7 @@ textarea.enhanced-meta-field-input {
    DOWNLOAD DISCOGRAPHY — Button + Modal
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.discog-download-wrap { margin: 12px 0 4px; }
+.discog-download-wrap { margin: 0; display: inline-flex; }
 
 .discog-download-btn {
     position: relative;
@@ -46947,7 +46905,6 @@ textarea.enhanced-meta-field-input {
     padding: 7px 16px;
     font-size: 12px;
     border-radius: 8px;
-    margin-top: 8px;
 }
 
 .discog-btn-compact .discog-btn-icon { font-size: 12px; }
