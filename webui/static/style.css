@@ -63178,3 +63178,912 @@ body.reduce-effects .dash-card::after {
     color: #ef4444;
     background: rgba(239, 68, 68, 0.12);
 }
+
+
+/* =====================================================================
+ * Auto-Sync Manager — v2 visual overhaul
+ *
+ * Selector-based restyle of the modal that matches the rest of the
+ * app: deeper glass surfaces, accent-color radial washes, gradient
+ * borders, dashboard-style stat tiles, premium tabs, refined
+ * sidebar / board / cards / editor. Functionality is untouched —
+ * every selector here exists in the original block above; this
+ * section just wins on cascade order. Delete the entire block to
+ * revert.
+ * ===================================================================== */
+
+
+/* — Backdrop: deeper blur + subtle accent radial wash so the modal
+ *   feels like it's emerging from the dim app underneath. */
+.auto-sync-overlay {
+    background:
+        radial-gradient(ellipse at top,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 9%, transparent) 0%,
+            rgba(0, 0, 0, 0.78) 55%,
+            rgba(0, 0, 0, 0.86) 100%);
+    backdrop-filter: blur(18px) saturate(1.1);
+    -webkit-backdrop-filter: blur(18px) saturate(1.1);
+}
+
+
+/* — Modal shell: glassy gradient card with thin accent border +
+ *   inner top-edge highlight. Same architecture as the dashboard
+ *   .dash-card so this modal reads as part of the same UI. */
+.auto-sync-modal {
+    background:
+        radial-gradient(ellipse at 0% 0%,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 6%, transparent) 0%,
+            transparent 45%),
+        linear-gradient(165deg,
+            rgba(22, 25, 36, 0.94) 0%,
+            rgba(14, 16, 24, 0.96) 50%,
+            rgba(10, 12, 18, 0.97) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 22px;
+    box-shadow:
+        0 32px 96px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.03),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+
+/* — Header: tighter typography, accent-tinted eyebrow, bigger
+ *   title. Adds a hairline accent line below for separation
+ *   instead of the flat border. */
+.auto-sync-header {
+    padding: 26px 32px 22px;
+    border-bottom: none;
+    background:
+        linear-gradient(180deg, transparent 88%, rgba(var(--accent-rgb), 0.06) 100%);
+    position: relative;
+}
+
+.auto-sync-header::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.35) 30%,
+        rgba(var(--accent-rgb), 0.35) 70%,
+        transparent);
+    opacity: 0.6;
+}
+
+.auto-sync-header h3 {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    background: linear-gradient(135deg, #fff 0%, color-mix(in srgb, rgb(var(--accent-light-rgb)) 65%, white 35%) 140%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+}
+
+.auto-sync-eyebrow {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    opacity: 0.95;
+}
+
+.auto-sync-close {
+    width: 36px;
+    height: 36px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-close:hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+
+/* — KPI summary tiles: match dashboard .dash-card aesthetic.
+ *   Inset gradient + accent-tinted top-edge highlight on hover. */
+.auto-sync-summary {
+    padding: 18px 28px 16px;
+    border-bottom: none;
+    gap: 12px;
+}
+
+.auto-sync-summary div {
+    padding: 14px 16px;
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.04) 0%,
+            rgba(255, 255, 255, 0.02) 50%,
+            rgba(0, 0, 0, 0.2) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.25s, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-summary div::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+
+.auto-sync-summary div:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    transform: translateY(-1px);
+}
+
+.auto-sync-summary div:hover::before {
+    opacity: 1;
+}
+
+.auto-sync-summary span {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #fff 0%, color-mix(in srgb, rgb(var(--accent-light-rgb)) 50%, white 50%) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+}
+
+.auto-sync-summary small {
+    margin-top: 6px;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+
+/* — Live monitor strip: distinct glass panel with accent kicker. */
+.auto-sync-monitor {
+    padding: 14px 28px 16px;
+    border-bottom: none;
+    background:
+        linear-gradient(180deg,
+            rgba(var(--accent-rgb), 0.03) 0%,
+            transparent 100%);
+}
+
+.auto-sync-monitor-kicker {
+    color: rgb(var(--accent-light-rgb));
+    letter-spacing: 0.14em;
+    font-weight: 800;
+}
+
+.auto-sync-monitor-card {
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.06) 0%,
+            rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    border-radius: 12px;
+}
+
+.auto-sync-monitor-card.running {
+    border-color: rgba(74, 222, 128, 0.3);
+    box-shadow:
+        0 0 0 1px rgba(74, 222, 128, 0.12),
+        0 0 24px rgba(74, 222, 128, 0.08);
+}
+
+.auto-sync-monitor-card.error {
+    border-color: rgba(239, 68, 68, 0.3);
+    box-shadow:
+        0 0 0 1px rgba(239, 68, 68, 0.12),
+        0 0 24px rgba(239, 68, 68, 0.08);
+}
+
+
+/* — Intro / refresh button row + ghost-style refresh button. */
+.auto-sync-board-intro,
+.auto-sync-history-intro {
+    padding: 16px 28px 14px;
+    border-bottom: none;
+    position: relative;
+}
+
+.auto-sync-board-intro::after,
+.auto-sync-history-intro::after {
+    content: '';
+    position: absolute;
+    left: 28px;
+    right: 28px;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(255, 255, 255, 0.08) 20%,
+        rgba(255, 255, 255, 0.08) 80%,
+        transparent);
+}
+
+.auto-sync-monitor-head button,
+.auto-sync-board-intro button,
+.auto-sync-history-intro button {
+    height: 32px;
+    padding: 0 16px;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 99px;
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.1) 0%,
+            rgba(var(--accent-rgb), 0.04) 100%);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-monitor-head button:hover,
+.auto-sync-board-intro button:hover,
+.auto-sync-history-intro button:hover {
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.2) 0%,
+            rgba(var(--accent-rgb), 0.1) 100%);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.18);
+}
+
+
+/* — Tabs: underline-style with accent fill + soft glow on active.
+ *   Matches the underline-tabs pattern used elsewhere in the app. */
+.auto-sync-tabs {
+    padding: 0 28px;
+    gap: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: transparent;
+}
+
+.auto-sync-tabs button {
+    padding: 12px 18px;
+    border-radius: 0;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: color 0.2s, border-color 0.2s;
+    position: relative;
+}
+
+.auto-sync-tabs button:hover {
+    color: rgba(255, 255, 255, 0.85);
+    background: transparent;
+}
+
+.auto-sync-tabs button.active {
+    color: rgb(var(--accent-light-rgb));
+    background: transparent;
+    border-bottom-color: rgb(var(--accent-rgb));
+    text-shadow: 0 0 16px color-mix(in srgb, rgb(var(--accent-rgb)) 50%, transparent);
+}
+
+.auto-sync-tabs button.active::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -1px;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 8px;
+    background: radial-gradient(ellipse at center,
+        rgba(var(--accent-rgb), 0.35) 0%,
+        transparent 70%);
+    filter: blur(2px);
+    pointer-events: none;
+}
+
+
+/* — Sidebar: dense glass panel, source groups as collapsible-feel
+ *   cards, filter input pill. */
+.auto-sync-sidebar {
+    background:
+        linear-gradient(180deg,
+            rgba(0, 0, 0, 0.18) 0%,
+            rgba(0, 0, 0, 0.28) 100%);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.auto-sync-sidebar-title {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb));
+    opacity: 0.9;
+}
+
+.auto-sync-sidebar-search {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.auto-sync-sidebar-search:focus {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+}
+
+.auto-sync-source-group {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.025) 0%,
+            rgba(255, 255, 255, 0.012) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 10px;
+}
+
+.auto-sync-source-title {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+
+/* — Sidebar playlist tile: dense glass row with accent border on
+ *   the unscheduled state, accent fill on the scheduled state. */
+.auto-sync-playlist {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.035) 0%,
+            rgba(255, 255, 255, 0.015) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 11px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-playlist::before {
+    background: linear-gradient(180deg,
+        rgb(var(--accent-light-rgb)) 0%,
+        rgb(var(--accent-rgb)) 100%);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.55);
+}
+
+.auto-sync-playlist:hover {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.08) 0%,
+            rgba(255, 255, 255, 0.02) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.auto-sync-playlist.scheduled {
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.12) 0%,
+            rgba(var(--accent-rgb), 0.04) 100%);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+
+/* — Board: dark canvas with subtle radial spotlight + columns
+ *   as glass cards with accent-tinted headers. */
+.auto-sync-board {
+    background:
+        radial-gradient(ellipse at 50% -20%,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 4%, transparent) 0%,
+            transparent 60%);
+    padding: 18px 24px;
+    gap: 14px;
+}
+
+.auto-sync-column {
+    background:
+        linear-gradient(180deg,
+            rgba(255, 255, 255, 0.035) 0%,
+            rgba(255, 255, 255, 0.015) 8%,
+            rgba(0, 0, 0, 0.15) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    transition: border-color 0.25s, box-shadow 0.25s;
+    overflow: hidden;
+    position: relative;
+}
+
+.auto-sync-column::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.3),
+        transparent);
+}
+
+.auto-sync-column-head {
+    background:
+        linear-gradient(180deg,
+            rgba(var(--accent-rgb), 0.06) 0%,
+            transparent 100%);
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.auto-sync-column-head > span:first-child {
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 700;
+    letter-spacing: -0.005em;
+}
+
+.auto-sync-column-head small {
+    color: rgba(var(--accent-light-rgb), 0.65);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+}
+
+.auto-sync-column.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow:
+        0 0 0 1px rgba(var(--accent-rgb), 0.4),
+        0 0 32px rgba(var(--accent-rgb), 0.2),
+        inset 0 0 40px rgba(var(--accent-rgb), 0.06);
+}
+
+.auto-sync-column.custom {
+    border-style: dashed;
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+
+/* — Drop hint: dashed glassy callout that animates on the
+ *   column hover. */
+.auto-sync-drop-hint {
+    border: 1.5px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background:
+        radial-gradient(ellipse at center,
+            rgba(var(--accent-rgb), 0.04) 0%,
+            transparent 70%);
+    padding: 22px 14px;
+    margin: 12px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-drop-hint strong {
+    display: block;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+
+.auto-sync-drop-hint span {
+    display: block;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.auto-sync-column.drag-over .auto-sync-drop-hint {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background:
+        radial-gradient(ellipse at center,
+            rgba(var(--accent-rgb), 0.15) 0%,
+            rgba(var(--accent-rgb), 0.04) 60%,
+            transparent 90%);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-column.drag-over .auto-sync-drop-hint strong {
+    color: rgb(var(--accent-light-rgb));
+    text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
+}
+
+
+/* — Scheduled cards: refined glass + accent left-edge stripe.
+ *   Hourly + weekly variants both inherit. */
+.auto-sync-scheduled-card {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.045) 0%,
+            rgba(255, 255, 255, 0.02) 50%,
+            rgba(0, 0, 0, 0.15) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 13px;
+    margin: 10px 12px;
+    padding: 12px 14px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-scheduled-card::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 0;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: linear-gradient(180deg,
+        rgb(var(--accent-light-rgb)),
+        rgb(var(--accent-rgb)));
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
+}
+
+.auto-sync-scheduled-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.auto-sync-scheduled-card.disabled {
+    opacity: 0.55;
+}
+
+.auto-sync-scheduled-card.disabled::before {
+    background: rgba(255, 255, 255, 0.2);
+    box-shadow: none;
+}
+
+.auto-sync-scheduled-card.failing::before {
+    background: linear-gradient(180deg, #fca5a5, #ef4444);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+}
+
+.auto-sync-scheduled-card.warning::before {
+    background: linear-gradient(180deg, #fde047, #fbbf24);
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+}
+
+.auto-sync-scheduled-name {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    margin-bottom: 4px;
+}
+
+.auto-sync-scheduled-meta {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+
+/* — Card buttons: pill primary + ghost secondary, matching the
+ *   app-wide button language. */
+.auto-sync-scheduled-card button.run {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%) 0%,
+            rgb(var(--accent-rgb)) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 99px;
+    padding: 4px 12px;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 2px 8px rgba(var(--accent-rgb), 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.auto-sync-scheduled-card button.run:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow:
+        0 6px 16px rgba(var(--accent-rgb), 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 85%, white 15%) 0%,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%) 100%);
+}
+
+.auto-sync-scheduled-card button.run:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    box-shadow: none;
+}
+
+.auto-sync-scheduled-card button:not(.run) {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-scheduled-card button:not(.run):hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fff;
+    transform: rotate(90deg) scale(1.05);
+}
+
+
+/* — Timing pills inside scheduled cards: accent for primary, soft
+ *   glass for tz / next-run. */
+.auto-sync-scheduled-timing span {
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.18) 0%,
+            rgba(var(--accent-rgb), 0.08) 100%);
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+}
+
+.auto-sync-scheduled-timing small {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+
+/* — History tab: rows styled like the dashboard's Recent Activity
+ *   strip but bigger / scannable. */
+.auto-sync-history-intro strong {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 800;
+    letter-spacing: -0.005em;
+}
+
+.auto-sync-history-intro span {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.auto-sync-history-row {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.035) 0%,
+            rgba(255, 255, 255, 0.015) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-history-row:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.06) 0%,
+            rgba(255, 255, 255, 0.02) 100%);
+    transform: translateY(-1px);
+}
+
+.auto-sync-history-status {
+    border-radius: 99px;
+    padding: 3px 10px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    border-color: transparent;
+}
+
+.auto-sync-history-status.completed,
+.auto-sync-history-status.finished {
+    background: rgba(74, 222, 128, 0.12);
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.3);
+}
+
+.auto-sync-history-status.error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.auto-sync-history-status.skipped {
+    background: rgba(250, 204, 21, 0.1);
+    color: #fde047;
+    border-color: rgba(250, 204, 21, 0.3);
+}
+
+
+/* — Bulk schedule popover: glass card with accent border. */
+.auto-sync-bulk-menu {
+    background:
+        linear-gradient(160deg,
+            rgba(20, 22, 32, 0.96) 0%,
+            rgba(12, 14, 22, 0.97) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 16px;
+    box-shadow:
+        0 20px 50px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.auto-sync-bulk-menu-title {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 10px;
+}
+
+.auto-sync-bulk-menu button {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-bulk-menu button:hover {
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.16) 0%,
+            rgba(var(--accent-rgb), 0.06) 100%);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.auto-sync-bulk-menu-unschedule {
+    color: #fca5a5 !important;
+    border-color: rgba(239, 68, 68, 0.25) !important;
+}
+
+.auto-sync-bulk-menu-unschedule:hover {
+    background:
+        linear-gradient(160deg,
+            rgba(239, 68, 68, 0.18) 0%,
+            rgba(239, 68, 68, 0.06) 100%) !important;
+    border-color: rgba(239, 68, 68, 0.45) !important;
+    color: #fff !important;
+}
+
+
+/* — Weekly editor popover: full-screen glass overlay matching
+ *   the version modal / tag-preview modal vibe. */
+.auto-sync-weekly-editor {
+    background:
+        radial-gradient(ellipse at 0% 0%,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 7%, transparent) 0%,
+            transparent 40%),
+        linear-gradient(165deg,
+            rgba(20, 22, 32, 0.97) 0%,
+            rgba(12, 14, 22, 0.97) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 22px;
+    box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.auto-sync-weekly-editor-head h4 {
+    background: linear-gradient(135deg, #fff 0%, color-mix(in srgb, rgb(var(--accent-light-rgb)) 60%, white 40%) 140%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+}
+
+.auto-sync-weekly-day-toggle {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 99px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-sync-weekly-day-toggle:hover {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+.auto-sync-weekly-day-toggle.active {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%) 0%,
+            rgb(var(--accent-rgb)) 100%);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: #fff;
+    box-shadow:
+        0 2px 8px rgba(var(--accent-rgb), 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.auto-sync-weekly-editor-save {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%) 0%,
+            rgb(var(--accent-rgb)) 100%) !important;
+    border: 1px solid rgba(var(--accent-rgb), 0.55) !important;
+    box-shadow:
+        0 4px 14px rgba(var(--accent-rgb), 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-radius: 99px !important;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.auto-sync-weekly-editor-cancel,
+.auto-sync-weekly-editor-delete {
+    border-radius: 99px !important;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+
+/* — Empty / unavailable / monitor empty states. */
+.auto-sync-empty,
+.auto-sync-monitor-empty {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.02) 0%,
+            rgba(0, 0, 0, 0.15) 100%);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 18px;
+    text-align: center;
+    font-size: 12px;
+}
+
+.auto-sync-source-group-disabled {
+    opacity: 0.55;
+}
+
+
+/* — Soft scrollbars to match the dashboard. */
+.auto-sync-modal *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.auto-sync-modal *::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.auto-sync-modal *::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.auto-sync-modal *::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.3);
+    background-clip: padding-box;
+}
