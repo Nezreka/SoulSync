@@ -36687,6 +36687,33 @@ def start_runtime_services():
         else:
             logger.warning("No stuck flags detected - system healthy")
 
+        # Album-bundle staging sweep — remove orphan ``<batch_id>``
+        # dirs left behind by previous-session crashes, errored
+        # batches, or pre-fix Soulseek bundles that the per-batch
+        # cleanup gate excluded. Runs once at startup, before any
+        # new batch can register a staging dir, so we can't race a
+        # starting batch. download_batches is empty at this point
+        # (no batches survive a process restart) — every dir on
+        # disk is by definition an orphan.
+        try:
+            from core.downloads.lifecycle import sweep_orphan_album_bundle_staging
+            _staging_root = config_manager.get(
+                'download_source.album_bundle_staging_path',
+                'storage/album_bundle_staging',
+            ) or 'storage/album_bundle_staging'
+            _swept = sweep_orphan_album_bundle_staging(
+                _staging_root,
+                active_batch_ids=set(download_batches.keys()),
+            )
+            if _swept:
+                logger.warning(
+                    "[Startup] Swept %d orphan album-bundle staging dir(s) from %s",
+                    _swept, _staging_root,
+                )
+        except Exception as _sweep_err:
+            # Sweep must not crash startup — log and continue.
+            logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
+
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")
         start_simple_background_monitor()
