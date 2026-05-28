@@ -1131,30 +1131,59 @@ class MusicBrainzSearchClient:
         }
 
     def get_artist_albums(self, artist_mbid: str, album_type: str = 'album,single', limit: int = 200) -> List:
-        """Get artist's releases for discography view."""
+        """Get an artist's full discography for the artist-detail view.
+
+        Walks the paginated browse endpoint (`/release-group?artist=<mbid>`)
+        instead of the artist lookup's embedded release-groups. The lookup
+        (`/artist/<mbid>?inc=release-groups`) is hard-capped at 25 release-
+        groups by MusicBrainz — and ignores the `limit` param entirely — so
+        prolific artists had ~85% of their catalogue silently dropped. That
+        was the bug Sokhi reported: "a lot of albums are missing vs what's
+        showing on the site" (e.g. Kendrick Lamar — 167 release-groups on
+        MB, only the first 25 ever reached SoulSync).
+
+        Unlike the search path there is NO `type` filter and NO studio-only
+        filter here: the artist-detail page wants the *whole* catalogue —
+        albums, EPs, singles, compilations, soundtracks, live — so its tabs
+        mirror musicbrainz.org. `_release_group_to_album` maps each release-
+        group's primary/secondary types into the right bucket.
+        """
         try:
-            artist = self._client.get_artist(artist_mbid, includes=['release-groups'])
-            if not artist or 'release-groups' not in artist:
-                return []
+            # Lightweight lookup purely for the canonical artist name — the
+            # browse endpoint doesn't carry it. Non-fatal: on failure each
+            # Album falls back to 'Unknown Artist' via _release_group_to_album.
+            artist = self._client.get_artist(artist_mbid)
+            artist_name = (artist or {}).get('name', '') or ''
 
-            albums = []
-            for rg in artist.get('release-groups', []):
-                primary_type = rg.get('primary-type', '') or ''
-                rg_type = _map_release_type(primary_type, rg.get('secondary-types', []))
-
-                rg_mbid = rg.get('id', '')
-                image_url = self._cached_art(rg_mbid, rg_mbid)
-
-                albums.append(Album(
-                    id=rg_mbid,
-                    name=rg.get('title', ''),
-                    artists=[artist.get('name', 'Unknown Artist')],
-                    release_date=rg.get('first-release-date', '') or '',
-                    total_tracks=0,
-                    album_type=rg_type,
-                    image_url=image_url,
-                    external_urls={'musicbrainz': f'https://musicbrainz.org/release-group/{rg_mbid}'},
-                ))
+            page_size = 100  # MusicBrainz browse hard cap per page
+            albums: List[Album] = []
+            seen: set = set()
+            offset = 0
+            while len(albums) < limit:
+                page = self._client.browse_artist_release_groups(
+                    artist_mbid,
+                    # No type filter — fetch every primary type. Secondary
+                    # types (Compilation/Soundtrack/Live) ride along on their
+                    # Album/Single/EP parent and are bucketed downstream.
+                    # (Filtering by type=compilation is intentionally avoided:
+                    # it's a secondary type and silently breaks MB's filter —
+                    # see browse_artist_release_groups docs.)
+                    release_types=None,
+                    limit=page_size,
+                    offset=offset,
+                )
+                if not page:
+                    break
+                for rg in page:
+                    rg_mbid = rg.get('id', '')
+                    if rg_mbid and rg_mbid in seen:
+                        continue
+                    if rg_mbid:
+                        seen.add(rg_mbid)
+                    albums.append(self._release_group_to_album(rg, artist_name))
+                if len(page) < page_size:
+                    break  # last page reached
+                offset += page_size
             return albums[:limit]
         except Exception as e:
             logger.warning(f"MusicBrainz artist albums failed: {e}")

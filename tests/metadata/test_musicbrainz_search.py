@@ -1179,3 +1179,150 @@ def test_search_tracks_with_artist_swallows_client_errors():
     client._client.search_recording.side_effect = RuntimeError('network down')
 
     assert client.search_tracks_with_artist('Track', 'Artist', limit=10) == []
+
+
+# ---------------------------------------------------------------------------
+# get_artist_albums — full-discography browse pagination
+#
+# Regression for Sokhi's report ("a lot of albums are missing vs the site").
+# The old impl read the artist *lookup*'s embedded release-groups
+# (`/artist/<mbid>?inc=release-groups`), which MusicBrainz hard-caps at 25
+# and which ignores the `limit` param — so ~85% of a prolific artist's
+# catalogue (Kendrick Lamar: 167 release-groups) was silently dropped.
+# The fix walks the paginated browse endpoint instead.
+# ---------------------------------------------------------------------------
+
+def _mk_rg(rg_id, title, primary='Album', secondary=None, date='2000-01-01'):
+    return {
+        'id': rg_id,
+        'title': title,
+        'primary-type': primary,
+        'secondary-types': secondary or [],
+        'first-release-date': date,
+    }
+
+
+def test_get_artist_albums_does_not_use_capped_lookup_release_groups():
+    """The capped `inc=release-groups` lookup must NOT be the source of the
+    discography. We still do a lightweight name lookup, but never request
+    the embedded (25-capped) release-groups."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Kendrick Lamar'}
+    client._client.browse_artist_release_groups.return_value = [
+        _mk_rg('rg-1', 'DAMN.'),
+    ]
+
+    client.get_artist_albums('mbid-kdot')
+
+    # browse is the discography source.
+    assert client._client.browse_artist_release_groups.called
+    # The name lookup must not pull the capped embedded release-groups.
+    for call in client._client.get_artist.call_args_list:
+        assert 'release-groups' not in (call.kwargs.get('includes') or [])
+        assert all('release-groups' not in (a or []) for a in call.args[1:])
+
+
+def test_get_artist_albums_paginates_past_25_cap():
+    """Walks multiple browse pages until a short page, returning the FULL
+    catalogue — the whole point of the fix. A single full page (100) must
+    trigger a follow-up fetch."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Prolific Artist'}
+
+    page1 = [_mk_rg(f'rg-{i}', f'Album {i}') for i in range(100)]
+    page2 = [_mk_rg(f'rg-{i}', f'Album {i}') for i in range(100, 164)]
+    client._client.browse_artist_release_groups.side_effect = [page1, page2, []]
+
+    albums = client.get_artist_albums('mbid-x', limit=200)
+
+    assert len(albums) == 164  # not truncated to 25
+    # Second page fetched at offset=100.
+    offsets = [c.kwargs.get('offset') for c in client._client.browse_artist_release_groups.call_args_list]
+    assert 0 in offsets and 100 in offsets
+    # No `type` filter — the detail page wants the whole catalogue.
+    for c in client._client.browse_artist_release_groups.call_args_list:
+        assert c.kwargs.get('release_types') is None
+
+
+def test_get_artist_albums_stops_on_short_page():
+    """A page shorter than the page size is the last page — don't fetch
+    a spurious extra page."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Small Artist'}
+    client._client.browse_artist_release_groups.return_value = [
+        _mk_rg('rg-1', 'Only Album'),
+    ]
+
+    albums = client.get_artist_albums('mbid-small', limit=200)
+
+    assert len(albums) == 1
+    client._client.browse_artist_release_groups.assert_called_once()
+
+
+def test_get_artist_albums_respects_limit():
+    """`limit` caps the returned list even when more release-groups exist."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Prolific Artist'}
+    client._client.browse_artist_release_groups.return_value = [
+        _mk_rg(f'rg-{i}', f'Album {i}') for i in range(100)
+    ]
+
+    albums = client.get_artist_albums('mbid-x', limit=50)
+
+    assert len(albums) == 50
+
+
+def test_get_artist_albums_dedupes_release_group_ids():
+    """A release-group id repeated across pages is collapsed to one card.
+    First page is full (100) so a second page is fetched; 'dup' appears on
+    both and must surface only once."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Artist'}
+    page1 = [_mk_rg('dup', 'A')] + [_mk_rg(f'rg-{i}', f'B{i}') for i in range(99)]
+    page2 = [_mk_rg('dup', 'A again'), _mk_rg('rg-last', 'C')]
+    client._client.browse_artist_release_groups.side_effect = [page1, page2, []]
+
+    albums = client.get_artist_albums('mbid-x', limit=200)
+
+    ids = [a.id for a in albums]
+    assert ids.count('dup') == 1
+    assert 'rg-last' in ids
+    assert len(ids) == len(set(ids))
+
+
+def test_get_artist_albums_maps_types_into_buckets():
+    """Primary/secondary types map to the album_type the discography binning
+    expects: EP→ep, Single→single, Album+Compilation→compilation, plain
+    Album→album."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Artist'}
+    client._client.browse_artist_release_groups.return_value = [
+        _mk_rg('rg-lp', 'The LP', primary='Album'),
+        _mk_rg('rg-ep', 'The EP', primary='EP'),
+        _mk_rg('rg-single', 'The Single', primary='Single'),
+        _mk_rg('rg-comp', 'Greatest Hits', primary='Album', secondary=['Compilation']),
+    ]
+
+    albums = {a.id: a for a in client.get_artist_albums('mbid-x')}
+
+    assert albums['rg-lp'].album_type == 'album'
+    assert albums['rg-ep'].album_type == 'ep'
+    assert albums['rg-single'].album_type == 'single'
+    assert albums['rg-comp'].album_type == 'compilation'
+
+
+def test_get_artist_albums_swallows_browse_errors():
+    """Browse raising must not crash the discography endpoint — return []
+    so the source-priority cascade falls through to the next provider."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_artist.return_value = {'name': 'Artist'}
+    client._client.browse_artist_release_groups.side_effect = RuntimeError('mb down')
+
+    assert client.get_artist_albums('mbid-x') == []
