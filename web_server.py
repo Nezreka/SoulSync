@@ -20802,25 +20802,7 @@ def reset_tidal_playlist(playlist_id):
 @app.route('/api/tidal/delete/<playlist_id>', methods=['POST'])
 def delete_tidal_playlist(playlist_id):
     """Delete Tidal playlist state completely"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-        
-        # Remove from state dictionary
-        del tidal_discovery_states[playlist_id]
-        
-        logger.info(f"Deleted Tidal playlist state: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist deleted"})
-        
-    except Exception as e:
-        logger.error(f"Error deleting Tidal playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _delete_source_playlist(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
 
 @app.route('/api/tidal/update_phase/<playlist_id>', methods=['POST'])
 def update_tidal_playlist_phase(playlist_id):
@@ -21074,7 +21056,31 @@ from core.discovery.scoring import (
 # Tidal discovery worker logic lives in core/discovery/tidal.py.
 from core.discovery import tidal as _discovery_tidal
 # Source-agnostic discovery route helpers (lifted from the per-source copies).
-from core.discovery.endpoints import convert_results_to_spotify_tracks
+from core.discovery.endpoints import (
+    convert_results_to_spotify_tracks,
+    cancel_sync as _cancel_sync_core,
+    delete_playlist_state as _delete_playlist_state_core,
+)
+
+
+def _cancel_source_sync(states, key, label, not_found_message):
+    """Thin glue: wire web_server's sync infra into the lifted cancel_sync
+    helper and jsonify the result. Used by the per-source cancel routes."""
+    body, code = _cancel_sync_core(
+        states, key, label=label, not_found_message=not_found_message,
+        sync_lock=sync_lock, sync_states=sync_states,
+        active_sync_workers=active_sync_workers,
+    )
+    return jsonify(body), code
+
+
+def _delete_source_playlist(states, key, label, not_found_message):
+    """Thin glue for the per-source delete routes that share the identical
+    delete body (Tidal/Deezer/Qobuz/Spotify-Public)."""
+    body, code = _delete_playlist_state_core(
+        states, key, label=label, not_found_message=not_found_message,
+    )
+    return jsonify(body), code
 
 
 def _build_tidal_discovery_deps():
@@ -21214,33 +21220,7 @@ def get_tidal_sync_status(playlist_id):
 @app.route('/api/tidal/sync/cancel/<playlist_id>', methods=['POST'])
 def cancel_tidal_sync(playlist_id):
     """Cancel sync for a Tidal playlist"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-        
-        if sync_playlist_id:
-            # Cancel the sync using existing sync infrastructure
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-            
-            # Clean up sync worker
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-        
-        # Revert Tidal state
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-        
-        return jsonify({"success": True, "message": "Tidal sync cancelled"})
-        
-    except Exception as e:
-        logger.error(f"Error cancelling Tidal sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
 
 
 # ===================================================================
@@ -21699,25 +21679,7 @@ def reset_deezer_playlist(playlist_id):
 @app.route('/api/deezer/delete/<playlist_id>', methods=['POST'])
 def delete_deezer_playlist(playlist_id):
     """Delete Deezer playlist state completely"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        # Remove from state dictionary
-        del deezer_discovery_states[playlist_id]
-
-        logger.info(f"Deleted Deezer playlist state: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist deleted"})
-
-    except Exception as e:
-        logger.error(f"Error deleting Deezer playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _delete_source_playlist(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
 
 @app.route('/api/deezer/update_phase/<playlist_id>', methods=['POST'])
 def update_deezer_playlist_phase(playlist_id):
@@ -21893,33 +21855,7 @@ def get_deezer_sync_status(playlist_id):
 @app.route('/api/deezer/sync/cancel/<playlist_id>', methods=['POST'])
 def cancel_deezer_sync(playlist_id):
     """Cancel sync for a Deezer playlist"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if sync_playlist_id:
-            # Cancel the sync using existing sync infrastructure
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-
-            # Clean up sync worker
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-
-        # Revert Deezer state
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-
-        return jsonify({"success": True, "message": "Deezer sync cancelled"})
-
-    except Exception as e:
-        logger.error(f"Error cancelling Deezer sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
 
 
 # ===================================================================
@@ -22335,23 +22271,7 @@ def reset_qobuz_playlist(playlist_id):
 @app.route('/api/qobuz/delete/<playlist_id>', methods=['POST'])
 def delete_qobuz_playlist(playlist_id):
     """Delete Qobuz playlist state completely."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        del qobuz_discovery_states[playlist_id]
-
-        logger.info(f"Deleted Qobuz playlist state: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist deleted"})
-
-    except Exception as e:
-        logger.error(f"Error deleting Qobuz playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _delete_source_playlist(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
 
 
 @app.route('/api/qobuz/update_phase/<playlist_id>', methods=['POST'])
@@ -22517,29 +22437,7 @@ def get_qobuz_sync_status(playlist_id):
 @app.route('/api/qobuz/sync/cancel/<playlist_id>', methods=['POST'])
 def cancel_qobuz_sync(playlist_id):
     """Cancel sync for a Qobuz playlist."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if sync_playlist_id:
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-
-        return jsonify({"success": True, "message": "Qobuz sync cancelled"})
-
-    except Exception as e:
-        logger.error(f"Error cancelling Qobuz sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
 
 
 # ===================================================================
@@ -23239,25 +23137,7 @@ def reset_spotify_public_playlist(url_hash):
 @app.route('/api/spotify-public/delete/<url_hash>', methods=['POST'])
 def delete_spotify_public_playlist(url_hash):
     """Delete Spotify Public playlist state completely"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        # Remove from state dictionary
-        del spotify_public_discovery_states[url_hash]
-
-        logger.info(f"Deleted Spotify Public playlist state: {url_hash}")
-        return jsonify({"success": True, "message": "Playlist deleted"})
-
-    except Exception as e:
-        logger.error(f"Error deleting Spotify Public playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _delete_source_playlist(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
 
 @app.route('/api/spotify-public/update_phase/<url_hash>', methods=['POST'])
 def update_spotify_public_playlist_phase(url_hash):
@@ -23434,33 +23314,7 @@ def get_spotify_public_sync_status(url_hash):
 @app.route('/api/spotify-public/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_spotify_public_sync(url_hash):
     """Cancel sync for a Spotify Public playlist"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if sync_playlist_id:
-            # Cancel the sync using existing sync infrastructure
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-
-            # Clean up sync worker
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-
-        # Revert Spotify Public state
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-
-        return jsonify({"success": True, "message": "Spotify Public sync cancelled"})
-
-    except Exception as e:
-        logger.error(f"Error cancelling Spotify Public sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
 
 
 # ===================================================================
@@ -23890,24 +23744,7 @@ def get_itunes_link_sync_status(url_hash):
 
 @app.route('/api/itunes-link/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_itunes_link_sync(url_hash):
-    try:
-        if url_hash not in itunes_link_discovery_states:
-            return jsonify({"error": "iTunes Link not found"}), 404
-        state = itunes_link_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-        if sync_playlist_id:
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-        return jsonify({"success": True, "message": "iTunes Link sync cancelled"})
-    except Exception as e:
-        logger.error(f"Error cancelling iTunes Link sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(itunes_link_discovery_states, url_hash, "iTunes Link", "iTunes Link not found")
 
 
 # ===================================================================
@@ -24555,33 +24392,7 @@ def get_youtube_sync_status(url_hash):
 @app.route('/api/youtube/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_youtube_sync(url_hash):
     """Cancel sync for a YouTube playlist"""
-    try:
-        if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
-        
-        state = youtube_playlist_states[url_hash]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-        
-        if sync_playlist_id:
-            # Cancel the sync using existing sync infrastructure
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-            
-            # Clean up sync worker
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-        
-        # Revert YouTube state
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-        
-        return jsonify({"success": True, "message": "YouTube sync cancelled"})
-        
-    except Exception as e:
-        logger.error(f"Error cancelling YouTube sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(youtube_playlist_states, url_hash, "YouTube", "YouTube playlist not found")
 
 # New YouTube Playlist Management Endpoints (for persistent state)
 
@@ -30690,34 +30501,7 @@ def get_listenbrainz_sync_status(playlist_mbid):
 @app.route('/api/listenbrainz/sync/cancel/<playlist_mbid>', methods=['POST'])
 def cancel_listenbrainz_sync(playlist_mbid):
     """Cancel sync for a ListenBrainz playlist"""
-    try:
-        state_key = _lb_state_key(playlist_mbid)
-        if state_key not in listenbrainz_playlist_states:
-            return jsonify({"error": "ListenBrainz playlist not found"}), 404
-
-        state = listenbrainz_playlist_states[state_key]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if sync_playlist_id:
-            # Cancel the sync using existing sync infrastructure
-            with sync_lock:
-                sync_states[sync_playlist_id] = {"status": "cancelled"}
-
-            # Clean up sync worker
-            if sync_playlist_id in active_sync_workers:
-                del active_sync_workers[sync_playlist_id]
-
-        # Revert ListenBrainz state
-        state['phase'] = 'discovered'
-        state['sync_playlist_id'] = None
-        state['sync_progress'] = {}
-
-        return jsonify({"success": True, "message": "ListenBrainz sync cancelled"})
-
-    except Exception as e:
-        logger.error(f"Error cancelling ListenBrainz sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _cancel_source_sync(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz", "ListenBrainz playlist not found")
 
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
