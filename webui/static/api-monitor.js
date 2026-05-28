@@ -201,6 +201,7 @@ function _renderEqualizerBars(grid, data) {
             bar.type = 'button';
             bar.className = 'rate-eq';
             bar.id = `rate-eq-${svc}`;
+            bar.dataset.svc = svc;
             bar.style.setProperty('--eq-accent', accent);
             bar.setAttribute('aria-label', `${label} rate detail`);
             bar.onclick = () => _openRateModal(svc);
