@@ -153,7 +153,9 @@ class TestDownloadFallbackOnCdnRefusal:
 
     def test_tag_writer_retries_with_original_on_failure(self, monkeypatch):
         """tag_writer.download_cover_art must fall back to the
-        original URL when the upgraded URL fails."""
+        original URL when the upgraded URL fails. The fetch now lives in
+        the shared ``core.metadata.artwork._fetch_art_bytes`` helper that
+        tag_writer delegates to, so the network is patched there."""
         from core import tag_writer
 
         original_url = 'https://cdn-images.dzcdn.net/images/cover/abc/1000x1000-000000-80-0-0.jpg'
@@ -176,7 +178,7 @@ class TestDownloadFallbackOnCdnRefusal:
                 raise Exception("403 Forbidden")
             return _FakeResponse()
 
-        monkeypatch.setattr('core.tag_writer.urllib.request.urlopen', fake_urlopen)
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
 
         result = tag_writer.download_cover_art(original_url)
 
@@ -185,8 +187,9 @@ class TestDownloadFallbackOnCdnRefusal:
         assert call_log == [upgraded_url, original_url]
 
     def test_tag_writer_no_fallback_for_non_dzcdn_url(self, monkeypatch):
-        """Non-Deezer URLs go through unchanged — no upgrade, no
-        fallback. Fast path preserved."""
+        """Non-Deezer URLs with no recognizable size segment go through
+        unchanged — no upgrade, so a single fetch attempt with no
+        fallback."""
         from core import tag_writer
 
         spotify_url = 'https://i.scdn.co/image/abc'
@@ -196,10 +199,10 @@ class TestDownloadFallbackOnCdnRefusal:
             call_log.append(url)
             raise Exception("network error")
 
-        monkeypatch.setattr('core.tag_writer.urllib.request.urlopen', fake_urlopen)
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
 
         result = tag_writer.download_cover_art(spotify_url)
 
         assert result is None
-        # Single attempt — no Deezer fallback path triggered
+        # Single attempt — upgrade is a no-op for this URL, so no fallback
         assert call_log == [spotify_url]

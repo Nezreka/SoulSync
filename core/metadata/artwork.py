@@ -256,6 +256,79 @@ def _browser_safe_image_url(url: str) -> str:
     return url
 
 
+def _upgrade_art_url(art_url: str) -> str:
+    """Rewrite a source CDN art URL to the highest resolution that source
+    serves, so embedded tag art is as sharp as the cover.jpg in the folder.
+
+    - Spotify (i.scdn.co): request the original uploaded master (~2000px+).
+    - iTunes (mzstatic.com): bump the size segment to 3000x3000.
+    - Deezer (dzcdn): rewrite to 1900x1900 (CDN serves larger than the API's
+      1000px cover_xl).
+
+    Unrecognized URLs are returned unchanged. Both the embed and cover.jpg
+    paths call this so the two never diverge in quality again.
+    """
+    if not art_url:
+        return art_url
+    if "i.scdn.co" in art_url:
+        try:
+            from core.spotify_client import _upgrade_spotify_image_url
+
+            return _upgrade_spotify_image_url(art_url)
+        except Exception as e:
+            logger.debug("upgrade spotify image url failed: %s", e)
+    elif "mzstatic.com" in art_url:
+        return re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
+    elif "dzcdn" in art_url:
+        try:
+            from core.deezer_client import _upgrade_deezer_cover_url
+
+            return _upgrade_deezer_cover_url(art_url)
+        except Exception as e:
+            logger.debug("upgrade deezer image url failed: %s", e)
+    elif "coverartarchive.org" in art_url:
+        # MusicBrainz art comes in as Cover Art Archive thumbnails
+        # (/front-250, also -500/-1200 — see musicbrainz_search._cover_art_url).
+        # The bare /front is the original full-resolution upload, which always
+        # exists when any front art does, so rewrite the size segment back to
+        # it. Critical for MB-as-source users: without this, embedded art is
+        # the 250px search thumbnail. `_fetch_art_bytes` falls back to the
+        # sized URL if /front is ever refused.
+        return re.sub(r"/front-\d+", "/front", art_url)
+    return art_url
+
+
+def _fetch_art_bytes(art_url: str):
+    """Fetch artwork bytes at the highest resolution the source serves.
+
+    Upgrades the URL via `_upgrade_art_url`, then fetches. If the upgraded
+    (larger) size is refused by the CDN, retry once with the original URL so
+    we never regress vs. the un-upgraded behavior. Empirically the upgrade
+    works for every album tested; the fallback just defends the edge case.
+
+    Returns `(image_data, mime_type)` or `(None, None)` on failure.
+    """
+    if not art_url:
+        return None, None
+    upgraded = _upgrade_art_url(art_url)
+    try:
+        with urllib.request.urlopen(upgraded, timeout=10) as response:
+            return response.read(), (response.info().get_content_type() or "image/jpeg")
+    except Exception as fetch_err:
+        if upgraded != art_url:
+            logger.info(
+                "Upgraded art URL refused (%s); retrying original size", fetch_err
+            )
+            try:
+                with urllib.request.urlopen(art_url, timeout=10) as response:
+                    return response.read(), (response.info().get_content_type() or "image/jpeg")
+            except Exception as retry_err:
+                logger.error("Art fetch failed after fallback: %s", retry_err)
+                return None, None
+        logger.error("Art fetch failed: %s", fetch_err)
+        return None, None
+
+
 def embed_album_art_metadata(audio_file, metadata: dict):
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
@@ -284,9 +357,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             if not art_url:
                 logger.warning("No album art URL available for embedding.")
                 return
-            with urllib.request.urlopen(art_url, timeout=10) as response:
-                image_data = response.read()
-                mime_type = response.info().get_content_type() or "image/jpeg"
+            image_data, mime_type = _fetch_art_bytes(art_url)
 
         if not image_data:
             logger.error("Failed to download album art data.")
@@ -365,59 +436,13 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                         art_url = images[0].get("url", "")
                 if art_url:
                     logger.info("Using cover art URL from album context")
-            if art_url and "i.scdn.co" in art_url:
-                try:
-                    from core.spotify_client import _upgrade_spotify_image_url
-
-                    art_url = _upgrade_spotify_image_url(art_url)
-                except Exception as e:
-                    logger.debug("upgrade spotify image url failed: %s", e)
-            elif art_url and "mzstatic.com" in art_url:
-                art_url = re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
-            elif art_url and "dzcdn" in art_url:
-                # Deezer's API returns cover_xl URLs at 1000×1000 but
-                # the underlying CDN serves up to 1900×1900 by rewriting
-                # the size segment in the URL path. Without this upgrade
-                # users embedding cover art via Deezer get visibly
-                # blurry covers in their library / phone player (Discord
-                # report from Tim, 2026-05). Same shape as the iTunes
-                # mzstatic upgrade above + Spotify scdn upgrade.
-                try:
-                    from core.deezer_client import _upgrade_deezer_cover_url
-
-                    art_url = _upgrade_deezer_cover_url(art_url)
-                except Exception as e:
-                    logger.debug("upgrade deezer image url failed: %s", e)
             if not art_url:
                 logger.warning("No cover art URL available for download.")
                 return
-            # Fetch with one fallback level: if we upgraded a Deezer
-            # URL above and the CDN happens to refuse the larger size
-            # for this specific album, retry with the original URL so
-            # we never regress vs. pre-upgrade behavior. Empirically
-            # 1900 works for every album tested but defending against
-            # the edge case keeps the fix strictly non-regressive.
-            original_url = album_info.get("album_image_url")
-            if context and not original_url:
-                album_ctx = get_import_context_album(context)
-                original_url = album_ctx.get("image_url") or original_url
-            try:
-                with urllib.request.urlopen(art_url, timeout=10) as response:
-                    image_data = response.read()
-            except Exception as fetch_err:
-                if (
-                    "dzcdn" in art_url
-                    and original_url
-                    and original_url != art_url
-                ):
-                    logger.info(
-                        "Deezer CDN refused upgraded cover URL (%s); "
-                        "retrying with original size", fetch_err,
-                    )
-                    with urllib.request.urlopen(original_url, timeout=10) as response:
-                        image_data = response.read()
-                else:
-                    raise
+            # Upgrade to the source's highest resolution (Spotify master /
+            # iTunes 3000 / Deezer 1900) with a one-level fallback — shared
+            # with the tag-embed path so cover.jpg and embedded art match.
+            image_data, _ = _fetch_art_bytes(art_url)
 
         if not image_data:
             return
