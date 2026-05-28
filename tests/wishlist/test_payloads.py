@@ -106,6 +106,204 @@ def test_extract_spotify_track_from_modal_info_reconstructs_from_slskd_result():
     assert out["album"]["name"] == "Album Three"
 
 
+# ---------------------------------------------------------------------------
+# track_number / disc_number preservation through the wishlist payload
+# helpers — pins the bug A fix from PR 2/4. Pre-fix the helpers
+# defaulted missing numbers to 1, which locked every wishlist retry
+# to track 01 because the import pipeline's filename-extract fallback
+# only fires when the value is None (not the pre-filled 1).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_wishlist_track_format_preserves_real_track_number():
+    """Real track positions must survive the format helper. Pre-fix
+    the helper read ``track_info.get('track_number', 1)`` which always
+    returned 1 if the upstream payload had dropped the key — the
+    desired number was lost on every round-trip."""
+    track = {
+        "name": "No Sleep Till Brooklyn",
+        "artist": "Beastie Boys",
+        "album": {"name": "Licensed to Ill", "release_date": "1986-11-15"},
+        "track_number": 8,
+        "disc_number": 1,
+    }
+    out = payloads.ensure_wishlist_track_format(track)
+    assert out["track_number"] == 8
+    assert out["disc_number"] == 1
+
+
+def test_ensure_wishlist_track_format_keeps_missing_track_number_as_none():
+    """When the upstream payload doesn't carry a track number, the
+    helper must NOT pre-fill 1 — that poisons the chain and locks the
+    file to track 01. Leave None so the import pipeline's filename
+    fallback at ``core/imports/pipeline.py:652`` can fire."""
+    track = {
+        "name": "Mystery Track",
+        "artist": "Artist",
+        "album": {"name": "Album"},
+    }
+    out = payloads.ensure_wishlist_track_format(track)
+    assert out["track_number"] is None
+    assert out["disc_number"] is None
+
+
+def test_build_cancelled_task_wishlist_payload_preserves_track_number():
+    """Cancellation→re-add path was the worst offender — the payload
+    builder dropped track_number from the saved data entirely (didn't
+    even include the key). Next wishlist cycle saw missing key →
+    helper defaulted to 1 → file imported as 01. Now both the
+    cancellation payload AND the helper preserve real positions."""
+    task = {
+        "track_info": {
+            "id": "trk-1", "name": "Brass Monkey",
+            "artists": [{"name": "Beastie Boys"}],
+            "album": {"name": "Licensed to Ill", "release_date": "1986-11-15"},
+            "track_number": 11,
+            "disc_number": 1,
+        },
+        "playlist_name": "Wishlist",
+        "playlist_id": "p1",
+    }
+    out = payloads.build_cancelled_task_wishlist_payload(task)
+    td = out["track_data"]
+    assert td["track_number"] == 11
+    assert td["disc_number"] == 1
+    # Album release_date survives the round-trip so the path template
+    # renders the year in the folder name.
+    assert td["album"]["release_date"] == "1986-11-15"
+
+
+def test_track_object_to_dict_preserves_full_album_dict():
+    """When the input track has an album as a DICT (e.g. raw Spotify
+    spotify_track_data), every album field must survive the
+    Track→dict conversion. Pre-fix the conversion built
+    ``album = {'name': X}`` only, silently dropping release_date /
+    images / album_type / total_tracks. Result: every wishlist row
+    added from a Track-object path had empty release_date in the DB
+    → import path-template rendered without year → user's main
+    complaint."""
+    track_obj = SimpleNamespace(
+        id="track-1",
+        name="Never Gonna Give You Up",
+        artists=[{"name": "Rick Astley"}],
+        album={
+            "id": "alb-1",
+            "name": "Whenever You Need Somebody",
+            "release_date": "1987-11-12",
+            "album_type": "album",
+            "total_tracks": 10,
+            "images": [{"url": "https://cdn.example/cover.jpg"}],
+            "artists": [{"name": "Rick Astley"}],
+        },
+        duration_ms=213000,
+        track_number=1,
+        disc_number=1,
+    )
+    out = payloads.track_object_to_dict(track_obj)
+    assert out["album"]["name"] == "Whenever You Need Somebody"
+    assert out["album"]["release_date"] == "1987-11-12"
+    assert out["album"]["album_type"] == "album"
+    assert out["album"]["total_tracks"] == 10
+    assert out["album"]["id"] == "alb-1"
+    assert out["album"]["images"] == [{"url": "https://cdn.example/cover.jpg"}]
+    assert out["album"]["artists"] == [{"name": "Rick Astley"}]
+
+
+def test_track_object_to_dict_extracts_release_date_from_album_object():
+    """When the album is a sub-OBJECT (e.g. Spotify/Deezer Album
+    dataclass), the conversion must pull release_date / album_type /
+    total_tracks from its attributes — not assume dict-only access.
+    Pre-fix the only attr read was ``.name``, dropping everything
+    else even when the object had it."""
+
+    class _AlbumLike:
+        name = "Licensed to Ill"
+        id = "alb-li"
+        release_date = "1986-11-15"
+        album_type = "album"
+        total_tracks = 13
+        artists = ["Beastie Boys"]
+        images = [{"url": "https://cover.example/li.jpg"}]
+
+    track_obj = SimpleNamespace(
+        id="track-2",
+        name="No Sleep Till Brooklyn",
+        artists=[{"name": "Beastie Boys"}],
+        album=_AlbumLike(),
+        duration_ms=242000,
+        track_number=8,
+        disc_number=1,
+    )
+    out = payloads.track_object_to_dict(track_obj)
+    assert out["album"]["name"] == "Licensed to Ill"
+    assert out["album"]["release_date"] == "1986-11-15"
+    assert out["album"]["total_tracks"] == 13
+    assert out["album"]["id"] == "alb-li"
+    assert out["track_number"] == 8
+
+
+def test_track_object_to_dict_string_album_pulls_release_date_from_track_attrs():
+    """When the album is a bare STRING (the lean Track dataclass
+    shape used by some metadata sources), the album dict has to be
+    built from scratch. Pull release_date + album_type from adjacent
+    track-object attrs and image_url from the track itself so we
+    don't lose the path-template inputs entirely."""
+    track_obj = SimpleNamespace(
+        id="track-3",
+        name="Stacy's Mom",
+        artists=[{"name": "Fountains of Wayne"}],
+        album="Welcome Interstate Managers",
+        release_date="2003-06-10",
+        album_type="album",
+        total_tracks=15,
+        image_url="https://cover.example/wim.jpg",
+        track_number=3,
+        disc_number=1,
+        duration_ms=200000,
+    )
+    out = payloads.track_object_to_dict(track_obj)
+    assert out["album"]["name"] == "Welcome Interstate Managers"
+    assert out["album"]["release_date"] == "2003-06-10"
+    assert out["album"]["album_type"] == "album"
+    assert out["album"]["total_tracks"] == 15
+    assert out["album"]["images"] == [{"url": "https://cover.example/wim.jpg"}]
+    assert out["track_number"] == 3
+
+
+def test_track_object_to_dict_missing_track_number_stays_none():
+    """Track-object-style sources that genuinely don't know the track
+    position must surface as None (not pre-filled 1), so the import
+    pipeline's filename-extract fallback can fire."""
+    track_obj = SimpleNamespace(
+        id="track-4",
+        name="Unknown Track",
+        artists=[{"name": "Artist"}],
+        album="Album",
+    )
+    out = payloads.track_object_to_dict(track_obj)
+    assert out["track_number"] is None
+    assert out["disc_number"] is None
+
+
+def test_build_cancelled_task_wishlist_payload_string_album_pulls_release_date_from_track_info():
+    """When the source ``album`` field is a bare string, the payload
+    builder constructs an album dict from scratch — it must pull
+    release_date / album_image_url / etc. from the adjacent
+    track_info fields rather than dropping them silently."""
+    task = {
+        "track_info": {
+            "id": "trk-2", "name": "Song",
+            "artists": [{"name": "Artist"}],
+            "album": "Bare String Album",
+            "release_date": "2020-06-01",
+        },
+    }
+    out = payloads.build_cancelled_task_wishlist_payload(task)
+    album = out["track_data"]["album"]
+    assert album["name"] == "Bare String Album"
+    assert album["release_date"] == "2020-06-01"
+
+
 def test_ensure_wishlist_track_format_defaults_non_dict_album_to_album_type():
     """When ``album`` arrives as a non-dict (legacy/reconstruction path) we
     must not stamp ``album_type='single'`` — that lies about the origin

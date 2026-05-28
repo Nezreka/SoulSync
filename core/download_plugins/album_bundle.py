@@ -25,7 +25,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from config.settings import config_manager
 from utils.logging_config import get_logger
@@ -177,6 +177,179 @@ def atomic_copy_to_staging(src: Path, dest: Path) -> bool:
         raise
 
 
+# Number of consecutive None-status reads tolerated before treating the
+# job as gone. Sized for the SAB queue→history transition window: SAB
+# removes the slot from the queue before adding it to history, and on a
+# busy server (par2 verify + unrar) that window can be several poll
+# intervals. At the default 2s interval, 5 retries = ~10s of tolerance
+# before we give up and emit a terminal failure. Override via
+# ``download_source.album_bundle_transient_miss_threshold`` for users
+# whose servers need more headroom (very large multi-disc box sets,
+# slow disks, etc.).
+DEFAULT_TRANSIENT_MISS_THRESHOLD = 5
+
+
+def get_transient_miss_threshold() -> int:
+    """Return the configured transient-miss threshold for poll loops."""
+    raw = config_manager.get('download_source.album_bundle_transient_miss_threshold',
+                             DEFAULT_TRANSIENT_MISS_THRESHOLD)
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_TRANSIENT_MISS_THRESHOLD
+
+
+class TransientMissCounter:
+    """Bounded retry counter for adapter status reads.
+
+    Both the album-bundle poll (in ``poll_album_download``) and the
+    per-track download threads in ``usenet.py`` / ``torrent.py`` need
+    the same "tolerate N consecutive missing or unmapped reads before
+    declaring the job gone" logic. Lifted into one class so the rule
+    is in one place and unit-testable in isolation — the per-track
+    paths used to carry inline counters that mirrored this logic by
+    hand, which is exactly the kind of duplication that drifts."""
+
+    def __init__(self, threshold: Optional[int] = None) -> None:
+        self.threshold = threshold if threshold is not None else get_transient_miss_threshold()
+        self.misses = 0
+
+    def record_miss(self) -> bool:
+        """Bump the miss counter. Returns True when the counter has
+        reached the threshold (caller should give up)."""
+        self.misses += 1
+        return self.misses >= self.threshold
+
+    def reset(self) -> None:
+        """Successful read — reset the counter back to zero."""
+        self.misses = 0
+
+
+def poll_album_download(
+    *,
+    get_status: Callable[[], Optional[Any]],
+    title: str,
+    emit: Callable[..., None],
+    complete_states: frozenset,
+    failed_states: frozenset = frozenset(['failed']),
+    is_shutdown: Optional[Callable[[], bool]] = None,
+    transient_miss_threshold: int = DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    poll_interval: Optional[float] = None,
+    timeout: Optional[float] = None,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+    log_prefix: str = '[album_bundle]',
+) -> Optional[str]:
+    """Drive the per-poll status loop for an album-bundle download.
+
+    Lifted out of ``UsenetDownloadPlugin._poll_album_download`` and the
+    sibling torrent method so the loop is testable in isolation and so
+    both plugins share the same exit semantics.
+
+    Contract:
+    - ``get_status()`` returns the adapter status object for the bound
+      job, ``None`` when the client doesn't know about the job
+      currently (transient or terminal — disambiguated by retry count).
+    - ``emit(state, **fields)`` is the plugin's progress callback —
+      this function calls it on EVERY successful poll with
+      ``state='downloading'`` and ALWAYS calls it once more with
+      ``state='failed'`` before returning ``None`` on any failure path,
+      so the UI doesn't freeze on the last 'downloading' emit.
+    - ``complete_states`` is the adapter's terminal-success set
+      ('completed' alone for usenet; 'seeding' + 'completed' for
+      torrent because seeding-but-files-on-disk also counts).
+    - ``failed_states`` is the explicit-failure set. The adapter-level
+      'error' (unmapped state default) is intentionally NOT in here —
+      that's treated as a transient miss because a real SAB / NZBGet
+      / qBit never returns a literal 'error' state on a healthy job;
+      it's only our default fallback for unknown queue strings. Real
+      example: SAB's 'Pp' post-processing state was unmapped → became
+      'error' → poll infinite-looped until the 6-hour timeout.
+    - ``transient_miss_threshold`` is the number of consecutive None /
+      'error' reads tolerated before declaring the job gone. Sized for
+      the SAB queue→history gap window.
+
+    Returns the adapter's reported save_path on terminal success, or
+    ``None`` on any failure (timeout / disappeared / explicit failed
+    / shutdown). On every failure path emits ``'failed'`` once with an
+    ``error`` field describing why.
+    """
+    interval = poll_interval if poll_interval is not None else get_poll_interval()
+    deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
+    last_save_path: Optional[str] = None
+    misses = TransientMissCounter(transient_miss_threshold)
+
+    def _fail(reason: str) -> None:
+        try:
+            emit('failed', release=title, error=reason)
+        except Exception as cb_exc:
+            logger.debug("%s terminal emit failed: %s", log_prefix, cb_exc)
+
+    while monotonic() < deadline:
+        if is_shutdown and is_shutdown():
+            # Shutdown is a clean exit — don't paint failure on the UI;
+            # the app is going away anyway.
+            return None
+
+        try:
+            status = get_status()
+        except Exception as e:
+            logger.warning("%s Poll error: %s", log_prefix, e)
+            status = None
+
+        if status is None:
+            if misses.record_miss():
+                logger.error(
+                    "%s '%s' missing from client for %d consecutive polls — giving up",
+                    log_prefix, title, misses.misses,
+                )
+                _fail('Disappeared from client (no status after retries)')
+                return None
+            sleep(interval)
+            continue
+
+        # Reset the miss counter only when the adapter returned a state
+        # we actually recognise. The default-fallback 'error' is treated
+        # as a continuing transient miss below, so it must NOT reset
+        # here — otherwise a persistently-unmapped state loops forever.
+        if status.state != 'error':
+            misses.reset()
+
+        emit('downloading', progress=status.progress, downloaded=status.downloaded,
+             speed=status.download_speed)
+        if status.save_path:
+            last_save_path = status.save_path
+
+        if status.state in complete_states:
+            return last_save_path
+        if status.state in failed_states:
+            error = getattr(status, 'error', None) or 'Client reported failure'
+            logger.error("%s '%s' failed: %s", log_prefix, title, error)
+            _fail(error)
+            return None
+        if status.state == 'error':
+            # Unmapped adapter state — see contract docstring. Warn so
+            # we hear about new states the adapter map needs to grow
+            # without breaking the user's download. The miss counter
+            # was intentionally NOT reset above for this branch.
+            logger.warning(
+                "%s '%s' returned unmapped state — treating as transient",
+                log_prefix, title,
+            )
+            if misses.record_miss():
+                _fail('Client returned unmapped state repeatedly')
+                return None
+
+        sleep(interval)
+
+    logger.error("%s '%s' timed out", log_prefix, title)
+    _fail('Download timed out')
+    return None
+
+
 def copy_audio_files_atomically(
     sources: Iterable[Path], staging_dir: Path,
 ) -> list:
@@ -206,11 +379,15 @@ __all__ = [
     "ALBUM_PICK_MAX_BYTES",
     "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_POLL_TIMEOUT_SECONDS",
+    "DEFAULT_TRANSIENT_MISS_THRESHOLD",
+    "TransientMissCounter",
     "atomic_copy_to_staging",
     "copy_audio_files_atomically",
     "get_poll_interval",
     "get_poll_timeout",
+    "get_transient_miss_threshold",
     "pick_best_album_release",
+    "poll_album_download",
     "quality_score",
     "time",
     "unique_staging_path",

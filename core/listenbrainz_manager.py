@@ -120,6 +120,69 @@ class ListenBrainzManager:
             "summary": summary
         }
 
+    def refresh_playlist(self, playlist_mbid: str) -> Dict:
+        """Targeted single-playlist refresh.
+
+        Reads the cached ``playlist_type`` for the MBID, refetches the
+        playlist from ListenBrainz, runs the result through
+        ``_update_playlist`` (the same upsert path ``update_all_playlists``
+        uses). Faster than ``update_all_playlists`` when only one
+        playlist needs refreshing (no per-type list pulls, no cleanup
+        sweep, no rolling-series re-walk) — the original API was wired
+        up as the only entry-point even though most callers refresh
+        exactly one playlist.
+
+        Returns
+        -------
+        Dict with ``success`` (bool), ``result`` ("updated"/"skipped"/"new")
+        on success, or ``error`` (str) on failure. Caller is expected
+        to log + surface any failure — the manager does NOT silently
+        swallow exceptions.
+        """
+        if not self.client.is_authenticated():
+            logger.warning("ListenBrainz not authenticated, skipping refresh")
+            return {"success": False, "error": "Not authenticated"}
+
+        if not playlist_mbid:
+            return {"success": False, "error": "No playlist_mbid provided"}
+
+        conn = self._get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT playlist_type FROM listenbrainz_playlists
+                WHERE playlist_mbid = ? AND profile_id = ?
+                """,
+                (playlist_mbid, self.profile_id),
+            )
+            row = cursor.fetchone()
+        finally:
+            conn.close()
+
+        # ``user`` is the safest default when the playlist isn't in
+        # cache yet — it maps to the simplest insert path in
+        # ``_update_playlist`` without triggering created-for-specific
+        # cleanup logic.
+        playlist_type = row[0] if row else "user"
+
+        logger.info(
+            f"Refreshing single LB playlist {playlist_mbid} (type={playlist_type})"
+        )
+
+        full_playlist = self.client.get_playlist_details(playlist_mbid)
+        if not full_playlist:
+            logger.warning(f"LB returned no data for playlist {playlist_mbid}")
+            return {"success": False, "error": "Playlist not found upstream"}
+
+        result = self._update_playlist(full_playlist, playlist_type)
+        return {
+            "success": True,
+            "result": result,
+            "playlist_mbid": playlist_mbid,
+            "playlist_type": playlist_type,
+        }
+
     def _update_playlist(self, playlist_data: Dict, playlist_type: str) -> str:
         """
         Update a single playlist. Returns 'updated', 'skipped', or 'new'

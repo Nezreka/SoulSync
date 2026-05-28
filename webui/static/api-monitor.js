@@ -19,6 +19,31 @@ const _RATE_GAUGE_COLORS = {
     amazon: '#FF9900',
 };
 
+// Brand logos rendered inside each equalizer bar's avatar disc.
+// Same URLs the header-actions worker-orb buttons use — sourced
+// from each service's official press / SVG-repo asset so the row
+// reads as branded chips, not anonymous initials. AudioDB ships
+// no public logo URL, so it lives as a local static file.
+const _RATE_GAUGE_LOGOS = {
+    spotify:    'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    itunes:     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+    deezer:     'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+    lastfm:     'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
+    genius:     'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png',
+    musicbrainz:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+    audiodb:    '/static/audiodb.png',
+    tidal:      'https://www.svgrepo.com/show/519734/tidal.svg',
+    qobuz:      'https://www.svgrepo.com/show/504778/qobuz.svg',
+    discogs:    'https://www.svgrepo.com/show/305957/discogs.svg',
+    amazon:     '/static/amazon.svg',
+};
+
+// Per-service display state for the equalizer bars. Holds the last
+// rendered count so we can animate digit changes via easing, and the
+// last fill height so the spike-detect peak flash only fires on a
+// real upward step (not on repaint / equal-value socket updates).
+const _eqDisplay = {};
+
 // SVG constants — 240° arc, gap at bottom
 const _G = { size: 160, cx: 80, cy: 84, r: 56, stroke: 8, startAngle: 240, totalArc: 240 };
 
@@ -39,6 +64,19 @@ function _gArc(startDeg, endDeg, radius) {
 function _handleRateMonitorUpdate(data) {
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
+
+    // The dashboard rate monitor uses the equalizer-bar visual — a
+    // vertical-bar VU-meter row that fits any service count without
+    // an orphan grid cell. Detail page / mobile breakpoints keep the
+    // legacy speedometer card markup so existing CSS still applies.
+    const useEqualizer = grid.classList.contains('rate-monitor-grid--equalizer')
+        || grid.closest('[data-card="enrichment"]') !== null;
+
+    if (useEqualizer) {
+        grid.classList.add('rate-monitor-grid--equalizer');
+        _renderEqualizerBars(grid, data);
+        return;
+    }
 
     if (!grid.children.length) {
         for (const svc of _RATE_GAUGE_SERVICES) {
@@ -141,6 +179,180 @@ function _handleRateMonitorUpdate(data) {
         container.classList.toggle('active', value > 0 || wStatus === 'running');
         container.classList.toggle('rate-limited', isRateLimited);
     }
+}
+
+
+// ── Equalizer-bar renderer (dashboard) ─────────────────────────────────
+//
+// VU-meter aesthetic: one vertical bar per service. Bar height = current
+// rate / limit. Service brand color fades up the bar with an animated
+// glow at the tip when active. Click opens the same detail modal the
+// speedometer used. Symmetric by design — any service count fits one
+// flex row regardless of viewport.
+
+function _renderEqualizerBars(grid, data) {
+    if (!grid.children.length) {
+        for (const svc of _RATE_GAUGE_SERVICES) {
+            const accent = _RATE_GAUGE_COLORS[svc] || '#888';
+            const label = _RATE_GAUGE_LABELS[svc] || svc;
+            const logoSrc = _RATE_GAUGE_LOGOS[svc] || '';
+            const fallbackGlyph = (label[0] || '?').toUpperCase();
+            const bar = document.createElement('button');
+            bar.type = 'button';
+            bar.className = 'rate-eq';
+            bar.id = `rate-eq-${svc}`;
+            bar.dataset.svc = svc;
+            bar.style.setProperty('--eq-accent', accent);
+            bar.setAttribute('aria-label', `${label} rate detail`);
+            bar.onclick = () => _openRateModal(svc);
+            // Layout, top-to-bottom:
+            //   - avatar disc (brand logo) anchored above the track —
+            //     ``onerror`` swap to the initial-letter glyph keeps the
+            //     UI legible if a CDN URL ever breaks
+            //   - track (with reflection puddle as ::after) holding the
+            //     fill / shimmer / peak tip / live count
+            //   - meta column (state pill + service name)
+            const avatar = logoSrc
+                ? `<div class="rate-eq-avatar" aria-hidden="true">
+                       <img class="rate-eq-avatar-logo" src="${logoSrc}" alt=""
+                            onerror="this.parentElement.classList.add('rate-eq-avatar--fallback');this.replaceWith(Object.assign(document.createElement('span'),{className:'rate-eq-avatar-glyph',textContent:'${fallbackGlyph}'}));">
+                   </div>`
+                : `<div class="rate-eq-avatar rate-eq-avatar--fallback" aria-hidden="true">
+                       <span class="rate-eq-avatar-glyph">${fallbackGlyph}</span>
+                   </div>`;
+            bar.innerHTML = `
+                ${avatar}
+                <div class="rate-eq-track">
+                    <div class="rate-eq-ticks"></div>
+                    <div class="rate-eq-fill">
+                        <div class="rate-eq-shimmer"></div>
+                        <div class="rate-eq-tip"></div>
+                    </div>
+                    <div class="rate-eq-value">0</div>
+                </div>
+                <div class="rate-eq-meta">
+                    <span class="rate-eq-state" data-status="stopped">
+                        <span class="rate-eq-state-dot"></span>
+                        <span class="rate-eq-state-text">Stopped</span>
+                    </span>
+                    <span class="rate-eq-name">${label}</span>
+                </div>
+            `;
+            grid.appendChild(bar);
+            _eqDisplay[svc] = { value: 0, pct: 0.04 };
+        }
+    }
+
+    for (const svc of _RATE_GAUGE_SERVICES) {
+        const d = data[svc];
+        if (!d) continue;
+        _rateMonitorState[svc] = d;
+        const bar = document.getElementById(`rate-eq-${svc}`);
+        if (!bar) continue;
+
+        const value = d.cpm || 0;
+        const max = d.limit || 60;
+        // Clamp the visual fill to [4%, 100%]. The 4% floor lets idle
+        // bars still show a sliver of accent so the row reads as
+        // present-but-quiet instead of empty — critical for the
+        // "everything alive" vibe; an actual zero would make most
+        // services disappear most of the time.
+        const pct = Math.max(0.04, Math.min(value / max, 1));
+        const worker = d.worker || {};
+        const wStatus = worker.status || 'stopped';
+        const isRateLimited = d.rate_limited === true;
+
+        const prev = _eqDisplay[svc] || { value: 0, pct: 0.04 };
+
+        const fill = bar.querySelector('.rate-eq-fill');
+        if (fill) fill.style.height = `${pct * 100}%`;
+
+        // The reflection puddle (CSS ::after on the track) fades in
+        // proportional to the real (unclamped) rate so idle services
+        // don't pollute the row with a floor of glow. Bound to a
+        // CSS variable so the puddle and any future glow-aware
+        // styling can share the same source-of-truth value.
+        const realPct = max > 0 ? value / max : 0;
+        bar.style.setProperty('--eq-glow', String(Math.min(1, realPct + 0.04)));
+
+        // Rolling counter — animate the digit change instead of
+        // snapping. Premium feel; matches the smooth height
+        // transition the fill already has.
+        const val = bar.querySelector('.rate-eq-value');
+        if (val) {
+            const rounded = Math.round(value);
+            const prevRounded = Math.round(prev.value);
+            if (rounded !== prevRounded) {
+                _animateRollingNumber(val, prevRounded, rounded);
+            } else {
+                val.textContent = rounded;
+            }
+        }
+
+        // Peak-flash detector: if the rate stepped UPWARD between
+        // socket updates, briefly trigger the .peak-flash class on
+        // the bar so the tip emits a quick accent burst. Mimics a
+        // hardware VU meter's peak-detect LED — sells the "alive"
+        // feeling and ties bar movement to actual call activity.
+        // Only fires on real increases above a small noise floor
+        // (jitter on near-zero rates would otherwise pulse the
+        // bar constantly).
+        const PEAK_JITTER_THRESHOLD = 1;
+        if (value - prev.value > PEAK_JITTER_THRESHOLD) {
+            bar.classList.remove('peak-flash');
+            // Force a reflow so re-adding the class restarts the
+            // animation even if it was already mid-cycle.
+            void bar.offsetWidth;  // eslint-disable-line no-unused-expressions
+            bar.classList.add('peak-flash');
+            window.setTimeout(() => bar.classList.remove('peak-flash'), 700);
+        }
+
+        const state = bar.querySelector('.rate-eq-state');
+        if (state) {
+            state.dataset.status = wStatus;
+            const text = state.querySelector('.rate-eq-state-text');
+            if (text) text.textContent = _workerStatusLabel(wStatus, worker);
+        }
+
+        // Danger threshold uses the REAL (unclamped) ratio so the
+        // 4% visual floor for idle bars doesn't push everything into
+        // a permanent green state — the threshold reads true rate.
+        bar.classList.toggle('danger', realPct > 0.8 || isRateLimited);
+        bar.classList.toggle('active', value > 0 || wStatus === 'running');
+        bar.classList.toggle('rate-limited', isRateLimited);
+
+        _eqDisplay[svc] = { value, pct };
+    }
+}
+
+// Animate a single integer counter from `from` to `to` with an
+// easeOutCubic curve. Used by the equalizer bars so the live count
+// digit-rolls instead of snapping when sockets push a new value.
+const _eqRollingHandles = new WeakMap();
+
+function _animateRollingNumber(el, from, to, duration = 520) {
+    // Cancel any animation already running on this element so we
+    // don't get two RAF loops fighting over its textContent.
+    const prev = _eqRollingHandles.get(el);
+    if (prev) cancelAnimationFrame(prev);
+
+    if (from === to) {
+        el.textContent = String(to);
+        return;
+    }
+    const start = performance.now();
+    const span = to - from;
+    function step(now) {
+        const t = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        el.textContent = String(Math.round(from + span * eased));
+        if (t < 1) {
+            _eqRollingHandles.set(el, requestAnimationFrame(step));
+        } else {
+            _eqRollingHandles.delete(el);
+        }
+    }
+    _eqRollingHandles.set(el, requestAnimationFrame(step));
 }
 
 function _workerStatusLabel(status, worker) {

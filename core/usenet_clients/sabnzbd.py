@@ -21,26 +21,31 @@ from utils.logging_config import get_logger
 logger = get_logger("usenet.sabnzbd")
 
 
-# SAB queue states + history states → adapter-uniform set.
-# Queue: Idle, Paused, Downloading, Grabbing, Queued, Checking,
-# QuickCheck, Verifying, Repairing, Fetching, Extracting, Moving,
-# Running, Completed, Failed.
+# SAB Status enum (sabnzbd/constants.py:~95-118) → adapter-uniform set.
+# SAB emits PascalCase strings (``Idle``, ``Downloading``, ...) under
+# the slot ``status`` field; this map is keyed lowercase because
+# ``_map_state`` normalises before lookup. Anything unmapped lands on
+# ``error`` via ``_map_state``'s default — the album-bundle poll
+# helper treats that default as a transient miss so a brand-new
+# unmapped state can't infinite-loop the poll.
 _SAB_QUEUE_STATE_MAP = {
-    "idle":        "queued",
-    "queued":      "queued",
-    "grabbing":    "queued",
-    "fetching":    "downloading",
-    "downloading": "downloading",
-    "paused":      "paused",
-    "checking":    "verifying",
-    "quickcheck":  "verifying",
-    "verifying":   "verifying",
-    "repairing":   "repairing",
-    "extracting":  "extracting",
-    "moving":      "extracting",
-    "running":     "extracting",
-    "completed":   "completed",
-    "failed":      "failed",
+    "idle":         "queued",
+    "queued":       "queued",
+    "grabbing":     "queued",
+    "propagating":  "queued",
+    "fetching":     "downloading",
+    "downloading":  "downloading",
+    "paused":       "paused",
+    "checking":     "verifying",
+    "quickcheck":   "verifying",
+    "verifying":    "verifying",
+    "repairing":    "repairing",
+    "extracting":   "extracting",
+    "moving":       "extracting",
+    "running":      "extracting",
+    "completed":    "completed",
+    "failed":       "failed",
+    "deleted":      "failed",
 }
 
 
@@ -156,7 +161,28 @@ class SABnzbdAdapter:
         return await loop.run_in_executor(None, self._get_status_sync, job_id)
 
     def _get_status_sync(self, job_id: str) -> Optional[UsenetStatus]:
-        # Check active queue first; if not found, fall back to history.
+        # Direct nzo_ids lookup against queue, then history. Falls back
+        # to the bulk fetch for SAB versions that don't honour the
+        # nzo_ids filter (very old SAB), but the direct path is the hot
+        # path because the bulk history fetch was limited to 50 entries
+        # — on a busy SAB server a recently-completed job would roll
+        # past the window and the poll would log "disappeared".
+        if not job_id:
+            return None
+        queue = self._call_sync('queue', nzo_ids=job_id)
+        if queue and isinstance(queue.get('queue'), dict):
+            for slot in queue['queue'].get('slots', []) or []:
+                if str(slot.get('nzo_id') or '') == job_id:
+                    return self._parse_queue_slot(slot)
+        history = self._call_sync('history', nzo_ids=job_id)
+        if history and isinstance(history.get('history'), dict):
+            for slot in history['history'].get('slots', []) or []:
+                if str(slot.get('nzo_id') or '') == job_id:
+                    return self._parse_history_slot(slot)
+        # Fallback: SAB version pre-dating nzo_ids filter support. The
+        # bulk path is still limit=50; the helper's transient-miss
+        # tolerance will cover the gap if the entry briefly rolls out
+        # of the window.
         for status in self._get_all_sync():
             if status.id == job_id:
                 return status

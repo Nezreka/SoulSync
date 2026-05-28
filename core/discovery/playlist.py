@@ -306,6 +306,18 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         except Exception as e:
                             logger.debug("metadata cache lookup for album enrichment failed: %s", e)
 
+                    # Always include ``track_number`` / ``disc_number``
+                    # in the matched payload — None when unknown rather
+                    # than omitting the key. Downstream consumers
+                    # (``ensure_wishlist_track_format``, post-process
+                    # pipeline) check for None to know "look this up
+                    # somewhere else"; an absent key was indistinguishable
+                    # from "value is 1" after older payload helpers
+                    # silently filled the default. Pre-fix Deezer-sourced
+                    # matches always omitted the key (Deezer's track shape
+                    # uses ``track_position`` and the cache lookup at
+                    # line 304 reads ``track_number`` literally so it
+                    # returns None for Deezer rows).
                     matched_data = {
                         'id': best_match.id if hasattr(best_match, 'id') else '',
                         'name': best_match.name if hasattr(best_match, 'name') else '',
@@ -314,11 +326,13 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         'duration_ms': best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0,
                         'image_url': match_image,
                         'source': discovery_source,
+                        'track_number': track_number if track_number else (
+                            getattr(best_match, 'track_number', None)
+                        ),
+                        'disc_number': disc_number if disc_number else (
+                            getattr(best_match, 'disc_number', None)
+                        ),
                     }
-                    if track_number:
-                        matched_data['track_number'] = track_number
-                    if disc_number:
-                        matched_data['disc_number'] = disc_number
 
                     extra_data = {
                         'discovered': True,

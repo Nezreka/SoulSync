@@ -18,9 +18,13 @@ import time
 import threading
 import requests
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from utils.logging_config import get_logger
 
+from core.automation.schedule import next_run_at
+
 logger = get_logger("automation_engine")
+
 
 def _utcnow():
     """Return current UTC time as timezone-aware datetime."""
@@ -33,6 +37,42 @@ def _utcnow_str():
 def _utc_after(seconds):
     """Return UTC time N seconds from now as naive string for DB storage."""
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _dt_to_db_str(dt: datetime) -> str:
+    """Convert an aware-UTC datetime to the naive-UTC string the DB
+    ``next_run`` column stores. Centralised so a tz mistake here
+    surfaces in one place, not scattered through every caller of
+    ``next_run_at``."""
+    if dt.tzinfo is None:
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    return dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _resolve_system_default_tz() -> str:
+    """Return the IANA tz name the engine uses when a schedule's
+    trigger config doesn't carry an explicit ``tz`` field.
+
+    Existing daily / weekly rows pre-date the ``tz`` field — the
+    historic engine computed delays from naive ``datetime.now()``,
+    which is implicitly the server's local timezone. Falling back to
+    that same tz here preserves "every Monday at 09:00" running at
+    09:00 server local for rows that already exist in the DB.
+    Without ``tzlocal`` installed (or a system without a discoverable
+    tz), falls back to UTC."""
+    try:
+        import tzlocal
+        return tzlocal.get_localzone_name() or 'UTC'
+    except Exception:
+        return 'UTC'
+
+
+# Server-local tz cached at import time. Re-reading per-call is
+# pointless: the host's timezone doesn't change while the process is
+# running. Tests that need a different default tz inject it through
+# the engine's ``_default_tz`` attribute or via the
+# ``automation.default_timezone`` config key.
+_SYSTEM_DEFAULT_TZ = _resolve_system_default_tz()
 
 SYSTEM_AUTOMATIONS = [
     {
@@ -134,11 +174,25 @@ class AutomationEngine:
         self._max_chain_depth = 5
         self._signal_cooldown_seconds = 10
 
+        # Default tz used when a schedule's ``trigger_config`` doesn't
+        # carry an explicit ``tz`` field — preserves historic behaviour
+        # for daily / weekly rows created before the field existed
+        # (engine used naive ``datetime.now()`` = server local). Reads
+        # from the ``automation.default_timezone`` config key first to
+        # let users override without touching env vars; falls back to
+        # the system-detected local tz.
+        try:
+            from config.settings import config_manager
+            self._default_tz = (config_manager.get('automation.default_timezone', '') or _SYSTEM_DEFAULT_TZ)
+        except Exception:
+            self._default_tz = _SYSTEM_DEFAULT_TZ
+
         # Trigger registry: type → setup function (schedule only — events use emit())
         self._trigger_handlers = {
             'schedule': self._setup_schedule_trigger,
             'daily_time': self._setup_daily_time_trigger,
             'weekly_time': self._setup_weekly_time_trigger,
+            'monthly_time': self._setup_monthly_time_trigger,
         }
 
     # --- Action Handler Registration ---
@@ -674,23 +728,21 @@ class AutomationEngine:
                 trigger_config = json.loads(auto.get('trigger_config') or '{}')
                 if retry_delay_seconds:
                     next_run_str = _utc_after(retry_delay_seconds)
-                elif trigger_type == 'daily_time':
-                    # Next run is tomorrow at the configured time (compute delay from local time, store as UTC)
-                    time_str = trigger_config.get('time', '00:00')
-                    hour, minute = map(int, time_str.split(':'))
-                    now_local = datetime.now()
-                    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
-                    next_run_str = _utc_after((target - now_local).total_seconds())
-                elif trigger_type == 'weekly_time':
-                    time_str = trigger_config.get('time', '00:00')
-                    hour, minute = map(int, time_str.split(':'))
-                    now_local = datetime.now()
-                    target = self._next_weekly_occurrence(hour, minute, trigger_config.get('days', []))
-                    next_run_str = _utc_after((target - now_local).total_seconds())
                 else:
-                    delay = self._calc_delay_seconds(trigger_config)
-                    if delay:
-                        next_run_str = _utc_after(delay)
+                    # Single integration point with ``next_run_at``. The
+                    # helper handles every trigger type the engine
+                    # supports (interval / daily / weekly / monthly) and
+                    # returns aware-UTC; ``_dt_to_db_str`` normalises to
+                    # the naive-UTC string the DB column stores. Tests
+                    # injecting a different ``now_utc`` patch this same
+                    # path — no scattered ``datetime.now()`` calls left.
+                    next_run_dt = next_run_at(
+                        trigger_type, trigger_config,
+                        now_utc=_utcnow(),
+                        default_tz=self._default_tz,
+                    )
+                    if next_run_dt is not None:
+                        next_run_str = _dt_to_db_str(next_run_dt)
             except Exception as e:
                 logger.debug("next run calc failed: %s", e)
 
@@ -764,45 +816,72 @@ class AutomationEngine:
         logger.debug(f"Scheduled automation {automation_id} in {delay:.0f}s")
 
     def _setup_daily_time_trigger(self, automation_id, config):
-        """Config: {"time": "03:00"}  — runs daily at the specified local time."""
-        time_str = config.get('time', '00:00')
-        try:
-            hour, minute = map(int, time_str.split(':'))
-        except (ValueError, AttributeError):
-            hour, minute = 0, 0
-
-        now_local = datetime.now()
-        target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now_local:
-            target += timedelta(days=1)
-
-        delay = (target - now_local).total_seconds()
-
-        next_run_str = _utc_after(delay)
-        self.db.update_automation(automation_id, next_run=next_run_str)
-
-        timer = threading.Timer(delay, self.run_automation, args=(automation_id,))
-        timer.daemon = True
-        timer.start()
-
-        with self._lock:
-            self._timers[automation_id] = timer
-
-        logger.debug(f"Daily automation {automation_id} scheduled for {time_str} (in {delay:.0f}s)")
+        """Config: ``{"time": "03:00", "tz": "<IANA>"}`` — runs daily
+        at the specified local time. Tz defaults to ``self._default_tz``
+        when absent."""
+        self._setup_timed_trigger(automation_id, 'daily_time', config,
+                                  label=f"Daily at {config.get('time', '00:00')}")
 
     def _setup_weekly_time_trigger(self, automation_id, config):
-        """Config: {"time": "03:00", "days": ["mon", "wed", "fri"]}"""
-        time_str = config.get('time', '00:00')
-        try:
-            hour, minute = map(int, time_str.split(':'))
-        except (ValueError, AttributeError):
-            hour, minute = 0, 0
+        """Config: ``{"time": "03:00", "days": ["mon","wed","fri"], "tz": "<IANA>"}``."""
+        day_names = ', '.join(config.get('days') or []) or 'every day'
+        self._setup_timed_trigger(automation_id, 'weekly_time', config,
+                                  label=f"Weekly {config.get('time', '00:00')} on {day_names}")
 
-        target = self._next_weekly_occurrence(hour, minute, config.get('days', []))
-        delay = (target - datetime.now()).total_seconds()
+    def _setup_monthly_time_trigger(self, automation_id, config):
+        """Config: ``{"time": "09:00", "day_of_month": 15, "tz": "<IANA>"}``.
 
-        next_run_str = _utc_after(delay)
-        self.db.update_automation(automation_id, next_run=next_run_str)
+        Day clamped to [1, 31]; months too short for the target day
+        clamp to the last valid day (Feb 31 → Feb 28 / Feb 29 leap
+        year) per standard cron convention — see
+        ``core.automation.schedule._next_monthly`` for the rule."""
+        day = config.get('day_of_month', 1)
+        self._setup_timed_trigger(automation_id, 'monthly_time', config,
+                                  label=f"Monthly {config.get('time', '00:00')} on day {day}")
+
+    def _setup_timed_trigger(self, automation_id, trigger_type, config, *, label):
+        """Shared setup for daily / weekly / monthly time triggers.
+
+        All three flow through the same skeleton: compute next-run
+        via ``next_run_at``, persist to DB, arm a ``threading.Timer``
+        that fires the automation when the delay elapses. Lifting
+        these out of three near-identical methods means there's one
+        place to fix when (e.g.) timer rearm semantics need a tweak.
+
+        Honours an existing future ``next_run`` row in the DB —
+        prevents losing a hand-edited next_run when the engine
+        reschedules at startup. Same guard as the interval path."""
+        target_dt = next_run_at(
+            trigger_type, config or {},
+            now_utc=_utcnow(),
+            default_tz=self._default_tz,
+        )
+        if target_dt is None:
+            logger.warning(
+                f"Skip scheduling automation {automation_id}: next_run_at returned "
+                f"None for {trigger_type!r}",
+            )
+            return
+
+        delay = max(0.0, (target_dt - _utcnow()).total_seconds())
+
+        # If the DB already carries a future next_run, prefer it —
+        # matches the interval-path behaviour and lets manual edits
+        # or pending retries survive a process restart.
+        auto = self.db.get_automation(automation_id)
+        if auto and auto.get('next_run'):
+            try:
+                existing = datetime.strptime(
+                    auto['next_run'], '%Y-%m-%d %H:%M:%S',
+                ).replace(tzinfo=timezone.utc)
+                remaining = (existing - _utcnow()).total_seconds()
+                if remaining > 0:
+                    delay = remaining
+                    target_dt = existing
+            except (ValueError, TypeError):
+                pass
+
+        self.db.update_automation(automation_id, next_run=_dt_to_db_str(target_dt))
 
         timer = threading.Timer(delay, self.run_automation, args=(automation_id,))
         timer.daemon = True
@@ -811,25 +890,7 @@ class AutomationEngine:
         with self._lock:
             self._timers[automation_id] = timer
 
-        day_names = ', '.join(config.get('days', [])) or 'every day'
-        logger.debug(f"Weekly automation {automation_id} scheduled for {time_str} on {day_names} (in {delay:.0f}s)")
-
-    def _next_weekly_occurrence(self, hour, minute, days):
-        """Find the next datetime matching one of the given weekday abbreviations."""
-        day_map = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
-        allowed = {day_map[d] for d in days if d in day_map}
-        if not allowed:
-            allowed = set(range(7))  # no days selected = every day
-
-        now = datetime.now()
-        for offset in range(8):  # check today + next 7 days
-            candidate = now + timedelta(days=offset)
-            if candidate.weekday() in allowed:
-                target = candidate.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                if target > now:
-                    return target
-        # Fallback: tomorrow (shouldn't happen with 8-day scan)
-        return now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
+        logger.debug(f"{label} automation {automation_id} scheduled (in {delay:.0f}s)")
 
     # --- Then Actions (notifications + signals) ---
 

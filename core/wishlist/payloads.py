@@ -118,8 +118,15 @@ def ensure_wishlist_track_format(track_info):
         'artists': artists_list,
         'album': album,
         'duration_ms': track_info.get('duration_ms', 0),
-        'track_number': track_info.get('track_number', 1),
-        'disc_number': track_info.get('disc_number', 1),
+        # track/disc numbers preserved as-is (no default-to-1 fallback).
+        # Defaulting to 1 here poisons the downstream chain — the import
+        # pipeline at ``core/imports/pipeline.py:645`` only runs its
+        # ``extract_track_number_from_filename`` fallback when this
+        # value is None, so a pre-filled 1 would lock every wishlist
+        # re-attempt to track 01 regardless of source filename. Leave
+        # missing values explicit so the pipeline can detect-and-recover.
+        'track_number': track_info.get('track_number'),
+        'disc_number': track_info.get('disc_number'),
         'preview_url': track_info.get('preview_url'),
         'external_urls': track_info.get('external_urls', {}),
         'popularity': track_info.get('popularity', 0),
@@ -156,18 +163,33 @@ def build_cancelled_task_wishlist_payload(task, profile_id: int = 1):
 
     album_raw = track_info.get('album', {})
     if isinstance(album_raw, dict):
+        # Full-dict shape — copy as-is so release_date / id / total_tracks
+        # / artists survive the round-trip. Earlier this only ``setdefault``ed
+        # name/album_type/images, but ``dict(album_raw)`` already
+        # preserves every other key the source carries; the setdefaults
+        # only fill blanks. release_date in particular MUST survive so
+        # the import path-template renders the year in the folder name.
         album_data = dict(album_raw)
         album_data.setdefault('name', 'Unknown Album')
         album_data.setdefault('album_type', track_info.get('album_type', 'album'))
         if 'images' not in album_data and track_info.get('album_image_url'):
             album_data['images'] = [{'url': track_info.get('album_image_url')}]
     else:
+        # String-shape album — preserve every adjacent track_info field
+        # we know about so the constructed dict is still usable
+        # downstream. Pre-fix this only set name + album_type, dropping
+        # release_date / total_tracks / id even when the caller had them.
         album_data = {
             'name': str(album_raw) if album_raw else 'Unknown Album',
             'album_type': track_info.get('album_type', 'album'),
         }
         if track_info.get('album_image_url'):
             album_data['images'] = [{'url': track_info.get('album_image_url')}]
+        if track_info.get('album_release_date') or track_info.get('release_date'):
+            album_data['release_date'] = (
+                track_info.get('album_release_date')
+                or track_info.get('release_date')
+            )
 
     track_data = {
         'id': track_info.get('id'),
@@ -175,6 +197,13 @@ def build_cancelled_task_wishlist_payload(task, profile_id: int = 1):
         'artists': formatted_artists,
         'album': album_data,
         'duration_ms': track_info.get('duration_ms'),
+        # Preserve track / disc position so a cancellation→re-add doesn't
+        # lock the next attempt to track 01. ``None`` is intentional —
+        # downstream ``core/imports/pipeline.py:645`` reads None as
+        # "extract from filename instead", which is what we want when
+        # the position genuinely isn't known.
+        'track_number': track_info.get('track_number'),
+        'disc_number': track_info.get('disc_number'),
     }
 
     source_context = {
@@ -263,24 +292,76 @@ def track_object_to_dict(track_object) -> Dict[str, Any]:
             else:
                 artists_list.append({"name": str(artist)})
 
-        album_name = "Unknown Album"
-        if hasattr(track_object, "album") and track_object.album:
-            if hasattr(track_object.album, "name"):
-                album_name = track_object.album.name
-            else:
-                album_name = str(track_object.album)
+        # Build the album dict by preserving every field the track
+        # object carries about its album. Pre-fix only ``name`` was
+        # surfaced — release_date / images / album_type / total_tracks
+        # / id / artists were all silently dropped during the
+        # Track→dict conversion that runs whenever the wishlist payload
+        # arrives as a Track dataclass (vs. a raw spotify_data dict).
+        # That regression poisoned every wishlist row added from a
+        # Track object: stored album={'name': X} only, so downstream
+        # path-template rendering had no year and post-process had no
+        # track count for relative-position math.
+        album_attr = getattr(track_object, "album", None) if hasattr(track_object, "album") else None
+        if isinstance(album_attr, dict):
+            # Album was already a dict on the track object — preserve
+            # every key the source put there.
+            album_dict = dict(album_attr)
+            album_dict.setdefault("name", "Unknown Album")
+        elif album_attr is not None and hasattr(album_attr, "name"):
+            # Album was a sub-object — pull every common field across
+            # the Spotify / Deezer / iTunes Album dataclass shapes.
+            album_dict = {
+                "name": getattr(album_attr, "name", "") or "Unknown Album",
+            }
+            for src_attr, dest_key in (
+                ("id", "id"),
+                ("release_date", "release_date"),
+                ("album_type", "album_type"),
+                ("total_tracks", "total_tracks"),
+                ("total_discs", "total_discs"),
+                ("artists", "artists"),
+                ("images", "images"),
+                ("image_url", "image_url"),
+            ):
+                val = getattr(album_attr, src_attr, None)
+                if val not in (None, "", [], 0):
+                    album_dict[dest_key] = val
+        else:
+            # Album was a bare string OR truthy-but-untyped — pull
+            # adjacent track-object attrs to flesh it out.
+            album_name = str(album_attr) if album_attr else "Unknown Album"
+            album_dict = {"name": album_name}
+            for src_attr, dest_key in (
+                ("release_date", "release_date"),
+                ("album_id", "id"),
+                ("album_type", "album_type"),
+                ("total_tracks", "total_tracks"),
+            ):
+                val = getattr(track_object, src_attr, None)
+                if val not in (None, "", [], 0):
+                    album_dict[dest_key] = val
+            # ``image_url`` lives on the track object on the Deezer /
+            # iTunes Track dataclasses — surface as album.images so the
+            # path template's artwork hook can find it.
+            img = getattr(track_object, "image_url", None)
+            if img and "images" not in album_dict:
+                album_dict["images"] = [{"url": img}]
 
         result = {
             "id": getattr(track_object, "id", None),
             "name": getattr(track_object, "name", "Unknown Track"),
             "artists": artists_list,
-            "album": {"name": album_name},
+            "album": album_dict,
             "duration_ms": getattr(track_object, "duration_ms", 0),
             "preview_url": getattr(track_object, "preview_url", None),
             "external_urls": getattr(track_object, "external_urls", {}),
             "popularity": getattr(track_object, "popularity", 0),
-            "track_number": getattr(track_object, "track_number", 1),
-            "disc_number": getattr(track_object, "disc_number", 1),
+            # See ``ensure_wishlist_track_format`` — preserve missing
+            # values as None so the import pipeline's filename fallback
+            # can fire instead of locking to track/disc 01.
+            "track_number": getattr(track_object, "track_number", None),
+            "disc_number": getattr(track_object, "disc_number", None),
         }
 
         logger.debug(

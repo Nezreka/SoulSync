@@ -2603,7 +2603,16 @@ function _adlRenderBatchPanel() {
         // Phase label with icon
         let phaseText = '';
         let phaseIcon = '';
-        if (batch.phase === 'analysis') {
+        if (batch.phase === 'queued') {
+            // Batch is in the executor queue waiting for a worker slot.
+            // ``missing_download_executor`` has max_workers=3 by default,
+            // so wishlist runs with >3 sub-batches park the rest at this
+            // state until a worker frees up. Pre-fix this status rendered
+            // as "Analyzing..." which misled users into thinking 26
+            // batches were all working when really only 3 were running.
+            phaseText = 'Queued';
+            phaseIcon = '<span style="margin-right:4px;opacity:0.6">⏳</span>';
+        } else if (batch.phase === 'analysis') {
             phaseText = 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'album_downloading') {

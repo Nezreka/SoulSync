@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.2"
+_SOULSYNC_BASE_VERSION = "2.6.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -5984,14 +5984,24 @@ def start_download():
 
 
 def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
-    """
-    Robustly finds a completed file on disk, accounting for name variations and
-    unexpected subdirectories. This version uses the superior normalization logic
-    from the GUI's matching_engine.py to ensure consistency.
+    """Thin wrapper around the shared file finder.
 
-    First searches in download_dir, then optionally searches in transfer_dir if provided.
-    Returns tuple (file_path, location) where location is 'downloads' or 'transfer'.
+    Behaviour preserved verbatim — the implementation lives in
+    ``core/downloads/file_finder.py`` so the Soulseek album-bundle
+    poll (which previously had its own 3-candidate probe and
+    silently timed out on slskd configs that nested downloads under
+    a username subdir, see issue #715) and the per-track download
+    poll go through the same recursive-walk + path-confirm logic.
     """
+    from core.downloads.file_finder import find_completed_audio_file
+    return find_completed_audio_file(download_dir, api_filename, transfer_dir)
+
+
+def _find_completed_file_robust_legacy(download_dir, api_filename, transfer_dir=None):
+    """Legacy inline implementation, kept for reference. Unused
+    after the lift to ``core/downloads/file_finder.py``. Will be
+    removed after the next release ships and the new finder
+    proves itself in the field."""
     import re
     import os
     from difflib import SequenceMatcher
@@ -36676,6 +36686,33 @@ def start_runtime_services():
             logger.warning("Recovered stuck flags from previous session")
         else:
             logger.warning("No stuck flags detected - system healthy")
+
+        # Album-bundle staging sweep — remove orphan ``<batch_id>``
+        # dirs left behind by previous-session crashes, errored
+        # batches, or pre-fix Soulseek bundles that the per-batch
+        # cleanup gate excluded. Runs once at startup, before any
+        # new batch can register a staging dir, so we can't race a
+        # starting batch. download_batches is empty at this point
+        # (no batches survive a process restart) — every dir on
+        # disk is by definition an orphan.
+        try:
+            from core.downloads.lifecycle import sweep_orphan_album_bundle_staging
+            _staging_root = config_manager.get(
+                'download_source.album_bundle_staging_path',
+                'storage/album_bundle_staging',
+            ) or 'storage/album_bundle_staging'
+            _swept = sweep_orphan_album_bundle_staging(
+                _staging_root,
+                active_batch_ids=set(download_batches.keys()),
+            )
+            if _swept:
+                logger.warning(
+                    "[Startup] Swept %d orphan album-bundle staging dir(s) from %s",
+                    _swept, _staging_root,
+                )
+        except Exception as _sweep_err:
+            # Sweep must not crash startup — log and continue.
+            logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
 
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")

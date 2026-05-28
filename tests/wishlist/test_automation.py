@@ -228,7 +228,12 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
     assert submitted_args[2][0]["_original_index"] == 0
     assert len(batch_map) == 1
     batch = next(iter(batch_map.values()))
-    assert batch["phase"] == "analysis"
+    # ``queued`` is the initial state — the master worker flips it
+    # to ``analysis`` as its first action when the executor picks
+    # the batch up. Without this, wishlist runs with N > 3
+    # sub-batches all rendered "Analyzing..." simultaneously even
+    # though only 3 workers were running (UI lie).
+    assert batch["phase"] == "queued"
     assert batch["playlist_name"] == "Wishlist (Auto - Albums)"
     assert batch["analysis_total"] == 1
     assert any(kwargs.get("progress") == 50 for _args, kwargs in progress_calls)
@@ -238,14 +243,17 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
 
 
 def test_wishlist_albums_cycle_splits_into_per_album_batches():
-    """Multi-album wishlist run: each album emits its own sub-batch
+    """Multi-album wishlist run: each album with at least the
+    threshold of missing tracks (default 2) emits its own sub-batch
     with ``is_album_download=True`` + populated album/artist context.
-    Pinned so the album-bundle dispatch gate (which keys on those
-    fields) engages per album instead of falling through to per-track
-    on a single mixed batch."""
+    Single-track-per-album items fall to residual and take the
+    per-track path. Pinned so the album-bundle dispatch gate (which
+    keys on those fields) engages per album instead of falling through
+    to per-track on a single mixed batch."""
     batch_map = {}
     runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
         tracks=[
+            # Album one: 2 missing tracks → promotes to album-bundle.
             {
                 "name": "Song A1",
                 "artists": [{"name": "Artist 1"}],
@@ -262,6 +270,7 @@ def test_wishlist_albums_cycle_splits_into_per_album_batches():
                     "artists": [{"name": "Artist 1"}],
                 },
             },
+            # Album two: 3 missing tracks → also promotes.
             {
                 "name": "Song B1",
                 "artists": [{"name": "Artist 2"}],
@@ -270,9 +279,25 @@ def test_wishlist_albums_cycle_splits_into_per_album_batches():
                     "artists": [{"name": "Artist 2"}],
                 },
             },
+            {
+                "name": "Song B2",
+                "artists": [{"name": "Artist 2"}],
+                "spotify_data": {
+                    "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
+                    "artists": [{"name": "Artist 2"}],
+                },
+            },
+            {
+                "name": "Song B3",
+                "artists": [{"name": "Artist 2"}],
+                "spotify_data": {
+                    "album": {"id": "alb2", "name": "Album Two", "album_type": "album"},
+                    "artists": [{"name": "Artist 2"}],
+                },
+            },
         ],
         cycle_value="albums",
-        count=3,
+        count=5,
         batch_map=batch_map,
     )
 
@@ -290,7 +315,7 @@ def test_wishlist_albums_cycle_splits_into_per_album_batches():
 
     submitted_track_lists = [submitted_args[2] for _fn, submitted_args, _kw in executor.submissions]
     track_counts = sorted(len(tracks) for tracks in submitted_track_lists)
-    assert track_counts == [1, 2]
+    assert track_counts == [2, 3]
 
     # All sub-batches of one wishlist invocation share a single
     # ``wishlist_run_id`` so the completion handler can gate the
@@ -303,13 +328,16 @@ def test_wishlist_albums_cycle_splits_into_per_album_batches():
 def test_wishlist_albums_cycle_residual_for_orphan_tracks():
     """Tracks without resolvable album metadata fall to the classic
     per-track residual batch (no ``is_album_download`` flag), while
-    sibling tracks with valid album info still get their own
-    album-bundle sub-batch."""
+    sibling tracks with valid album info AND enough missing tracks to
+    clear the bundle threshold still get their own album-bundle
+    sub-batch. With the default threshold bumped to 2, the album side
+    needs at least two tracks from the same album to promote."""
     batch_map = {}
     runtime, _service, _profiles_db, music_db, executor, _logger, _progress, _guards = _build_runtime(
         tracks=[
+            # Album side: two missing tracks from Album One → promotes.
             {
-                "name": "Real Album Track",
+                "name": "Real Album Track 1",
                 "artists": [{"name": "Artist 1"}],
                 "spotify_data": {
                     "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
@@ -317,14 +345,22 @@ def test_wishlist_albums_cycle_residual_for_orphan_tracks():
                 },
             },
             {
-                # No album id, no album name — orphan
+                "name": "Real Album Track 2",
+                "artists": [{"name": "Artist 1"}],
+                "spotify_data": {
+                    "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                    "artists": [{"name": "Artist 1"}],
+                },
+            },
+            # Orphan: no album id, no album name → residual.
+            {
                 "name": "Orphan",
                 "artists": [{"name": "X"}],
                 "spotify_data": {"album": {"album_type": "album"}, "artists": [{"name": "X"}]},
             },
         ],
         cycle_value="albums",
-        count=2,
+        count=3,
         batch_map=batch_map,
     )
 
@@ -337,6 +373,7 @@ def test_wishlist_albums_cycle_residual_for_orphan_tracks():
     assert len(album_batches) == 1
     assert len(residual_batches) == 1
     assert album_batches[0]["album_context"]["name"] == "Album One"
+    assert album_batches[0]["analysis_total"] == 2
     assert residual_batches[0]["analysis_total"] == 1
 
 
