@@ -5984,14 +5984,24 @@ def start_download():
 
 
 def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
-    """
-    Robustly finds a completed file on disk, accounting for name variations and
-    unexpected subdirectories. This version uses the superior normalization logic
-    from the GUI's matching_engine.py to ensure consistency.
+    """Thin wrapper around the shared file finder.
 
-    First searches in download_dir, then optionally searches in transfer_dir if provided.
-    Returns tuple (file_path, location) where location is 'downloads' or 'transfer'.
+    Behaviour preserved verbatim — the implementation lives in
+    ``core/downloads/file_finder.py`` so the Soulseek album-bundle
+    poll (which previously had its own 3-candidate probe and
+    silently timed out on slskd configs that nested downloads under
+    a username subdir, see issue #715) and the per-track download
+    poll go through the same recursive-walk + path-confirm logic.
     """
+    from core.downloads.file_finder import find_completed_audio_file
+    return find_completed_audio_file(download_dir, api_filename, transfer_dir)
+
+
+def _find_completed_file_robust_legacy(download_dir, api_filename, transfer_dir=None):
+    """Legacy inline implementation, kept for reference. Unused
+    after the lift to ``core/downloads/file_finder.py``. Will be
+    removed after the next release ships and the new finder
+    proves itself in the field."""
     import re
     import os
     from difflib import SequenceMatcher
