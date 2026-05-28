@@ -161,6 +161,35 @@ function autoSyncSourceLabel(source) {
     return labels[source] || source || 'Other';
 }
 
+// Per-source logo URLs for the sidebar source-group headers and
+// anywhere else a small branded chip helps disambiguate the source.
+// Same URLs the dashboard equalizer / header-action orbs reference
+// so the visual language stays consistent. Sources without a
+// readily available logo (``beatport``, ``file``) fall through to
+// no-image; the source-icon element drops to display:none via
+// the ``<img onerror>`` swap so the header renders cleanly without
+// a broken-image placeholder.
+const _AUTO_SYNC_SOURCE_LOGOS = {
+    spotify:            'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    spotify_public:     'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    tidal:              'https://www.svgrepo.com/show/519734/tidal.svg',
+    youtube:            'https://www.svgrepo.com/show/13671/youtube.svg',
+    deezer:             'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+    qobuz:              'https://www.svgrepo.com/show/504778/qobuz.svg',
+    itunes_link:        'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+    lastfm:             'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
+    listenbrainz:       'https://listenbrainz.org/static/img/listenbrainz-logo-no-text.svg',
+    soulsync_discovery: '/static/favicon.png',
+};
+
+function autoSyncSourceIconHtml(source) {
+    const src = _AUTO_SYNC_SOURCE_LOGOS[source];
+    if (!src) return '';
+    return `<img class="auto-sync-source-icon" data-svc="${_escAttr(source)}"
+                 src="${src}" alt="" aria-hidden="true"
+                 onerror="this.style.display='none'">`;
+}
+
 function autoSyncCanSchedulePlaylist(playlist) {
     if (!playlist) return false;
     const src = playlist.source || '';
@@ -407,7 +436,10 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
-                <span class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</span>
+                <span class="auto-sync-source-title">
+                    ${autoSyncSourceIconHtml(source)}
+                    <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
+                </span>
                 <button type="button" class="auto-sync-source-bulk-btn"
                         onclick="event.stopPropagation(); openAutoSyncBulkMenu(event, '${_escAttr(source)}')"
                         title="Schedule all ${_escAttr(autoSyncSourceLabel(source))} playlists at the same interval">
@@ -517,7 +549,10 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
-                <span class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</span>
+                <span class="auto-sync-source-title">
+                    ${autoSyncSourceIconHtml(source)}
+                    <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
+                </span>
             </div>
             ${grouped[source].map(p => {
                 const weekly = weeklySchedules[p.id];

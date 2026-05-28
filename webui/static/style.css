@@ -63544,6 +63544,54 @@ body.reduce-effects .dash-card::after {
     font-weight: 800;
     letter-spacing: 0.12em;
     text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.auto-sync-source-title-label {
+    /* Wrap the label text so the inline-flex container doesn't
+       collapse line-height when the logo isn't loaded yet. */
+    display: inline-block;
+    line-height: 1;
+}
+
+/* Source-group logo chip — matches the dashboard equalizer
+   avatar treatment: dark glass disc, accent-tinted ring, logo
+   sized at 70% with a brand-colored drop-shadow. Dark-foreground
+   marks (tidal / qobuz / amazon) invert to white silhouette so
+   they read against the disc, same as the equalizer overrides. */
+.auto-sync-source-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 30% 25%,
+            rgba(255, 255, 255, 0.08),
+            rgba(0, 0, 0, 0.35) 70%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    object-fit: contain;
+    padding: 2px;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+}
+
+/* Last.fm's source icon is a square avatar PNG — clip it to a
+   circle so the chip reads as a uniform disc just like the
+   equalizer avatar does. */
+.auto-sync-source-icon[data-svc="lastfm"] {
+    padding: 0;
+    object-fit: cover;
+}
+
+/* Dark-foreground marks: invert to white silhouette so the logo
+   reads against the dark glass disc. Matches the equalizer
+   ``brightness(0) invert(1)`` recipe for Tidal / Qobuz / Discogs
+   / Amazon. */
+.auto-sync-source-icon[data-svc="tidal"],
+.auto-sync-source-icon[data-svc="qobuz"],
+.auto-sync-source-icon[data-svc="itunes_link"] {
+    filter: brightness(0) invert(1) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
 }
 
 
