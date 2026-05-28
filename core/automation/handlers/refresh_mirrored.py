@@ -51,6 +51,16 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
     playlist_id = config.get('playlist_id')
     refresh_all = config.get('all', False)
     auto_id = config.get('_automation_id')
+    # Pipeline runs (``run_mirrored_playlist_pipeline``) set this flag
+    # because Phase 2 of the pipeline already runs the playlist
+    # discovery worker — the same matching engine ``_maybe_discover``
+    # would call here. Running both means LB tracks discover twice
+    # AND the refresh-side discovery blocks 5+ minutes with no
+    # progress emission, leaving the UI stuck on "Refreshing:" until
+    # the loop returns. Standalone callers (Sync page, registration
+    # action) leave it False so LB tracks still get matched_data on
+    # refresh.
+    skip_discovery = bool(config.get('skip_discovery', False))
 
     if refresh_all:
         playlists = db.get_mirrored_playlists()
@@ -93,7 +103,14 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
             # mark them ``needs_discovery=True``. Hand them to the
             # adapter's matcher so the resulting mirror rows carry
             # provider IDs + matched_data, ready for the sync pipeline.
-            detail_tracks = _maybe_discover(detail.tracks, source, deps)
+            #
+            # Pipeline runs skip this because Phase 2's discovery
+            # worker handles it with proper progress emission — see
+            # ``skip_discovery`` resolution at the top of this fn.
+            detail_tracks = (
+                detail.tracks if skip_discovery
+                else _maybe_discover(detail.tracks, source, deps)
+            )
 
             tracks = [to_mirror_track_dict(t) for t in detail_tracks]
             refreshed += _commit_refresh(pl, source, source_id, tracks, db, deps, auto_id)

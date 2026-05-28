@@ -474,6 +474,14 @@ class TestRefreshMirrored:
             def update_all_playlists(self):
                 pass
 
+            def refresh_playlist(self, mbid):
+                # Adapter now calls the targeted refresh instead of
+                # the legacy ``update_all_playlists``. Trivial stub —
+                # the test only cares about the discovery + commit
+                # paths downstream.
+                return {'success': True, 'result': 'skipped',
+                        'playlist_mbid': mbid}
+
         discovery_calls = []
 
         def fake_discover(track_dicts):
@@ -536,6 +544,95 @@ class TestRefreshMirrored:
         assert extra['discovered'] is True
         assert extra['provider'] == 'spotify'
         assert extra['matched_data']['id'] == 'sp-matched'
+
+    def test_skip_discovery_flag_bypasses_matcher(self):
+        """``skip_discovery=True`` (set by the pipeline runner) must
+        prevent ``_maybe_discover`` from invoking the matching engine
+        on LB / Last.fm tracks. Pipeline's Phase 2 runs the discovery
+        worker with proper progress emission — running it during
+        refresh too blocks the UI for minutes with no updates."""
+        from core.playlists.sources.bootstrap import build_playlist_source_registry
+
+        class _StubLBManager:
+            def get_cached_playlists(self, playlist_type):
+                if playlist_type == 'created_for_user':
+                    return [{
+                        'playlist_mbid': 'lb-skip',
+                        'title': 'LB Weekly',
+                        'creator': 'ListenBrainz',
+                        'track_count': 1,
+                        'annotation': {},
+                        'last_updated': '2026-05-26',
+                    }]
+                return []
+
+            def get_playlist_type(self, mbid):
+                return 'created_for_user' if mbid == 'lb-skip' else ''
+
+            def get_cached_tracks(self, mbid):
+                if mbid == 'lb-skip':
+                    return [{
+                        'track_name': 'MB Song',
+                        'artist_name': 'MB Artist',
+                        'album_name': 'MB Album',
+                        'duration_ms': 240_000,
+                        'recording_mbid': 'rec-skip',
+                        'release_mbid': '',
+                        'album_cover_url': '',
+                        'additional_metadata': {},
+                    }]
+                return []
+
+            def refresh_playlist(self, mbid):
+                # Test only cares that discovery is skipped, not the
+                # refresh path itself — keep this trivial.
+                return {'success': True, 'result': 'skipped'}
+
+        discovery_calls = []
+
+        def fake_discover(track_dicts):
+            discovery_calls.append(list(track_dicts))
+            return []  # never returned because we expect skip
+
+        registry = build_playlist_source_registry(
+            spotify_client_getter=lambda: None,
+            tidal_client_getter=lambda: None,
+            qobuz_client_getter=lambda: None,
+            deezer_client_getter=lambda: None,
+            listenbrainz_manager_getter=lambda: _StubLBManager(),
+            discover_callable=fake_discover,
+        )
+
+        db = _StubDB(playlists=[
+            {
+                'id': 77,
+                'name': 'LB Weekly',
+                'source': 'listenbrainz',
+                'source_playlist_id': 'lb-skip',
+                'profile_id': 1,
+            },
+        ])
+        deps = _build_deps(get_database=lambda: db)
+        object.__setattr__(deps, 'playlist_source_registry', registry)
+
+        # Pipeline-style call: include the skip_discovery flag.
+        result = auto_refresh_mirrored(
+            {'playlist_id': '77', 'skip_discovery': True}, deps,
+        )
+
+        assert result['status'] == 'completed'
+        assert result['refreshed'] == '1'
+        # CRITICAL: the matcher was NOT invoked.
+        assert discovery_calls == []
+
+        # The mirror row still landed — just without matched_data.
+        # Phase 2 of the pipeline picks it up from needs_discovery.
+        call = db.mirror_calls[0]
+        assert len(call['tracks']) == 1
+        # No discovery → no matched_data, and the source_track_id
+        # falls back to the recording_mbid the LB adapter projects.
+        track = call['tracks'][0]
+        assert track['source_track_id'] == 'rec-skip'
 
     def test_spotify_public_uses_authed_spotify_when_signed_in(self):
         """The handler-level fallback chain: when Spotify is authed
