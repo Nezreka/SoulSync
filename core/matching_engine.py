@@ -74,7 +74,22 @@ class MusicMatchingEngine:
         # Skip unidecode for CJK text — it converts Japanese kanji to Chinese pinyin,
         # producing gibberish like "tvanimedei" for "命の灯火". Preserve original characters
         # so Soulseek searches use the real title. Only apply unidecode to non-CJK text.
-        if any('\u2e80' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' or '\uff00' <= c <= '\uffef' or '\uac00' <= c <= '\ud7af' for c in text):
+        # Issue #722 — flag CJK presence here so the alphanumeric strip
+        # below preserves CJK ranges instead of nuking them. Pre-fix the
+        # strip pattern ``[^a-z0-9\s$]`` deleted every CJK character,
+        # which left every Japanese title normalised to ``''``. Two empty
+        # strings produce 0.0 title similarity, the matcher fell back to
+        # duration+artist alone, and multiple iTunes tracks mapped to the
+        # same Tidal candidate, so the user got duplicate downloads under
+        # different track positions.
+        has_cjk = any(
+            '\u2e80' <= c <= '\u9fff'  # CJK Unified Ideographs + radicals
+            or '\u3040' <= c <= '\u30ff'  # Hiragana + Katakana
+            or '\uff00' <= c <= '\uffef'  # Halfwidth / Fullwidth forms
+            or '\uac00' <= c <= '\ud7af'  # Hangul syllables
+            for c in text
+        )
+        if has_cjk:
             # CJK detected — just lowercase, don't transliterate
             text = text.lower()
         else:
@@ -103,7 +118,17 @@ class MusicMatchingEngine:
         text = re.sub(r'[._/&-]', ' ', text)
 
         # Keep alphanumeric characters, spaces, AND the '$' sign.
-        text = re.sub(r'[^a-z0-9\s$]', '', text)
+        # When CJK was detected upstream, also preserve CJK Unified
+        # Ideographs / Hiragana / Katakana / Hangul / Halfwidth-Fullwidth
+        # ranges so Japanese / Chinese / Korean titles produce a
+        # comparable normalised form instead of an empty string.
+        if has_cjk:
+            text = re.sub(
+                r'[^a-z0-9\s$\u2e80-\u9fff\u3040-\u30ff\uff00-\uffef\uac00-\ud7af]',
+                '', text,
+            )
+        else:
+            text = re.sub(r'[^a-z0-9\s$]', '', text)
         
         # Consolidate multiple spaces into one
         text = re.sub(r'\s+', ' ', text).strip()
