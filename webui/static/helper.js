@@ -3414,7 +3414,7 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     '2.6.4': [
-        { unreleased: true },
+        { date: 'May 28, 2026 — 2.6.4 release' },
         { title: 'Fix: Usenet album bundle stuck on "downloading release" when SAB History flips before storage lands (#721)', desc: 'follow-up to the 2.6.3 queue→history handoff fix. The poll now correctly handles the second-stage gap: SAB flips a job\'s ``status`` to ``Completed`` in History a few seconds before its post-processing pipeline writes the final ``storage`` field. Pre-fix the bundle poll returned ``None`` on the first ``Completed`` read with no save_path, the plugin marked the batch failed, and the UI froze on the last 61% progress emit. ``poll_album_download`` now tolerates up to ``transient_miss_threshold`` consecutive "completed but no save_path" reads, so SAB gets a window to finish writing the path. When it lands, the poll resolves normally. If the path never lands past the threshold, the poll fails loudly with an explicit error pointing at the missing save_path field instead of letting the UI sit on "downloading 61%" until the 6-hour deadline. Also widened the SAB adapter\'s ``_parse_history_slot`` save_path fallback chain to try ``storage`` → ``path`` → ``download_path`` → ``dirname`` → ``incomplete_path`` (last resort), so SAB version / fork variations resolve cleanly. Whitespace-only values are skipped. 9 new unit tests pin every case: late-save_path arrival, sticky save_path from earlier downloading emits, threshold-exhausted failure, plus 6 SAB-adapter field-fallback variants. Closes #721.', page: 'downloads' },
     ],
     '2.6.3': [
