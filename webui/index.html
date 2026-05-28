@@ -10,6 +10,7 @@
     <meta name="theme-color" content="#1db954">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     {{ vite_assets('head')|safe }}
@@ -2088,103 +2089,71 @@
                              results are cached per (query, source) pair. -->
                         <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
-                        <!-- Basic Search Section (Current) -->
+                        <!-- Basic Search Section -->
                         <div id="basic-search-section" class="search-section">
-                            <!-- Search Bar: Replicates create_elegant_search_bar() -->
-                            <div class="search-bar-container">
-                                <input type="text" id="downloads-search-input"
-                                    placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
-                                <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
-                                <button id="downloads-search-btn">🔍 Search</button>
+
+                            <!-- Source picker: chip row, one chip per active download source.
+                                 Populated by downloads.js:initBasicSearchSources().
+                                 Hidden until sources load; in single-source mode shows one
+                                 non-interactive chip so the user knows what they're searching. -->
+                            <div class="bs-source-row" id="bs-source-row" aria-label="Search source" role="tablist"></div>
+
+                            <!-- Search bar -->
+                            <div class="bs-search-bar">
+                                <div class="bs-search-input-wrap">
+                                    <svg class="bs-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/></svg>
+                                    <input type="text" id="downloads-search-input"
+                                           placeholder="Search artists, albums, tracks…"
+                                           autocomplete="off" spellcheck="false">
+                                    <button id="downloads-cancel-btn" class="bs-cancel-btn hidden" aria-label="Cancel">✕</button>
+                                </div>
+                                <button id="downloads-search-btn" class="bs-search-btn">Search</button>
                             </div>
 
-
-                            <div id="filters-container" class="filters-container hidden">
-                                <div class="filter-toggle-header">
-                                    <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
-                                </div>
-
-                                <div id="filter-content" class="filter-content hidden">
-                                    <!-- Filter by Type -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Type:</label>
-                                        <button class="filter-btn active" data-filter-type="type"
-                                            data-value="all">All</button>
-                                        <button class="filter-btn" data-filter-type="type"
-                                            data-value="album">Albums</button>
-                                        <button class="filter-btn" data-filter-type="type"
-                                            data-value="track">Singles</button>
-                                    </div>
-
-                                    <!-- Filter by Format -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Format:</label>
-                                        <button class="filter-btn active" data-filter-type="format"
-                                            data-value="all">All</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="flac">FLAC</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="mp3">MP3</button>
-                                        <!-- Added missing format buttons -->
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="ogg">OGG</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="aac">AAC</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="wma">WMA</button>
-                                    </div>
-
-                                    <!-- Sort Controls -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Sort by:</label>
-                                        <button id="sort-order-btn" class="filter-btn sort-order-btn"
-                                            data-order="desc">↓</button>
-                                        <!-- Added all sort options from the GUI -->
-                                        <button class="filter-btn active" data-filter-type="sort"
-                                            data-value="relevance">Relevance</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="quality_score">Quality</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="size">Size</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="title">Name</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="username">Uploader</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="bitrate">Bitrate</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="duration">Duration</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="availability">Available</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="upload_speed">Speed</button>
-                                    </div>
-                                </div>
-                            </div>
-
-
-                            <!-- Search Status Bar -->
-                            <div class="search-status-container">
+                            <!-- Status / loading bar -->
+                            <div class="bs-status-bar">
                                 <div class="spinner-animation hidden"></div>
-                                <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
+                                <span id="search-status-text" class="bs-status-text">Enter an artist, album, or track name to search</span>
                                 <div class="dots-animation hidden"></div>
                             </div>
 
-                            <!-- Search Results Area: Replicates the QScrollArea -->
-                            <div class="search-results-container">
-                                <div class="search-results-header">
-                                    <h3>Search Results</h3>
+                            <!-- Filters: always-visible compact pill row -->
+                            <div id="filters-container" class="bs-filters hidden">
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Type</span>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="type" data-value="all">All</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="album">Albums</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="track">Tracks</button>
                                 </div>
-                                <div class="search-results-scroll-area" id="search-results-area">
-                                    <!-- 
-                                The placeholder search results have been removed.
-                                This area will now be populated by JavaScript based on API responses.
-                                -->
-                                    <div class="search-results-placeholder">
-                                        <p>Your search results will appear here.</p>
-                                    </div>
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Format</span>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="format" data-value="all">All</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="flac">FLAC</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="mp3">MP3</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="ogg">OGG</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="aac">AAC</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="wma">WMA</button>
+                                </div>
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Sort</span>
+                                    <button id="sort-order-btn" class="filter-btn bs-filter-pill sort-order-btn" data-order="desc">↓</button>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="sort" data-value="relevance">Relevance</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="quality_score">Quality</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="size">Size</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="title">Name</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="username">Uploader</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="bitrate">Bitrate</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="duration">Duration</button>
                                 </div>
                             </div>
+
+                            <!-- Results area -->
+                            <div class="bs-results-wrap" id="search-results-area">
+                                <div class="search-results-placeholder">
+                                    <p>Enter a search term to get started.</p>
+                                </div>
+                            </div>
+
                         </div>
                         <!-- End Basic Search Section -->
 

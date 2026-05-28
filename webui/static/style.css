@@ -7155,7 +7155,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: center;
     gap: 18px;
     position: relative;
-    overflow: hidden;
 
     /* Neumorphic depth shadows - elevated card effect */
     box-shadow:
@@ -7255,7 +7254,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin: 12px 8px;
     padding: 24px;
     position: relative;
-    overflow: hidden;
 
     /* Neumorphic depth shadows - elevated card effect */
     box-shadow:
