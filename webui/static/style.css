@@ -62331,6 +62331,32 @@ body.reduce-effects .dash-card::after {
             drop-shadow(0 0 4px color-mix(in srgb, var(--eq-accent) 35%, transparent));
 }
 
+/* Per-service logo tweaks — brand assets vary in shape + foreground
+ * contrast; these overrides normalise their presentation in the
+ * dark-glass avatar disc.
+ *
+ * - Last.fm ships a square Twitter avatar PNG; clip it to a circle
+ *   so it matches the rounded chip aesthetic and fills the disc.
+ * - Tidal / Qobuz / Discogs / Amazon ship dark-foreground marks
+ *   that disappear on the dark disc — invert to white silhouette
+ *   so the logo reads. ``brightness(0) invert(1)`` is the canonical
+ *   recipe for "render this image as pure white"; the per-service
+ *   accent drop-shadow (inherited above) keeps the color cue. */
+.rate-eq[data-svc="lastfm"] .rate-eq-avatar-logo {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+}
+
+.rate-eq[data-svc="tidal"] .rate-eq-avatar-logo,
+.rate-eq[data-svc="qobuz"] .rate-eq-avatar-logo,
+.rate-eq[data-svc="discogs"] .rate-eq-avatar-logo,
+.rate-eq[data-svc="amazon"] .rate-eq-avatar-logo {
+    filter: brightness(0) invert(1)
+            drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))
+            drop-shadow(0 0 4px color-mix(in srgb, var(--eq-accent) 60%, transparent));
+}
+
 /* Fallback variant — restores the original accent-gradient disc +
  * initial-letter glyph when the brand logo URL fails to load. */
 .rate-eq-avatar--fallback {
