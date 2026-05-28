@@ -14,6 +14,7 @@ in the DB) — there is no process-wide singleton to grab at import time.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from core.playlists.sources.base import (
@@ -23,6 +24,8 @@ from core.playlists.sources.base import (
     PlaylistSource,
     SOURCE_LISTENBRAINZ,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Type alias for the discovery callable: takes a list of MB-shaped
@@ -259,19 +262,51 @@ class ListenBrainzPlaylistSource(PlaylistSource):
         return out
 
     def refresh_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
-        """Trigger a manager-side refresh, then return the new snapshot.
+        """Targeted single-playlist refresh via the LB manager.
 
-        ``update_all_playlists`` is the only refresh entry-point on the
-        manager — it re-fetches every cached playlist. That's wasteful
-        for a single-playlist refresh; Phase 1 should add a targeted
-        ``refresh_playlist(mbid)`` to the manager."""
+        Resolves synthetic series ids (``lb_weekly_jams_<user>``) to
+        the latest MBID, then calls ``manager.refresh_playlist(mbid)``
+        instead of the legacy ``update_all_playlists`` — the old path
+        re-pulled every cached LB playlist (12+ API calls) just to
+        refresh one row.
+
+        Refresh failures log with traceback + return ``None`` so the
+        outer handler in ``core/automation/handlers/refresh_mirrored.py``
+        counts the error and surfaces it. Pre-fix this branch silently
+        swallowed every exception and read stale cache as if the
+        refresh succeeded, masking LB API outages as no-op refreshes.
+        """
         manager = self._manager()
         if manager is None:
             return None
+
+        target_mbid = playlist_id
+        from core.playlists.lb_series import is_series_synthetic_id
+        if is_series_synthetic_id(playlist_id):
+            resolved = self._resolve_series_to_latest_mbid(manager, playlist_id)
+            if not resolved:
+                logger.warning(
+                    "LB rolling series %r has no cached members — refresh skipped",
+                    playlist_id,
+                )
+                return None
+            target_mbid = resolved
+
         try:
-            manager.update_all_playlists()
-        except Exception:  # noqa: S110 — caller falls back to last cached playlist on refresh failure
-            pass
+            result = manager.refresh_playlist(target_mbid)
+        except Exception:
+            logger.exception("LB refresh_playlist(%s) failed", target_mbid)
+            return None
+
+        if not result.get("success"):
+            logger.warning(
+                "LB refresh did not succeed for %s: %s",
+                target_mbid, result.get("error", "unknown"),
+            )
+
+        # Read back via the same cache lookup ``get_playlist`` uses so
+        # the meta object preserves the caller's original id (synthetic
+        # or real). Refresh is decoupled from read intentionally.
         return self.get_playlist(playlist_id)
 
     # ---- projection helpers ------------------------------------------------

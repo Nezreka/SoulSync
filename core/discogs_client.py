@@ -61,6 +61,24 @@ def rate_limited(func):
     return wrapper
 
 
+# Discogs disambiguates duplicate artist names two ways: numeric `(N)`
+# suffix on the older convention (e.g. "Bullet (2)") and a trailing `*`
+# on the newer convention (e.g. "John Smith*"). Both are presentation-
+# only — the underlying canonical name is what users expect to see in
+# search results, on cards, and especially in import paths (otherwise
+# library folders end up named `Foo*` on disk). Strip both at every
+# point a Discogs payload becomes a name string.
+_DISCOGS_DISAMBIG_RE = re.compile(r'(?:\s*\(\d+\))?\s*\*+\s*$|\s*\(\d+\)\s*$')
+
+
+def _clean_discogs_artist_name(name: Optional[str]) -> str:
+    """Strip Discogs disambiguation suffixes — both `(N)` and trailing
+    `*` — from an artist name. Returns '' for None / empty input."""
+    if not name:
+        return ''
+    return _DISCOGS_DISAMBIG_RE.sub('', name).strip()
+
+
 # --- Shared dataclasses (same shape as iTunes/Deezer/Spotify) ---
 
 @dataclass
@@ -117,9 +135,10 @@ class Track:
         # Artists from track-level or release-level
         track_artists = []
         if track_data.get('artists'):
-            track_artists = [a.get('name', '') for a in track_data['artists'] if a.get('name')]
+            track_artists = [_clean_discogs_artist_name(a.get('name', '')) for a in track_data['artists'] if a.get('name')]
         if not track_artists and release.get('artists'):
-            track_artists = [a.get('name', '') for a in release['artists'] if a.get('name')]
+            track_artists = [_clean_discogs_artist_name(a.get('name', '')) for a in release['artists'] if a.get('name')]
+        track_artists = [a for a in track_artists if a]
         if not track_artists:
             track_artists = ['Unknown Artist']
 
@@ -190,7 +209,9 @@ class Artist:
 
         return cls(
             id=str(artist_data.get('id', '')),
-            name=artist_data.get('name', artist_data.get('title', '')),
+            name=_clean_discogs_artist_name(
+                artist_data.get('name', artist_data.get('title', ''))
+            ),
             popularity=0,
             genres=[],
             followers=0,
@@ -216,14 +237,15 @@ class Album:
         artists = []
         title = release_data.get('title', '')
         if release_data.get('artists'):
-            artists = [a.get('name', '') for a in release_data['artists'] if a.get('name')]
+            artists = [_clean_discogs_artist_name(a.get('name', '')) for a in release_data['artists'] if a.get('name')]
         elif release_data.get('artist'):
-            artists = [release_data['artist']]
+            artists = [_clean_discogs_artist_name(release_data['artist'])]
         elif ' - ' in title:
             # Search results: "Radiohead - OK Computer" → artist="Radiohead", title="OK Computer"
             parts = title.split(' - ', 1)
-            artists = [parts[0].strip()]
+            artists = [_clean_discogs_artist_name(parts[0])]
             title = parts[1].strip()
+        artists = [a for a in artists if a]
         if not artists:
             artists = ['Unknown Artist']
 
@@ -444,8 +466,8 @@ class DiscogsClient:
                 artist_name = ''
                 if artists and isinstance(artists[0], dict):
                     artist_name = (artists[0].get('name') or '').strip()
-                # Strip trailing "(N)" disambiguation suffix Discogs adds.
-                artist_name = re.sub(r'\s*\(\d+\)$', '', artist_name)
+                # Strip Discogs disambiguation suffixes — both `(N)` and `*`.
+                artist_name = _clean_discogs_artist_name(artist_name)
                 if not title or not artist_name:
                     continue
 
@@ -658,9 +680,13 @@ class DiscogsClient:
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
         """Get releases by an artist. Prefers master releases, filters features."""
-        # First get the artist name for feature filtering
+        # First get the artist name for feature filtering. Strip Discogs
+        # disambiguation suffix so feature-vs-primary matching below
+        # compares against the canonical name, not "Beyoncé*".
         artist_data = self._api_get(f'/artists/{artist_id}')
-        artist_name = artist_data.get('name', '').lower() if artist_data else ''
+        artist_name = _clean_discogs_artist_name(
+            artist_data.get('name', '') if artist_data else ''
+        ).lower()
 
         data = self._api_get(f'/artists/{artist_id}/releases', {
             'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
@@ -765,7 +791,11 @@ class DiscogsClient:
         # Get artists
         artists_list = []
         if data.get('artists'):
-            artists_list = [{'name': a.get('name', '')} for a in data['artists'] if a.get('name')]
+            artists_list = [
+                {'name': _clean_discogs_artist_name(a.get('name', ''))}
+                for a in data['artists']
+                if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
+            ]
         if not artists_list:
             artists_list = [{'name': 'Unknown Artist'}]
 
@@ -794,7 +824,11 @@ class DiscogsClient:
             # Per-track artists or fall back to release artists
             track_artists = artists_list
             if t.get('artists'):
-                track_artists = [{'name': a.get('name', '')} for a in t['artists'] if a.get('name')]
+                track_artists = [
+                    {'name': _clean_discogs_artist_name(a.get('name', ''))}
+                    for a in t['artists']
+                    if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
+                ]
 
             tracks.append({
                 'id': f"{release_id}_t{track_num}",

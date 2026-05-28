@@ -167,15 +167,32 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
     Returns True if a match was found and the file was moved to the transfer folder.
     Returns False to fall through to normal download.
+
+    Every silent-False exit point logs at INFO with the rejection reason
+    so #706 / #708-class "track staged but never imported, ends up
+    re-added to wishlist" loops can be diagnosed from app.log without
+    a re-instrumentation round-trip. Per-candidate skips log at DEBUG
+    so the noise stays out of INFO unless explicitly turned up.
     """
+    track_title = (track.name or '').strip() if hasattr(track, 'name') else ''
+    track_artist = (track.artists[0] if (hasattr(track, 'artists') and track.artists) else '').strip()
+    # Compact identifier for the log lines below so a multi-batch
+    # wishlist run can be greppable per-track.
+    _track_label = f"'{track_title}' by '{track_artist}'"
+
     staging_files = deps.get_staging_file_cache(batch_id or task_id)
     if not staging_files:
+        logger.info(
+            "[Staging] No match attempted for %s — staging cache empty for batch %s",
+            _track_label, batch_id or task_id,
+        )
         return False
 
-    track_title = track.name or ''
-    track_artist = track.artists[0] if track.artists else ''
-
     if not track_title:
+        logger.info(
+            "[Staging] No match attempted for task %s — track has empty title",
+            task_id,
+        )
         return False
 
     from difflib import SequenceMatcher
@@ -186,12 +203,20 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
     best_match = None
     best_score = 0.0
+    # Track per-candidate scoring so the rejection log can show the
+    # near-miss that DID exist (useful when title-sim is 0.79 — one
+    # point below the threshold).
+    candidate_scores: list = []
 
     for sf in staging_files:
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])
 
         if not sf_title_variants:
+            logger.debug(
+                "[Staging] Skip candidate %s — no usable title variants",
+                os.path.basename(sf.get('full_path', '?')),
+            )
             continue
 
         # Title similarity (primary)
@@ -201,6 +226,12 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             for candidate in sf_title_variants
         )
         if title_sim < 0.80:
+            logger.debug(
+                "[Staging] Skip candidate %s — title_sim=%.2f below 0.80 threshold (%s vs %s)",
+                os.path.basename(sf.get('full_path', '?')),
+                title_sim, norm_title, '|'.join(sf_title_variants[:3]),
+            )
+            candidate_scores.append((sf, title_sim, None, 0.0))
             continue
 
         # Artist similarity (secondary)
@@ -221,12 +252,37 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         else:
             combined = (title_sim * 0.80) + (artist_sim * 0.20)
 
+        candidate_scores.append((sf, title_sim, artist_sim, combined))
+
         if combined > best_score:
             best_score = combined
             best_match = sf
 
     # Require high confidence to avoid false positives
     if not best_match or best_score < 0.75:
+        # Log the rejection with the best near-miss so we can see why
+        # the staged files didn't claim this wishlist track. Pre-fix
+        # this returned False silently and the loop "download album,
+        # stage files, never claim them, re-add to wishlist" was
+        # impossible to debug from logs alone.
+        if candidate_scores:
+            near_miss = max(candidate_scores, key=lambda c: c[3])
+            sf, title_sim, artist_sim, combined = near_miss
+            logger.info(
+                "[Staging] No match for %s in batch %s — best candidate %s "
+                "(title_sim=%.2f, artist_sim=%s, combined=%.2f) below 0.75 threshold",
+                _track_label, batch_id or task_id,
+                os.path.basename(sf.get('full_path', '?')),
+                title_sim,
+                f"{artist_sim:.2f}" if artist_sim is not None else 'n/a',
+                combined,
+            )
+        else:
+            logger.info(
+                "[Staging] No match for %s in batch %s — %d staging files "
+                "but none had usable title variants",
+                _track_label, batch_id or task_id, len(staging_files),
+            )
         return False
 
     logger.info(f"[Staging] Match found for '{track_title}' by '{track_artist}': "

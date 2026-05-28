@@ -305,6 +305,64 @@ def test_match_above_threshold_writes_extra_data():
     assert deps._db.cache_saves  # saved to cache
 
 
+def test_matched_data_always_includes_track_and_disc_number_keys():
+    """Discovery's matched_data must ALWAYS include ``track_number``
+    and ``disc_number`` keys — None when unknown, not omitted. Pre-fix
+    the keys were only added when truthy, so Deezer-sourced matches
+    (where the cache stores ``track_position`` not ``track_number``)
+    saved payloads without the key entirely. Downstream consumers
+    couldn't distinguish "value is 1" from "key is missing" and the
+    chain silently filled 1 every time. Pin the consistent-shape
+    contract here."""
+    match = _FakeMatch()
+    match.track_number = None  # simulate Deezer-sourced sparse match
+    match.disc_number = None
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    assert len(deps._db.extra_data_writes) == 1
+    _, extra = deps._db.extra_data_writes[0]
+    matched = extra['matched_data']
+    # Keys MUST be present even when value is None — downstream relies
+    # on explicit None to know "look this up elsewhere".
+    assert 'track_number' in matched
+    assert 'disc_number' in matched
+    assert matched['track_number'] is None
+    assert matched['disc_number'] is None
+
+
+def test_matched_data_pulls_track_number_from_best_match_when_cache_misses():
+    """Cache enrichment may return None (Deezer key-mismatch case),
+    but the Track dataclass best_match itself often carries the
+    track_number from the source-shape mapping. matched_data must
+    fall back to ``best_match.track_number`` instead of silently
+    dropping the field."""
+    match = _FakeMatch()
+    match.track_number = 8  # populated by Track.from_deezer_track
+    match.disc_number = 2
+    tracks = [_track(track_id=1)]
+    deps = _build_deps(
+        tracks_by_playlist={'p1': tracks},
+        spotify_results=[match],
+        score_result=(match, 0.95, 0),
+    )
+
+    dp.run_playlist_discovery_worker([_playlist('p1')], deps=deps)
+
+    matched = deps._db.extra_data_writes[0][1]['matched_data']
+    # When the cache lookup returns None for track_number, fall back
+    # to best_match.track_number (populated by the Track dataclass'
+    # from_<source>_track classmethod).
+    assert matched['track_number'] == 8
+    assert matched['disc_number'] == 2
+
+
 def test_match_below_threshold_falls_back_to_wing_it():
     """No high-confidence match → Wing It stub written."""
     match = _FakeMatch()

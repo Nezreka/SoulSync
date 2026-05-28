@@ -16,6 +16,7 @@ let _autoSyncScheduleState = {
     playlists: [],
     automations: [],
     playlistSchedules: {},
+    weeklySchedules: {},
     automationPipelines: [],
     runHistory: [],
     runHistoryTotal: 0,
@@ -24,6 +25,11 @@ let _autoSyncActiveTab = 'schedule';
 let _autoSyncSidebarFilter = '';
 let _autoSyncHistoryFilter = 'all';  // 'all' | 'error' | 'completed' | 'skipped'
 let _autoSyncHistoryLimit = 50;
+// Open weekly-editor popover state. ``null`` when no popover is open.
+// Tracks playlist id + the current draft (time / days / tz) so the
+// editor is a controlled component — clicking outside without saving
+// discards the draft.
+let _autoSyncWeeklyEditor = null;
 
 function getMirroredSourceRef(p) {
     if (p && p.source_ref) return String(p.source_ref);
@@ -67,6 +73,76 @@ function autoSyncIntervalLabel(hours) {
     return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
 }
 
+// Browser-detected default tz for new schedules. Used when the user
+// creates a weekly schedule and hasn't picked an explicit tz — falls
+// back to UTC on browsers where Intl is unavailable (very old ones).
+function detectBrowserTimezone() {
+    try {
+        const tz = typeof Intl !== 'undefined'
+            && Intl.DateTimeFormat
+            && Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return tz || 'UTC';
+    } catch (_) {
+        return 'UTC';
+    }
+}
+
+// Canonical weekday order Mon-Sun. Matches both the backend
+// ``next_run_at`` weekday_map and the column ordering in the UI.
+// Keeping the abbreviations short-lowercase ('mon' not 'MON' / 'Mon')
+// matches the engine's existing config payload convention.
+const AUTO_SYNC_WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const AUTO_SYNC_WEEKDAY_LABELS = {
+    mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu',
+    fri: 'Fri', sat: 'Sat', sun: 'Sun',
+};
+
+// Build a ``weekly_time`` trigger_config payload from picker input.
+// Defensive — caller may pass garbage; we clamp / drop / default so
+// the resulting payload always passes ``next_run_at`` validation.
+function autoSyncWeeklyTrigger({ time, days, tz } = {}) {
+    const safeTime = typeof time === 'string' && /^\d{1,2}:\d{2}$/.test(time)
+        ? time : '09:00';
+    const safeDays = Array.isArray(days)
+        ? days.filter(d => AUTO_SYNC_WEEKDAYS.includes(d))
+        : [];
+    const safeTz = (typeof tz === 'string' && tz) ? tz : detectBrowserTimezone();
+    return { time: safeTime, days: safeDays, tz: safeTz };
+}
+
+// Parse the days/time/tz back out of a ``weekly_time`` trigger_config,
+// with defensive fallbacks so a hand-edited row doesn't crash render.
+// Returns null when the config isn't recognisable as a weekly trigger.
+function autoSyncWeeklyFromTrigger(config) {
+    if (!config || typeof config !== 'object') return null;
+    const rawTime = typeof config.time === 'string' && /^\d{1,2}:\d{2}$/.test(config.time)
+        ? config.time : '09:00';
+    let days = Array.isArray(config.days)
+        ? config.days.map(d => String(d).toLowerCase()).filter(d => AUTO_SYNC_WEEKDAYS.includes(d))
+        : [];
+    // Empty / all-invalid days = "every day" per next_run_at convention.
+    // Surface that so the UI can render the schedule under all 7 day
+    // columns instead of treating it as unscheduled.
+    if (days.length === 0) days = [...AUTO_SYNC_WEEKDAYS];
+    const tz = (typeof config.tz === 'string' && config.tz) ? config.tz : 'UTC';
+    return { time: rawTime, days, tz };
+}
+
+// Human-readable label for a weekly schedule. Used on card metadata
+// and column tooltips. Multi-day schedules collapse to "Mon, Wed, Fri
+// @09:00"; full-week schedules collapse to "Daily @ 09:00".
+function autoSyncWeeklyLabel(parsed) {
+    if (!parsed) return 'Unscheduled';
+    const { time, days } = parsed;
+    if (!Array.isArray(days) || days.length === 0) return `Daily @ ${time}`;
+    if (days.length === 7) return `Daily @ ${time}`;
+    // Sort to canonical Mon-Sun order so card text doesn't shuffle
+    // when the user toggles days on/off in arbitrary order.
+    const ordered = AUTO_SYNC_WEEKDAYS.filter(d => days.includes(d));
+    const dayList = ordered.map(d => AUTO_SYNC_WEEKDAY_LABELS[d]).join(', ');
+    return `${dayList} @ ${time}`;
+}
+
 function autoSyncSourceLabel(source) {
     const labels = {
         spotify: 'Spotify',
@@ -83,6 +159,35 @@ function autoSyncSourceLabel(source) {
         soulsync_discovery: 'SoulSync Discovery',
     };
     return labels[source] || source || 'Other';
+}
+
+// Per-source logo URLs for the sidebar source-group headers and
+// anywhere else a small branded chip helps disambiguate the source.
+// Same URLs the dashboard equalizer / header-action orbs reference
+// so the visual language stays consistent. Sources without a
+// readily available logo (``beatport``, ``file``) fall through to
+// no-image; the source-icon element drops to display:none via
+// the ``<img onerror>`` swap so the header renders cleanly without
+// a broken-image placeholder.
+const _AUTO_SYNC_SOURCE_LOGOS = {
+    spotify:            'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    spotify_public:     'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    tidal:              'https://www.svgrepo.com/show/519734/tidal.svg',
+    youtube:            'https://www.svgrepo.com/show/13671/youtube.svg',
+    deezer:             'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+    qobuz:              'https://www.svgrepo.com/show/504778/qobuz.svg',
+    itunes_link:        'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+    lastfm:             'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
+    listenbrainz:       'https://listenbrainz.org/static/img/listenbrainz-logo-no-text.svg',
+    soulsync_discovery: '/static/favicon.png',
+};
+
+function autoSyncSourceIconHtml(source) {
+    const src = _AUTO_SYNC_SOURCE_LOGOS[source];
+    if (!src) return '';
+    return `<img class="auto-sync-source-icon" data-svc="${_escAttr(source)}"
+                 src="${src}" alt="" aria-hidden="true"
+                 onerror="this.style.display='none'">`;
 }
 
 function autoSyncCanSchedulePlaylist(playlist) {
@@ -125,29 +230,58 @@ function autoSyncIsScheduleOwned(auto) {
 
 function buildAutoSyncScheduleState(playlists, automations, historyData = {}) {
     const playlistSchedules = {};
+    const weeklySchedules = {};
     const automationPipelines = [];
     const pipelineAutomations = automations.filter(autoSyncIsPipelineAutomation);
     pipelineAutomations.forEach(auto => {
         const playlistId = autoSyncPlaylistIdFromAutomation(auto);
-        const hours = auto.trigger_type === 'schedule' ? autoSyncHoursFromTrigger(auto.trigger_config || {}) : null;
-        if (playlistId && hours && autoSyncIsScheduleOwned(auto)) {
-            playlistSchedules[playlistId] = {
-                automation_id: auto.id,
-                automation_name: auto.name,
-                hours,
-                enabled: auto.enabled !== false && auto.enabled !== 0,
-                owned: true,
-                next_run: auto.next_run,
-                trigger_config: auto.trigger_config || {},
-            };
-        } else {
-            automationPipelines.push(auto);
+        const isOwned = autoSyncIsScheduleOwned(auto);
+
+        if (playlistId && isOwned && auto.trigger_type === 'schedule') {
+            const hours = autoSyncHoursFromTrigger(auto.trigger_config || {});
+            if (hours) {
+                playlistSchedules[playlistId] = {
+                    automation_id: auto.id,
+                    automation_name: auto.name,
+                    hours,
+                    enabled: auto.enabled !== false && auto.enabled !== 0,
+                    owned: true,
+                    next_run: auto.next_run,
+                    trigger_config: auto.trigger_config || {},
+                };
+                return;
+            }
         }
+        if (playlistId && isOwned && auto.trigger_type === 'weekly_time') {
+            // No ``|| {}`` coercion here on purpose — null / non-object
+            // trigger_config from a hand-edited row should fall through
+            // to automationPipelines as a "broken row" rather than be
+            // silently bucketed as an every-day schedule. The helper
+            // returns null for those cases; truthy config flows through
+            // the helper's defensive defaults.
+            const parsed = autoSyncWeeklyFromTrigger(auto.trigger_config);
+            if (parsed) {
+                weeklySchedules[playlistId] = {
+                    automation_id: auto.id,
+                    automation_name: auto.name,
+                    time: parsed.time,
+                    days: parsed.days,
+                    tz: parsed.tz,
+                    enabled: auto.enabled !== false && auto.enabled !== 0,
+                    owned: true,
+                    next_run: auto.next_run,
+                    trigger_config: auto.trigger_config || {},
+                };
+                return;
+            }
+        }
+        automationPipelines.push(auto);
     });
     return {
         playlists,
         automations,
         playlistSchedules,
+        weeklySchedules,
         automationPipelines,
         runHistory: historyData.history || [],
         runHistoryTotal: historyData.total || 0,
@@ -220,16 +354,19 @@ function renderAutoSyncScheduleModal() {
     const overlay = document.getElementById('auto-sync-schedule-modal');
     if (!overlay) return;
 
-    const { playlists, playlistSchedules, automationPipelines, runHistory, runHistoryTotal } = _autoSyncScheduleState;
-    const scheduledCount = Object.keys(playlistSchedules).length;
-    const enabledCount = Object.values(playlistSchedules).filter(s => s.enabled).length;
+    const { playlists, playlistSchedules, weeklySchedules, automationPipelines, runHistory, runHistoryTotal } = _autoSyncScheduleState;
+    const scheduledCount = Object.keys(playlistSchedules).length + Object.keys(weeklySchedules || {}).length;
+    const enabledCount = Object.values(playlistSchedules).filter(s => s.enabled).length
+        + Object.values(weeklySchedules || {}).filter(s => s.enabled).length;
     const pipelineCount = automationPipelines.length;
     const totalTracks = playlists.reduce((sum, p) => sum + (parseInt(p.track_count, 10) || 0), 0);
     const scheduleActive = _autoSyncActiveTab === 'schedule';
+    const weeklyActive = _autoSyncActiveTab === 'weekly';
     const automationsActive = _autoSyncActiveTab === 'automations';
     const historyActive = _autoSyncActiveTab === 'history';
 
     const schedulePanel = renderAutoSyncSchedulePanel(playlists, playlistSchedules);
+    const weeklyPanel = renderAutoSyncWeeklyPanel(playlists, playlistSchedules);
     const automationPanel = renderAutoSyncAutomationPanel(automationPipelines, playlists);
     const historyPanel = renderAutoSyncHistoryPanel(runHistory, runHistoryTotal);
     const monitor = renderAutoSyncPipelineMonitor(playlists);
@@ -252,7 +389,8 @@ function renderAutoSyncScheduleModal() {
             </div>
             ${monitor}
             <div class="auto-sync-tabs">
-                <button class="${scheduleActive ? 'active' : ''}" onclick="setAutoSyncTab('schedule')">Schedule Board</button>
+                <button class="${scheduleActive ? 'active' : ''}" onclick="setAutoSyncTab('schedule')">Hourly Board</button>
+                <button class="${weeklyActive ? 'active' : ''}" onclick="setAutoSyncTab('weekly')">Weekly Board</button>
                 <button class="${automationsActive ? 'active' : ''}" onclick="setAutoSyncTab('automations')">Automation Pipelines</button>
                 <button class="${historyActive ? 'active' : ''}" onclick="setAutoSyncTab('history')">
                     Run History
@@ -263,6 +401,7 @@ function renderAutoSyncScheduleModal() {
                 </button>
             </div>
             <div class="auto-sync-tab-panel ${scheduleActive ? 'active' : ''}" id="auto-sync-schedule-panel">${schedulePanel}</div>
+            <div class="auto-sync-tab-panel ${weeklyActive ? 'active' : ''}" id="auto-sync-weekly-panel">${weeklyPanel}</div>
             <div class="auto-sync-tab-panel ${automationsActive ? 'active' : ''}" id="auto-sync-automation-panel">${automationPanel}</div>
             <div class="auto-sync-tab-panel ${historyActive ? 'active' : ''}" id="auto-sync-history-panel">${historyPanel}</div>
         </div>
@@ -272,7 +411,11 @@ function renderAutoSyncScheduleModal() {
 }
 
 function setAutoSyncTab(tab) {
-    _autoSyncActiveTab = ['automations', 'history'].includes(tab) ? tab : 'schedule';
+    const allowed = ['schedule', 'weekly', 'automations', 'history'];
+    _autoSyncActiveTab = allowed.includes(tab) ? tab : 'schedule';
+    // Switching tabs closes any open weekly editor so the popover
+    // doesn't ghost-render over the wrong panel.
+    if (_autoSyncActiveTab !== 'weekly') _autoSyncWeeklyEditor = null;
     renderAutoSyncScheduleModal();
 }
 
@@ -293,7 +436,10 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
     const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
         <div class="auto-sync-source-group">
             <div class="auto-sync-source-group-head">
-                <span class="auto-sync-source-title">${_esc(autoSyncSourceLabel(source))}</span>
+                <span class="auto-sync-source-title">
+                    ${autoSyncSourceIconHtml(source)}
+                    <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
+                </span>
                 <button type="button" class="auto-sync-source-bulk-btn"
                         onclick="event.stopPropagation(); openAutoSyncBulkMenu(event, '${_escAttr(source)}')"
                         title="Schedule all ${_escAttr(autoSyncSourceLabel(source))} playlists at the same interval">
@@ -372,6 +518,231 @@ function renderAutoSyncSchedulePanel(playlists, playlistSchedules) {
             </div>
     `;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Weekly schedule board — PR 3 of the schedule-types feature.
+// Renders 7 day columns Mon-Sun. Each column lists the playlists
+// scheduled to run on that weekday (multi-day schedules render
+// under EACH matching column, matching how the user thinks about
+// "this playlist runs on Mon AND Wed AND Fri"). Drag a playlist onto
+// a column → create a single-day weekly schedule at the default time.
+// Click a scheduled card → opens an editor popover for time + days
+// + tz adjustments.
+// ──────────────────────────────────────────────────────────────────────
+
+
+function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
+    const weeklySchedules = _autoSyncScheduleState.weeklySchedules || {};
+    const filter = (_autoSyncSidebarFilter || '').trim().toLowerCase();
+    const matchesFilter = (p) => !filter || (p.name || '').toLowerCase().includes(filter)
+        || autoSyncSourceLabel(p.source || '').toLowerCase().includes(filter);
+    const schedulablePlaylists = playlists.filter(p => autoSyncCanSchedulePlaylist(p) && matchesFilter(p));
+    const unavailablePlaylists = playlists.filter(p => !autoSyncCanSchedulePlaylist(p) && matchesFilter(p));
+    const grouped = schedulablePlaylists.reduce((acc, p) => {
+        const key = p.source || 'other';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(p);
+        return acc;
+    }, {});
+    const sourceKeys = Object.keys(grouped).sort((a, b) => autoSyncSourceLabel(a).localeCompare(autoSyncSourceLabel(b)));
+
+    const sidebarHtml = sourceKeys.length ? sourceKeys.map(source => `
+        <div class="auto-sync-source-group">
+            <div class="auto-sync-source-group-head">
+                <span class="auto-sync-source-title">
+                    ${autoSyncSourceIconHtml(source)}
+                    <span class="auto-sync-source-title-label">${_esc(autoSyncSourceLabel(source))}</span>
+                </span>
+            </div>
+            ${grouped[source].map(p => {
+                const weekly = weeklySchedules[p.id];
+                const hourly = playlistSchedules[p.id];
+                let assigned = 'Unscheduled';
+                if (weekly) assigned = autoSyncWeeklyLabel(weekly);
+                else if (hourly) assigned = `Hourly (${autoSyncIntervalLabel(hourly.hours).toLowerCase()})`;
+                return `
+                    <div class="auto-sync-playlist ${weekly ? 'scheduled' : (hourly ? 'scheduled-elsewhere' : '')}"
+                         draggable="true" data-playlist-id="${p.id}"
+                         ondragstart="autoSyncWeeklyDragStart(event)" ondragend="autoSyncWeeklyDragEnd()">
+                        <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
+                        <div class="auto-sync-playlist-meta">${p.track_count || 0} tracks &middot; ${_esc(assigned)}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `).join('') : '<div class="auto-sync-empty">No refreshable mirrored playlists yet.</div>';
+
+    const unavailableHtml = unavailablePlaylists.length ? `
+        <div class="auto-sync-source-group auto-sync-source-group-disabled">
+            <div class="auto-sync-source-title">Not schedulable</div>
+            ${unavailablePlaylists.map(p => `
+                <div class="auto-sync-playlist unavailable">
+                    <div class="auto-sync-playlist-name">${_esc(p.name)}</div>
+                    <div class="auto-sync-playlist-meta">${_esc(autoSyncSourceLabel(p.source))} &middot; refresh not supported</div>
+                </div>
+            `).join('')}
+        </div>
+    ` : '';
+
+    // Build per-day column lists. Iterate the weeklySchedules dict
+    // once instead of per-day scanning so multi-day schedules render
+    // under each matching column without a double-loop.
+    const playlistsById = new Map(schedulablePlaylists.map(p => [parseInt(p.id, 10), p]));
+    const cardsByDay = {};
+    AUTO_SYNC_WEEKDAYS.forEach(d => { cardsByDay[d] = []; });
+    Object.entries(weeklySchedules).forEach(([pid, sched]) => {
+        const playlist = playlistsById.get(parseInt(pid, 10));
+        if (!playlist) return;
+        (sched.days || []).forEach(day => {
+            if (cardsByDay[day]) cardsByDay[day].push({ playlist, schedule: sched });
+        });
+    });
+
+    const dayColumnsHtml = AUTO_SYNC_WEEKDAYS.map(day => {
+        const cards = cardsByDay[day];
+        const cardHtml = cards.length
+            ? cards.map(({ playlist, schedule }) => autoSyncWeeklyCardHtml(playlist, schedule)).join('')
+            : '<div class="auto-sync-drop-hint"><strong>Drop here</strong><span>Schedule playlists on this day</span></div>';
+        return `
+            <div class="auto-sync-column auto-sync-weekly-column" data-day="${day}"
+                 ondragover="autoSyncWeeklyDragOver(event)"
+                 ondragleave="autoSyncWeeklyDragLeave(event)"
+                 ondrop="autoSyncWeeklyDrop(event, '${day}')">
+                <div class="auto-sync-column-head">
+                    <span>${AUTO_SYNC_WEEKDAY_LABELS[day]}</span>
+                    <small>${cards.length} playlist${cards.length === 1 ? '' : 's'}</small>
+                </div>
+                <div class="auto-sync-column-list">${cardHtml}</div>
+            </div>
+        `;
+    }).join('');
+
+    const filterValue = _esc(_autoSyncSidebarFilter || '');
+    const editorHtml = _autoSyncWeeklyEditor ? renderAutoSyncWeeklyEditor() : '';
+    return `
+        <div class="auto-sync-board-intro">
+            <div>
+                <strong>Drag playlists onto a day</strong>
+                <span>Each placement creates a weekly-time schedule. Click a card to edit time, additional days, or timezone.</span>
+            </div>
+            <button onclick="refreshAutoSyncScheduleModal()">Refresh</button>
+        </div>
+        <div class="auto-sync-body">
+            <aside class="auto-sync-sidebar">
+                <div class="auto-sync-sidebar-title">Mirrored playlists</div>
+                <div class="auto-sync-sidebar-filter">
+                    <input type="search" class="auto-sync-sidebar-search" placeholder="Filter playlists…"
+                           value="${filterValue}" oninput="setAutoSyncSidebarFilter(this.value)" />
+                    ${_autoSyncSidebarFilter ? `<button type="button" class="auto-sync-sidebar-filter-clear" onclick="setAutoSyncSidebarFilter('')" aria-label="Clear filter">&times;</button>` : ''}
+                </div>
+                <div class="auto-sync-source-list">${sidebarHtml}${unavailableHtml}</div>
+            </aside>
+            <main class="auto-sync-board auto-sync-weekly-board">${dayColumnsHtml}</main>
+        </div>
+        ${editorHtml}
+    `;
+}
+
+
+function autoSyncWeeklyCardHtml(playlist, schedule) {
+    // Mirror the hourly board's ``autoSyncScheduledCardHtml`` shape so
+    // the two boards stay visually consistent — same name + meta +
+    // timing + actions row regardless of whether the schedule is
+    // hourly or weekday-based. The only per-board differences are:
+    //   - timing line: weekly label vs interval label
+    //   - click opens the weekly editor (hourly board has no editor)
+    //   - drag fns use the weekly-specific ondragstart / ondragend
+    //   - unschedule calls the weekly-specific helper
+    const enabled = schedule?.enabled !== false;
+    const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
+    const isRunning = playlist.pipeline_state?.status === 'running';
+    const health = autoSyncPlaylistHealth(playlist.id);
+    const healthClass = health.level === 'failing' ? 'failing'
+        : health.level === 'warning' ? 'warning'
+        : '';
+    const label = autoSyncWeeklyLabel(schedule);
+    const tz = schedule?.tz || 'UTC';
+    return `
+        <div class="auto-sync-scheduled-card auto-sync-weekly-card ${enabled ? '' : 'disabled'} ${healthClass}"
+             draggable="true"
+             data-playlist-id="${playlist.id}"
+             ondragstart="autoSyncWeeklyDragStart(event)"
+             ondragend="autoSyncWeeklyDragEnd()"
+             onclick="openAutoSyncWeeklyEditor(${playlist.id})">
+            <div class="auto-sync-scheduled-main">
+                <div class="auto-sync-scheduled-name">
+                    ${health.level !== 'ok' ? `<span class="auto-sync-scheduled-health ${healthClass}" title="${_escAttr(health.tooltip)}">${health.level === 'failing' ? '!' : '⚠'}</span>` : ''}
+                    ${_esc(playlist.name)}
+                </div>
+                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
+                <div class="auto-sync-scheduled-timing">
+                    <span>${_esc(label)}</span>
+                    <small>${_esc(tz)}</small>
+                    ${nextLabel ? `<small>${_esc(nextLabel)}</small>` : ''}
+                </div>
+            </div>
+            <div class="auto-sync-scheduled-actions">
+                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>
+                <button onclick="event.stopPropagation(); unscheduleAutoSyncWeekly(${playlist.id})" title="Remove this weekly schedule">&times;</button>
+            </div>
+        </div>
+    `;
+}
+
+
+function renderAutoSyncWeeklyEditor() {
+    const draft = _autoSyncWeeklyEditor;
+    if (!draft) return '';
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(draft.playlistId, 10));
+    if (!playlist) return '';
+    const dayToggles = AUTO_SYNC_WEEKDAYS.map(day => {
+        const on = draft.days.includes(day);
+        return `
+            <button type="button"
+                    class="auto-sync-weekly-day-toggle ${on ? 'active' : ''}"
+                    onclick="toggleAutoSyncWeeklyEditorDay('${day}')">
+                ${AUTO_SYNC_WEEKDAY_LABELS[day]}
+            </button>
+        `;
+    }).join('');
+    const existing = _autoSyncScheduleState.weeklySchedules?.[draft.playlistId];
+    return `
+        <div class="auto-sync-weekly-editor-backdrop" onclick="closeAutoSyncWeeklyEditor()">
+            <div class="auto-sync-weekly-editor" onclick="event.stopPropagation()">
+                <div class="auto-sync-weekly-editor-head">
+                    <h4>Weekly schedule</h4>
+                    <button type="button" class="auto-sync-close" onclick="closeAutoSyncWeeklyEditor()">&times;</button>
+                </div>
+                <div class="auto-sync-weekly-editor-playlist">${_esc(playlist.name)}</div>
+                <div class="auto-sync-weekly-editor-section">
+                    <label>Days</label>
+                    <div class="auto-sync-weekly-editor-days">${dayToggles}</div>
+                </div>
+                <div class="auto-sync-weekly-editor-section">
+                    <label for="auto-sync-weekly-time">Time</label>
+                    <input type="time" id="auto-sync-weekly-time"
+                           value="${_escAttr(draft.time)}"
+                           oninput="setAutoSyncWeeklyEditorTime(this.value)" />
+                </div>
+                <div class="auto-sync-weekly-editor-section">
+                    <label for="auto-sync-weekly-tz">Timezone (IANA)</label>
+                    <input type="text" id="auto-sync-weekly-tz"
+                           value="${_escAttr(draft.tz)}"
+                           oninput="setAutoSyncWeeklyEditorTz(this.value)" />
+                    <small class="auto-sync-weekly-editor-hint">e.g. America/Los_Angeles, Europe/London, Asia/Tokyo</small>
+                </div>
+                <div class="auto-sync-weekly-editor-actions">
+                    ${existing ? `<button class="auto-sync-weekly-editor-delete" onclick="unscheduleAutoSyncWeeklyFromEditor()">Unschedule</button>` : ''}
+                    <div class="auto-sync-weekly-editor-actions-right">
+                        <button class="auto-sync-weekly-editor-cancel" onclick="closeAutoSyncWeeklyEditor()">Cancel</button>
+                        <button class="auto-sync-weekly-editor-save" onclick="saveAutoSyncWeeklyFromEditor()">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 
 function setAutoSyncSidebarFilter(value) {
     _autoSyncSidebarFilter = String(value || '');
@@ -1311,6 +1682,17 @@ async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
         showToast('That playlist source cannot be refreshed by Auto-Sync.', 'info');
         return;
     }
+
+    // Enforce one-schedule-per-playlist: if a weekly schedule exists,
+    // drop it before installing the hourly one. Mirrors the same
+    // mutual-exclusion the weekly save path enforces in reverse.
+    const existingWeekly = _autoSyncScheduleState.weeklySchedules?.[playlistId];
+    if (existingWeekly) {
+        try {
+            await fetch(`/api/automations/${existingWeekly.automation_id}`, { method: 'DELETE' });
+        } catch (_) { /* best-effort cleanup */ }
+    }
+
     const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
     const payload = {
         name: `Auto-Sync: ${playlist.name}`,
@@ -1352,6 +1734,205 @@ async function unscheduleAutoSyncPlaylist(playlistId) {
         showToast(`Error: ${err.message}`, 'error');
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Weekly-tab drag-drop + editor state mutators.
+// ──────────────────────────────────────────────────────────────────────
+
+
+function autoSyncWeeklyDragStart(event) {
+    _autoSyncIsDragging = true;
+    const id = event.currentTarget?.dataset?.playlistId || '';
+    event.dataTransfer.setData('text/plain', id);
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+
+function autoSyncWeeklyDragEnd() {
+    _autoSyncIsDragging = false;
+}
+
+
+function autoSyncWeeklyDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const col = event.currentTarget;
+    if (col && !col.classList.contains('drag-over')) {
+        col.classList.add('drag-over');
+    }
+}
+
+
+function autoSyncWeeklyDragLeave(event) {
+    const col = event.currentTarget;
+    if (!col) return;
+    col.classList.remove('drag-over');
+}
+
+
+async function autoSyncWeeklyDrop(event, day) {
+    event.preventDefault();
+    _autoSyncIsDragging = false;
+    const col = event.currentTarget;
+    if (col) col.classList.remove('drag-over');
+    const playlistId = parseInt(event.dataTransfer.getData('text/plain'), 10);
+    if (!playlistId) return;
+    if (!AUTO_SYNC_WEEKDAYS.includes(day)) return;
+
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === playlistId);
+    if (!playlist || !autoSyncCanSchedulePlaylist(playlist)) {
+        showToast('That playlist source cannot be refreshed by Auto-Sync.', 'info');
+        return;
+    }
+
+    // Augment OR create: if a weekly schedule already exists for this
+    // playlist, append the dropped day (no-op when already present);
+    // otherwise create a single-day schedule with default time + browser tz.
+    const existing = _autoSyncScheduleState.weeklySchedules?.[playlistId];
+    const days = existing
+        ? (existing.days.includes(day) ? existing.days : [...existing.days, day])
+        : [day];
+    const time = existing?.time || '09:00';
+    const tz = existing?.tz || detectBrowserTimezone();
+    await saveAutoSyncWeeklySchedule(playlistId, { time, days, tz });
+}
+
+
+function openAutoSyncWeeklyEditor(playlistId) {
+    const pid = parseInt(playlistId, 10);
+    if (!pid) return;
+    const existing = _autoSyncScheduleState.weeklySchedules?.[pid];
+    _autoSyncWeeklyEditor = {
+        playlistId: pid,
+        time: existing?.time || '09:00',
+        days: existing ? [...existing.days] : [],
+        tz: existing?.tz || detectBrowserTimezone(),
+    };
+    renderAutoSyncScheduleModal();
+}
+
+
+function closeAutoSyncWeeklyEditor() {
+    _autoSyncWeeklyEditor = null;
+    renderAutoSyncScheduleModal();
+}
+
+
+function toggleAutoSyncWeeklyEditorDay(day) {
+    if (!_autoSyncWeeklyEditor) return;
+    if (!AUTO_SYNC_WEEKDAYS.includes(day)) return;
+    const idx = _autoSyncWeeklyEditor.days.indexOf(day);
+    if (idx >= 0) {
+        _autoSyncWeeklyEditor.days.splice(idx, 1);
+    } else {
+        _autoSyncWeeklyEditor.days.push(day);
+    }
+    renderAutoSyncScheduleModal();
+}
+
+
+function setAutoSyncWeeklyEditorTime(value) {
+    if (!_autoSyncWeeklyEditor) return;
+    _autoSyncWeeklyEditor.time = String(value || '09:00');
+}
+
+
+function setAutoSyncWeeklyEditorTz(value) {
+    if (!_autoSyncWeeklyEditor) return;
+    _autoSyncWeeklyEditor.tz = String(value || 'UTC');
+}
+
+
+async function saveAutoSyncWeeklyFromEditor() {
+    if (!_autoSyncWeeklyEditor) return;
+    const { playlistId, time, days, tz } = _autoSyncWeeklyEditor;
+    if (!days.length) {
+        showToast('Pick at least one day for the weekly schedule.', 'error');
+        return;
+    }
+    await saveAutoSyncWeeklySchedule(playlistId, { time, days, tz });
+    _autoSyncWeeklyEditor = null;
+}
+
+
+async function unscheduleAutoSyncWeeklyFromEditor() {
+    if (!_autoSyncWeeklyEditor) return;
+    const { playlistId } = _autoSyncWeeklyEditor;
+    _autoSyncWeeklyEditor = null;
+    await unscheduleAutoSyncWeekly(playlistId);
+}
+
+
+async function saveAutoSyncWeeklySchedule(playlistId, { time, days, tz }) {
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+    if (!playlist) return;
+    if (!autoSyncCanSchedulePlaylist(playlist)) {
+        showToast('That playlist source cannot be refreshed by Auto-Sync.', 'info');
+        return;
+    }
+    const triggerConfig = autoSyncWeeklyTrigger({ time, days, tz });
+    if (!triggerConfig.days.length) {
+        showToast('Pick at least one day for the weekly schedule.', 'error');
+        return;
+    }
+
+    // Enforce one-schedule-per-playlist: if the playlist currently has
+    // an hourly schedule, drop it before installing the weekly one. The
+    // engine can technically run both side-by-side as two separate
+    // automations, but the UI assumes one schedule per playlist and
+    // showing two cards under the same playlist row would surprise
+    // users. Delete-then-create is safe — the worst case (POST fails)
+    // leaves the playlist unscheduled, which is recoverable from the UI.
+    const existingHourly = _autoSyncScheduleState.playlistSchedules?.[playlistId];
+    if (existingHourly) {
+        try {
+            await fetch(`/api/automations/${existingHourly.automation_id}`, { method: 'DELETE' });
+        } catch (_) { /* best-effort cleanup */ }
+    }
+
+    const existingWeekly = _autoSyncScheduleState.weeklySchedules?.[playlistId];
+    const payload = {
+        name: `Auto-Sync: ${playlist.name}`,
+        trigger_type: 'weekly_time',
+        trigger_config: triggerConfig,
+        action_type: 'playlist_pipeline',
+        action_config: { playlist_id: String(playlistId), all: false },
+        then_actions: [],
+        group_name: 'Playlist Auto-Sync',
+        owned_by: 'auto_sync',
+    };
+    try {
+        const res = await fetch(existingWeekly ? `/api/automations/${existingWeekly.automation_id}` : '/api/automations', {
+            method: existingWeekly ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to save weekly schedule');
+        showToast(`${playlist.name} scheduled ${autoSyncWeeklyLabel(triggerConfig).toLowerCase()}`, 'success');
+        await refreshAutoSyncScheduleModal();
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+
+async function unscheduleAutoSyncWeekly(playlistId) {
+    const schedule = _autoSyncScheduleState.weeklySchedules?.[playlistId];
+    const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+    if (!schedule) return;
+    if (!await showConfirmDialog({ title: 'Remove Weekly Schedule', message: `Remove weekly schedule for "${playlist?.name || 'this playlist'}"?` })) return;
+    try {
+        const res = await fetch(`/api/automations/${schedule.automation_id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to remove weekly schedule');
+        showToast('Weekly schedule removed', 'success');
+        await refreshAutoSyncScheduleModal();
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
 
 async function runAutoSyncScheduledPlaylist(playlistId) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));

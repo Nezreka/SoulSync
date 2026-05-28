@@ -350,6 +350,33 @@ def test_batch_completion_cleans_private_album_bundle_staging(tmp_path):
     assert not staging_dir.exists()
 
 
+def test_batch_completion_cleans_soulseek_bundle_staging(tmp_path):
+    """Regression: Soulseek bundles also copy files into the private
+    staging dir (``soulseek_client.py:1599``). Pre-fix the cleanup
+    gate excluded ``soulseek`` because of an outdated comment about
+    slskd "keeping its own completed folders" — so slskd bundle
+    copies leaked under storage/album_bundle_staging forever.
+    Now soulseek is in the cleanup set alongside torrent / usenet."""
+    staging_dir = tmp_path / 'b_slskd'
+    staging_dir.mkdir()
+    (staging_dir / 'leftover.flac').write_bytes(b'audio')
+
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'name': 'X'}}
+    download_batches['b_slskd'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+        'album_bundle_private_staging': True,
+        'album_bundle_source': 'soulseek',
+        'album_bundle_staging_path': str(staging_dir),
+    }
+    deps, _ = _build_deps()
+
+    lc.on_download_completed('b_slskd', 't1', True, deps)
+
+    assert not staging_dir.exists()
+
+
 def test_batch_completion_keeps_unexpected_staging_path(tmp_path):
     staging_dir = tmp_path / 'shared-staging'
     staging_dir.mkdir()

@@ -47,6 +47,26 @@ def _build_album_images(album: Dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _build_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a wishlist-modal add payload into the canonical
+    wishlist track shape.
+
+    Pre-fix this used default values (``track_number=1``,
+    ``disc_number=1``, ``total_tracks=1``, ``release_date=''``) when
+    the upstream UI omitted a field. That silently poisoned every
+    wishlist row added from the library "add to wishlist" modal:
+    track_number locked to 1 regardless of source position, year
+    dropped from folder paths because release_date was empty. The
+    library modal flow is what's used for "add this album's missing
+    tracks to wishlist" and "add this playlist to wishlist" bulk
+    actions — the most common user path, so the regression was
+    everywhere.
+
+    Now preserve missing values explicitly (None for numeric
+    positions, omit-or-empty for release_date) so the downstream
+    import pipeline can detect-and-recover via
+    ``core/imports/track_number.py:resolve_track_number`` instead
+    of locking to 1.
+    """
     album_images = _build_album_images(album)
     return {
         "id": track.get("id"),
@@ -58,12 +78,20 @@ def _build_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str,
             "artists": album.get("artists", []),
             "images": album_images,
             "album_type": album.get("album_type", "album"),
+            # release_date stays as whatever the upstream sent
+            # (including '' when truly unknown). Path template
+            # gracefully omits the year when empty; we don't fake
+            # a date.
             "release_date": album.get("release_date", ""),
-            "total_tracks": album.get("total_tracks", 1),
+            # total_tracks=None preserves "we don't know"; UI uses
+            # this for category classification + path math. Pre-fix
+            # default of 1 mislabelled multi-track albums as singles.
+            "total_tracks": album.get("total_tracks"),
         },
         "duration_ms": track.get("duration_ms", 0),
-        "track_number": track.get("track_number", 1),
-        "disc_number": track.get("disc_number", 1),
+        # Numeric positions: None when missing, not 1.
+        "track_number": track.get("track_number"),
+        "disc_number": track.get("disc_number"),
         "explicit": track.get("explicit", False),
         "popularity": track.get("popularity", 0),
         "preview_url": track.get("preview_url"),

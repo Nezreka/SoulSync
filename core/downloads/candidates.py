@@ -36,6 +36,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.downloads.track_metadata_backfill import hydrate_download_metadata
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -247,55 +248,30 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                         enhanced_payload['artists'] = [{'name': artist} for artist in track.artists] if track.artists else []
                         logger.info(f"[Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
-                        # Get track_number and disc_number — prefer track data we already have,
-                        # fall back to detailed API call only if needed
-                        got_track_number = False
-
-                        # 1. Try track_info (from frontend, has album track data)
-                        tn = track_info.get('track_number', 0) if isinstance(track_info, dict) else 0
-                        dn = (track_info.get('disc_number') or 1) if isinstance(track_info, dict) else 1
-                        if tn and tn > 0:
-                            enhanced_payload['track_number'] = tn
-                            enhanced_payload['disc_number'] = dn
-                            got_track_number = True
-                            logger.info(f"[Context] Added track_number from track_info: {tn}, disc_number: {dn}")
-
-                        # 2. Try the track object itself (from album tracks response)
-                        if not got_track_number and hasattr(track, 'track_number') and track.track_number:
-                            enhanced_payload['track_number'] = track.track_number
-                            enhanced_payload['disc_number'] = getattr(track, 'disc_number', 1) or 1
-                            got_track_number = True
-                            logger.info(f"[Context] Added track_number from track object: {track.track_number}, disc_number: {enhanced_payload['disc_number']}")
-
-                        # 3. Last resort — fetch from metadata source API
-                        if not got_track_number and hasattr(track, 'id') and track.id:
-                            try:
-                                detailed_track = deps.spotify_client.get_track_details(track.id)
-                                if detailed_track and detailed_track.get('track_number'):
-                                    enhanced_payload['track_number'] = detailed_track['track_number']
-                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number') or 1
-                                    got_track_number = True
-                                    logger.info(f"[Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
-
-                                    # Backfill album metadata from detailed track when context
-                                    # has incomplete data (missing release_date, total_tracks, etc.)
-                                    if isinstance(detailed_track.get('album'), dict):
-                                        dt_album = detailed_track['album']
-                                        if not spotify_album_context.get('release_date') and dt_album.get('release_date'):
-                                            spotify_album_context['release_date'] = dt_album['release_date']
-                                            logger.info(f"[Context] Backfilled release_date from API: {dt_album['release_date']}")
-                                        if not spotify_album_context.get('album_type') and dt_album.get('album_type'):
-                                            spotify_album_context['album_type'] = dt_album['album_type']
-                                        if not spotify_album_context.get('total_tracks') and dt_album.get('total_tracks'):
-                                            spotify_album_context['total_tracks'] = dt_album['total_tracks']
-                                        if not spotify_album_context.get('id') and dt_album.get('id'):
-                                            spotify_album_context['id'] = dt_album['id']
-                                        if not spotify_album_context.get('image_url') and dt_album.get('images'):
-                                            spotify_album_context['image_url'] = dt_album['images'][0].get('url', '')
-                            except Exception as e:
-                                logger.error(f"[Context] API track details failed: {e}")
-
-                        if not got_track_number:
+                        # Resolve track_number / disc_number and hydrate
+                        # lean album context. Extracted to
+                        # track_metadata_backfill.hydrate_download_metadata
+                        # — see that module for the precedence chain.
+                        # Why the extract: the inline pre-fix coupled
+                        # album-backfill to the "track_number missing"
+                        # branch. When wishlist payloads carried a poisoned
+                        # default-1 track_number (older routes.py used
+                        # ``.get('track_number', 1)``) the API call short-
+                        # circuited and the lean album_context (no
+                        # release_date / total_tracks for Deezer-sourced
+                        # discovery matches) survived untouched, producing
+                        # folders without a year subfolder.
+                        resolved = hydrate_download_metadata(
+                            track, track_info, spotify_album_context, deps.spotify_client,
+                        )
+                        if resolved.track_number is not None:
+                            enhanced_payload['track_number'] = resolved.track_number
+                            enhanced_payload['disc_number'] = resolved.disc_number
+                            logger.info(
+                                f"[Context] Added track_number from {resolved.source}: "
+                                f"{resolved.track_number}, disc_number: {resolved.disc_number}"
+                            )
+                        else:
                             enhanced_payload.setdefault('track_number', 0)
                             enhanced_payload.setdefault('disc_number', 1)
                             logger.warning("[Context] No track_number found from any source")
