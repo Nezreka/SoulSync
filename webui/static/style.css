@@ -62271,12 +62271,13 @@ body.reduce-effects .dash-card::after {
 
 .rate-eq {
     --eq-accent: #888;
+    --eq-glow: 0.04;
     flex: 1 1 0;
     min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 8px;
     padding: 0;
     background: none;
     border: 0;
@@ -62286,6 +62287,71 @@ body.reduce-effects .dash-card::after {
     text-align: center;
     position: relative;
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Avatar disc — circular brand-color chip above the bar, glyph
+ * centered. Anchors each capsule to its service so the row reads
+ * as identifiable rather than 11 anonymous bars. */
+.rate-eq-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.95);
+    background:
+        radial-gradient(circle at 30% 25%,
+            color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+            var(--eq-accent) 55%,
+            color-mix(in srgb, var(--eq-accent) 55%, black 45%) 100%);
+    border: 1px solid color-mix(in srgb, var(--eq-accent) 55%, transparent);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
+        0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    transition: box-shadow 0.3s, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    flex: 0 0 auto;
+}
+
+.rate-eq.active .rate-eq-avatar {
+    animation: rate-eq-avatar-halo 2.8s ease-in-out infinite;
+}
+
+@keyframes rate-eq-avatar-halo {
+    0%, 100% {
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.25),
+            0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
+            0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
+    }
+    50% {
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.3),
+            0 4px 18px color-mix(in srgb, var(--eq-accent) 55%, transparent),
+            0 0 0 5px color-mix(in srgb, var(--eq-accent) 12%, transparent);
+    }
+}
+
+.rate-eq:hover .rate-eq-avatar {
+    transform: translateY(-1px) scale(1.05);
+}
+
+.rate-eq.rate-limited .rate-eq-avatar {
+    background:
+        radial-gradient(circle at 30% 25%, #ffb4b4, #ef4444 55%, #7a1a1a 100%);
+    border-color: rgba(239, 68, 68, 0.5);
+    animation: rate-eq-avatar-warn 1.1s ease-in-out infinite;
+}
+
+@keyframes rate-eq-avatar-warn {
+    0%, 100% { filter: brightness(1); }
+    50%      { filter: brightness(1.35); }
 }
 
 .rate-eq:focus-visible {
@@ -62315,6 +62381,45 @@ body.reduce-effects .dash-card::after {
         inset 0 1px 0 rgba(255, 255, 255, 0.04),
         inset 0 -10px 24px rgba(0, 0, 0, 0.35);
     transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Reflection puddle — a soft accent-colored glow rendered as a
+ * pseudo on the host button so it escapes the track's
+ * ``overflow: hidden`` clipping. Sits between the track and the
+ * meta column, intensifying with bar height to sell the "glass
+ * surface" feel: the bar looks like it's standing on a polished
+ * pane, not floating in space. Opacity is driven by --eq-glow
+ * which the renderer sets proportional to the real (unclamped)
+ * rate, so idle bars don't pollute the row with permanent
+ * ground-light. */
+.rate-eq::after {
+    content: '';
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    /* Anchored just above the meta column. Using a numeric inset
+     * from the bottom keeps the puddle visually attached to the
+     * track regardless of meta-block height. */
+    bottom: 44px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center,
+        color-mix(in srgb, var(--eq-accent) 75%, transparent) 0%,
+        color-mix(in srgb, var(--eq-accent) 40%, transparent) 40%,
+        transparent 70%);
+    opacity: calc(var(--eq-glow, 0.04) * 1.1);
+    filter: blur(5px);
+    pointer-events: none;
+    transition: opacity 0.6s;
+    z-index: 0;
+}
+
+.rate-eq.rate-limited::after,
+.rate-eq.danger::after {
+    background: radial-gradient(ellipse at center,
+        rgba(239, 68, 68, 0.75) 0%,
+        rgba(239, 68, 68, 0.4) 40%,
+        transparent 70%);
 }
 
 .rate-eq:hover .rate-eq-track {
@@ -62414,6 +62519,61 @@ body.reduce-effects .dash-card::after {
             inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
             0 0 32px color-mix(in srgb, var(--eq-accent) 55%, transparent);
     }
+}
+
+/* Peak-flash — fires on a real upward step in cpm between socket
+ * updates. Mimics a hardware VU meter's peak-detect LED: tip
+ * briefly flares white-hot, the bar fill flashes brighter, and a
+ * thin ring radiates from the top of the fill. Self-contained
+ * 650ms one-shot; JS removes the class after the animation ends. */
+.rate-eq.peak-flash .rate-eq-tip {
+    animation: rate-eq-tip-flash 0.65s ease-out;
+}
+
+.rate-eq.peak-flash .rate-eq-fill {
+    animation: rate-eq-fill-flash 0.65s ease-out;
+}
+
+@keyframes rate-eq-tip-flash {
+    0% {
+        background: #fff;
+        height: 2px;
+        opacity: 1;
+        box-shadow:
+            0 0 18px #fff,
+            0 0 36px color-mix(in srgb, var(--eq-accent) 90%, white),
+            0 0 60px color-mix(in srgb, var(--eq-accent) 60%, transparent);
+        transform: translateY(0);
+    }
+    40% {
+        height: 4px;
+        opacity: 1;
+        box-shadow:
+            0 0 22px #fff,
+            0 0 44px color-mix(in srgb, var(--eq-accent) 80%, white);
+        transform: translateY(-2px);
+    }
+    100% {
+        height: 2px;
+        transform: translateY(0);
+    }
+}
+
+@keyframes rate-eq-fill-flash {
+    0%   { filter: brightness(1.55) saturate(1.25); }
+    50%  { filter: brightness(1.25) saturate(1.15); }
+    100% { filter: brightness(1)    saturate(1); }
+}
+
+/* Peak-flash also briefly intensifies the reflection puddle, so
+ * the surface "ripples" with the call burst. */
+.rate-eq.peak-flash::after {
+    animation: rate-eq-puddle-flash 0.65s ease-out;
+}
+
+@keyframes rate-eq-puddle-flash {
+    0%   { opacity: calc((var(--eq-glow, 0.04) + 0.45) * 1.2); filter: blur(7px); }
+    100% { opacity: calc(var(--eq-glow, 0.04) * 1.2);          filter: blur(5px); }
 }
 
 /* Idle floor: keep the 4% sliver visibly alive — a slow breathe so
@@ -62570,9 +62730,10 @@ body.reduce-effects .dash-card::after {
         --eq-track-h: 140px;
         gap: 4px;
     }
-    .rate-eq-value { font-size: 16px; }
-    .rate-eq-name  { font-size: 10px; }
-    .rate-eq-state { font-size: 8px; padding: 1px 6px; }
+    .rate-eq-value  { font-size: 16px; }
+    .rate-eq-name   { font-size: 10px; }
+    .rate-eq-state  { font-size: 8px; padding: 1px 6px; }
+    .rate-eq-avatar { width: 26px; height: 26px; font-size: 10px; }
 }
 
 @media (max-width: 720px) {
@@ -62589,6 +62750,7 @@ body.reduce-effects .dash-card::after {
     .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
         --eq-track-h: 108px;
     }
+    .rate-eq-avatar { width: 24px; height: 24px; font-size: 9px; }
 }
 
 /* Active downloads container */
