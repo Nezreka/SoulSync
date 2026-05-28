@@ -1536,12 +1536,21 @@ class SoulseekClient(DownloadSourcePlugin):
             result['error'] = 'No suitable Soulseek album folder after filtering'
             return result
 
+        # On the preflight-reuse path ``picked`` is None — the master
+        # already selected the folder so we never call _pick_album_bundle_folder.
+        # Read the track count off the preferred_tracks list in that
+        # case so the log line doesn't misleadingly report "0 tracks".
+        _log_track_count = (
+            getattr(picked, 'track_count', 0) if picked is not None
+            else len(folder_tracks)
+        )
+        _log_quality = getattr(picked, 'dominant_quality', '') if picked is not None else ''
         logger.info(
             "[Soulseek album] Picked %s:%s (%s tracks, quality=%s)",
             username,
             folder_path,
-            getattr(picked, 'track_count', 0),
-            getattr(picked, 'dominant_quality', ''),
+            _log_track_count,
+            _log_quality,
         )
         _emit(
             'queued',
@@ -1678,6 +1687,19 @@ class SoulseekClient(DownloadSourcePlugin):
         interval = get_poll_interval()
         completed_paths: Dict[tuple, Path] = {}
         failed_states: Dict[tuple, str] = {}
+        # Track keys where slskd reports the transfer Completed /
+        # Succeeded but the local file finder can't yet locate the
+        # file on disk. Usually transient (slskd writes the file
+        # after announcing completion); becomes a hard failure when
+        # ALL remaining keys land here long enough — that's the
+        # symptom from issue #715 (Billy Ocean bundle hung 22 min
+        # after slskd finished). The grace window keeps the
+        # transient case from triggering; the all-stuck check
+        # short-circuits when there's no chance of progress.
+        unresolved_since: Dict[tuple, float] = {}
+        # Seconds an "slskd Completed but locally unresolved" key
+        # has to stay stuck before we give up on it.
+        _unresolved_grace = 45.0
         while time.monotonic() < deadline:
             try:
                 downloads = run_async(self.get_all_downloads())
@@ -1716,7 +1738,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     path = self._resolve_downloaded_album_file(track.filename)
                     if path:
                         completed_paths[key] = path
+                        unresolved_since.pop(key, None)
                     else:
+                        # First time we see slskd report this key as
+                        # completed-but-locally-missing, stamp it.
+                        # Subsequent iterations keep the original
+                        # stamp so the grace window is real wall-time.
+                        unresolved_since.setdefault(key, time.monotonic())
                         logger.debug(
                             "[Soulseek album] Transfer completed but local file not found yet: %s",
                             track.filename,
@@ -1739,6 +1767,33 @@ class SoulseekClient(DownloadSourcePlugin):
                 return []
             if len(completed_paths) == len(transfer_keys):
                 return list(completed_paths.values())
+
+            # Early exit when every remaining key is "slskd done +
+            # locally unresolved past grace". Pre-fix this was the
+            # silent timeout path from issue #715 — slskd finished
+            # downloading the whole album, but no local file ever
+            # resolved, so the poll spun until ``get_poll_timeout()``
+            # elapsed (default 30+ minutes) before failing the batch.
+            now = time.monotonic()
+            still_pending = [
+                k for k in transfer_keys
+                if k not in completed_paths and k not in failed_states
+            ]
+            if still_pending and all(
+                k in unresolved_since and (now - unresolved_since[k]) >= _unresolved_grace
+                for k in still_pending
+            ):
+                logger.error(
+                    "[Soulseek album] %d transfer(s) reported Completed by slskd "
+                    "but no local file could be resolved after %.0fs — likely a "
+                    "``soulseek.download_path`` mismatch (Docker volume / "
+                    "username-prefixed slskd config). Files this poll attempted: %s",
+                    len(still_pending),
+                    _unresolved_grace,
+                    [transfer_keys[k].filename for k in still_pending[:5]],
+                )
+                return list(completed_paths.values())
+
             time.sleep(interval)
         pending = len(transfer_keys) - len(completed_paths) - len(failed_states)
         if completed_paths:
@@ -1758,9 +1813,26 @@ class SoulseekClient(DownloadSourcePlugin):
         return []
 
     def _resolve_downloaded_album_file(self, remote_filename: str) -> Optional[Path]:
+        # Pre-fix this tried three hardcoded candidate paths and
+        # silently returned None on anything else — including the
+        # common slskd config that nests downloads under
+        # ``<download_dir>/<username>/<filename>``. That mismatch
+        # caused issue #715: bundle downloads on those setups
+        # timed out 22 minutes after slskd reported every transfer
+        # Completed because the resolver never located a single
+        # local file.
+        #
+        # Now delegates to the shared robust finder which recursively
+        # walks the download dir by basename + path-confirms via the
+        # remote directory components. Same logic the per-track flow
+        # has used since 2.5.9.
+        from core.downloads.file_finder import find_completed_audio_file
         basename = os.path.basename((remote_filename or '').replace('\\', '/'))
         if not basename:
             return None
+        # Fast path: the three hardcoded candidates still cover the
+        # default slskd-flat layout cheaply, and avoid an os.walk
+        # for the common case. Walk only when none hit.
         candidates = [
             self.download_path / remote_filename,
             self.download_path / basename,
@@ -1774,14 +1846,11 @@ class SoulseekClient(DownloadSourcePlugin):
                     return candidate
             except OSError:
                 continue
-        try:
-            matches = list(self.download_path.rglob(basename))
-        except OSError:
-            matches = []
-        for match in matches:
-            if match.is_file():
-                return match
-        return None
+
+        found_path, _location = find_completed_audio_file(
+            str(self.download_path), remote_filename,
+        )
+        return Path(found_path) if found_path else None
     
     async def check_connection(self) -> bool:
         """Check if slskd is running and connected to the Soulseek network"""
