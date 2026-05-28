@@ -21073,6 +21073,8 @@ from core.discovery.scoring import (
 
 # Tidal discovery worker logic lives in core/discovery/tidal.py.
 from core.discovery import tidal as _discovery_tidal
+# Source-agnostic discovery route helpers (lifted from the per-source copies).
+from core.discovery.endpoints import convert_results_to_spotify_tracks
 
 
 def _build_tidal_discovery_deps():
@@ -21103,39 +21105,7 @@ def _run_tidal_discovery_worker(playlist_id):
 
 def convert_tidal_results_to_spotify_tracks(discovery_results):
     """Convert Tidal discovery results to Spotify tracks format for sync"""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            # Create track object matching the expected format
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            # Build from individual fields (automatic discovery format)
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} Tidal matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "Tidal")
 
 
 # ===================================================================
@@ -21817,37 +21787,7 @@ def _run_deezer_discovery_worker(playlist_id):
 
 def convert_deezer_results_to_spotify_tracks(discovery_results):
     """Convert Deezer discovery results to Spotify tracks format for sync"""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} Deezer matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "Deezer")
 
 
 # ===================================================================
@@ -22478,36 +22418,7 @@ def _run_qobuz_discovery_worker(playlist_id):
 
 def convert_qobuz_results_to_spotify_tracks(discovery_results):
     """Convert Qobuz discovery results to Spotify tracks format for sync."""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} Qobuz matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "Qobuz")
 
 
 # ===================================================================
@@ -22967,32 +22878,7 @@ def _build_itunes_link_state(response_data):
 
 
 def _convert_link_results_to_spotify_tracks(discovery_results, label):
-    spotify_tracks = []
-    for result in discovery_results:
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            spotify_tracks.append({
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            })
-    logger.info(f"Converted {len(spotify_tracks)} {label} matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, label)
 
 @app.route('/api/spotify/parse-public', methods=['POST'])
 def parse_spotify_public_endpoint():
@@ -23442,38 +23328,7 @@ def _run_spotify_public_discovery_worker(url_hash):
 
 def convert_spotify_public_results_to_spotify_tracks(discovery_results):
     """Convert Spotify Public discovery results to Spotify tracks format for sync"""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            # Preserve track_number/disc_number from discovery enrichment
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} Spotify Public matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "Spotify Public")
 
 
 # ===================================================================
@@ -24889,39 +24744,7 @@ def update_youtube_playlist_phase(url_hash):
 
 def convert_youtube_results_to_spotify_tracks(discovery_results):
     """Convert YouTube discovery results to Spotify tracks format for sync"""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            # Create track object matching the expected format
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            # Build from individual fields (automatic discovery format)
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} YouTube matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "YouTube")
 
 
 # Add these new endpoints to the end of web_server.py
@@ -30702,39 +30525,7 @@ def update_listenbrainz_discovery_match():
 
 def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
     """Convert ListenBrainz discovery results to Spotify tracks format for sync"""
-    spotify_tracks = []
-
-    for result in discovery_results:
-        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
-        if result.get('spotify_data'):
-            spotify_data = result['spotify_data']
-
-            # Create track object matching the expected format
-            track = {
-                'id': spotify_data['id'],
-                'name': spotify_data['name'],
-                'artists': spotify_data['artists'],
-                'album': spotify_data['album'],
-                'duration_ms': spotify_data.get('duration_ms', 0)
-            }
-            if spotify_data.get('track_number'):
-                track['track_number'] = spotify_data['track_number']
-            if spotify_data.get('disc_number'):
-                track['disc_number'] = spotify_data['disc_number']
-            spotify_tracks.append(track)
-        elif result.get('spotify_track') and result.get('status_class') == 'found':
-            # Build from individual fields (automatic discovery format)
-            track = {
-                'id': result.get('spotify_id', 'unknown'),
-                'name': result.get('spotify_track', 'Unknown Track'),
-                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
-                'duration_ms': 0
-            }
-            spotify_tracks.append(track)
-
-    logger.info(f"Converted {len(spotify_tracks)} ListenBrainz matches to Spotify tracks for sync")
-    return spotify_tracks
+    return convert_results_to_spotify_tracks(discovery_results, "ListenBrainz")
 
 @app.route('/api/wing-it/sync', methods=['POST'])
 def wing_it_sync():
