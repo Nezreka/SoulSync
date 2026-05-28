@@ -389,6 +389,9 @@ class _FakeLBManager:
             }],
         }
         self.refresh_called = False
+        self.refresh_playlist_calls: list[str] = []
+        # Toggle to raise from refresh_playlist for the silent-swallow test.
+        self.refresh_raises: Optional[Exception] = None
 
     def get_cached_playlists(self, playlist_type: str):
         return self._rows.get(playlist_type, [])
@@ -403,7 +406,16 @@ class _FakeLBManager:
         return self._tracks.get(mbid, [])
 
     def update_all_playlists(self):
+        # Pre-fix fallback — kept so adapters that haven't been
+        # migrated still work, and so an accidental return to the
+        # legacy entry-point is detectable in tests.
         self.refresh_called = True
+
+    def refresh_playlist(self, mbid: str):
+        self.refresh_playlist_calls.append(mbid)
+        if self.refresh_raises is not None:
+            raise self.refresh_raises
+        return {"success": True, "result": "skipped", "playlist_mbid": mbid}
 
 
 def test_listenbrainz_adapter_marks_needs_discovery():
@@ -424,11 +436,79 @@ def test_listenbrainz_adapter_marks_needs_discovery():
     assert t.extra["recording_mbid"] == "rec-1"
 
 
-def test_listenbrainz_adapter_refresh_calls_manager():
+def test_listenbrainz_adapter_refresh_uses_targeted_manager_call():
+    """Adapter must call ``manager.refresh_playlist(mbid)`` — the
+    targeted single-playlist refresh — not the legacy
+    ``update_all_playlists`` which re-pulls every cached LB row.
+    """
     manager = _FakeLBManager()
     src = ListenBrainzPlaylistSource(lambda: manager)
-    src.refresh_playlist("lb-1")
-    assert manager.refresh_called is True
+    detail = src.refresh_playlist("lb-1")
+
+    assert manager.refresh_playlist_calls == ["lb-1"]
+    # Legacy entry-point must NOT be touched.
+    assert manager.refresh_called is False
+    # Refresh returned a detail (read-back via get_playlist).
+    assert detail is not None
+    assert detail.meta.source_playlist_id == "lb-1"
+
+
+def test_listenbrainz_adapter_refresh_logs_and_returns_none_on_manager_error():
+    """When the LB manager raises, the adapter MUST surface the
+    failure as ``None`` (so the outer handler logs + counts it),
+    not silently swallow and return a stale cache read.
+
+    Pre-fix: ``except Exception: pass`` then ``return get_playlist()``
+    — masking every LB API failure as a successful no-op refresh.
+    """
+    manager = _FakeLBManager()
+    manager.refresh_raises = RuntimeError("LB API timed out")
+    src = ListenBrainzPlaylistSource(lambda: manager)
+
+    result = src.refresh_playlist("lb-1")
+
+    assert result is None
+    assert manager.refresh_playlist_calls == ["lb-1"]
+
+
+def test_listenbrainz_adapter_refresh_resolves_synthetic_series_id():
+    """Rolling-series synthetic ids (``lb_weekly_jams_<user>``) must
+    resolve to the latest cached member MBID before calling the
+    targeted manager refresh. Without resolution the manager would
+    try to fetch the synthetic id as a real MBID and 404."""
+    manager = _FakeLBManager()
+    # Re-shape the fake's rows so the title matches a series LIKE pattern.
+    manager._rows["created_for_user"] = [{
+        "playlist_mbid": "weekly-mbid",
+        "title": "Weekly Jams for nezreka, week of 2026-05-25 Mon",
+        "creator": "ListenBrainz",
+        "track_count": 1,
+        "annotation": {},
+        "last_updated": "2026-05-26",
+    }]
+    manager._tracks = {"weekly-mbid": []}
+    # Stub the manager DB connection used by the resolution helper.
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute(
+        "CREATE TABLE listenbrainz_playlists "
+        "(playlist_mbid TEXT, title TEXT, profile_id INTEGER, last_updated TEXT)"
+    )
+    cur.execute(
+        "INSERT INTO listenbrainz_playlists VALUES "
+        "('weekly-mbid', 'Weekly Jams for nezreka, week of 2026-05-25 Mon', 1, '2026-05-26')"
+    )
+    conn.commit()
+    manager.profile_id = 1
+    manager._get_db_connection = lambda: conn
+
+    src = ListenBrainzPlaylistSource(lambda: manager)
+    src.refresh_playlist("lb_weekly_jams_nezreka")
+
+    # Manager refresh got called with the RESOLVED real MBID, not the
+    # synthetic one.
+    assert manager.refresh_playlist_calls == ["weekly-mbid"]
 
 
 # ─── Last.fm ────────────────────────────────────────────────────────────

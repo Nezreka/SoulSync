@@ -293,6 +293,12 @@ def _run_refresh_phase(
 
     refresh_config = dict(config)
     refresh_config['_automation_id'] = None
+    # Phase 2 below runs the discovery worker with proper progress
+    # emission — refresh shouldn't run it too. Without this flag, LB
+    # / Last.fm sources double-discover (5+ minutes silent block on
+    # the refresh side, then again in Phase 2) and the UI sits on
+    # "Refreshing:" the whole time.
+    refresh_config['skip_discovery'] = True
     refresh_result = refresh_fn(refresh_config, deps)
     refreshed = int(refresh_result.get('refreshed', 0))
     refresh_errors = int(refresh_result.get('errors', 0))
