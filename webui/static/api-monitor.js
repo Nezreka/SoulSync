@@ -19,13 +19,23 @@ const _RATE_GAUGE_COLORS = {
     amazon: '#FF9900',
 };
 
-// 2–3 character abbreviations rendered inside each equalizer bar's
-// avatar disc. First-letter alone collided too often (3× "A" services,
-// 2× "D"); these read as service shorthand at a glance.
-const _RATE_GAUGE_GLYPHS = {
-    spotify: 'SP', itunes: 'AM', deezer: 'DZ', lastfm: 'LF', genius: 'GN',
-    musicbrainz: 'MB', audiodb: 'ADB', tidal: 'TD', qobuz: 'QB', discogs: 'DC',
-    amazon: 'AZ',
+// Brand logos rendered inside each equalizer bar's avatar disc.
+// Same URLs the header-actions worker-orb buttons use — sourced
+// from each service's official press / SVG-repo asset so the row
+// reads as branded chips, not anonymous initials. AudioDB ships
+// no public logo URL, so it lives as a local static file.
+const _RATE_GAUGE_LOGOS = {
+    spotify:    'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    itunes:     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+    deezer:     'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+    lastfm:     'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
+    genius:     'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png',
+    musicbrainz:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+    audiodb:    '/static/audiodb.png',
+    tidal:      'https://www.svgrepo.com/show/519734/tidal.svg',
+    qobuz:      'https://www.svgrepo.com/show/504778/qobuz.svg',
+    discogs:    'https://www.svgrepo.com/show/305957/discogs.svg',
+    amazon:     '/static/amazon.svg',
 };
 
 // Per-service display state for the equalizer bars. Holds the last
@@ -185,7 +195,8 @@ function _renderEqualizerBars(grid, data) {
         for (const svc of _RATE_GAUGE_SERVICES) {
             const accent = _RATE_GAUGE_COLORS[svc] || '#888';
             const label = _RATE_GAUGE_LABELS[svc] || svc;
-            const glyph = _RATE_GAUGE_GLYPHS[svc] || (label[0] || '?').toUpperCase();
+            const logoSrc = _RATE_GAUGE_LOGOS[svc] || '';
+            const fallbackGlyph = (label[0] || '?').toUpperCase();
             const bar = document.createElement('button');
             bar.type = 'button';
             bar.className = 'rate-eq';
@@ -194,12 +205,22 @@ function _renderEqualizerBars(grid, data) {
             bar.setAttribute('aria-label', `${label} rate detail`);
             bar.onclick = () => _openRateModal(svc);
             // Layout, top-to-bottom:
-            //   - avatar disc (brand glyph) anchored above the track
+            //   - avatar disc (brand logo) anchored above the track —
+            //     ``onerror`` swap to the initial-letter glyph keeps the
+            //     UI legible if a CDN URL ever breaks
             //   - track (with reflection puddle as ::after) holding the
             //     fill / shimmer / peak tip / live count
             //   - meta column (state pill + service name)
+            const avatar = logoSrc
+                ? `<div class="rate-eq-avatar" aria-hidden="true">
+                       <img class="rate-eq-avatar-logo" src="${logoSrc}" alt=""
+                            onerror="this.parentElement.classList.add('rate-eq-avatar--fallback');this.replaceWith(Object.assign(document.createElement('span'),{className:'rate-eq-avatar-glyph',textContent:'${fallbackGlyph}'}));">
+                   </div>`
+                : `<div class="rate-eq-avatar rate-eq-avatar--fallback" aria-hidden="true">
+                       <span class="rate-eq-avatar-glyph">${fallbackGlyph}</span>
+                   </div>`;
             bar.innerHTML = `
-                <div class="rate-eq-avatar" aria-hidden="true">${glyph}</div>
+                ${avatar}
                 <div class="rate-eq-track">
                     <div class="rate-eq-ticks"></div>
                     <div class="rate-eq-fill">
