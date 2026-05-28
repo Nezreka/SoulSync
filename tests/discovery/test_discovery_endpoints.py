@@ -8,7 +8,30 @@ the originals handled is exercised here.
 
 from __future__ import annotations
 
-from core.discovery.endpoints import convert_results_to_spotify_tracks
+import threading
+
+from core.discovery.endpoints import (
+    convert_results_to_spotify_tracks,
+    cancel_sync,
+    delete_playlist_state,
+)
+
+
+class _FakeFuture:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
+def _cancel_infra():
+    """Fresh sync infra (lock + the two shared dicts) for cancel_sync tests."""
+    return {
+        'sync_lock': threading.Lock(),
+        'sync_states': {},
+        'active_sync_workers': {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -125,3 +148,114 @@ def test_spotify_data_takes_precedence_over_auto_fields():
     }]
     out = convert_results_to_spotify_tracks(results, 'Tidal')
     assert out[0]['id'] == 'D'
+
+
+# ---------------------------------------------------------------------------
+# cancel_sync
+# ---------------------------------------------------------------------------
+
+def test_cancel_sync_not_found_returns_404():
+    body, code = cancel_sync({}, 'missing', label='Tidal',
+                             not_found_message='Tidal playlist not found', **_cancel_infra())
+    assert code == 404
+    assert body == {"error": "Tidal playlist not found"}
+
+
+def test_cancel_sync_cancels_active_worker_and_reverts_state():
+    infra = _cancel_infra()
+    infra['sync_states']['sp1'] = {"status": "running"}
+    infra['active_sync_workers']['sp1'] = _FakeFuture()
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1',
+                     'sync_progress': {'done': 1}, 'last_accessed': 0}}
+
+    body, code = cancel_sync(states, 'pl', label='Tidal',
+                             not_found_message='nf', **infra)
+
+    assert code == 200
+    assert body == {"success": True, "message": "Tidal sync cancelled"}
+    # sync marked cancelled, worker removed
+    assert infra['sync_states']['sp1'] == {"status": "cancelled"}
+    assert 'sp1' not in infra['active_sync_workers']
+    # state reverted
+    assert states['pl']['phase'] == 'discovered'
+    assert states['pl']['sync_playlist_id'] is None
+    assert states['pl']['sync_progress'] == {}
+    assert states['pl']['last_accessed'] != 0  # touched
+
+
+def test_cancel_sync_worker_absent_from_active_map_is_safe():
+    infra = _cancel_infra()  # active_sync_workers empty
+    states = {'pl': {'phase': 'syncing', 'sync_playlist_id': 'sp1'}}
+    body, code = cancel_sync(states, 'pl', label='Deezer', not_found_message='nf', **infra)
+    assert code == 200
+    assert infra['sync_states']['sp1'] == {"status": "cancelled"}
+
+
+def test_cancel_sync_no_sync_in_progress_still_reverts():
+    infra = _cancel_infra()
+    states = {'pl': {'phase': 'discovered'}}  # no sync_playlist_id
+    body, code = cancel_sync(states, 'pl', label='Qobuz', not_found_message='nf', **infra)
+    assert code == 200
+    assert states['pl']['sync_playlist_id'] is None
+    assert states['pl']['sync_progress'] == {}
+    assert infra['sync_states'] == {}  # nothing cancelled
+
+
+def test_cancel_sync_label_in_message():
+    infra = _cancel_infra()
+    states = {'pl': {}}
+    body, _ = cancel_sync(states, 'pl', label='iTunes Link', not_found_message='nf', **infra)
+    assert body["message"] == "iTunes Link sync cancelled"
+
+
+def test_cancel_sync_exception_returns_500():
+    infra = _cancel_infra()
+    states = {'pl': object()}  # not subscriptable -> raises inside try
+    body, code = cancel_sync(states, 'pl', label='Tidal', not_found_message='nf', **infra)
+    assert code == 500
+    assert "error" in body
+
+
+# ---------------------------------------------------------------------------
+# delete_playlist_state
+# ---------------------------------------------------------------------------
+
+def test_delete_not_found_returns_404():
+    body, code = delete_playlist_state({}, 'missing', label='Tidal',
+                                       not_found_message='Tidal playlist not found')
+    assert code == 404
+    assert body == {"error": "Tidal playlist not found"}
+
+
+def test_delete_cancels_discovery_future_and_removes_state():
+    fut = _FakeFuture()
+    states = {'pl': {'discovery_future': fut}}
+    body, code = delete_playlist_state(states, 'pl', label='Tidal', not_found_message='nf')
+    assert code == 200
+    assert body == {"success": True, "message": "Playlist deleted"}
+    assert fut.cancelled is True
+    assert 'pl' not in states
+
+
+def test_delete_without_discovery_future_still_removes():
+    states = {'pl': {'phase': 'discovered'}}  # no discovery_future
+    body, code = delete_playlist_state(states, 'pl', label='Deezer', not_found_message='nf')
+    assert code == 200
+    assert 'pl' not in states
+
+
+def test_delete_falsy_discovery_future_not_cancelled():
+    states = {'pl': {'discovery_future': None}}
+    body, code = delete_playlist_state(states, 'pl', label='Qobuz', not_found_message='nf')
+    assert code == 200
+    assert 'pl' not in states
+
+
+def test_delete_exception_returns_500():
+    fut = object()  # no .cancel() -> AttributeError inside try
+    states = {'pl': {'discovery_future': fut}}
+    body, code = delete_playlist_state(states, 'pl', label='Tidal', not_found_message='nf')
+    assert code == 500
+    assert "error" in body
+    # state NOT deleted because the exception fired before del
+    assert 'pl' in states

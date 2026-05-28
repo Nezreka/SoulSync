@@ -14,7 +14,8 @@ shape) is intentionally NOT routed through here and stays in its own function.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Tuple
 
 from utils.logging_config import get_logger
 
@@ -74,3 +75,85 @@ def convert_results_to_spotify_tracks(
 
     logger.info(f"Converted {len(spotify_tracks)} {source_label} matches to Spotify tracks for sync")
     return spotify_tracks
+
+
+def cancel_sync(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    label: str,
+    not_found_message: str,
+    sync_lock: Any,
+    sync_states: Dict[str, Any],
+    active_sync_workers: Dict[str, Any],
+) -> Tuple[Dict[str, Any], int]:
+    """Cancel an in-progress sync for one discovery playlist.
+
+    1:1 lift of the byte-identical ``cancel_<source>_sync`` bodies (Tidal,
+    Deezer, Qobuz, Spotify-Public, iTunes-Link, YouTube, ListenBrainz). The
+    caller passes the already-resolved state key (ListenBrainz transforms it
+    via ``_lb_state_key`` first), the source ``label``, the exact 404 message
+    (iTunes-Link uses "iTunes Link not found", not "... playlist not found"),
+    and the shared sync infrastructure (so this stays free of web_server
+    globals / Flask).
+
+    Returns ``(payload_dict, status_code)``; the caller wraps in ``jsonify``.
+
+    Beatport is NOT routed here — it cancels a stored ``sync_future`` and
+    returns a different payload.
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id:
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        return {"success": True, "message": f"{label} sync cancelled"}, 200
+    except Exception as e:
+        logger.error(f"Error cancelling {label} sync: {e}")
+        return {"error": str(e)}, 500
+
+
+def delete_playlist_state(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    label: str,
+    not_found_message: str,
+) -> Tuple[Dict[str, Any], int]:
+    """Delete a discovery playlist's state entry, cancelling any active
+    discovery first.
+
+    1:1 lift of the byte-identical ``delete_<source>_playlist`` bodies
+    (Tidal, Deezer, Qobuz, Spotify-Public). Returns ``(payload, status_code)``.
+
+    The iTunes-Link / YouTube / ListenBrainz / Beatport deletes intentionally
+    keep their own bodies — they differ in success message, info-log wording,
+    name extraction, and/or key transform.
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+        del states[key]
+
+        logger.info(f"Deleted {label} playlist state: {key}")
+        return {"success": True, "message": "Playlist deleted"}, 200
+    except Exception as e:
+        logger.error(f"Error deleting {label} playlist: {e}")
+        return {"error": str(e)}, 500
