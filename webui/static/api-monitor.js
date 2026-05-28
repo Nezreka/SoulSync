@@ -40,6 +40,19 @@ function _handleRateMonitorUpdate(data) {
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
 
+    // The dashboard rate monitor uses the equalizer-bar visual — a
+    // vertical-bar VU-meter row that fits any service count without
+    // an orphan grid cell. Detail page / mobile breakpoints keep the
+    // legacy speedometer card markup so existing CSS still applies.
+    const useEqualizer = grid.classList.contains('rate-monitor-grid--equalizer')
+        || grid.closest('[data-card="enrichment"]') !== null;
+
+    if (useEqualizer) {
+        grid.classList.add('rate-monitor-grid--equalizer');
+        _renderEqualizerBars(grid, data);
+        return;
+    }
+
     if (!grid.children.length) {
         for (const svc of _RATE_GAUGE_SERVICES) {
             const div = document.createElement('div');
@@ -140,6 +153,89 @@ function _handleRateMonitorUpdate(data) {
         container.classList.toggle('danger', pct > 0.8 || isRateLimited);
         container.classList.toggle('active', value > 0 || wStatus === 'running');
         container.classList.toggle('rate-limited', isRateLimited);
+    }
+}
+
+
+// ── Equalizer-bar renderer (dashboard) ─────────────────────────────────
+//
+// VU-meter aesthetic: one vertical bar per service. Bar height = current
+// rate / limit. Service brand color fades up the bar with an animated
+// glow at the tip when active. Click opens the same detail modal the
+// speedometer used. Symmetric by design — any service count fits one
+// flex row regardless of viewport.
+
+function _renderEqualizerBars(grid, data) {
+    if (!grid.children.length) {
+        for (const svc of _RATE_GAUGE_SERVICES) {
+            const accent = _RATE_GAUGE_COLORS[svc] || '#888';
+            const label = _RATE_GAUGE_LABELS[svc] || svc;
+            const bar = document.createElement('button');
+            bar.type = 'button';
+            bar.className = 'rate-eq';
+            bar.id = `rate-eq-${svc}`;
+            bar.style.setProperty('--eq-accent', accent);
+            bar.setAttribute('aria-label', `${label} rate detail`);
+            bar.onclick = () => _openRateModal(svc);
+            bar.innerHTML = `
+                <div class="rate-eq-track">
+                    <div class="rate-eq-ticks"></div>
+                    <div class="rate-eq-fill">
+                        <div class="rate-eq-shimmer"></div>
+                        <div class="rate-eq-tip"></div>
+                    </div>
+                    <div class="rate-eq-value">0</div>
+                </div>
+                <div class="rate-eq-meta">
+                    <span class="rate-eq-state" data-status="stopped">
+                        <span class="rate-eq-state-dot"></span>
+                        <span class="rate-eq-state-text">Stopped</span>
+                    </span>
+                    <span class="rate-eq-name">${label}</span>
+                </div>
+            `;
+            grid.appendChild(bar);
+        }
+    }
+
+    for (const svc of _RATE_GAUGE_SERVICES) {
+        const d = data[svc];
+        if (!d) continue;
+        _rateMonitorState[svc] = d;
+        const bar = document.getElementById(`rate-eq-${svc}`);
+        if (!bar) continue;
+
+        const value = d.cpm || 0;
+        const max = d.limit || 60;
+        // Clamp the visual fill to [4%, 100%]. The 4% floor lets idle
+        // bars still show a sliver of accent so the row reads as
+        // present-but-quiet instead of empty — critical for the
+        // "everything alive" vibe; an actual zero would make most
+        // services disappear most of the time.
+        const pct = Math.max(0.04, Math.min(value / max, 1));
+        const worker = d.worker || {};
+        const wStatus = worker.status || 'stopped';
+        const isRateLimited = d.rate_limited === true;
+
+        const fill = bar.querySelector('.rate-eq-fill');
+        if (fill) fill.style.height = `${pct * 100}%`;
+        const val = bar.querySelector('.rate-eq-value');
+        if (val) val.textContent = Math.round(value);
+
+        const state = bar.querySelector('.rate-eq-state');
+        if (state) {
+            state.dataset.status = wStatus;
+            const text = state.querySelector('.rate-eq-state-text');
+            if (text) text.textContent = _workerStatusLabel(wStatus, worker);
+        }
+
+        // Danger threshold uses the REAL (unclamped) ratio so the
+        // 4% visual floor for idle bars doesn't push everything into
+        // a permanent green state — the threshold reads true rate.
+        const realPct = max > 0 ? value / max : 0;
+        bar.classList.toggle('danger', realPct > 0.8 || isRateLimited);
+        bar.classList.toggle('active', value > 0 || wStatus === 'running');
+        bar.classList.toggle('rate-limited', isRateLimited);
     }
 }
 
