@@ -63181,6 +63181,206 @@ body.reduce-effects .dash-card::after {
 
 
 /* =====================================================================
+ * Sync page tabs — icon-chip v2 layout
+ *
+ * 14+ tabs no longer fit in a single horizontal pill row. Collapse
+ * each tab to a circular brand-logo chip; the active tab swells
+ * into a pill that shows its label inline. Hover surfaces the
+ * tab title attribute as a native tooltip. ``[data-link="true"]``
+ * tabs (Spotify Link, Deezer Link, iTunes Link) carry a small
+ * chain-link badge bottom-right so they disambiguate from their
+ * native-source siblings (same brand logo, different source mode).
+ *
+ * Behavior untouched — same JS event handlers, same .active class,
+ * same data-tab routing. CSS-only swap.
+ * ===================================================================== */
+
+.sync-tabs {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+    background:
+        radial-gradient(ellipse at top,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 4%, transparent) 0%,
+            rgba(0, 0, 0, 0.22) 70%);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 14px;
+    align-items: center;
+}
+
+.sync-tab-button {
+    /* Reset: drop flex:1 stretch + heavy padding, become a chip. */
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    gap: 0;
+    border-radius: 999px;
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.04) 0%,
+            rgba(0, 0, 0, 0.18) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 12px;
+    overflow: hidden;
+    position: relative;
+    transition:
+        width 0.32s cubic-bezier(0.34, 1.2, 0.5, 1),
+        padding 0.32s cubic-bezier(0.34, 1.2, 0.5, 1),
+        background 0.25s ease,
+        border-color 0.25s ease,
+        box-shadow 0.25s ease,
+        transform 0.18s ease;
+}
+
+.sync-tab-button:hover:not(.active) {
+    background:
+        linear-gradient(160deg,
+            color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 14%, transparent) 0%,
+            rgba(0, 0, 0, 0.18) 100%);
+    border-color: color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 35%, rgba(255, 255, 255, 0.1));
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+/* Active state — swell into a pill that shows the label inline. */
+.sync-tab-button.active {
+    width: auto;
+    padding: 0 14px 0 10px;
+    gap: 8px;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 92%, white 8%),
+        color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 78%, black 22%));
+    border-color: color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 55%, transparent);
+    color: #fff;
+    box-shadow:
+        0 4px 18px color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 28%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.sync-tab-server.active {
+    /* The Server Playlists tab kept its bespoke gradient — preserve it. */
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.95),
+        rgba(var(--accent-rgb), 0.75)) !important;
+    color: #000 !important;
+}
+
+/* Per-tab accent. Used by both the active fill and the hover ring,
+ * so each chip lights up in its brand color. */
+.sync-tab-button[data-tab="spotify"],
+.sync-tab-button[data-tab="spotify-public"]      { --sync-tab-accent: #1DB954; }
+.sync-tab-button[data-tab="tidal"]               { --sync-tab-accent: #ff6600; }
+.sync-tab-button[data-tab="qobuz"]               { --sync-tab-accent: #5b8dee; }
+.sync-tab-button[data-tab="deezer"],
+.sync-tab-button[data-tab="deezer-link"]         { --sync-tab-accent: #a238ff; }
+.sync-tab-button[data-tab="itunes-link"]         { --sync-tab-accent: #fa586a; }
+.sync-tab-button[data-tab="youtube"]             { --sync-tab-accent: #ff0000; }
+.sync-tab-button[data-tab="beatport"]            { --sync-tab-accent: #01ff95; }
+.sync-tab-button[data-tab="listenbrainz-sync"]   { --sync-tab-accent: #eb743b; }
+.sync-tab-button[data-tab="lastfm-sync"]         { --sync-tab-accent: #d51007; }
+.sync-tab-button[data-tab="soulsync-discovery-sync"] { --sync-tab-accent: #14b8a6; }
+
+/* Active tabs use white-on-color, so the per-tab icon overrides
+ * shipped in the original CSS apply automatically. Nothing to do
+ * for the active-icon swap — handled by existing rules above. */
+
+/* Icon scaling — chip is 40px, icon was 16px; size up to 20px so
+ * the logo fills the chip naturally. */
+.sync-tab-button .tab-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+/* Label collapses to width 0 when not active, so the chip stays
+ * circular. Reveals on .active via the gap + padding shift above. */
+.sync-tab-label {
+    max-width: 0;
+    opacity: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    transition: max-width 0.32s cubic-bezier(0.34, 1.2, 0.5, 1),
+                opacity 0.22s ease;
+}
+
+.sync-tab-button.active .sync-tab-label {
+    max-width: 200px;
+    opacity: 1;
+}
+
+/* Chain-link badge for the ``Link`` variants (Spotify Link, Deezer
+ * Link, iTunes Link). Bottom-right corner of the chip, accent-tinted
+ * disc with a tiny link glyph. Disambiguates same-brand chips at
+ * a glance without forcing the label to always be visible. */
+.sync-tab-button[data-link="true"]::after {
+    content: '';
+    position: absolute;
+    right: 1px;
+    bottom: 1px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background:
+        color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 85%, black 15%)
+        center / 70% no-repeat
+        url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>");
+    border: 1.5px solid #1a1d28;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    z-index: 2;
+}
+
+/* When the link-variant tab is active, the badge inherits the
+ * darker outline of the now-bright pill — bump the border to keep
+ * contrast against the brand-color fill. */
+.sync-tab-button[data-link="true"].active::after {
+    border-color: rgba(0, 0, 0, 0.45);
+}
+
+/* Divider between Server Playlists and the rest — slim it down so
+ * it doesn't dominate the compacted row. */
+.sync-tab-divider {
+    height: 24px;
+    margin: 0 4px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Responsive — collapse chip size on smaller widths to fit the row. */
+@media (max-width: 1099px) {
+    .sync-tab-button {
+        width: 36px;
+        height: 36px;
+    }
+    .sync-tab-button .tab-icon { width: 18px; height: 18px; }
+    .sync-tab-button.active { padding: 0 12px 0 8px; }
+    .sync-tab-label { font-size: 11px; }
+}
+
+@media (max-width: 720px) {
+    .sync-tabs {
+        gap: 4px;
+        padding: 6px;
+    }
+    .sync-tab-button {
+        width: 32px;
+        height: 32px;
+    }
+    .sync-tab-button .tab-icon { width: 16px; height: 16px; }
+    .sync-tab-button[data-link="true"]::after {
+        width: 12px;
+        height: 12px;
+        border-width: 1px;
+    }
+    .sync-tab-divider { display: none; }
+}
+
+
+/* =====================================================================
  * Auto-Sync Manager — v2 visual overhaul
  *
  * Selector-based restyle of the modal that matches the rest of the
