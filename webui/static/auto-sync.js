@@ -610,16 +610,45 @@ function renderAutoSyncWeeklyPanel(playlists, playlistSchedules) {
 
 
 function autoSyncWeeklyCardHtml(playlist, schedule) {
-    const enabled = schedule.enabled !== false;
+    // Mirror the hourly board's ``autoSyncScheduledCardHtml`` shape so
+    // the two boards stay visually consistent — same name + meta +
+    // timing + actions row regardless of whether the schedule is
+    // hourly or weekday-based. The only per-board differences are:
+    //   - timing line: weekly label vs interval label
+    //   - click opens the weekly editor (hourly board has no editor)
+    //   - drag fns use the weekly-specific ondragstart / ondragend
+    //   - unschedule calls the weekly-specific helper
+    const enabled = schedule?.enabled !== false;
+    const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
+    const isRunning = playlist.pipeline_state?.status === 'running';
+    const health = autoSyncPlaylistHealth(playlist.id);
+    const healthClass = health.level === 'failing' ? 'failing'
+        : health.level === 'warning' ? 'warning'
+        : '';
     const label = autoSyncWeeklyLabel(schedule);
+    const tz = schedule?.tz || 'UTC';
     return `
-        <div class="auto-sync-scheduled-card auto-sync-weekly-card ${enabled ? '' : 'disabled'}"
+        <div class="auto-sync-scheduled-card auto-sync-weekly-card ${enabled ? '' : 'disabled'} ${healthClass}"
+             draggable="true"
              data-playlist-id="${playlist.id}"
+             ondragstart="autoSyncWeeklyDragStart(event)"
+             ondragend="autoSyncWeeklyDragEnd()"
              onclick="openAutoSyncWeeklyEditor(${playlist.id})">
-            <div class="auto-sync-scheduled-name">${_esc(playlist.name)}</div>
-            <div class="auto-sync-scheduled-meta">
-                <span>${_esc(label)}</span>
-                <small>${_esc(schedule.tz || 'UTC')}</small>
+            <div class="auto-sync-scheduled-main">
+                <div class="auto-sync-scheduled-name">
+                    ${health.level !== 'ok' ? `<span class="auto-sync-scheduled-health ${healthClass}" title="${_escAttr(health.tooltip)}">${health.level === 'failing' ? '!' : '⚠'}</span>` : ''}
+                    ${_esc(playlist.name)}
+                </div>
+                <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
+                <div class="auto-sync-scheduled-timing">
+                    <span>${_esc(label)}</span>
+                    <small>${_esc(tz)}</small>
+                    ${nextLabel ? `<small>${_esc(nextLabel)}</small>` : ''}
+                </div>
+            </div>
+            <div class="auto-sync-scheduled-actions">
+                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>
+                <button onclick="event.stopPropagation(); unscheduleAutoSyncWeekly(${playlist.id})" title="Remove this weekly schedule">&times;</button>
             </div>
         </div>
     `;
