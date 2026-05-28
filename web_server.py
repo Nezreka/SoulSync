@@ -21060,6 +21060,10 @@ from core.discovery.endpoints import (
     convert_results_to_spotify_tracks,
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
+    get_sync_status as _get_sync_status_core,
+    playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
+    playlist_name_strict as _pl_name_strict,
+    playlist_name_safe as _pl_name_safe,
 )
 
 
@@ -21079,6 +21083,18 @@ def _delete_source_playlist(states, key, label, not_found_message):
     delete body (Tidal/Deezer/Qobuz/Spotify-Public)."""
     body, code = _delete_playlist_state_core(
         states, key, label=label, not_found_message=not_found_message,
+    )
+    return jsonify(body), code
+
+
+def _get_source_sync_status(states, key, not_found_message, error_label,
+                            activity_subject, name_getter):
+    """Thin glue for the per-source get_*_sync_status routes — wires the sync
+    infra + add_activity_item into the lifted helper and jsonifies."""
+    body, code = _get_sync_status_core(
+        states, key, not_found_message=not_found_message, error_label=error_label,
+        activity_subject=activity_subject, playlist_name_getter=name_getter,
+        sync_lock=sync_lock, sync_states=sync_states, add_activity_item=add_activity_item,
     )
     return jsonify(body), code
 
@@ -21174,48 +21190,7 @@ def start_tidal_sync(playlist_id):
 @app.route('/api/tidal/sync/status/<playlist_id>', methods=['GET'])
 def get_tidal_sync_status(playlist_id):
     """Get sync status for a Tidal playlist"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-        
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-        
-        # Get sync status from existing sync infrastructure
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-        
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-        
-        # Update Tidal state if sync completed
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            # Add activity for sync completion
-            playlist = state.get('playlist')
-            playlist_name = playlist.name if playlist and hasattr(playlist, 'name') else 'Unknown Playlist'
-            add_activity_item("", "Sync Complete", f"Tidal playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'  # Revert on error
-            playlist = state.get('playlist')
-            playlist_name = playlist.name if playlist and hasattr(playlist, 'name') else 'Unknown Playlist'
-            add_activity_item("", "Sync Failed", f"Tidal playlist '{playlist_name}' sync failed", "Now")
-        
-        return jsonify(response)
-        
-    except Exception as e:
-        logger.error(f"Error getting Tidal sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(tidal_discovery_states, playlist_id, "Tidal playlist not found", "Tidal", "Tidal playlist", _pl_name_attr_or_unknown)
 
 @app.route('/api/tidal/sync/cancel/<playlist_id>', methods=['POST'])
 def cancel_tidal_sync(playlist_id):
@@ -21812,45 +21787,7 @@ def start_deezer_sync(playlist_id):
 @app.route('/api/deezer/sync/status/<playlist_id>', methods=['GET'])
 def get_deezer_sync_status(playlist_id):
     """Get sync status for a Deezer playlist"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-
-        # Get sync status from existing sync infrastructure
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-
-        # Update Deezer state if sync completed
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Complete", f"Deezer playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'  # Revert on error
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Failed", f"Deezer playlist '{playlist_name}' sync failed", "Now")
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Deezer sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(deezer_discovery_states, playlist_id, "Deezer playlist not found", "Deezer", "Deezer playlist", _pl_name_strict)
 
 @app.route('/api/deezer/sync/cancel/<playlist_id>', methods=['POST'])
 def cancel_deezer_sync(playlist_id):
@@ -22395,43 +22332,7 @@ def start_qobuz_sync(playlist_id):
 @app.route('/api/qobuz/sync/status/<playlist_id>', methods=['GET'])
 def get_qobuz_sync_status(playlist_id):
     """Get sync status for a Qobuz playlist."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Complete", f"Qobuz playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Failed", f"Qobuz playlist '{playlist_name}' sync failed", "Now")
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Qobuz sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(qobuz_discovery_states, playlist_id, "Qobuz playlist not found", "Qobuz", "Qobuz playlist", _pl_name_strict)
 
 
 @app.route('/api/qobuz/sync/cancel/<playlist_id>', methods=['POST'])
@@ -23271,45 +23172,7 @@ def start_spotify_public_sync(url_hash):
 @app.route('/api/spotify-public/sync/status/<url_hash>', methods=['GET'])
 def get_spotify_public_sync_status(url_hash):
     """Get sync status for a Spotify Public playlist"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-
-        # Get sync status from existing sync infrastructure
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-
-        # Update Spotify Public state if sync completed
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Complete", f"Spotify Link playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'  # Revert on error
-            playlist_name = state['playlist']['name']
-            add_activity_item("", "Sync Failed", f"Spotify Link playlist '{playlist_name}' sync failed", "Now")
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Spotify Public sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(spotify_public_discovery_states, url_hash, "Spotify Public playlist not found", "Spotify Public", "Spotify Link playlist", _pl_name_strict)
 
 @app.route('/api/spotify-public/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_spotify_public_sync(url_hash):
@@ -23711,35 +23574,7 @@ def start_itunes_link_sync(url_hash):
 
 @app.route('/api/itunes-link/sync/status/<url_hash>', methods=['GET'])
 def get_itunes_link_sync_status(url_hash):
-    try:
-        if url_hash not in itunes_link_discovery_states:
-            return jsonify({"error": "iTunes Link not found"}), 404
-        state = itunes_link_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-        sync_playlist_id = state.get('sync_playlist_id')
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            add_activity_item("", "Sync Complete", f"iTunes Link '{state['playlist']['name']}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'
-            add_activity_item("", "Sync Failed", f"iTunes Link '{state['playlist']['name']}' sync failed", "Now")
-        return jsonify(response)
-    except Exception as e:
-        logger.error(f"Error getting iTunes Link sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(itunes_link_discovery_states, url_hash, "iTunes Link not found", "iTunes Link", "iTunes Link", _pl_name_strict)
 
 
 @app.route('/api/itunes-link/sync/cancel/<url_hash>', methods=['POST'])
@@ -24348,46 +24183,7 @@ def start_youtube_sync(url_hash):
 @app.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])
 def get_youtube_sync_status(url_hash):
     """Get sync status for a YouTube playlist"""
-    try:
-        if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
-        
-        state = youtube_playlist_states[url_hash]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-        
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-        
-        # Get sync status from existing sync infrastructure
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-        
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-        
-        # Update YouTube state if sync completed
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            # Add activity for sync completion
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
-            add_activity_item("", "Sync Complete", f"YouTube playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'  # Revert on error
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
-            add_activity_item("", "Sync Failed", f"YouTube playlist '{playlist_name}' sync failed", "Now")
-        
-        return jsonify(response)
-        
-    except Exception as e:
-        logger.error(f"Error getting YouTube sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube", "YouTube playlist", _pl_name_safe)
 
 @app.route('/api/youtube/sync/cancel/<url_hash>', methods=['POST'])
 def cancel_youtube_sync(url_hash):
@@ -30456,47 +30252,7 @@ def start_listenbrainz_sync(playlist_mbid):
 @app.route('/api/listenbrainz/sync/status/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_sync_status(playlist_mbid):
     """Get sync status for a ListenBrainz playlist"""
-    try:
-        state_key = _lb_state_key(playlist_mbid)
-        if state_key not in listenbrainz_playlist_states:
-            return jsonify({"error": "ListenBrainz playlist not found"}), 404
-
-        state = listenbrainz_playlist_states[state_key]
-        state['last_accessed'] = time.time()  # Update access time
-        sync_playlist_id = state.get('sync_playlist_id')
-
-        if not sync_playlist_id:
-            return jsonify({"error": "No sync in progress"}), 404
-
-        # Get sync status from existing sync infrastructure
-        with sync_lock:
-            sync_state = sync_states.get(sync_playlist_id, {})
-
-        response = {
-            'phase': state['phase'],
-            'sync_status': sync_state.get('status', 'unknown'),
-            'progress': sync_state.get('progress', {}),
-            'complete': sync_state.get('status') == 'finished',
-            'error': sync_state.get('error')
-        }
-
-        # Update ListenBrainz state if sync completed
-        if sync_state.get('status') == 'finished':
-            state['phase'] = 'sync_complete'
-            state['sync_progress'] = sync_state.get('progress', {})
-            # Add activity for sync completion
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
-            add_activity_item("", "Sync Complete", f"ListenBrainz playlist '{playlist_name}' synced successfully", "Now")
-        elif sync_state.get('status') == 'error':
-            state['phase'] = 'discovered'  # Revert on error
-            playlist_name = state.get('playlist', {}).get('name', 'Unknown Playlist')
-            add_activity_item("", "Sync Failed", f"ListenBrainz playlist '{playlist_name}' sync failed", "Now")
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting ListenBrainz sync status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_sync_status(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz playlist not found", "ListenBrainz", "ListenBrainz playlist", _pl_name_safe)
 
 @app.route('/api/listenbrainz/sync/cancel/<playlist_mbid>', methods=['POST'])
 def cancel_listenbrainz_sync(playlist_mbid):
