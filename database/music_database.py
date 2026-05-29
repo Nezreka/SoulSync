@@ -337,6 +337,7 @@ class MusicDatabase:
                     deezer_artist_id TEXT,
                     discogs_artist_id TEXT,
                     musicbrainz_artist_id TEXT,
+                    amazon_artist_id TEXT,
                     artist_name TEXT NOT NULL,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_scan_timestamp TIMESTAMP,
@@ -1826,6 +1827,7 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -1854,7 +1856,8 @@ class MusicDatabase:
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
-                            musicbrainz_artist_id TEXT
+                            musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT
                         )
                     """)
 
@@ -1867,7 +1870,7 @@ class MusicDatabase:
                             'include_remixes', 'include_acoustic', 'include_compilations',
                             'include_instrumentals', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                            'musicbrainz_artist_id', 'profile_id']
+                            'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
@@ -2711,6 +2714,7 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -2724,7 +2728,7 @@ class MusicDatabase:
                                 'include_remixes', 'include_acoustic', 'include_compilations',
                                 'include_instrumentals', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                                'musicbrainz_artist_id', 'profile_id']
+                                'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
 
