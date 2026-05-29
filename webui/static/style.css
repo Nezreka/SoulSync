@@ -54451,7 +54451,7 @@ tr.tag-diff-same {
    ================================================================================== */
 
 .explorer-container {
-    padding: 24px 32px;
+    /* card styling from .page-shell; keep full-height flex layout */
     display: flex;
     flex-direction: column;
     min-height: 100%;
