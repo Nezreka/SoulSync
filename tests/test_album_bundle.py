@@ -22,6 +22,7 @@ import pytest
 from core.download_plugins.album_bundle import (
     ALBUM_PICK_MAX_BYTES,
     ALBUM_PICK_MIN_BYTES,
+    album_title_relevance,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_POLL_TIMEOUT_SECONDS,
     atomic_copy_to_staging,
@@ -112,6 +113,85 @@ def test_picker_rejects_oversized_box_sets() -> None:
     # Sane wins even with 100x fewer seeders, because box is outside
     # the preferred range.
     assert pick_best_album_release([sane, box], _flac_quality_guess) is sane
+
+
+def test_picker_rejects_wrong_album_by_title() -> None:
+    """Regression for #730: a 'Heroes' request returned 'Scary Monsters'
+    because the picker ranked purely by grabs and that release was far more
+    popular. With the album name supplied, title relevance must gate first
+    so the actual requested album wins despite ~16x fewer grabs."""
+    scary = _Release(
+        title='David Bowie-Scary Monsters And Super Creeps-24-192-WEB-FLAC-REMASTERED-2017-OBZEN',
+        size=2_000_000_000, seeders=None, grabs=15698,
+    )
+    heroes = _Release(
+        title='David Bowie-Heroes-24-192-WEB-FLAC-REMASTERED-2017-OBZEN',
+        size=1_000_000_000, seeders=None, grabs=960,
+    )
+    picked = pick_best_album_release(
+        [scary, heroes], _flac_quality_guess,
+        album_name='"Heroes" (2017 Remaster)', artist_name='David Bowie',
+    )
+    assert picked is heroes
+
+
+def test_picker_returns_none_when_no_candidate_matches_album() -> None:
+    """If nothing resembles the requested album, refuse rather than grab a
+    mismatched (popular) release — failing the bundle lets the per-track
+    flow take over instead of importing the wrong album."""
+    scary = _Release(
+        title='David Bowie-Scary Monsters And Super Creeps-FLAC-2017',
+        size=2_000_000_000, seeders=None, grabs=15698,
+    )
+    assert pick_best_album_release(
+        [scary], _flac_quality_guess, album_name='"Heroes" (2017 Remaster)',
+    ) is None
+
+
+def test_picker_without_album_name_keeps_legacy_popularity_ranking() -> None:
+    """Back-compat: with no album name (older callers), the relevance gate
+    is skipped and the most-popular album-sized release still wins."""
+    a = _Release(title='Whatever A [FLAC]', size=200_000_000, seeders=None, grabs=10)
+    b = _Release(title='Whatever B [FLAC]', size=200_000_000, seeders=None, grabs=999)
+    assert pick_best_album_release([a, b], _flac_quality_guess) is b
+
+
+def test_picker_prefers_stronger_title_match_over_grabs() -> None:
+    """A multi-token album: a release covering all core tokens beats a
+    more-popular release that only partially matches."""
+    exact = _Release(
+        title='Scary Monsters And Super Creeps [FLAC]',
+        size=300_000_000, seeders=None, grabs=5,
+    )
+    partial = _Release(
+        title='Scary Monsters (single) [FLAC]',
+        size=300_000_000, seeders=None, grabs=9000,
+    )
+    picked = pick_best_album_release(
+        [partial, exact], _flac_quality_guess,
+        album_name='Scary Monsters and Super Creeps',
+    )
+    assert picked is exact
+
+
+def test_album_title_relevance_scoring() -> None:
+    # Exact / noise-padded release name still matches on the core token.
+    assert album_title_relevance(
+        'David Bowie-Heroes-24-192-WEB-FLAC-REMASTERED-2017-OBZEN',
+        '"Heroes" (2017 Remaster)',
+    ) >= 0.9
+    # Different album → no shared core tokens.
+    assert album_title_relevance(
+        'David Bowie-Scary Monsters And Super Creeps-FLAC-2017',
+        '"Heroes" (2017 Remaster)',
+    ) == 0.0
+    # Multi-token album fully covered.
+    assert album_title_relevance(
+        'VA - Scary Monsters And Super Creeps (Remastered) FLAC',
+        'Scary Monsters and Super Creeps',
+    ) >= 0.9
+    # Empty album name is unscoreable.
+    assert album_title_relevance('Anything', '') == 0.0
 
 
 # ---------------------------------------------------------------------------
