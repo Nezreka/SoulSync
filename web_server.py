@@ -7601,15 +7601,15 @@ def get_artist_detail(artist_id):
         try:
             from core.metadata.lookup import MetadataLookupOptions
             from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
+            from core.source_ids import source_id_map
 
-            artist_source_ids = {
-                'spotify': artist_info.get('spotify_artist_id'),
-                'deezer': artist_info.get('deezer_id'),
-                'itunes': artist_info.get('itunes_artist_id'),
-                'discogs': artist_info.get('discogs_id'),
-                'hydrabase': artist_info.get('soul_id'),
-                'amazon': artist_info.get('amazon_id'),
-            }
+            # Per-source artist IDs, read via the canonical source-ID registry
+            # (same columns as before: spotify_artist_id / deezer_id /
+            # itunes_artist_id / discogs_id / soul_id / amazon_id).
+            artist_source_ids = source_id_map(
+                artist_info, 'artist',
+                providers=('spotify', 'deezer', 'itunes', 'discogs', 'hydrabase', 'amazon'),
+            )
 
             artist_detail_discography = _get_artist_detail_discography(
                 artist_id,
