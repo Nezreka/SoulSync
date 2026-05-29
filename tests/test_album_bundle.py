@@ -22,10 +22,12 @@ import pytest
 from core.download_plugins.album_bundle import (
     ALBUM_PICK_MAX_BYTES,
     ALBUM_PICK_MIN_BYTES,
+    DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_POLL_TIMEOUT_SECONDS,
     atomic_copy_to_staging,
     copy_audio_files_atomically,
+    get_completed_no_path_window_seconds,
     get_poll_interval,
     get_poll_timeout,
     pick_best_album_release,
@@ -301,6 +303,28 @@ def test_get_poll_timeout_falls_back_on_garbage() -> None:
         assert get_poll_timeout() == DEFAULT_POLL_TIMEOUT_SECONDS
 
 
+def test_get_completed_no_path_window_uses_default_when_unset() -> None:
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
+def test_get_completed_no_path_window_honours_override() -> None:
+    """Users whose SAB is slow to write ``storage`` (large box sets,
+    slow disks) can widen the tolerance without touching code."""
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = 300
+        assert get_completed_no_path_window_seconds() == 300.0
+
+
+def test_get_completed_no_path_window_falls_back_on_garbage() -> None:
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = ''
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+        cm.get.return_value = 0
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------
@@ -395,6 +419,7 @@ class _Status:
     downloaded: int = 0
     download_speed: int = 0
     error: Optional[str] = None
+    incomplete_path: Optional[str] = None
 
 
 class _ScriptedClock:
@@ -650,6 +675,82 @@ def test_poll_gives_up_when_completed_with_no_save_path_persists() -> None:
         poll_interval=2.0, timeout=600.0,
     )
 
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    err = failed_calls[0][1].get('error', '').lower()
+    assert 'save_path' in err or 'success but never' in err
+
+
+def test_poll_completed_no_path_window_is_longer_than_miss_window() -> None:
+    """#721 follow-up: the completed-but-no-save_path window must be
+    DECOUPLED from (and far longer than) the transient-miss window. SAB
+    can take 2+ minutes to write ``storage``; the old code reused the
+    5-poll (~10s) miss window here and false-failed real completions.
+    With a small miss threshold but the default long no-path window, a
+    download that takes 8 completed-no-path polls before ``storage``
+    lands must still succeed."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter(
+        [_Status(state='completed', save_path=None, progress=1.0)] * 8
+        + [_Status(state='completed', save_path='/dl/late', progress=1.0)]
+    )
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Slow SAB',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=3,   # vanished-job window stays short
+        # completed_no_path_threshold left to default (~120s / interval).
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+    assert result == '/dl/late'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_falls_back_to_incomplete_path_after_window_exhausted() -> None:
+    """When SAB reports the job completed but the final save_path NEVER
+    lands (some SAB versions / no post-process move), the files are
+    still physically on disk in the in-progress dir. Rather than failing
+    a download that actually succeeded, the poll falls back to the
+    adapter's ``incomplete_path`` as a last resort once the window is
+    exhausted — no terminal 'failed' emit."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='No Storage Field',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+    assert result == '/sab/incomplete/album'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
+    """Last resort only fires when there's actually a path to scan.
+    With neither a final save_path nor an incomplete_path, the poll
+    still fails loudly after the window so the UI doesn't freeze."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(state='completed', save_path=None,
+                                   incomplete_path=None, progress=1.0),
+        title='Truly Pathless',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
     assert result is None
     failed_calls = [c for c in calls if c[0] == 'failed']
     assert len(failed_calls) == 1
