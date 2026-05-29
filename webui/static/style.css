@@ -7990,13 +7990,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* ======================================================= */
 
 /* Main Dashboard Layout */
-.dashboard-container {
-    display: flex;
-    flex-direction: column;
-    gap: 25px;
-    /* Spacing between sections */
-    padding: 28px 24px 30px 24px;
-
+/* ── Shared page shell ──────────────────────────────────────────────
+   The canonical page card (the dashboard / stats look). Adopted by the
+   dashboard, tools, watchlist and wishlist pages — and intended for reuse
+   by the React pages too (same class name). Page-specific extras (flex
+   layout, position) stay on the per-page class. */
+.page-shell {
+    padding: 28px 24px 30px;
     /* Semi-transparent to let page particles show through */
     background: linear-gradient(135deg,
             rgba(20, 20, 20, 0.55) 0%,
@@ -8005,12 +8005,18 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     margin: 20px;
-
     /* Soft floating shadow */
     box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.3),
         0 4px 16px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+    /* Spacing between sections; card styling comes from .page-shell */
 }
 
 .dashboard-section {
@@ -59446,20 +59452,7 @@ body.reduce-effects *::after {
    TOOLS PAGE
    ═══════════════════════════════════════════════════════════════════ */
 
-.tools-page-container {
-    padding: 28px 24px 30px;
-    margin: 20px;
-    background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.55) 0%,
-        rgba(12, 12, 12, 0.62) 100%);
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
+/* .tools-page-container: card styling now from .page-shell (no extras). */
 
 .tools-page-header {
     padding: 20px 24px 18px;
@@ -59632,18 +59625,7 @@ body.reduce-effects *::after {
    ═══════════════════════════════════════════════════════════════════ */
 
 .watchlist-page-container {
-    padding: 28px 24px 30px;
-    margin: 20px;
-    background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.55) 0%,
-        rgba(12, 12, 12, 0.62) 100%);
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    /* card styling from .page-shell; keep page-specific positioning */
     position: relative;
 }
 
@@ -60044,18 +60026,7 @@ body.reduce-effects *::after {
    ═══════════════════════════════════════════════════════════════════ */
 
 .wishlist-page-container {
-    padding: 28px 24px 30px;
-    margin: 20px;
-    background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.55) 0%,
-        rgba(12, 12, 12, 0.62) 100%);
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    /* card styling from .page-shell; keep page-specific positioning */
     position: relative;
 }
 
