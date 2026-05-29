@@ -32,6 +32,7 @@ from core.download_plugins.album_bundle import (
     get_poll_timeout,
     pick_best_album_release,
     quality_score,
+    resolve_reported_save_path,
     unique_staging_path,
 )
 
@@ -323,6 +324,92 @@ def test_get_completed_no_path_window_falls_back_on_garbage() -> None:
         assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
         cm.get.return_value = 0
         assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# resolve_reported_save_path — downloader→local path translation. The arr
+# remote-path problem: SAB reports its own container path, SoulSync mounts
+# the same files elsewhere.
+# ---------------------------------------------------------------------------
+
+
+def _cfg(values: dict):
+    """Build a config_manager.get-shaped callable from a dict."""
+    def _get(key, default=None):
+        return values.get(key, default)
+    return _get
+
+
+def test_resolve_returns_reported_path_verbatim_when_readable(tmp_path: Path) -> None:
+    """If the client's path is already readable here (mounts mirror the
+    client), return it unchanged — no translation needed."""
+    album = tmp_path / "MyAlbum"
+    album.mkdir()
+    # config_get should never even be consulted on the happy path.
+    assert resolve_reported_save_path(str(album), config_get=_cfg({})) == str(album)
+
+
+def test_resolve_uses_explicit_prefix_mapping(tmp_path: Path) -> None:
+    """Sonarr/Radarr-style remote path mapping: SAB's prefix is rewritten
+    to a SoulSync-visible root."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'download_source.usenet_path_mappings': [
+        {'from': '/data/downloads/music', 'to': str(tmp_path)},
+    ]})
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
+def test_resolve_basename_fallback_against_download_root(tmp_path: Path) -> None:
+    """Zero-config shared-volume case: the album folder shows up under
+    SoulSync's own download root with the same name SAB reported."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'soulseek.download_path': str(tmp_path)})
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
+def test_resolve_mapping_takes_priority_over_basename(tmp_path: Path) -> None:
+    """An explicit mapping that resolves wins over the basename scan."""
+    mapped_root = tmp_path / "mapped"
+    dl_root = tmp_path / "dl"
+    (mapped_root / "MyAlbum").mkdir(parents=True)
+    (dl_root / "MyAlbum").mkdir(parents=True)
+    cfg = _cfg({
+        'download_source.usenet_path_mappings': [
+            {'from': '/data/downloads/music', 'to': str(mapped_root)},
+        ],
+        'soulseek.download_path': str(dl_root),
+    })
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(mapped_root / "MyAlbum")
+
+
+def test_resolve_returns_reported_unchanged_when_nothing_found(tmp_path: Path) -> None:
+    """No readable path, no mapping hit, no basename match → return the
+    original so the caller's 'no audio' error still surfaces."""
+    cfg = _cfg({'soulseek.download_path': str(tmp_path)})  # empty root
+    reported = '/data/downloads/music/Missing'
+    assert resolve_reported_save_path(reported, config_get=cfg) == reported
+
+
+def test_resolve_handles_empty_and_none(tmp_path: Path) -> None:
+    assert resolve_reported_save_path('', config_get=_cfg({})) == ''
+    assert resolve_reported_save_path(None, config_get=_cfg({})) is None
+
+
+def test_resolve_skips_mapping_when_target_missing_then_tries_basename(tmp_path: Path) -> None:
+    """A mapping whose translated path doesn't exist must not short-circuit
+    — fall through to the basename scan."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({
+        'download_source.usenet_path_mappings': [
+            {'from': '/data/downloads/music', 'to': '/nope/not/mounted'},
+        ],
+        'soulseek.download_path': str(tmp_path),
+    })
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
 
 
 # ---------------------------------------------------------------------------

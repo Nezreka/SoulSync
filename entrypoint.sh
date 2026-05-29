@@ -40,7 +40,7 @@ if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
     DATA_OWNER=$(stat -c '%u:%g' /app/data 2>/dev/null || echo "unknown")
     if [ "$DATA_OWNER" != "$PUID:$PGID" ]; then
         echo "🔒 Fixing permissions on app directories..."
-        chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream 2>/dev/null || true
+        chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage 2>/dev/null || true
     else
         echo "✅ App directory permissions already correct"
     fi
