@@ -27,6 +27,7 @@ from core.download_plugins.album_bundle import (
     get_completed_no_path_window_seconds,
     pick_best_album_release,
     poll_album_download,
+    resolve_reported_save_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.torrent import (
@@ -337,13 +338,21 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         if not save_path:
             self._mark_error(download_id, "Usenet job completed but no save_path reported")
             return
+        # Translate the client-reported path to one THIS process can read
+        # (SAB reports its own container path; SoulSync may see the same
+        # files at a different mount). See ``resolve_reported_save_path``.
+        local_path = resolve_reported_save_path(save_path)
+        if local_path != save_path:
+            logger.info("Usenet %s: resolved client path %r -> %r",
+                        download_id[:8], save_path, local_path)
         try:
-            audio_files = collect_audio_after_extraction(Path(save_path))
+            audio_files = collect_audio_after_extraction(Path(local_path))
         except Exception as e:
             self._mark_error(download_id, f"Post-extract walk failed: {e}")
             return
         if not audio_files:
-            self._mark_error(download_id, f"No audio files found in {save_path}")
+            suffix = f" (resolved: {local_path})" if local_path != save_path else ""
+            self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
             return
         primary = audio_files[0]
         with self._lock:
@@ -497,13 +506,19 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             return result
 
         _emit('staging', release=picked.title)
+        # SAB reports its own container path; SoulSync may mount the same
+        # files elsewhere. Resolve to a locally-readable path before walking.
+        local_path = resolve_reported_save_path(save_path)
+        if local_path != save_path:
+            logger.info("[Usenet album] Resolved client path %r -> %r", save_path, local_path)
         try:
-            audio_files = collect_audio_after_extraction(Path(save_path))
+            audio_files = collect_audio_after_extraction(Path(local_path))
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
             return result
         if not audio_files:
-            result['error'] = f'No audio files found in {save_path}'
+            suffix = f' (resolved: {local_path})' if local_path != save_path else ''
+            result['error'] = f'No audio files found in {save_path}{suffix}'
             return result
 
         copied = copy_audio_files_atomically(audio_files, Path(staging_dir))

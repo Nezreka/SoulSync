@@ -487,6 +487,111 @@ def poll_album_download(
     return None
 
 
+def _candidate_download_roots(config_get: Callable[..., Any]) -> list:
+    """Directories where THIS process can read finished downloads — used by
+    ``resolve_reported_save_path`` for the basename fallback.
+
+    Order matters: most-specific usenet/torrent roots first, then the
+    general Soulseek download / transfer dirs, which in the standard
+    shared-volume arr setup are bind-mounted to the very directory the
+    usenet client writes its completed downloads into. Relative values
+    (e.g. ``./downloads``) resolve against the process CWD — the
+    container's ``/app`` — which is exactly where those mounts live.
+    """
+    roots: list = []
+    for key in (
+        'download_source.usenet_download_path',
+        'usenet_client.completed_path',
+        'usenet_client.download_path',
+        'download_source.torrent_download_path',
+        'soulseek.download_path',
+        'soulseek.transfer_path',
+    ):
+        value = config_get(key, None)
+        if value:
+            roots.append(str(value))
+    seen: set = set()
+    out: list = []
+    for root in roots:
+        if root not in seen:
+            seen.add(root)
+            out.append(root)
+    return out
+
+
+def resolve_reported_save_path(
+    reported_path: Optional[str],
+    config_get: Optional[Callable[..., Any]] = None,
+) -> Optional[str]:
+    """Translate a downloader-reported save_path into one THIS process can read.
+
+    Usenet / torrent clients report paths from inside THEIR OWN container
+    (e.g. SAB hands back ``/data/downloads/music/<album>``); SoulSync often
+    mounts the very same files at a different point (``/app/downloads/<album>``).
+    Feeding the client's path straight to the audio walker then yields
+    "No audio files found" even though the files are physically present —
+    the classic arr-stack remote-path mismatch.
+
+    Resolution order:
+      1. The reported path verbatim, if it's a readable directory here
+         (deployments that mirror the client's mount paths).
+      2. Explicit prefix mappings from ``download_source.usenet_path_mappings``
+         — a list of ``{"from": "...", "to": "..."}`` (Sonarr/Radarr-style
+         remote path mapping) for non-shared / oddly-mounted layouts.
+      3. Basename fallback: a same-named folder under a known SoulSync
+         download root. Zero-config for the standard shared-volume setup —
+         the album folder shows up under SoulSync's own ``./downloads``
+         mount with the same name the client reported.
+
+    Returns the best resolved path, or ``reported_path`` unchanged when
+    nothing better is found (so the caller's existing "no audio" error still
+    surfaces, with both paths logged).
+    """
+    if not reported_path:
+        return reported_path
+    if config_get is None:
+        config_get = config_manager.get
+
+    def _is_dir(candidate) -> bool:
+        try:
+            return Path(candidate).is_dir()
+        except OSError:
+            return False
+
+    # 1. Reported path is directly readable — mounts already line up.
+    if _is_dir(reported_path):
+        return reported_path
+
+    normalized = str(reported_path).replace('\\', '/')
+
+    # 2. Explicit prefix mappings (remote-path-mapping escape hatch).
+    mappings = config_get('download_source.usenet_path_mappings', None) or []
+    if isinstance(mappings, (list, tuple)):
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            frm = str(mapping.get('from') or '').replace('\\', '/').rstrip('/')
+            to = str(mapping.get('to') or '')
+            if not frm or not to:
+                continue
+            if normalized == frm or normalized.startswith(frm + '/'):
+                rest = normalized[len(frm):].lstrip('/')
+                candidate = str(Path(to) / rest) if rest else to
+                if _is_dir(candidate):
+                    return candidate
+
+    # 3. Basename fallback under known download roots — covers the standard
+    #    shared-volume layout with zero configuration.
+    basename = Path(normalized).name
+    if basename:
+        for root in _candidate_download_roots(config_get):
+            candidate = Path(root) / basename
+            if _is_dir(candidate):
+                return str(candidate)
+
+    return reported_path
+
+
 def copy_audio_files_atomically(
     sources: Iterable[Path], staging_dir: Path,
 ) -> list:
@@ -525,6 +630,7 @@ __all__ = [
     "get_poll_interval",
     "get_poll_timeout",
     "get_transient_miss_threshold",
+    "resolve_reported_save_path",
     "pick_best_album_release",
     "poll_album_download",
     "quality_score",
