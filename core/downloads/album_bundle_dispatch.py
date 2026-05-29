@@ -31,11 +31,18 @@ testable without touching live runtime state.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
-logger = logging.getLogger(__name__)
+from utils.logging_config import get_logger
+
+# Use the project logger factory so these lines land in app.log under the
+# ``soulsync.*`` namespace the file handler captures. Plain
+# ``logging.getLogger(__name__)`` logs to the console only (the file
+# handler is attached to the ``soulsync`` logger), which is why
+# ``[Album Bundle] flow failed`` showed up in the terminal but never in
+# app.log during the #721 triage.
+logger = get_logger("downloads.album_bundle_dispatch")
 
 
 class BatchStateAccess(Protocol):

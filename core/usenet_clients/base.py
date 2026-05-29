@@ -39,6 +39,15 @@ class UsenetStatus:
     download_speed: int              # bytes/sec
     eta: Optional[int] = None        # seconds, None if unknown
     save_path: Optional[str] = None
+    # In-progress / pre-move directory (SAB ``incomplete_path``). Kept
+    # SEPARATE from ``save_path`` on purpose: it points at the staging
+    # dir SAB uses BEFORE its post-process move, so it must never be
+    # treated as the final path on a normal completion. The poll loops
+    # only fall back to it as a LAST RESORT — after waiting the full
+    # completed-but-no-save_path window — to recover the (#721) case
+    # where SAB finished, the files are physically on disk, but the
+    # final ``storage`` field never lands. See ``poll_album_download``.
+    incomplete_path: Optional[str] = None
     category: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None

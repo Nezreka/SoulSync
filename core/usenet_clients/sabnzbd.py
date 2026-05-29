@@ -232,19 +232,54 @@ class SABnzbdAdapter:
         )
 
     def _parse_history_slot(self, slot: dict) -> UsenetStatus:
-        # History entries are post-download — progress is 1.0 unless failed.
-        sab_state = (slot.get('status') or '').lower()
-        is_failed = sab_state == 'failed'
-        save_path = self._extract_history_save_path(slot)
+        # History entries cover BOTH finished jobs AND jobs that are still
+        # POST-PROCESSING. SAB removes a job from the queue the moment the
+        # download finishes and runs par2 verify / repair / unpack / move
+        # while the job sits in History — exposing the live stage in the
+        # ``status`` field ('Verifying' / 'Repairing' / 'Extracting' /
+        # 'Moving' / 'Running' / ...). Only 'Completed' means truly done;
+        # 'Failed' / 'Deleted' mean failure.
+        #
+        # The old logic mapped EVERY non-'failed' status to 'completed'.
+        # That made the poll treat a still-extracting 1.7 GB FLAC album
+        # (status 'Extracting', ``storage`` not written yet) as "completed
+        # but no save_path" and burn the completed-no-path window mid-PP —
+        # exactly the #721 stuck-at-99% signature in production where the
+        # path IS shared. Route the status through the same queue-state map
+        # so PP stages stay NON-terminal: the poll keeps waiting (as
+        # 'downloading') for as long as post-processing takes, and only a
+        # real 'Completed' flips it to terminal success.
+        mapped = _map_state(slot.get('status') or '')
+        is_failed = mapped == 'failed'
+        is_completed = mapped == 'completed'
+        # Only trust the final path on a TRUE completion. Mid-PP the path
+        # fields may be empty or still point at the incomplete dir; the
+        # completed-no-path retry handles the brief gap between the
+        # 'Completed' flip and ``storage`` landing in the same response.
+        save_path = self._extract_history_save_path(slot) if is_completed else None
+        # ``incomplete_path`` is surfaced separately (NOT as save_path) so
+        # the poll loops can fall back to it only as a last resort once
+        # the final ``storage`` field has provably failed to land — see
+        # ``UsenetStatus.incomplete_path`` and the #721 fallback in
+        # ``poll_album_download``. Whitespace-only values are treated as
+        # absent, same as the save_path chain.
+        incomplete_path = slot.get('incomplete_path')
+        if not (isinstance(incomplete_path, str) and incomplete_path.strip()):
+            incomplete_path = None
+        bytes_total = int(slot.get('bytes') or 0)
         return UsenetStatus(
             id=str(slot.get('nzo_id') or ''),
             name=slot.get('name') or '',
-            state='failed' if is_failed else 'completed',
+            state=mapped,
+            # Download itself is finished for ANY History slot (in-PP or
+            # done), so report full download progress — don't snap the UI
+            # back to 0% while SAB verifies/unpacks. Failed = 0.
             progress=0.0 if is_failed else 1.0,
-            size=int(slot.get('bytes') or 0),
-            downloaded=int(slot.get('bytes') or 0) if not is_failed else 0,
+            size=bytes_total,
+            downloaded=0 if is_failed else bytes_total,
             download_speed=0,
             save_path=save_path,
+            incomplete_path=incomplete_path,
             category=slot.get('category'),
             error=slot.get('fail_message') if is_failed else None,
         )
@@ -279,10 +314,16 @@ class SABnzbdAdapter:
             value = slot.get(key)
             if value and isinstance(value, str) and value.strip():
                 return value
-        # Loud diagnostic when the bundle poll is about to fail on this:
-        # users on SAB versions / forks with novel field names need to
-        # see this in the logs so we can grow ``_HISTORY_SAVE_PATH_KEYS``.
-        logger.debug(
+        # Loud diagnostic when the bundle poll is about to wait/fail on
+        # this: users on SAB versions / forks with novel field names need
+        # to see this in the logs so we can grow ``_HISTORY_SAVE_PATH_KEYS``.
+        # INFO (not DEBUG) on purpose — a completed History slot with no
+        # resolvable path is the #721 stuck-bundle signature, and dumping
+        # the actual slot keys here is what lets us add the missing field
+        # without a debug-logging round-trip. It only fires for completed
+        # slots that lack every known path field, so it self-limits the
+        # moment ``storage`` lands.
+        logger.info(
             "[SAB] History slot for nzo_id=%s has no save_path in any "
             "of the known fields %r — slot keys: %r",
             slot.get('nzo_id'),
