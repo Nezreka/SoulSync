@@ -67,6 +67,14 @@ class WishlistAutoProcessingRuntime:
     current_time_fn: Callable[[], float]
     profile_id: int = 1
     logger: Any = module_logger
+    # Dedicated pool for the inline-blocking per-album bundle downloads.
+    # Album-bundle batches block their worker thread for the whole search +
+    # download; running them on the shared ``missing_download_executor`` lets a
+    # burst of album batches (e.g. a big Album-Completeness "Fix all" → wishlist)
+    # starve the per-track flow AND the user's manual "Download Wishlist" (#740).
+    # Routing them here keeps the shared pool free. Falls back to the shared
+    # executor when unset (older callers / tests) — see the submit site below.
+    album_bundle_executor: Any = None
 
 
 def remove_completed_tracks_from_wishlist(
@@ -901,7 +909,15 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                             f"({len(group.tracks)} tracks) → {album_batch_id} [run {wishlist_run_id[:8]}]"
                         )
                         _submitted_batches.append(album_batch_id)
-                        runtime.missing_download_executor.submit(
+                        # Album bundles block their worker thread for the whole
+                        # search+download, so run them on the dedicated album
+                        # pool — never the shared pool that serves analysis,
+                        # per-track downloads and the manual wishlist (#740).
+                        # Fall back to the shared pool if unset (older callers).
+                        _album_executor = (
+                            runtime.album_bundle_executor or runtime.missing_download_executor
+                        )
+                        _album_executor.submit(
                             runtime.run_full_missing_tracks_process,
                             album_batch_id, playlist_id, group.tracks,
                         )
