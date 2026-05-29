@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from core.source_ids import id_column as _artist_id_column
+
 logger = logging.getLogger("artist_source_lookup")
 
 
@@ -29,14 +31,14 @@ SOURCE_ONLY_ARTIST_SOURCES = frozenset({
 })
 
 
+# The per-source column on the ``artists`` table, derived from the canonical
+# source-ID registry (the single source of truth). Values are unchanged from the
+# previous hardcoded map — this just stops duplicating that knowledge here.
 SOURCE_ID_FIELD = {
-    "spotify": "spotify_artist_id",
-    "itunes": "itunes_artist_id",
-    "deezer": "deezer_id",
-    "discogs": "discogs_id",
-    "hydrabase": "soul_id",
-    "musicbrainz": "musicbrainz_id",
-    "amazon": "amazon_id",
+    source: _artist_id_column(source, "artist")
+    for source in (
+        "spotify", "itunes", "deezer", "discogs", "hydrabase", "musicbrainz", "amazon",
+    )
 }
 
 
