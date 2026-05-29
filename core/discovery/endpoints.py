@@ -182,6 +182,23 @@ def playlist_name_safe(state: Dict[str, Any]) -> str:
     return state.get('playlist', {}).get('name', 'Unknown Playlist')
 
 
+def playlist_name_obj(state: Dict[str, Any]) -> str:
+    """Tidal start-sync: playlist is an object — strict ``.name`` (raises if
+    absent, exactly like the original)."""
+    return state['playlist'].name
+
+
+def playlist_image_obj(state: Dict[str, Any]) -> str:
+    """Tidal: ``getattr(playlist, 'image_url', '')`` (object attribute)."""
+    return getattr(state['playlist'], 'image_url', '')
+
+
+def playlist_image_dict(state: Dict[str, Any]) -> str:
+    """Deezer/Qobuz/Spotify-Public/YouTube: ``playlist.get('image_url', '')``
+    (dict access)."""
+    return state['playlist'].get('image_url', '')
+
+
 def get_sync_status(
     states: Dict[str, Any],
     key: str,
@@ -378,4 +395,82 @@ def get_playlist_states(
         return {"states": result}, 200
     except Exception as e:
         logger.error(f"Error getting {error_label} playlist states: {e}")
+        return {"error": str(e)}, 500
+
+
+def start_sync(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    sync_id_prefix: str,
+    not_found_message: str,
+    not_ready_message: str,
+    convert_fn,
+    playlist_name_getter,
+    playlist_image_getter,
+    activity_label: str,
+    error_label: str,
+    sync_lock: Any,
+    sync_states: Dict[str, Any],
+    active_sync_workers: Dict[str, Any],
+    submit_sync_task,
+    add_activity_item,
+) -> Tuple[Dict[str, Any], int]:
+    """Kick off a playlist sync from a source's discovered Spotify matches.
+
+    1:1 lift of the ``start_<source>_sync`` bodies for the five sources with
+    the identical flow (Tidal, Deezer, Qobuz, Spotify-Public, YouTube). The
+    per-source pieces are parameters:
+
+    - ``sync_id_prefix`` — the ``f"{prefix}_{key}"`` sync id.
+    - ``convert_fn`` — the source's discovery->spotify-tracks converter.
+    - ``playlist_name_getter`` / ``playlist_image_getter`` — Tidal reads an
+      object (``.name`` / ``getattr``), the rest read a dict; lifted as the
+      ``playlist_name_obj``/``playlist_image_obj`` vs ``playlist_name_strict``/
+      ``playlist_image_dict`` accessors.
+    - ``activity_label`` vs ``error_label`` — these DIFFER for Spotify-Public:
+      activity says "Spotify Link Sync Started" while logs say "Spotify Public".
+    - ``submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks,
+      playlist_image_url) -> Future`` — wraps sync_executor/_run_sync_task/
+      get_current_profile_id so this stays free of those globals.
+
+    Returns ``(payload, status_code)``.
+
+    NOT folded in: iTunes-Link (no final info log), ListenBrainz (submits the
+    task without an image arg), Beatport (extra debug logging, 'chart' key).
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        state['last_accessed'] = time.time()
+
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
+            return {"error": not_ready_message}, 400
+
+        spotify_tracks = convert_fn(state['discovery_results'])
+        if not spotify_tracks:
+            return {"error": "No Spotify matches found for sync"}, 400
+
+        sync_playlist_id = f"{sync_id_prefix}_{key}"
+        playlist_name = playlist_name_getter(state)
+
+        add_activity_item("", f"{activity_label} Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        playlist_image_url = playlist_image_getter(state)
+        future = submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_image_url)
+        active_sync_workers[sync_playlist_id] = future
+
+        logger.info(f"Started {error_label} sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return {"success": True, "sync_playlist_id": sync_playlist_id}, 200
+    except Exception as e:
+        logger.error(f"Error starting {error_label} sync: {e}")
         return {"error": str(e)}, 500
