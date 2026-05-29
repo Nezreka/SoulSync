@@ -5709,6 +5709,11 @@ let _gsController = null;
                 const freshResults = document.getElementById('gsearch-results');
                 const target = e.target;
                 if (freshBar?.contains(target) || freshResults?.contains(target)) return;
+                // The media player (mini bar + expanded now-playing modal)
+                // floats above the page. Clicking it — e.g. opening the full
+                // modal from the mini player, or anything inside that modal —
+                // must NOT tear down the global search results (#732).
+                if (target.closest && target.closest('#media-player, #np-modal-overlay')) return;
                 _gsDeactivate();
             }, 100);
         });
