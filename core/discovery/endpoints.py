@@ -249,3 +249,42 @@ def get_sync_status(
     except Exception as e:
         logger.error(f"Error getting {error_label} sync status: {e}")
         return {"error": str(e)}, 500
+
+
+def get_discovery_status(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    not_found_message: str,
+    error_label: str,
+) -> Tuple[Dict[str, Any], int]:
+    """Report real-time discovery progress/results for one playlist.
+
+    1:1 lift of the byte-identical ``get_<source>_discovery_status`` bodies.
+    Unlike sync-status, this shape is identical for ALL eight sources —
+    Beatport included — so it folds in too. Only the 404 message
+    (".../discovery not found" vs ".../playlist not found" vs "Beatport chart
+    not found") and the except-log label vary, both passed in. The caller
+    resolves the key (ListenBrainz via ``_lb_state_key``).
+
+    Returns ``(payload, status_code)``.
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        state['last_accessed'] = time.time()
+
+        return {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered',
+        }, 200
+    except Exception as e:
+        logger.error(f"Error getting {error_label} discovery status: {e}")
+        return {"error": str(e)}, 500
