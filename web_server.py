@@ -845,6 +845,16 @@ retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWork
 # Shared task/batch state now lives in core.runtime_state.
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 
+# Dedicated pool for per-album bundle downloads (#740). An album-bundle batch
+# blocks its worker thread for the entire search+download; if these run on the
+# shared missing_download_executor, a burst of album batches (e.g. a large
+# Album-Completeness "Fix all" → wishlist that splits into ~one batch per album)
+# saturates all 3 workers and starves the per-track flow AND the user's manual
+# "Download Wishlist" analysis, which then never starts. Keeping them on their
+# own bounded pool decouples that: hung/slow album downloads can only delay
+# other album downloads, never the user-facing path.
+album_bundle_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlbumBundleWorker")
+
 # Parallelizes the per-file metadata-lookup + post-processing in
 # /api/import/singles/process. Single-file work is dominated by
 # Spotify/iTunes/Deezer search round-trips so 3 workers give a near-
@@ -1663,6 +1673,7 @@ def _shutdown_runtime_components():
         (retag_executor, "retag executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
+        (album_bundle_executor, "album bundle executor"),
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
         (deezer_discovery_executor, "deezer discovery executor"),
@@ -14290,6 +14301,7 @@ def _process_wishlist_automatically(automation_id=None):
         update_automation_progress=_update_automation_progress,
         automation_engine=automation_engine,
         missing_download_executor=missing_download_executor,
+        album_bundle_executor=album_bundle_executor,
         run_full_missing_tracks_process=_run_full_missing_tracks_process,
         get_batch_max_concurrent=_get_batch_max_concurrent,
         get_active_server=config_manager.get_active_media_server,

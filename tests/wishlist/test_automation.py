@@ -131,6 +131,7 @@ def _build_runtime(
     batch_map=None,
     guard_acquired=True,
     is_actually_processing=False,
+    album_bundle_executor=None,
 ):
     if progress_calls is None:
         progress_calls = []
@@ -171,6 +172,7 @@ def _build_runtime(
         update_automation_progress=progress_callback,
         automation_engine=None,
         missing_download_executor=executor,
+        album_bundle_executor=album_bundle_executor,
         run_full_missing_tracks_process=lambda *args, **kwargs: None,
         get_batch_max_concurrent=lambda: 4,
         get_active_server=lambda: active_server,
@@ -466,3 +468,86 @@ def test_process_wishlist_automatically_skips_when_wishlist_batch_is_already_act
     assert guard_events == ["enter", "exit"]
     assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
     assert any("already active in another batch" in msg for msg in logger.info_messages)
+
+
+# --- #740: album-bundle batches must route to the dedicated pool ------------
+
+def _two_album_tracks_plus_orphan():
+    """2 missing tracks from one album (→ album-bundle batch) + 1 orphan
+    track with no album metadata (→ residual per-track batch)."""
+    return [
+        {
+            "name": "Album Song 1",
+            "artists": [{"name": "Artist 1"}],
+            "spotify_data": {
+                "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                "artists": [{"name": "Artist 1"}],
+            },
+        },
+        {
+            "name": "Album Song 2",
+            "artists": [{"name": "Artist 1"}],
+            "spotify_data": {
+                "album": {"id": "alb1", "name": "Album One", "album_type": "album"},
+                "artists": [{"name": "Artist 1"}],
+            },
+        },
+        {
+            "name": "Orphan",
+            "artists": [{"name": "X"}],
+            "spotify_data": {"album": {"album_type": "album"}, "artists": [{"name": "X"}]},
+        },
+    ]
+
+
+def test_album_subbatches_route_to_dedicated_album_pool():
+    """#740: per-album bundle batches (which block their worker thread for the
+    whole search+download) must be submitted to the dedicated album_bundle_executor,
+    NOT the shared missing_download_executor — so a burst of album batches can't
+    starve the per-track flow / manual wishlist. The residual per-track batch
+    still goes to the shared pool."""
+    album_executor = _FakeExecutor()
+    batch_map = {}
+    runtime, _s, _p, _db, shared_executor, _l, _pr, _g = _build_runtime(
+        tracks=_two_album_tracks_plus_orphan(),
+        cycle_value="albums",
+        count=3,
+        batch_map=batch_map,
+        album_bundle_executor=album_executor,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-pool")
+
+    # Album sub-batch → dedicated album pool; residual → shared pool.
+    assert len(album_executor.submissions) == 1
+    assert len(shared_executor.submissions) == 1
+
+    album_batch_id = album_executor.submissions[0][1][0]
+    assert batch_map[album_batch_id]["is_album_download"] is True
+    assert batch_map[album_batch_id]["album_context"]["name"] == "Album One"
+
+    residual_batch_id = shared_executor.submissions[0][1][0]
+    assert batch_map[residual_batch_id].get("is_album_download") is not True
+
+
+def test_album_subbatches_fall_back_to_shared_pool_when_no_album_pool():
+    """Bulletproofing: if no dedicated album pool is wired (older callers /
+    tests), album batches fall back to the shared executor — i.e. exactly the
+    pre-fix behavior, so nothing breaks."""
+    batch_map = {}
+    runtime, _s, _p, _db, shared_executor, _l, _pr, _g = _build_runtime(
+        tracks=_two_album_tracks_plus_orphan(),
+        cycle_value="albums",
+        count=3,
+        batch_map=batch_map,
+        album_bundle_executor=None,  # not wired
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-fallback")
+
+    # Both the album sub-batch and the residual land on the shared pool.
+    assert len(shared_executor.submissions) == 2
+    assert any(
+        batch_map[args[0]].get("is_album_download") is True
+        for _fn, args, _kw in shared_executor.submissions
+    )
