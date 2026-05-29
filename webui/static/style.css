@@ -43838,7 +43838,7 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
    AUTOMATIONS PAGE
    =========================== */
 
-.automations-container { padding: 20px 24px; }
+/* .automations-container: card styling from .page-shell */
 .automations-list { display: flex; flex-direction: column; gap: 0; }
 #automations-list-view { padding-bottom: 10vh; }
 
