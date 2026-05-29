@@ -790,3 +790,90 @@ def test_update_match_get_json_raises_returns_500():
     _, kw, _ = _update_kwargs(json_data={})
     body, code = update_discovery_match({}, boom, **kw)
     assert code == 500 and 'error' in body
+
+
+# ---------------------------------------------------------------------------
+# update_playlist_phase
+# ---------------------------------------------------------------------------
+
+_PHASES = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+
+
+def test_update_phase_not_found():
+    from core.discovery.endpoints import update_playlist_phase
+    body, code = update_playlist_phase({}, 'k', lambda: {'phase': 'fresh'},
+                                       not_found_message='Tidal playlist not found',
+                                       error_label='Tidal', valid_phases=_PHASES,
+                                       apply_extra_fields=False)
+    assert code == 404 and body == {"error": "Tidal playlist not found"}
+
+
+def test_update_phase_missing_phase():
+    from core.discovery.endpoints import update_playlist_phase
+    states = {'k': {'phase': 'discovered'}}
+    body, code = update_playlist_phase(states, 'k', lambda: {},
+                                       not_found_message='nf', error_label='Tidal',
+                                       valid_phases=_PHASES, apply_extra_fields=False)
+    assert code == 400 and body == {"error": "Phase not provided"}
+
+
+def test_update_phase_invalid():
+    from core.discovery.endpoints import update_playlist_phase
+    states = {'k': {'phase': 'discovered'}}
+    body, code = update_playlist_phase(states, 'k', lambda: {'phase': 'bogus'},
+                                       not_found_message='nf', error_label='Tidal',
+                                       valid_phases=_PHASES, apply_extra_fields=False)
+    assert code == 400 and 'Invalid phase' in body['error']
+
+
+def test_update_phase_happy_no_extra_fields():
+    from core.discovery.endpoints import update_playlist_phase
+    state = {'phase': 'download_complete', 'last_accessed': 0}
+    body, code = update_playlist_phase({'k': state}, 'k',
+                                       lambda: {'phase': 'discovered',
+                                                'download_process_id': 'dp'},
+                                       not_found_message='nf', error_label='Tidal',
+                                       valid_phases=_PHASES, apply_extra_fields=False)
+    assert code == 200
+    assert body == {"success": True, "message": "Phase updated to discovered",
+                    "old_phase": "download_complete", "new_phase": "discovered"}
+    assert state['phase'] == 'discovered'
+    assert state['last_accessed'] != 0
+    # apply_extra_fields=False -> download_process_id NOT applied (1:1 for Tidal/YouTube)
+    assert 'download_process_id' not in state
+
+
+def test_update_phase_applies_extra_fields_when_enabled():
+    from core.discovery.endpoints import update_playlist_phase
+    state = {'phase': 'discovered'}
+    body, code = update_playlist_phase({'k': state}, 'k',
+                                       lambda: {'phase': 'downloading',
+                                                'download_process_id': 'dp7',
+                                                'converted_spotify_playlist_id': 'cv7'},
+                                       not_found_message='nf', error_label='Deezer',
+                                       valid_phases=_PHASES, apply_extra_fields=True)
+    assert code == 200
+    assert state['download_process_id'] == 'dp7'
+    assert state['converted_spotify_playlist_id'] == 'cv7'
+
+
+def test_update_phase_youtube_parsed_allowed():
+    from core.discovery.endpoints import update_playlist_phase
+    yt_phases = ['fresh', 'parsed', 'discovering', 'discovered', 'syncing',
+                 'sync_complete', 'downloading', 'download_complete']
+    state = {'phase': 'discovered'}
+    body, code = update_playlist_phase({'k': state}, 'k', lambda: {'phase': 'parsed'},
+                                       not_found_message='nf', error_label='YouTube',
+                                       valid_phases=yt_phases, apply_extra_fields=False)
+    assert code == 200 and state['phase'] == 'parsed'
+
+
+def test_update_phase_exception_500():
+    from core.discovery.endpoints import update_playlist_phase
+    def boom():
+        raise ValueError('bad')
+    states = {'k': {'phase': 'discovered'}}
+    body, code = update_playlist_phase(states, 'k', boom, not_found_message='nf',
+                                       error_label='Tidal', valid_phases=_PHASES,
+                                       apply_extra_fields=False)
+    assert code == 500 and 'error' in body
