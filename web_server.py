@@ -18956,11 +18956,24 @@ def get_playlist_tracks(playlist_id):
 
         # Fetch all tracks with full album data
         tracks = []
-        try:
-            results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
-        except Exception as items_err:
-            # 403 on followed playlists — try the public embed scraper as fallback
-            logger.warning(f"Playlist items fetch failed ({items_err}), trying public embed scraper")
+        # The items endpoint intermittently fails for followed playlists — retry
+        # once before resorting to the (≈100-capped) public embed scraper, so a
+        # transient failure doesn't silently truncate a large playlist.
+        results = None
+        items_err = None
+        for _attempt in range(2):
+            try:
+                results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
+                break
+            except Exception as _e:
+                items_err = _e
+                if _attempt == 0:
+                    logger.warning(f"Playlist items fetch failed ({_e}); retrying once")
+                    time.sleep(0.5)
+        if results is None:
+            # Both attempts failed (often a 403 on followed playlists) — fall back
+            # to the public embed scraper as a last resort (capped at ~100 tracks).
+            logger.warning(f"Playlist items unavailable after retry ({items_err}), trying public embed scraper")
             try:
                 from core.spotify_public_scraper import scrape_spotify_embed
                 embed_data = scrape_spotify_embed('playlist', playlist_id)
@@ -18986,7 +18999,10 @@ def get_playlist_tracks(playlist_id):
                         'track_count': len(tracks),
                         'image_url': playlist_data['images'][0]['url'] if playlist_data.get('images') else None,
                         'snapshot_id': playlist_data.get('snapshot_id', ''),
-                        'tracks': tracks
+                        'tracks': tracks,
+                        # Embed scrape is capped at ~100 — mark as incomplete.
+                        'incomplete': True,
+                        'expected_total': (playlist_data.get('tracks') or {}).get('total'),
                     }
                     return jsonify(playlist_dict)
             except Exception as scrape_err:
@@ -19014,6 +19030,19 @@ def get_playlist_tracks(playlist_id):
             else:
                 results = None
 
+        # Guard against silent truncation: Spotify occasionally returns a short
+        # first page (next=None) for some playlists, so the loop above can end
+        # early. Compare against the playlist's known total and flag it rather
+        # than presenting a partial list as complete (bug #736).
+        expected_total = (playlist_data.get('tracks') or {}).get('total')
+        incomplete = bool(expected_total) and len(tracks) < expected_total
+        if incomplete:
+            logger.warning(
+                f"Playlist {playlist_id} ('{playlist_data.get('name')}'): fetched "
+                f"{len(tracks)}/{expected_total} tracks — Spotify returned incomplete "
+                f"items data (flagged, not silently truncated)"
+            )
+
         # Convert playlist to dict
         playlist_dict = {
             'id': playlist_data['id'],
@@ -19025,7 +19054,9 @@ def get_playlist_tracks(playlist_id):
             'track_count': len(tracks),
             'image_url': playlist_data['images'][0]['url'] if playlist_data.get('images') else None,
             'snapshot_id': playlist_data.get('snapshot_id', ''),
-            'tracks': tracks
+            'tracks': tracks,
+            'incomplete': incomplete,
+            'expected_total': expected_total,
         }
         return jsonify(playlist_dict)
     except Exception as e:
