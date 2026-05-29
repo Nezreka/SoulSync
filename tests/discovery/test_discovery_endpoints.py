@@ -549,3 +549,106 @@ def test_playlist_states_missing_required_field_raises_500():
     # state missing 'phase' -> strict access raises -> 500
     body, code = get_playlist_states({'k': {'status': 'x'}}, error_label='Qobuz')
     assert code == 500 and "error" in body
+
+
+# ---------------------------------------------------------------------------
+# start_sync
+# ---------------------------------------------------------------------------
+
+def _start_kwargs(infra, *, convert_fn=None, name='PL', image='img',
+                  activity_label='Tidal', error_label='Tidal',
+                  not_found_message='Tidal playlist not found',
+                  not_ready_message='Tidal playlist not ready for sync',
+                  sync_id_prefix='tidal'):
+    submitted = []
+
+    def submit(sync_playlist_id, playlist_name, tracks, image_url):
+        rec = (sync_playlist_id, playlist_name, tracks, image_url)
+        submitted.append(rec)
+        return f"future:{sync_playlist_id}"
+
+    calls, add = _activity_recorder()
+    kw = dict(
+        sync_id_prefix=sync_id_prefix, not_found_message=not_found_message,
+        not_ready_message=not_ready_message,
+        convert_fn=convert_fn or (lambda r: [{'id': 't'}]),
+        playlist_name_getter=lambda s: name, playlist_image_getter=lambda s: image,
+        activity_label=activity_label, error_label=error_label,
+        sync_lock=infra['sync_lock'], sync_states=infra['sync_states'],
+        active_sync_workers=infra['active_sync_workers'],
+        submit_sync_task=submit, add_activity_item=add,
+    )
+    return kw, submitted, calls
+
+
+def test_start_sync_not_found():
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    kw, _, _ = _start_kwargs(infra)
+    body, code = start_sync({}, 'missing', **kw)
+    assert code == 404 and body == {"error": "Tidal playlist not found"}
+
+
+def test_start_sync_not_ready_phase():
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    kw, _, _ = _start_kwargs(infra)
+    states = {'pl': {'phase': 'discovering'}}
+    body, code = start_sync(states, 'pl', **kw)
+    assert code == 400 and body == {"error": "Tidal playlist not ready for sync"}
+
+
+def test_start_sync_no_matches():
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    kw, _, _ = _start_kwargs(infra, convert_fn=lambda r: [])
+    states = {'pl': {'phase': 'discovered', 'discovery_results': []}}
+    body, code = start_sync(states, 'pl', **kw)
+    assert code == 400 and body == {"error": "No Spotify matches found for sync"}
+
+
+def test_start_sync_happy_path():
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    kw, submitted, calls = _start_kwargs(
+        infra, convert_fn=lambda r: [{'id': 'a'}, {'id': 'b'}],
+        name='My Mix', image='cover.jpg',
+        activity_label='Spotify Link', error_label='Spotify Public',
+        sync_id_prefix='spotify_public')
+    states = {'h1': {'phase': 'discovered', 'discovery_results': [1, 2]}}
+    body, code = start_sync(states, 'h1', **kw)
+
+    assert code == 200
+    assert body == {"success": True, "sync_playlist_id": "spotify_public_h1"}
+    # state mutated
+    assert states['h1']['phase'] == 'syncing'
+    assert states['h1']['sync_playlist_id'] == 'spotify_public_h1'
+    assert states['h1']['sync_progress'] == {}
+    # sync infra seeded + worker registered
+    assert infra['sync_states']['spotify_public_h1'] == {"status": "starting", "progress": {}}
+    assert infra['active_sync_workers']['spotify_public_h1'] == 'future:spotify_public_h1'
+    # submit got name/tracks/image
+    assert submitted == [('spotify_public_h1', 'My Mix', [{'id': 'a'}, {'id': 'b'}], 'cover.jpg')]
+    # activity uses activity_label (not error_label) + track count
+    assert calls == [("", "Spotify Link Sync Started", "'My Mix' - 2 tracks", "Now")]
+
+
+def test_start_sync_allows_resync_phases():
+    from core.discovery.endpoints import start_sync
+    for phase in ('sync_complete', 'download_complete'):
+        infra = _cancel_infra()
+        kw, _, _ = _start_kwargs(infra)
+        states = {'pl': {'phase': phase, 'discovery_results': [1]}}
+        body, code = start_sync(states, 'pl', **kw)
+        assert code == 200, phase
+
+
+def test_start_sync_exception_returns_500():
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    def boom(r):
+        raise RuntimeError("convert blew up")
+    kw, _, _ = _start_kwargs(infra, convert_fn=boom)
+    states = {'pl': {'phase': 'discovered', 'discovery_results': [1]}}
+    body, code = start_sync(states, 'pl', **kw)
+    assert code == 500 and "error" in body

@@ -20987,9 +20987,13 @@ from core.discovery.endpoints import (
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
+    start_sync as _start_sync_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
+    playlist_name_obj as _pl_name_obj,
+    playlist_image_obj as _pl_image_obj,
+    playlist_image_dict as _pl_image_dict,
 )
 
 
@@ -21051,6 +21055,33 @@ def _get_source_playlist_states(states, error_label, info_log_label=None):
     return jsonify(body), code
 
 
+def _submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_image_url):
+    """Submit a sync to the shared executor (closes over sync_executor /
+    _run_sync_task / get_current_profile_id so the lifted start_sync helper
+    stays free of those globals)."""
+    return sync_executor.submit(
+        _run_sync_task, sync_playlist_id, playlist_name, spotify_tracks,
+        None, get_current_profile_id(), playlist_image_url,
+    )
+
+
+def _start_source_sync(states, key, *, sync_id_prefix, not_found_message,
+                       not_ready_message, convert_fn, name_getter, image_getter,
+                       activity_label, error_label):
+    """Thin glue for the per-source start_*_sync routes (Tidal/Deezer/Qobuz/
+    Spotify-Public/YouTube) — wires sync infra into the lifted start_sync."""
+    body, code = _start_sync_core(
+        states, key, sync_id_prefix=sync_id_prefix,
+        not_found_message=not_found_message, not_ready_message=not_ready_message,
+        convert_fn=convert_fn, playlist_name_getter=name_getter,
+        playlist_image_getter=image_getter, activity_label=activity_label,
+        error_label=error_label, sync_lock=sync_lock, sync_states=sync_states,
+        active_sync_workers=active_sync_workers, submit_sync_task=_submit_sync_task,
+        add_activity_item=add_activity_item,
+    )
+    return jsonify(body), code
+
+
 def _build_tidal_discovery_deps():
     """Build the TidalDiscoveryDeps bundle from web_server.py globals on each call."""
     return _discovery_tidal.TidalDiscoveryDeps(
@@ -21089,55 +21120,13 @@ def convert_tidal_results_to_spotify_tracks(discovery_results):
 @app.route('/api/tidal/sync/start/<playlist_id>', methods=['POST'])
 def start_tidal_sync(playlist_id):
     """Start sync process for a Tidal playlist using discovered Spotify tracks"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()  # Update access time
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            return jsonify({"error": "Tidal playlist not ready for sync"}), 400
-        
-        # Convert discovery results to Spotify tracks format
-        spotify_tracks = convert_tidal_results_to_spotify_tracks(state['discovery_results'])
-        
-        if not spotify_tracks:
-            return jsonify({"error": "No Spotify matches found for sync"}), 400
-        
-        # Create a temporary playlist ID for sync tracking
-        sync_playlist_id = f"tidal_{playlist_id}"
-        playlist_name = state['playlist'].name  # Tidal playlist object has .name attribute
-        
-        # Add activity for sync start
-        add_activity_item("", "Tidal Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
-        
-        # Update Tidal state
-        state['phase'] = 'syncing'
-        state['sync_playlist_id'] = sync_playlist_id
-        state['sync_progress'] = {}
-        
-        # Start the sync using existing sync infrastructure
-        sync_data = {
-            'playlist_id': sync_playlist_id,
-            'playlist_name': playlist_name,
-            'tracks': spotify_tracks
-        }
-        
-        with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-
-        # Submit sync task
-        playlist_image_url = getattr(state['playlist'], 'image_url', '')
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
-        active_sync_workers[sync_playlist_id] = future
-
-        logger.info(f"Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
-        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-
-    except Exception as e:
-        logger.error(f"Error starting Tidal sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _start_source_sync(
+        tidal_discovery_states, playlist_id, sync_id_prefix="tidal",
+        not_found_message="Tidal playlist not found",
+        not_ready_message="Tidal playlist not ready for sync",
+        convert_fn=convert_tidal_results_to_spotify_tracks,
+        name_getter=_pl_name_obj, image_getter=_pl_image_obj,
+        activity_label="Tidal", error_label="Tidal")
 
 @app.route('/api/tidal/sync/status/<playlist_id>', methods=['GET'])
 def get_tidal_sync_status(playlist_id):
@@ -21611,55 +21600,13 @@ def convert_deezer_results_to_spotify_tracks(discovery_results):
 @app.route('/api/deezer/sync/start/<playlist_id>', methods=['POST'])
 def start_deezer_sync(playlist_id):
     """Start sync process for a Deezer playlist using discovered Spotify tracks"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            return jsonify({"error": "Deezer playlist not ready for sync"}), 400
-
-        # Convert discovery results to Spotify tracks format
-        spotify_tracks = convert_deezer_results_to_spotify_tracks(state['discovery_results'])
-
-        if not spotify_tracks:
-            return jsonify({"error": "No Spotify matches found for sync"}), 400
-
-        # Create a temporary playlist ID for sync tracking
-        sync_playlist_id = f"deezer_{playlist_id}"
-        playlist_name = state['playlist']['name']
-
-        # Add activity for sync start
-        add_activity_item("", "Deezer Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
-
-        # Update Deezer state
-        state['phase'] = 'syncing'
-        state['sync_playlist_id'] = sync_playlist_id
-        state['sync_progress'] = {}
-
-        # Start the sync using existing sync infrastructure
-        sync_data = {
-            'playlist_id': sync_playlist_id,
-            'playlist_name': playlist_name,
-            'tracks': spotify_tracks
-        }
-
-        with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-
-        # Submit sync task
-        playlist_image_url = state['playlist'].get('image_url', '')
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
-        active_sync_workers[sync_playlist_id] = future
-
-        logger.info(f"Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
-        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-
-    except Exception as e:
-        logger.error(f"Error starting Deezer sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _start_source_sync(
+        deezer_discovery_states, playlist_id, sync_id_prefix="deezer",
+        not_found_message="Deezer playlist not found",
+        not_ready_message="Deezer playlist not ready for sync",
+        convert_fn=convert_deezer_results_to_spotify_tracks,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
+        activity_label="Deezer", error_label="Deezer")
 
 @app.route('/api/deezer/sync/status/<playlist_id>', methods=['GET'])
 def get_deezer_sync_status(playlist_id):
@@ -22089,48 +22036,13 @@ def convert_qobuz_results_to_spotify_tracks(discovery_results):
 @app.route('/api/qobuz/sync/start/<playlist_id>', methods=['POST'])
 def start_qobuz_sync(playlist_id):
     """Start sync process for a Qobuz playlist using discovered Spotify tracks."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            return jsonify({"error": "Qobuz playlist not ready for sync"}), 400
-
-        spotify_tracks = convert_qobuz_results_to_spotify_tracks(state['discovery_results'])
-        if not spotify_tracks:
-            return jsonify({"error": "No Spotify matches found for sync"}), 400
-
-        sync_playlist_id = f"qobuz_{playlist_id}"
-        playlist_name = state['playlist']['name']
-
-        add_activity_item("", "Qobuz Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
-
-        state['phase'] = 'syncing'
-        state['sync_playlist_id'] = sync_playlist_id
-        state['sync_progress'] = {}
-
-        sync_data = {
-            'playlist_id': sync_playlist_id,
-            'playlist_name': playlist_name,
-            'tracks': spotify_tracks
-        }
-
-        with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-
-        playlist_image_url = state['playlist'].get('image_url', '')
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
-        active_sync_workers[sync_playlist_id] = future
-
-        logger.info(f"Started Qobuz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
-        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-
-    except Exception as e:
-        logger.error(f"Error starting Qobuz sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _start_source_sync(
+        qobuz_discovery_states, playlist_id, sync_id_prefix="qobuz",
+        not_found_message="Qobuz playlist not found",
+        not_ready_message="Qobuz playlist not ready for sync",
+        convert_fn=convert_qobuz_results_to_spotify_tracks,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
+        activity_label="Qobuz", error_label="Qobuz")
 
 
 @app.route('/api/qobuz/sync/status/<playlist_id>', methods=['GET'])
@@ -22848,55 +22760,13 @@ def convert_spotify_public_results_to_spotify_tracks(discovery_results):
 @app.route('/api/spotify-public/sync/start/<url_hash>', methods=['POST'])
 def start_spotify_public_sync(url_hash):
     """Start sync process for a Spotify Public playlist using discovered Spotify tracks"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            return jsonify({"error": "Spotify Public playlist not ready for sync"}), 400
-
-        # Convert discovery results to Spotify tracks format
-        spotify_tracks = convert_spotify_public_results_to_spotify_tracks(state['discovery_results'])
-
-        if not spotify_tracks:
-            return jsonify({"error": "No Spotify matches found for sync"}), 400
-
-        # Create a temporary playlist ID for sync tracking
-        sync_playlist_id = f"spotify_public_{url_hash}"
-        playlist_name = state['playlist']['name']
-
-        # Add activity for sync start
-        add_activity_item("", "Spotify Link Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
-
-        # Update Spotify Public state
-        state['phase'] = 'syncing'
-        state['sync_playlist_id'] = sync_playlist_id
-        state['sync_progress'] = {}
-
-        # Start the sync using existing sync infrastructure
-        sync_data = {
-            'playlist_id': sync_playlist_id,
-            'playlist_name': playlist_name,
-            'tracks': spotify_tracks
-        }
-
-        with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-
-        # Submit sync task
-        playlist_image_url = state['playlist'].get('image_url', '')
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
-        active_sync_workers[sync_playlist_id] = future
-
-        logger.info(f"Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
-        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-
-    except Exception as e:
-        logger.error(f"Error starting Spotify Public sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _start_source_sync(
+        spotify_public_discovery_states, url_hash, sync_id_prefix="spotify_public",
+        not_found_message="Spotify Public playlist not found",
+        not_ready_message="Spotify Public playlist not ready for sync",
+        convert_fn=convert_spotify_public_results_to_spotify_tracks,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
+        activity_label="Spotify Link", error_label="Spotify Public")
 
 @app.route('/api/spotify-public/sync/status/<url_hash>', methods=['GET'])
 def get_spotify_public_sync_status(url_hash):
@@ -23802,55 +23672,13 @@ def _calculate_similarity(str1, str2):
 @app.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
 def start_youtube_sync(url_hash):
     """Start sync process for a YouTube playlist using discovered Spotify tracks"""
-    try:
-        if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
-        
-        state = youtube_playlist_states[url_hash]
-        state['last_accessed'] = time.time()  # Update access time
-
-        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            return jsonify({"error": "YouTube playlist not ready for sync"}), 400
-        
-        # Convert discovery results to Spotify tracks format
-        spotify_tracks = convert_youtube_results_to_spotify_tracks(state['discovery_results'])
-        
-        if not spotify_tracks:
-            return jsonify({"error": "No Spotify matches found for sync"}), 400
-        
-        # Create a temporary playlist ID for sync tracking
-        sync_playlist_id = f"youtube_{url_hash}"
-        playlist_name = state['playlist']['name']
-        
-        # Add activity for sync start
-        add_activity_item("", "YouTube Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
-        
-        # Update YouTube state
-        state['phase'] = 'syncing'
-        state['sync_playlist_id'] = sync_playlist_id
-        state['sync_progress'] = {}
-        
-        # Start the sync using existing sync infrastructure
-        sync_data = {
-            'playlist_id': sync_playlist_id,
-            'playlist_name': playlist_name,
-            'tracks': spotify_tracks
-        }
-        
-        with sync_lock:
-            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-
-        # Submit sync task
-        playlist_image_url = state['playlist'].get('image_url', '')
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
-        active_sync_workers[sync_playlist_id] = future
-
-        logger.info(f"Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
-        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-
-    except Exception as e:
-        logger.error(f"Error starting YouTube sync: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _start_source_sync(
+        youtube_playlist_states, url_hash, sync_id_prefix="youtube",
+        not_found_message="YouTube playlist not found",
+        not_ready_message="YouTube playlist not ready for sync",
+        convert_fn=convert_youtube_results_to_spotify_tracks,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
+        activity_label="YouTube", error_label="YouTube")
 
 @app.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])
 def get_youtube_sync_status(url_hash):
