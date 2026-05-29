@@ -25765,10 +25765,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    =============================== */
 
 .library-container {
+    /* outer gutter comes from .page (40px) — shared across the full-width
+       exception pages so spacing is intentional, not accidental */
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 20px;
     gap: 20px;
 }
 
@@ -58153,9 +58154,10 @@ body.reduce-effects *::after {
 }
 
 .adl-layout {
+    /* outer gutter comes from .page (40px) — consistent with the other
+       full-width exception pages (library, etc.) */
     display: flex;
     gap: 0;
-    padding: 28px 32px;
     max-width: 1440px;
 }
 
