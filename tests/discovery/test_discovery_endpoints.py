@@ -505,3 +505,47 @@ def test_reset_exception_returns_500():
     states = {'pl': {'discovery_future': fut}}
     body, code = reset_playlist(states, 'pl', label='Qobuz', not_found_message='nf')
     assert code == 500 and "error" in body
+
+
+# ---------------------------------------------------------------------------
+# get_playlist_states (bulk hydration list)
+# ---------------------------------------------------------------------------
+
+def test_playlist_states_builds_list_and_bumps_access():
+    from core.discovery.endpoints import get_playlist_states
+    s1 = {'phase': 'discovered', 'status': 'done', 'discovery_progress': 100,
+          'spotify_matches': 3, 'spotify_total': 5, 'discovery_results': [{'a': 1}],
+          'converted_spotify_playlist_id': 'cv', 'download_process_id': 'dp',
+          'last_accessed': 0}
+    states = {'k1': s1}
+    body, code = get_playlist_states(states, error_label='Tidal', info_log_label='Tidal')
+    assert code == 200
+    assert body == {"states": [{
+        'playlist_id': 'k1', 'phase': 'discovered', 'status': 'done',
+        'discovery_progress': 100, 'spotify_matches': 3, 'spotify_total': 5,
+        'discovery_results': [{'a': 1}], 'converted_spotify_playlist_id': 'cv',
+        'download_process_id': 'dp', 'last_accessed': s1['last_accessed'],
+    }]}
+    assert s1['last_accessed'] != 0  # bumped
+
+
+def test_playlist_states_empty():
+    from core.discovery.endpoints import get_playlist_states
+    body, code = get_playlist_states({}, error_label='Deezer', info_log_label='Deezer')
+    assert code == 200 and body == {"states": []}
+
+
+def test_playlist_states_optional_ids_default_none():
+    from core.discovery.endpoints import get_playlist_states
+    state = {'phase': 'fresh', 'status': 'fresh', 'discovery_progress': 0,
+             'spotify_matches': 0, 'spotify_total': 0, 'discovery_results': []}
+    body, _ = get_playlist_states({'k': state}, error_label='iTunes Link')
+    assert body['states'][0]['converted_spotify_playlist_id'] is None
+    assert body['states'][0]['download_process_id'] is None
+
+
+def test_playlist_states_missing_required_field_raises_500():
+    from core.discovery.endpoints import get_playlist_states
+    # state missing 'phase' -> strict access raises -> 500
+    body, code = get_playlist_states({'k': {'status': 'x'}}, error_label='Qobuz')
+    assert code == 500 and "error" in body

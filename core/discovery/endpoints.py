@@ -334,3 +334,48 @@ def reset_playlist(
     except Exception as e:
         logger.error(f"Error resetting {label} playlist: {e}")
         return {"error": str(e)}, 500
+
+
+def get_playlist_states(
+    states: Dict[str, Any],
+    *,
+    error_label: str,
+    info_log_label: str = None,
+) -> Tuple[Dict[str, Any], int]:
+    """Return all stored discovery states for a source as a list for frontend
+    card hydration (``{"states": [...]}``).
+
+    1:1 lift of the ``get_<source>_playlist_states`` bodies (Tidal, Deezer,
+    Qobuz, Spotify-Public, iTunes-Link), which build the same per-entry dict.
+    iTunes-Link is the only one without the "Returning N ..." info log, so
+    ``info_log_label`` is optional (pass None to suppress it, as iTunes did).
+
+    NOT folded in: the YouTube/ListenBrainz ``get_all_*_playlists`` endpoints —
+    they return ``{"playlists": [...]}`` (different key + fields: url/created_at,
+    no discovery_results) and filter mirrored/profile-scoped entries.
+    """
+    try:
+        result = []
+        current_time = time.time()
+
+        for key, state in states.items():
+            state['last_accessed'] = current_time
+            result.append({
+                'playlist_id': key,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'last_accessed': state['last_accessed'],
+            })
+
+        if info_log_label:
+            logger.info(f"Returning {len(result)} stored {info_log_label} playlist states for hydration")
+        return {"states": result}, 200
+    except Exception as e:
+        logger.error(f"Error getting {error_label} playlist states: {e}")
+        return {"error": str(e)}, 500

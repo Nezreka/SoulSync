@@ -20682,35 +20682,7 @@ def update_tidal_discovery_match():
 @app.route('/api/tidal/playlists/states', methods=['GET'])
 def get_tidal_playlist_states():
     """Get all stored Tidal playlist discovery states for frontend hydration (similar to YouTube playlists)"""
-    try:
-        states = []
-        current_time = time.time()
-        
-        for playlist_id, state in tidal_discovery_states.items():
-            # Update access time when requested
-            state['last_accessed'] = current_time
-            
-            # Return essential data for card state recreation
-            state_info = {
-                'playlist_id': playlist_id,
-                'phase': state['phase'],
-                'status': state['status'],
-                'discovery_progress': state['discovery_progress'],
-                'spotify_matches': state['spotify_matches'],
-                'spotify_total': state['spotify_total'],
-                'discovery_results': state['discovery_results'],
-                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
-                'download_process_id': state.get('download_process_id'),
-                'last_accessed': state['last_accessed']
-            }
-            states.append(state_info)
-        
-        logger.info(f"Returning {len(states)} stored Tidal playlist states for hydration")
-        return jsonify({"states": states})
-        
-    except Exception as e:
-        logger.error(f"Error getting Tidal playlist states: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_playlist_states(tidal_discovery_states, "Tidal", "Tidal")
 
 @app.route('/api/tidal/state/<playlist_id>', methods=['GET'])
 def get_tidal_playlist_state(playlist_id):
@@ -21014,6 +20986,7 @@ from core.discovery.endpoints import (
     get_sync_status as _get_sync_status_core,
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
+    get_playlist_states as _get_playlist_states_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
@@ -21065,6 +21038,15 @@ def _reset_source_playlist(states, key, label, not_found_message):
     reset body (Tidal/Deezer/Qobuz/Spotify-Public)."""
     body, code = _reset_playlist_core(
         states, key, label=label, not_found_message=not_found_message,
+    )
+    return jsonify(body), code
+
+
+def _get_source_playlist_states(states, error_label, info_log_label=None):
+    """Thin glue for the per-source get_*_playlist_states bulk-hydration routes
+    (Tidal/Deezer/Qobuz/Spotify-Public/iTunes-Link)."""
+    body, code = _get_playlist_states_core(
+        states, error_label=error_label, info_log_label=info_log_label,
     )
     return jsonify(body), code
 
@@ -21506,33 +21488,7 @@ def update_deezer_discovery_match():
 @app.route('/api/deezer/playlists/states', methods=['GET'])
 def get_deezer_playlist_states():
     """Get all stored Deezer playlist discovery states for frontend hydration"""
-    try:
-        states = []
-        current_time = time.time()
-
-        for playlist_id, state in deezer_discovery_states.items():
-            state['last_accessed'] = current_time
-
-            state_info = {
-                'playlist_id': playlist_id,
-                'phase': state['phase'],
-                'status': state['status'],
-                'discovery_progress': state['discovery_progress'],
-                'spotify_matches': state['spotify_matches'],
-                'spotify_total': state['spotify_total'],
-                'discovery_results': state['discovery_results'],
-                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
-                'download_process_id': state.get('download_process_id'),
-                'last_accessed': state['last_accessed']
-            }
-            states.append(state_info)
-
-        logger.info(f"Returning {len(states)} stored Deezer playlist states for hydration")
-        return jsonify({"states": states})
-
-    except Exception as e:
-        logger.error(f"Error getting Deezer playlist states: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_playlist_states(deezer_discovery_states, "Deezer", "Deezer")
 
 @app.route('/api/deezer/state/<playlist_id>', methods=['GET'])
 def get_deezer_playlist_state(playlist_id):
@@ -22011,33 +21967,7 @@ def update_qobuz_discovery_match():
 @app.route('/api/qobuz/playlists/states', methods=['GET'])
 def get_qobuz_playlist_states():
     """Get all stored Qobuz playlist discovery states for frontend hydration."""
-    try:
-        states = []
-        current_time = time.time()
-
-        for playlist_id, state in qobuz_discovery_states.items():
-            state['last_accessed'] = current_time
-
-            state_info = {
-                'playlist_id': playlist_id,
-                'phase': state['phase'],
-                'status': state['status'],
-                'discovery_progress': state['discovery_progress'],
-                'spotify_matches': state['spotify_matches'],
-                'spotify_total': state['spotify_total'],
-                'discovery_results': state['discovery_results'],
-                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
-                'download_process_id': state.get('download_process_id'),
-                'last_accessed': state['last_accessed']
-            }
-            states.append(state_info)
-
-        logger.info(f"Returning {len(states)} stored Qobuz playlist states for hydration")
-        return jsonify({"states": states})
-
-    except Exception as e:
-        logger.error(f"Error getting Qobuz playlist states: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_playlist_states(qobuz_discovery_states, "Qobuz", "Qobuz")
 
 
 @app.route('/api/qobuz/state/<playlist_id>', methods=['GET'])
@@ -22795,33 +22725,7 @@ def update_spotify_public_discovery_match():
 @app.route('/api/spotify-public/playlists/states', methods=['GET'])
 def get_spotify_public_playlist_states():
     """Get all stored Spotify Public playlist discovery states for frontend hydration"""
-    try:
-        states = []
-        current_time = time.time()
-
-        for url_hash, state in spotify_public_discovery_states.items():
-            state['last_accessed'] = current_time
-
-            state_info = {
-                'playlist_id': url_hash,
-                'phase': state['phase'],
-                'status': state['status'],
-                'discovery_progress': state['discovery_progress'],
-                'spotify_matches': state['spotify_matches'],
-                'spotify_total': state['spotify_total'],
-                'discovery_results': state['discovery_results'],
-                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
-                'download_process_id': state.get('download_process_id'),
-                'last_accessed': state['last_accessed']
-            }
-            states.append(state_info)
-
-        logger.info(f"Returning {len(states)} stored Spotify Public playlist states for hydration")
-        return jsonify({"states": states})
-
-    except Exception as e:
-        logger.error(f"Error getting Spotify Public playlist states: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_playlist_states(spotify_public_discovery_states, "Spotify Public", "Spotify Public")
 
 @app.route('/api/spotify-public/state/<url_hash>', methods=['GET'])
 def get_spotify_public_playlist_state(url_hash):
@@ -23205,27 +23109,7 @@ def update_itunes_link_discovery_match():
 
 @app.route('/api/itunes-link/playlists/states', methods=['GET'])
 def get_itunes_link_playlist_states():
-    try:
-        current_time = time.time()
-        states = []
-        for url_hash, state in itunes_link_discovery_states.items():
-            state['last_accessed'] = current_time
-            states.append({
-                'playlist_id': url_hash,
-                'phase': state['phase'],
-                'status': state['status'],
-                'discovery_progress': state['discovery_progress'],
-                'spotify_matches': state['spotify_matches'],
-                'spotify_total': state['spotify_total'],
-                'discovery_results': state['discovery_results'],
-                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
-                'download_process_id': state.get('download_process_id'),
-                'last_accessed': state['last_accessed']
-            })
-        return jsonify({"states": states})
-    except Exception as e:
-        logger.error(f"Error getting iTunes Link playlist states: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_playlist_states(itunes_link_discovery_states, "iTunes Link")
 
 
 @app.route('/api/itunes-link/state/<url_hash>', methods=['GET'])
