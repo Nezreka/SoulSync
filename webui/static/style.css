@@ -7990,6 +7990,64 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* ======================================================= */
 
 /* Main Dashboard Layout */
+/* ── Shared button primitive ────────────────────────────────────────
+   The canonical button design system. New markup (and the React pages)
+   should use `.btn` + a modifier; existing per-page button classes are being
+   migrated onto it family by family. Values reflect the dominant existing
+   look (accent-gradient primary, translucent ghost, semantic danger/warning).
+   Filter "pills" / tab buttons are a separate primitive (see .tab below). */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+    border: none;
+    outline: none;
+    transition: all 0.2s ease;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn--primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    color: #000;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+}
+.btn--primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
+}
+.btn--primary:active:not(:disabled) { transform: translateY(0); }
+
+.btn--secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.btn--secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn--danger {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: #fff;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
+}
+.btn--danger:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
+}
+
+
 /* ── Shared page shell ──────────────────────────────────────────────
    The canonical page card (the dashboard / stats look). Adopted by the
    dashboard, tools, watchlist and wishlist pages — and intended for reuse
@@ -20880,48 +20938,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     justify-content: flex-end;
 }
 
-.config-modal-btn {
-    padding: 12px 28px;
-    border-radius: 12px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
-    outline: none;
-}
-
-.config-modal-btn-primary {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
-    color: #000;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
-}
-
-.config-modal-btn-primary:hover {
-    background: linear-gradient(135deg, #1fdf64, rgb(var(--accent-light-rgb)));
-    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-1px);
-}
-
-.config-modal-btn-primary:active {
-    transform: translateY(0);
-}
-
-.config-modal-btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.config-modal-btn-secondary {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.config-modal-btn-secondary:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.25);
-}
+/* .config-modal-btn* migrated to the shared .btn / .btn--primary / .btn--secondary primitive. */
 
 /* Linked Provider Artist */
 /* Per-source linked rows */
@@ -21159,7 +21176,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         flex-direction: column-reverse;
     }
 
-    .config-modal-btn {
+    .config-modal-actions .btn {
         width: 100%;
     }
 }
