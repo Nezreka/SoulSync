@@ -652,3 +652,141 @@ def test_start_sync_exception_returns_500():
     states = {'pl': {'phase': 'discovered', 'discovery_results': [1]}}
     body, code = start_sync(states, 'pl', **kw)
     assert code == 500 and "error" in body
+
+
+# ---------------------------------------------------------------------------
+# first_artist extractors
+# ---------------------------------------------------------------------------
+
+def test_first_artist_str_or_obj():
+    from core.discovery.endpoints import first_artist_str_or_obj as g
+    assert g({'artists': ['A', 'B']}) == 'A'
+    assert g({'artists': [{'name': 'Obj'}]}) == 'Obj'
+    assert g({'artists': []}) == ''
+    assert g({}) == ''
+
+
+def test_first_artist_plain():
+    from core.discovery.endpoints import first_artist_plain as g
+    assert g({'artists': ['A', 'B']}) == 'A'
+    assert g({'artists': []}) == ''
+    assert g({}) == ''
+
+
+# ---------------------------------------------------------------------------
+# update_discovery_match
+# ---------------------------------------------------------------------------
+
+class _FakeCacheDB:
+    def __init__(self):
+        self.saved = []
+
+    def save_discovery_cache_match(self, *args):
+        self.saved.append(args)
+
+
+def _update_kwargs(*, json_data, cache_db=None, getter=None):
+    from core.discovery.endpoints import first_artist_plain
+    db = cache_db or _FakeCacheDB()
+    kw = dict(
+        source_log_label='tidal', error_label='Tidal',
+        original_track_key='tidal_track',
+        original_artist_getter=getter or first_artist_plain,
+        join_artist_names=lambda arts: ", ".join(arts),
+        extract_artist_name=lambda a: str(a),
+        build_fix_modal_spotify_data=lambda st: {'built': st['id']},
+        get_discovery_cache_key=lambda name, artist: (name.lower(), artist.lower()),
+        get_database=lambda: db,
+        get_active_discovery_source=lambda: 'spotify',
+    )
+    return (lambda: json_data), kw, db
+
+
+def test_update_match_missing_fields():
+    from core.discovery.endpoints import update_discovery_match
+    gj, kw, _ = _update_kwargs(json_data={'identifier': 'p'})  # missing track_index/spotify_track
+    body, code = update_discovery_match({}, gj, **kw)
+    assert code == 400 and body == {'error': 'Missing required fields'}
+
+
+def test_update_match_state_not_found():
+    from core.discovery.endpoints import update_discovery_match
+    gj, kw, _ = _update_kwargs(json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': {'id': 'x'}})
+    body, code = update_discovery_match({}, gj, **kw)
+    assert code == 404 and body == {'error': 'Discovery state not found'}
+
+
+def test_update_match_invalid_index():
+    from core.discovery.endpoints import update_discovery_match
+    gj, kw, _ = _update_kwargs(json_data={
+        'identifier': 'p', 'track_index': 5,
+        'spotify_track': {'id': 'x', 'name': 'n', 'artists': [], 'album': 'a'}})
+    states = {'p': {'discovery_results': []}}
+    body, code = update_discovery_match(states, gj, **kw)
+    assert code == 400 and body == {'error': 'Invalid track index'}
+
+
+def test_update_match_happy_path_full():
+    from core.discovery.endpoints import update_discovery_match
+    sp = {'id': 'sp9', 'name': 'New Song', 'artists': ['Art1', 'Art2'],
+          'album': 'Alb', 'duration_ms': 185000, 'image_url': 'cov.jpg'}
+    gj, kw, db = _update_kwargs(json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': sp})
+    result = {'status': 'not_found', 'tidal_track': {'name': 'Orig', 'artists': ['OrigArt']}}
+    states = {'p': {'discovery_results': [result], 'spotify_matches': 2}}
+
+    body, code = update_discovery_match(states, gj, **kw)
+
+    assert code == 200 and body['success'] is True
+    assert result['status'] == 'Found'
+    assert result['status_class'] == 'found'
+    assert result['spotify_track'] == 'New Song'
+    assert result['spotify_artist'] == 'Art1, Art2'
+    assert result['spotify_id'] == 'sp9'
+    assert result['duration'] == '3:05'
+    assert result['spotify_data'] == {'built': 'sp9'}
+    assert result['wing_it_fallback'] is False
+    assert result['manual_match'] is True
+    assert states['p']['spotify_matches'] == 3  # incremented (was not found)
+    # cache saved with normalized key + matched_data carrying image
+    assert len(db.saved) == 1
+    key0, key1, source, score, matched, oname, oartist = db.saved[0]
+    assert (key0, key1) == ('orig', 'origart')
+    assert source == 'spotify' and score == 1.0
+    assert matched['album'] == {'name': 'Alb', 'image_url': 'cov.jpg', 'images': [{'url': 'cov.jpg'}]}
+    assert oname == 'Orig' and oartist == 'OrigArt'
+
+
+def test_update_match_no_increment_when_already_found():
+    from core.discovery.endpoints import update_discovery_match
+    sp = {'id': 'x', 'name': 'n', 'artists': ['A'], 'album': 'a', 'duration_ms': 0}
+    gj, kw, _ = _update_kwargs(json_data={'identifier': 'p', 'track_index': 0, 'spotify_track': sp})
+    result = {'status': 'Found', 'tidal_track': {}}
+    states = {'p': {'discovery_results': [result], 'spotify_matches': 5}}
+    body, code = update_discovery_match(states, gj, **kw)
+    assert code == 200
+    assert states['p']['spotify_matches'] == 5  # unchanged
+    assert result['duration'] == '0:00'
+
+
+def test_update_match_cache_error_is_swallowed():
+    from core.discovery.endpoints import update_discovery_match
+    class _BoomDB:
+        def save_discovery_cache_match(self, *a):
+            raise RuntimeError("db down")
+    sp = {'id': 'x', 'name': 'n', 'artists': ['A'], 'album': 'a', 'duration_ms': 0}
+    gj, kw, _ = _update_kwargs(json_data={'identifier': 'p', 'track_index': 0, 'spotify_track': sp},
+                               cache_db=_BoomDB())
+    states = {'p': {'discovery_results': [{'status': 'x', 'tidal_track': {}}], 'spotify_matches': 0}}
+    body, code = update_discovery_match(states, gj, **kw)
+    assert code == 200 and body['success'] is True  # cache failure doesn't fail the request
+
+
+def test_update_match_get_json_raises_returns_500():
+    from core.discovery.endpoints import update_discovery_match
+    def boom():
+        raise ValueError("bad json")
+    _, kw, _ = _update_kwargs(json_data={})
+    body, code = update_discovery_match({}, boom, **kw)
+    assert code == 500 and 'error' in body
