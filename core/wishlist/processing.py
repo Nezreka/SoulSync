@@ -100,6 +100,58 @@ def remove_completed_tracks_from_wishlist(
     return removed_count
 
 
+def make_wishlist_batch_row(
+    *,
+    playlist_id: str,
+    playlist_name: str,
+    track_count: int,
+    max_concurrent: int,
+    profile_id: int,
+    phase: str,
+    run_id: str | None = None,
+    is_album: bool = False,
+    album_context: Optional[Dict[str, Any]] = None,
+    artist_context: Optional[Dict[str, Any]] = None,
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Single source of truth for a wishlist ``download_batches`` row.
+
+    The auto and manual wishlist flows used to build this ~20-field dict in four
+    separate places, which let their batch shapes silently drift apart. They now
+    all go through here so every wishlist batch has an IDENTICAL field shape; the
+    genuinely per-flow differences (initial ``phase``, the auto-only
+    ``auto_initiated`` / ``current_cycle`` fields, album vs residual contexts) are
+    explicit arguments / ``extra_fields``.
+
+    NOTE: this builds the row only — it does NOT decide grouping, batch-id
+    allocation, or dispatch (parallel-submit vs serial), which legitimately
+    differ between the flows and stay in their callers.
+    """
+    row: Dict[str, Any] = {
+        'phase': phase,
+        'playlist_id': playlist_id,
+        'playlist_name': playlist_name,
+        'queue': [],
+        'active_count': 0,
+        'max_concurrent': max_concurrent,
+        'queue_index': 0,
+        'analysis_total': track_count,
+        'analysis_processed': 0,
+        'analysis_results': [],
+        'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+        'force_download_all': True,
+        'profile_id': profile_id,
+        'is_album_download': is_album,
+        'album_context': album_context,
+        'artist_context': artist_context,
+        'wishlist_run_id': run_id,
+    }
+    if extra_fields:
+        row.update(extra_fields)
+    return row
+
+
 def add_cancelled_tracks_to_failed_tracks(
     batch: Dict[str, Any],
     download_tasks: Dict[str, Dict[str, Any]],
@@ -455,24 +507,16 @@ def start_manual_wishlist_download_batch(
         playlist_name = "Wishlist"
 
         with runtime.tasks_lock:
-            runtime.download_batches[batch_id] = {
-                'phase': 'analysis',
-                'playlist_id': playlist_id,
-                'playlist_name': playlist_name,
-                'queue': [],
-                'active_count': 0,
-                'max_concurrent': runtime.get_batch_max_concurrent(),
-                'queue_index': 0,
-                # analysis_total starts at 0; the bg job updates it after cleanup
-                # finishes and the real track count is known.
-                'analysis_total': 0,
-                'analysis_processed': 0,
-                'analysis_results': [],
-                'permanently_failed_tracks': [],
-                'cancelled_tracks': set(),
-                'force_download_all': True,
-                'profile_id': runtime.profile_id,
-            }
+            # analysis_total starts at 0; the bg job updates it after cleanup
+            # finishes and the real track count is known.
+            runtime.download_batches[batch_id] = make_wishlist_batch_row(
+                playlist_id=playlist_id,
+                playlist_name=playlist_name,
+                track_count=0,
+                max_concurrent=runtime.get_batch_max_concurrent(),
+                profile_id=runtime.profile_id,
+                phase='analysis',
+            )
 
         runtime.missing_download_executor.submit(
             _prepare_and_run_manual_wishlist_batch,
@@ -631,26 +675,18 @@ def _prepare_and_run_manual_wishlist_batch(
                     runtime.download_batches[batch_id]['artist_context'] = first['artist_context']
                 runtime.download_batches[batch_id]['playlist_name'] = first['display_name']
             for payload in payloads[1:]:
-                runtime.download_batches[payload['batch_id']] = {
-                    'phase': 'analysis',
-                    'playlist_id': 'wishlist',
-                    'playlist_name': payload['display_name'],
-                    'queue': [],
-                    'active_count': 0,
-                    'max_concurrent': runtime.get_batch_max_concurrent(),
-                    'queue_index': 0,
-                    'analysis_total': len(payload['tracks']),
-                    'analysis_processed': 0,
-                    'analysis_results': [],
-                    'permanently_failed_tracks': [],
-                    'cancelled_tracks': set(),
-                    'force_download_all': True,
-                    'profile_id': runtime.profile_id,
-                    'is_album_download': bool(payload['is_album']),
-                    'album_context': payload['album_context'],
-                    'artist_context': payload['artist_context'],
-                    'wishlist_run_id': wishlist_run_id,
-                }
+                runtime.download_batches[payload['batch_id']] = make_wishlist_batch_row(
+                    playlist_id='wishlist',
+                    playlist_name=payload['display_name'],
+                    track_count=len(payload['tracks']),
+                    max_concurrent=runtime.get_batch_max_concurrent(),
+                    profile_id=runtime.profile_id,
+                    phase='analysis',
+                    run_id=wishlist_run_id,
+                    is_album=bool(payload['is_album']),
+                    album_context=payload['album_context'],
+                    artist_context=payload['artist_context'],
+                )
 
         logger.info(
             f"[Manual-Wishlist] Split into {len(payloads)} sub-batch(es) "
@@ -864,45 +900,29 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                             f"Wishlist (Auto - Album: {group.album_context.get('name', 'Unknown')})"
                         )
                         with runtime.tasks_lock:
-                            runtime.download_batches[album_batch_id] = {
-                                # ``queued`` until the master worker
-                                # picks the batch up from the
-                                # ``missing_download_executor`` pool
-                                # (max_workers=3 by default). The worker
-                                # flips phase to ``analysis`` as its
-                                # first action — see
-                                # ``core/downloads/master.py:328``.
-                                # Pre-fix the row was created with
-                                # ``analysis`` directly, so a wishlist
-                                # run with N > 3 sub-batches looked like
-                                # all N were working when really only
-                                # 3 were running.
-                                'phase': 'queued',
-                                'playlist_id': playlist_id,
-                                'playlist_name': album_batch_name,
-                                'queue': [],
-                                'active_count': 0,
-                                'max_concurrent': runtime.get_batch_max_concurrent(),
-                                'queue_index': 0,
-                                'analysis_total': len(group.tracks),
-                                'analysis_processed': 0,
-                                'analysis_results': [],
-                                'permanently_failed_tracks': [],
-                                'cancelled_tracks': set(),
-                                'force_download_all': True,
-                                'auto_initiated': True,
-                                'auto_processing_timestamp': runtime.current_time_fn(),
-                                'current_cycle': current_cycle,
-                                'profile_id': runtime.profile_id,
-                                # Album-bundle dispatch gate reads these
-                                # three. With them set, the master worker
-                                # routes through slskd / torrent / usenet
-                                # album-bundle search instead of per-track.
-                                'is_album_download': True,
-                                'album_context': group.album_context,
-                                'artist_context': group.artist_context,
-                                'wishlist_run_id': wishlist_run_id,
-                            }
+                            # ``queued`` (not ``analysis``) so a run with N > pool
+                            # sub-batches doesn't render all N as "analyzing" while
+                            # only the pool's worth actually run; the master worker
+                            # flips it to ``analysis`` when it picks the batch up.
+                            # is_album_download + contexts route it through the
+                            # album-bundle search instead of per-track.
+                            runtime.download_batches[album_batch_id] = make_wishlist_batch_row(
+                                playlist_id=playlist_id,
+                                playlist_name=album_batch_name,
+                                track_count=len(group.tracks),
+                                max_concurrent=runtime.get_batch_max_concurrent(),
+                                profile_id=runtime.profile_id,
+                                phase='queued',
+                                run_id=wishlist_run_id,
+                                is_album=True,
+                                album_context=group.album_context,
+                                artist_context=group.artist_context,
+                                extra_fields={
+                                    'auto_initiated': True,
+                                    'auto_processing_timestamp': runtime.current_time_fn(),
+                                    'current_cycle': current_cycle,
+                                },
+                            )
                         logger.info(
                             f"[Auto-Wishlist] Album sub-batch {album_idx + 1}/{len(grouping.album_groups)}: "
                             f"'{group.album_context.get('name')}' by '{group.artist_context.get('name')}' "
@@ -931,28 +951,23 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     batch_id = str(uuid.uuid4())
                     playlist_name = f"Wishlist (Auto - {current_cycle.capitalize()})"
                     with runtime.tasks_lock:
-                        runtime.download_batches[batch_id] = {
-                            # See album sub-batch above — ``queued``
-                            # until the master worker picks it up.
-                            'phase': 'queued',
-                            'playlist_id': playlist_id,
-                            'playlist_name': playlist_name,
-                            'queue': [],
-                            'active_count': 0,
-                            'max_concurrent': runtime.get_batch_max_concurrent(),
-                            'queue_index': 0,
-                            'analysis_total': len(residual_tracks),
-                            'analysis_processed': 0,
-                            'analysis_results': [],
-                            'permanently_failed_tracks': [],
-                            'cancelled_tracks': set(),
-                            'force_download_all': True,
-                            'auto_initiated': True,
-                            'auto_processing_timestamp': runtime.current_time_fn(),
-                            'current_cycle': current_cycle,
-                            'profile_id': runtime.profile_id,
-                            'wishlist_run_id': wishlist_run_id,
-                        }
+                        # See album sub-batch above — ``queued`` until the master
+                        # worker picks it up. Residual = classic per-track flow
+                        # (is_album_download defaults False).
+                        runtime.download_batches[batch_id] = make_wishlist_batch_row(
+                            playlist_id=playlist_id,
+                            playlist_name=playlist_name,
+                            track_count=len(residual_tracks),
+                            max_concurrent=runtime.get_batch_max_concurrent(),
+                            profile_id=runtime.profile_id,
+                            phase='queued',
+                            run_id=wishlist_run_id,
+                            extra_fields={
+                                'auto_initiated': True,
+                                'auto_processing_timestamp': runtime.current_time_fn(),
+                                'current_cycle': current_cycle,
+                            },
+                        )
                     _submitted_batches.append(batch_id)
                     runtime.missing_download_executor.submit(
                         runtime.run_full_missing_tracks_process,
