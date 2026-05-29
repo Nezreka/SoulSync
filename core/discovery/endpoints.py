@@ -398,6 +398,61 @@ def get_playlist_states(
         return {"error": str(e)}, 500
 
 
+def save_bubble_snapshot(
+    get_json,
+    *,
+    payload_key: str,
+    no_data_error: str,
+    snapshot_kind: str,
+    success_noun: str,
+    log_subject: str,
+    log_noun: str,
+    get_database,
+    get_current_profile_id,
+) -> Tuple[Dict[str, Any], int]:
+    """Persist a bubble/download snapshot for cross-refresh hydration.
+
+    1:1 lift of the four structurally-identical snapshot endpoints
+    (discover_downloads, artist_bubbles, search_bubbles, beatport_bubbles),
+    which differ only by:
+
+    - ``payload_key`` ('downloads' for discover, 'bubbles' for the rest) and
+      its ``no_data_error`` message.
+    - ``snapshot_kind`` — the db.save_bubble_snapshot category.
+    - ``success_noun`` — fills "Snapshot saved with N <noun>".
+    - ``log_subject`` / ``log_noun`` — the info ("Saved <subject>: N <noun>")
+      and except ("Error saving <subject>") log lines.
+
+    Returns ``(payload, status_code)``. ``get_json`` is invoked inside the try
+    like the original ``request.json``.
+    """
+    try:
+        from datetime import datetime
+
+        data = get_json()
+        if not data or payload_key not in data:
+            return {'success': False, 'error': no_data_error}, 400
+
+        items = data[payload_key]
+
+        db = get_database()
+        db.save_bubble_snapshot(snapshot_kind, items, profile_id=get_current_profile_id())
+
+        count = len(items)
+        logger.info(f"Saved {log_subject}: {count} {log_noun}")
+
+        return {
+            'success': True,
+            'message': f'Snapshot saved with {count} {success_noun}',
+            'timestamp': datetime.now().isoformat(),
+        }, 200
+    except Exception as e:
+        logger.error(f"Error saving {log_subject}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'error': str(e)}, 500
+
+
 def update_playlist_phase(
     states: Dict[str, Any],
     key: str,

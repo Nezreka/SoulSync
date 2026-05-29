@@ -877,3 +877,81 @@ def test_update_phase_exception_500():
                                        error_label='Tidal', valid_phases=_PHASES,
                                        apply_extra_fields=False)
     assert code == 500 and 'error' in body
+
+
+# ---------------------------------------------------------------------------
+# save_bubble_snapshot
+# ---------------------------------------------------------------------------
+
+class _SnapDB:
+    def __init__(self):
+        self.saved = []
+
+    def save_bubble_snapshot(self, kind, items, profile_id=None):
+        self.saved.append((kind, items, profile_id))
+
+
+def _snap_kwargs(db, *, payload_key='bubbles', no_data_error='No bubble data provided',
+                 snapshot_kind='artist_bubbles', success_noun='artist bubbles',
+                 log_subject='artist bubble snapshot', log_noun='artists'):
+    return dict(
+        payload_key=payload_key, no_data_error=no_data_error, snapshot_kind=snapshot_kind,
+        success_noun=success_noun, log_subject=log_subject, log_noun=log_noun,
+        get_database=lambda: db, get_current_profile_id=lambda: 7,
+    )
+
+
+def test_snapshot_missing_payload_key():
+    from core.discovery.endpoints import save_bubble_snapshot
+    db = _SnapDB()
+    body, code = save_bubble_snapshot(lambda: {'other': 1}, **_snap_kwargs(db))
+    assert code == 400 and body == {'success': False, 'error': 'No bubble data provided'}
+    assert db.saved == []
+
+
+def test_snapshot_none_body():
+    from core.discovery.endpoints import save_bubble_snapshot
+    db = _SnapDB()
+    body, code = save_bubble_snapshot(lambda: None,
+                                      **_snap_kwargs(db, payload_key='downloads',
+                                                     no_data_error='No download data provided'))
+    assert code == 400 and body['error'] == 'No download data provided'
+
+
+def test_snapshot_happy_path():
+    from core.discovery.endpoints import save_bubble_snapshot
+    db = _SnapDB()
+    items = [{'a': 1}, {'b': 2}, {'c': 3}]
+    body, code = save_bubble_snapshot(lambda: {'bubbles': items},
+                                      **_snap_kwargs(db, snapshot_kind='search_bubbles',
+                                                     success_noun='search bubbles'))
+    assert code == 200
+    assert body['success'] is True
+    assert body['message'] == 'Snapshot saved with 3 search bubbles'
+    assert isinstance(body['timestamp'], str) and body['timestamp']
+    # persisted with kind + profile id
+    assert db.saved == [('search_bubbles', items, 7)]
+
+
+def test_snapshot_discover_downloads_key():
+    from core.discovery.endpoints import save_bubble_snapshot
+    db = _SnapDB()
+    body, code = save_bubble_snapshot(lambda: {'downloads': [1, 2]},
+                                      **_snap_kwargs(db, payload_key='downloads',
+                                                     no_data_error='No download data provided',
+                                                     snapshot_kind='discover_downloads',
+                                                     success_noun='downloads',
+                                                     log_subject='discover download snapshot',
+                                                     log_noun='downloads'))
+    assert code == 200
+    assert body['message'] == 'Snapshot saved with 2 downloads'
+    assert db.saved[0][0] == 'discover_downloads'
+
+
+def test_snapshot_exception_returns_500():
+    from core.discovery.endpoints import save_bubble_snapshot
+    class _BoomDB:
+        def save_bubble_snapshot(self, *a, **k):
+            raise RuntimeError('db down')
+    body, code = save_bubble_snapshot(lambda: {'bubbles': [1]}, **_snap_kwargs(_BoomDB()))
+    assert code == 500 and body == {'success': False, 'error': 'db down'}

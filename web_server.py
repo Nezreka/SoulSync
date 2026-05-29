@@ -20856,6 +20856,7 @@ from core.discovery.endpoints import (
     start_sync as _start_sync_core,
     update_discovery_match as _update_discovery_match_core,
     update_playlist_phase as _update_playlist_phase_core,
+    save_bubble_snapshot as _save_bubble_snapshot_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
@@ -20981,6 +20982,19 @@ def _update_source_playlist_phase(states, key, not_found_message, error_label,
         states, key, lambda: request.get_json(),
         not_found_message=not_found_message, error_label=error_label,
         valid_phases=valid_phases, apply_extra_fields=apply_extra_fields,
+    )
+    return jsonify(body), code
+
+
+def _save_source_bubble_snapshot(payload_key, no_data_error, snapshot_kind,
+                                 success_noun, log_subject, log_noun):
+    """Thin glue for the snapshot routes (discover_downloads / artist_bubbles /
+    search_bubbles / beatport_bubbles)."""
+    body, code = _save_bubble_snapshot_core(
+        lambda: request.json, payload_key=payload_key, no_data_error=no_data_error,
+        snapshot_kind=snapshot_kind, success_noun=success_noun, log_subject=log_subject,
+        log_noun=log_noun, get_database=get_database,
+        get_current_profile_id=get_current_profile_id,
     )
     return jsonify(body), code
 
@@ -23519,35 +23533,7 @@ def save_discover_download_snapshot():
     """
     Saves a snapshot of current discover download state for persistence across page refreshes.
     """
-    try:
-        from datetime import datetime
-
-        data = request.json
-        if not data or 'downloads' not in data:
-            return jsonify({'success': False, 'error': 'No download data provided'}), 400
-
-        downloads = data['downloads']
-
-        db = get_database()
-        db.save_bubble_snapshot('discover_downloads', downloads, profile_id=get_current_profile_id())
-
-        download_count = len(downloads)
-        logger.info(f"Saved discover download snapshot: {download_count} downloads")
-
-        return jsonify({
-            'success': True,
-            'message': f'Snapshot saved with {download_count} downloads',
-            'timestamp': datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        logger.error(f"Error saving discover download snapshot: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    return _save_source_bubble_snapshot("downloads", "No download data provided", "discover_downloads", "downloads", "discover download snapshot", "downloads")
 
 @app.route('/api/discover_downloads/hydrate', methods=['GET'])
 def hydrate_discover_downloads():
@@ -23668,35 +23654,7 @@ def save_artist_bubble_snapshot():
     """
     Saves a snapshot of current artist bubble state for persistence across page refreshes.
     """
-    try:
-        from datetime import datetime
-
-        data = request.json
-        if not data or 'bubbles' not in data:
-            return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
-
-        bubbles = data['bubbles']
-
-        db = get_database()
-        db.save_bubble_snapshot('artist_bubbles', bubbles, profile_id=get_current_profile_id())
-
-        bubble_count = len(bubbles)
-        logger.info(f"Saved artist bubble snapshot: {bubble_count} artists")
-
-        return jsonify({
-            'success': True,
-            'message': f'Snapshot saved with {bubble_count} artist bubbles',
-            'timestamp': datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        logger.error(f"Error saving artist bubble snapshot: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "artist_bubbles", "artist bubbles", "artist bubble snapshot", "artists")
 
 @app.route('/api/artist_bubbles/hydrate', methods=['GET'])
 def hydrate_artist_bubbles():
@@ -23840,35 +23798,7 @@ def save_search_bubble_snapshot():
     """
     Saves a snapshot of current search bubble state for persistence across page refreshes.
     """
-    try:
-        from datetime import datetime
-
-        data = request.json
-        if not data or 'bubbles' not in data:
-            return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
-
-        bubbles = data['bubbles']
-
-        db = get_database()
-        db.save_bubble_snapshot('search_bubbles', bubbles, profile_id=get_current_profile_id())
-
-        bubble_count = len(bubbles)
-        logger.info(f"Saved search bubble snapshot: {bubble_count} albums/tracks")
-
-        return jsonify({
-            'success': True,
-            'message': f'Snapshot saved with {bubble_count} search bubbles',
-            'timestamp': datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        logger.error(f"Error saving search bubble snapshot: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "search_bubbles", "search bubbles", "search bubble snapshot", "albums/tracks")
 
 @app.route('/api/search_bubbles/hydrate', methods=['GET'])
 def hydrate_search_bubbles():
@@ -24003,35 +23933,7 @@ def hydrate_search_bubbles():
 @app.route('/api/beatport_bubbles/snapshot', methods=['POST'])
 def save_beatport_bubble_snapshot():
     """Saves a snapshot of current Beatport download bubble state for persistence."""
-    try:
-        from datetime import datetime
-
-        data = request.json
-        if not data or 'bubbles' not in data:
-            return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
-
-        bubbles = data['bubbles']
-
-        db = get_database()
-        db.save_bubble_snapshot('beatport_bubbles', bubbles, profile_id=get_current_profile_id())
-
-        bubble_count = len(bubbles)
-        logger.info(f"Saved Beatport bubble snapshot: {bubble_count} charts")
-
-        return jsonify({
-            'success': True,
-            'message': f'Snapshot saved with {bubble_count} Beatport bubbles',
-            'timestamp': datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        logger.error(f"Error saving Beatport bubble snapshot: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "beatport_bubbles", "Beatport bubbles", "Beatport bubble snapshot", "charts")
 
 @app.route('/api/beatport_bubbles/hydrate', methods=['GET'])
 def hydrate_beatport_bubbles():
