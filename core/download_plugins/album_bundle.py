@@ -21,6 +21,7 @@ folder scan.
 
 from __future__ import annotations
 
+import re
 import shutil
 import time
 import uuid
@@ -92,29 +93,114 @@ def quality_score(title: str, quality_guess) -> int:
     return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
 
 
-def pick_best_album_release(candidates, quality_guess) -> Optional[object]:
+# Words that decorate an album title in a release name but aren't part of
+# the album's identity — stripped before computing title relevance so e.g.
+# 'Heroes (2017 Remaster)' and a 'David Bowie - Heroes - ... 2017' release
+# still match on the core token 'heroes'.
+_ALBUM_TITLE_NOISE = {
+    'remaster', 'remastered', 'remasters', 'edition', 'deluxe', 'expanded',
+    'anniversary', 'special', 'platinum', 'collectors', 'collector',
+    'bonus', 'version', 'mono', 'stereo', 'reissue', 'the',
+}
+
+# Minimum fraction of the album's core title tokens that must appear in a
+# release title for it to be considered the same album. Below this we refuse
+# the candidate — downloading a different (often more-popular) album is far
+# worse than failing the bundle and falling back to per-track search.
+_ALBUM_TITLE_RELEVANCE_FLOOR = 0.55
+
+
+def _normalize_album_text(text: Any) -> str:
+    lowered = str(text or '').lower()
+    lowered = re.sub(r"[‘’'`]", '', lowered)             # drop apostrophes/quotes
+    lowered = re.sub(r'[^a-z0-9]+', ' ', lowered)        # everything else → space
+    return re.sub(r'\s+', ' ', lowered).strip()
+
+
+def _album_core_tokens(album_name: Any) -> list:
+    """Significant title tokens — digits (years) and edition/remaster noise
+    removed. Falls back to the raw tokens if stripping leaves nothing."""
+    tokens = _normalize_album_text(album_name).split()
+    core = [t for t in tokens if not t.isdigit() and t not in _ALBUM_TITLE_NOISE]
+    return core or tokens
+
+
+def album_title_relevance(release_title: Any, album_name: Any) -> float:
+    """How well a release title matches the requested album (0.0–1.0).
+
+    Token-coverage based: the fraction of the album's core tokens present in
+    the release title, with a bonus when the full core phrase appears as a
+    substring. Robust to the codec/year/group noise that pads release names
+    ('Artist-Album-24-192-WEB-FLAC-REMASTERED-2017-GROUP')."""
+    core = _album_core_tokens(album_name)
+    if not core:
+        return 0.0
+    release_norm = _normalize_album_text(release_title)
+    release_tokens = set(release_norm.split())
+    present = sum(1 for token in core if token in release_tokens)
+    coverage = present / len(core)
+    phrase = ' '.join(core)
+    if phrase and phrase in release_norm:
+        coverage = max(coverage, 0.9)
+    return coverage
+
+
+def pick_best_album_release(
+    candidates, quality_guess, album_name: str = '', artist_name: str = '',
+) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
-    1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
+    1. Title relevance — the release must actually be the requested album.
+       Prowlarr/indexers return broad fuzzy matches (a 'Heroes' search also
+       returns 'Scary Monsters'), and ranking purely by popularity then
+       grabs the wrong, more-popular album. When ``album_name`` is supplied
+       we drop candidates whose title doesn't cover the album's core tokens
+       (``_ALBUM_TITLE_RELEVANCE_FLOOR``), and refuse rather than download a
+       mismatch if none qualify. Soulseek is unaffected — it uses the
+       title/artist/coverage-aware album pre-flight instead of this picker.
+    2. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
        releases that snuck in and quarantines suspicious giants.
-    2. Higher seeders > lower (dead torrents = dead downloads).
+    3. Higher seeders > lower (dead torrents = dead downloads).
        Usenet releases use ``grabs`` as a popularity proxy when
        seeders is None.
-    3. Higher quality (FLAC > AAC > MP3) inferred from title.
-    4. Larger size as tiebreaker (often = higher bitrate).
+    4. Higher quality (FLAC > AAC > MP3) inferred from title.
+    5. Larger size as tiebreaker (often = higher bitrate).
     """
     if not candidates:
         return None
-    sized = [c for c in candidates
+
+    pool = list(candidates)
+
+    # 1. Title relevance gate (only when we know the target album).
+    if album_name:
+        relevant = [
+            c for c in pool
+            if album_title_relevance(getattr(c, 'title', '') or '', album_name)
+            >= _ALBUM_TITLE_RELEVANCE_FLOOR
+        ]
+        if not relevant:
+            logger.warning(
+                "[album_bundle] No candidate title matched album %r (checked %d) "
+                "— refusing to grab a mismatched release",
+                album_name, len(pool),
+            )
+            return None
+        pool = relevant
+
+    # 2. Size sanity.
+    sized = [c for c in pool
              if ALBUM_PICK_MIN_BYTES <= (c.size or 0) <= ALBUM_PICK_MAX_BYTES]
-    pool = sized or list(candidates)
+    pool = sized or pool
     if not pool:
         return None
 
     def _score(c) -> tuple:
         seeders = c.seeders if c.seeders is not None else (c.grabs or 0)
-        return (seeders, quality_score(c.title or '', quality_guess), c.size or 0)
+        # Relevance bucket first so a strong title match always beats a
+        # weakly-matching but more-popular release.
+        relevance = album_title_relevance(getattr(c, 'title', '') or '', album_name) if album_name else 0.0
+        return (round(relevance, 2), seeders, quality_score(c.title or '', quality_guess), c.size or 0)
 
     return max(pool, key=_score)
 
@@ -416,6 +502,7 @@ def copy_audio_files_atomically(
 __all__ = [
     "ALBUM_PICK_MIN_BYTES",
     "ALBUM_PICK_MAX_BYTES",
+    "album_title_relevance",
     "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_POLL_TIMEOUT_SECONDS",
     "DEFAULT_TRANSIENT_MISS_THRESHOLD",

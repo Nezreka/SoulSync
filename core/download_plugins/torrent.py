@@ -488,7 +488,10 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No torrent results found for "{query}"'
             return result
 
-        picked = pick_best_album_release(candidates, _guess_quality_from_title)
+        picked = pick_best_album_release(
+            candidates, _guess_quality_from_title,
+            album_name=album_name, artist_name=artist_name,
+        )
         if picked is None:
             result['error'] = 'No suitable torrent candidate after filtering'
             return result
