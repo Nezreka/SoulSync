@@ -288,3 +288,49 @@ def get_discovery_status(
     except Exception as e:
         logger.error(f"Error getting {error_label} discovery status: {e}")
         return {"error": str(e)}, 500
+
+
+def reset_playlist(
+    states: Dict[str, Any],
+    key: str,
+    *,
+    label: str,
+    not_found_message: str,
+) -> Tuple[Dict[str, Any], int]:
+    """Reset a discovery playlist back to the 'fresh' phase, clearing all
+    discovery/sync data while preserving the original playlist payload.
+
+    1:1 lift of the byte-identical ``reset_<source>_playlist`` bodies
+    (Tidal, Deezer, Qobuz, Spotify-Public). Returns ``(payload, status_code)``.
+
+    NOT folded in (genuinely divergent): YouTube (status -> 'parsed', no
+    download_process_id, logs the playlist name, "reset to fresh state"),
+    ListenBrainz (status -> 'cached', logs playlist title, returns
+    {"phase": "fresh"}), iTunes-Link (uses state.update, no info log, distinct
+    message). Those keep their own bodies.
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        state = states[key]
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        state['phase'] = 'fresh'
+        state['status'] = 'fresh'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['download_process_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+
+        logger.info(f"Reset {label} playlist to fresh: {key}")
+        return {"success": True, "message": "Playlist reset to fresh phase"}, 200
+    except Exception as e:
+        logger.error(f"Error resetting {label} playlist: {e}")
+        return {"error": str(e)}, 500
