@@ -20560,28 +20560,7 @@ def start_tidal_discovery(playlist_id):
 @app.route('/api/tidal/discovery/status/<playlist_id>', methods=['GET'])
 def get_tidal_discovery_status(playlist_id):
     """Get real-time discovery status for a Tidal playlist"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal discovery not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()  # Update access time
-        
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-        
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Tidal discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(tidal_discovery_states, playlist_id, "Tidal discovery not found", "Tidal")
 
 
 @app.route('/api/tidal/discovery/update_match', methods=['POST'])
@@ -21061,6 +21040,7 @@ from core.discovery.endpoints import (
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
+    get_discovery_status as _get_discovery_status_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
@@ -21095,6 +21075,14 @@ def _get_source_sync_status(states, key, not_found_message, error_label,
         states, key, not_found_message=not_found_message, error_label=error_label,
         activity_subject=activity_subject, playlist_name_getter=name_getter,
         sync_lock=sync_lock, sync_states=sync_states, add_activity_item=add_activity_item,
+    )
+    return jsonify(body), code
+
+
+def _get_source_discovery_status(states, key, not_found_message, error_label):
+    """Thin glue for the per-source get_*_discovery_status routes."""
+    body, code = _get_discovery_status_core(
+        states, key, not_found_message=not_found_message, error_label=error_label,
     )
     return jsonify(body), code
 
@@ -21418,28 +21406,7 @@ def start_deezer_discovery(playlist_id):
 @app.route('/api/deezer/discovery/status/<playlist_id>', methods=['GET'])
 def get_deezer_discovery_status(playlist_id):
     """Get real-time discovery status for a Deezer playlist"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer discovery not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Deezer discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(deezer_discovery_states, playlist_id, "Deezer discovery not found", "Deezer")
 
 @app.route('/api/deezer/discovery/update_match', methods=['POST'])
 def update_deezer_discovery_match():
@@ -21985,28 +21952,7 @@ def start_qobuz_discovery(playlist_id):
 @app.route('/api/qobuz/discovery/status/<playlist_id>', methods=['GET'])
 def get_qobuz_discovery_status(playlist_id):
     """Get real-time discovery status for a Qobuz playlist."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz discovery not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-        state['last_accessed'] = time.time()
-
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Qobuz discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(qobuz_discovery_states, playlist_id, "Qobuz discovery not found", "Qobuz")
 
 
 @app.route('/api/qobuz/discovery/update_match', methods=['POST'])
@@ -22803,28 +22749,7 @@ def start_spotify_public_discovery(url_hash):
 @app.route('/api/spotify-public/discovery/status/<url_hash>', methods=['GET'])
 def get_spotify_public_discovery_status(url_hash):
     """Get real-time discovery status for a Spotify Public playlist"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public discovery not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Spotify Public discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(spotify_public_discovery_states, url_hash, "Spotify Public discovery not found", "Spotify Public")
 
 @app.route('/api/spotify-public/discovery/update_match', methods=['POST'])
 def update_spotify_public_discovery_match():
@@ -23311,23 +23236,7 @@ def start_itunes_link_discovery(url_hash):
 
 @app.route('/api/itunes-link/discovery/status/<url_hash>', methods=['GET'])
 def get_itunes_link_discovery_status(url_hash):
-    try:
-        if url_hash not in itunes_link_discovery_states:
-            return jsonify({"error": "iTunes Link discovery not found"}), 404
-        state = itunes_link_discovery_states[url_hash]
-        state['last_accessed'] = time.time()
-        return jsonify({
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        })
-    except Exception as e:
-        logger.error(f"Error getting iTunes Link discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(itunes_link_discovery_states, url_hash, "iTunes Link discovery not found", "iTunes Link")
 
 
 def _update_itunes_link_discovery_result(identifier, track_index, spotify_track):
@@ -23727,28 +23636,7 @@ def start_youtube_discovery(url_hash):
 @app.route('/api/youtube/discovery/status/<url_hash>', methods=['GET'])
 def get_youtube_discovery_status(url_hash):
     """Get real-time discovery status for a YouTube playlist"""
-    try:
-        if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
-        
-        state = youtube_playlist_states[url_hash]
-        state['last_accessed'] = time.time()  # Update access time
-        
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-        
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting YouTube discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube")
 
 
 @app.route('/api/youtube/discovery/unmatch', methods=['POST'])
@@ -30002,29 +29890,7 @@ def start_listenbrainz_discovery(playlist_mbid):
 @app.route('/api/listenbrainz/discovery/status/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_discovery_status(playlist_mbid):
     """Get real-time discovery status for a ListenBrainz playlist"""
-    try:
-        state_key = _lb_state_key(playlist_mbid)
-        if state_key not in listenbrainz_playlist_states:
-            return jsonify({"error": "ListenBrainz playlist not found"}), 404
-
-        state = listenbrainz_playlist_states[state_key]
-        state['last_accessed'] = time.time()
-
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting ListenBrainz discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz playlist not found", "ListenBrainz")
 
 @app.route('/api/listenbrainz/update-phase/<playlist_mbid>', methods=['POST'])
 def update_listenbrainz_phase(playlist_mbid):
@@ -32018,28 +31884,7 @@ def start_beatport_discovery(url_hash):
 @app.route('/api/beatport/discovery/status/<url_hash>', methods=['GET'])
 def get_beatport_discovery_status(url_hash):
     """Get real-time discovery status for a Beatport chart"""
-    try:
-        if url_hash not in beatport_chart_states:
-            return jsonify({"error": "Beatport chart not found"}), 404
-
-        state = beatport_chart_states[url_hash]
-        state['last_accessed'] = time.time()
-
-        response = {
-            'phase': state['phase'],
-            'status': state['status'],
-            'progress': state['discovery_progress'],
-            'spotify_matches': state['spotify_matches'],
-            'spotify_total': state['spotify_total'],
-            'results': state['discovery_results'],
-            'complete': state['phase'] == 'discovered'
-        }
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error getting Beatport discovery status: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _get_source_discovery_status(beatport_chart_states, url_hash, "Beatport chart not found", "Beatport")
 
 
 @app.route('/api/beatport/discovery/update_match', methods=['POST'])

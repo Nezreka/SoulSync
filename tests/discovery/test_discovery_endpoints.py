@@ -394,3 +394,54 @@ def test_status_strict_getter_missing_playlist_raises_500_after_partial_mutation
     # phase was set to sync_complete BEFORE the strict getter raised (1:1).
     assert states['pl']['phase'] == 'sync_complete'
     assert calls == []  # activity never posted
+
+
+# ---------------------------------------------------------------------------
+# get_discovery_status
+# ---------------------------------------------------------------------------
+
+def test_discovery_status_not_found():
+    from core.discovery.endpoints import get_discovery_status
+    body, code = get_discovery_status({}, 'missing',
+                                      not_found_message='Tidal discovery not found',
+                                      error_label='Tidal')
+    assert code == 404 and body == {"error": "Tidal discovery not found"}
+
+
+def test_discovery_status_builds_response_and_bumps_access():
+    from core.discovery.endpoints import get_discovery_status
+    state = {
+        'phase': 'discovered', 'status': 'done', 'discovery_progress': 100,
+        'spotify_matches': 8, 'spotify_total': 10,
+        'discovery_results': [{'x': 1}], 'last_accessed': 0,
+    }
+    states = {'pl': state}
+    body, code = get_discovery_status(states, 'pl',
+                                      not_found_message='nf', error_label='Tidal')
+    assert code == 200
+    assert body == {
+        'phase': 'discovered', 'status': 'done', 'progress': 100,
+        'spotify_matches': 8, 'spotify_total': 10,
+        'results': [{'x': 1}], 'complete': True,
+    }
+    assert state['last_accessed'] != 0
+
+
+def test_discovery_status_complete_false_when_not_discovered():
+    from core.discovery.endpoints import get_discovery_status
+    state = {
+        'phase': 'discovering', 'status': 'running', 'discovery_progress': 40,
+        'spotify_matches': 2, 'spotify_total': 10, 'discovery_results': [],
+    }
+    body, code = get_discovery_status({'pl': state}, 'pl',
+                                      not_found_message='nf', error_label='Deezer')
+    assert code == 200 and body['complete'] is False
+
+
+def test_discovery_status_missing_field_raises_500():
+    from core.discovery.endpoints import get_discovery_status
+    # state missing 'status' -> strict access raises -> 500 (matches original)
+    states = {'pl': {'phase': 'x'}}
+    body, code = get_discovery_status(states, 'pl',
+                                      not_found_message='nf', error_label='Beatport')
+    assert code == 500 and "error" in body
