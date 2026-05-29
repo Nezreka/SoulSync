@@ -20620,31 +20620,7 @@ def delete_tidal_playlist(playlist_id):
 @app.route('/api/tidal/update_phase/<playlist_id>', methods=['POST'])
 def update_tidal_playlist_phase(playlist_id):
     """Update Tidal playlist phase (used when modal closes to reset from download_complete to discovered)"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        data = request.get_json()
-        if not data or 'phase' not in data:
-            return jsonify({"error": "Phase not provided"}), 400
-        
-        new_phase = data['phase']
-        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
-        
-        if new_phase not in valid_phases:
-            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
-        
-        state = tidal_discovery_states[playlist_id]
-        old_phase = state.get('phase', 'unknown')
-        state['phase'] = new_phase
-        state['last_accessed'] = time.time()
-        
-        logger.info(f"Updated Tidal playlist {playlist_id} phase: {old_phase} → {new_phase}")
-        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
-        
-    except Exception as e:
-        logger.error(f"Error updating Tidal playlist phase: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _update_source_playlist_phase(tidal_discovery_states, playlist_id, "Tidal playlist not found", "Tidal", _PHASE_LIST, False)
 
 
 _playlist_discovery_cancelled = set()  # Set of automation_ids that have been cancelled
@@ -20879,6 +20855,7 @@ from core.discovery.endpoints import (
     get_playlist_states as _get_playlist_states_core,
     start_sync as _start_sync_core,
     update_discovery_match as _update_discovery_match_core,
+    update_playlist_phase as _update_playlist_phase_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
@@ -20987,6 +20964,23 @@ def _update_source_discovery_match(states, source_log_label, error_label,
         build_fix_modal_spotify_data=_build_fix_modal_spotify_data,
         get_discovery_cache_key=_get_discovery_cache_key, get_database=get_database,
         get_active_discovery_source=_get_active_discovery_source,
+    )
+    return jsonify(body), code
+
+
+# Valid phase lists for update_*_playlist_phase (YouTube additionally allows 'parsed').
+_PHASE_LIST = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+_PHASE_LIST_YT = ['fresh', 'parsed', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+
+
+def _update_source_playlist_phase(states, key, not_found_message, error_label,
+                                  valid_phases, apply_extra_fields):
+    """Thin glue for the per-source update_*_playlist_phase routes
+    (Tidal/Deezer/Qobuz/Spotify-Public/YouTube)."""
+    body, code = _update_playlist_phase_core(
+        states, key, lambda: request.get_json(),
+        not_found_message=not_found_message, error_label=error_label,
+        valid_phases=valid_phases, apply_extra_fields=apply_extra_fields,
     )
     return jsonify(body), code
 
@@ -21326,39 +21320,7 @@ def delete_deezer_playlist(playlist_id):
 @app.route('/api/deezer/update_phase/<playlist_id>', methods=['POST'])
 def update_deezer_playlist_phase(playlist_id):
     """Update Deezer playlist phase (used when modal closes to reset from download_complete to discovered)"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        data = request.get_json()
-        if not data or 'phase' not in data:
-            return jsonify({"error": "Phase not provided"}), 400
-
-        new_phase = data['phase']
-        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
-
-        if new_phase not in valid_phases:
-            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
-
-        state = deezer_discovery_states[playlist_id]
-        old_phase = state.get('phase', 'unknown')
-        state['phase'] = new_phase
-        state['last_accessed'] = time.time()
-
-        # Update download process ID if provided (for download persistence)
-        if 'download_process_id' in data:
-            state['download_process_id'] = data['download_process_id']
-
-        # Update converted Spotify playlist ID if provided (for download persistence)
-        if 'converted_spotify_playlist_id' in data:
-            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
-
-        logger.info(f"Updated Deezer playlist {playlist_id} phase: {old_phase} → {new_phase}")
-        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
-
-    except Exception as e:
-        logger.error(f"Error updating Deezer playlist phase: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _update_source_playlist_phase(deezer_discovery_states, playlist_id, "Deezer playlist not found", "Deezer", _PHASE_LIST, True)
 
 
 # Deezer discovery worker logic lives in core/discovery/deezer.py.
@@ -21673,36 +21635,7 @@ def delete_qobuz_playlist(playlist_id):
 @app.route('/api/qobuz/update_phase/<playlist_id>', methods=['POST'])
 def update_qobuz_playlist_phase(playlist_id):
     """Update Qobuz playlist phase (used when modal closes to reset from download_complete to discovered)."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        data = request.get_json()
-        if not data or 'phase' not in data:
-            return jsonify({"error": "Phase not provided"}), 400
-
-        new_phase = data['phase']
-        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
-
-        if new_phase not in valid_phases:
-            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
-
-        state = qobuz_discovery_states[playlist_id]
-        old_phase = state.get('phase', 'unknown')
-        state['phase'] = new_phase
-        state['last_accessed'] = time.time()
-
-        if 'download_process_id' in data:
-            state['download_process_id'] = data['download_process_id']
-        if 'converted_spotify_playlist_id' in data:
-            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
-
-        logger.info(f"Updated Qobuz playlist {playlist_id} phase: {old_phase} → {new_phase}")
-        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
-
-    except Exception as e:
-        logger.error(f"Error updating Qobuz playlist phase: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _update_source_playlist_phase(qobuz_discovery_states, playlist_id, "Qobuz playlist not found", "Qobuz", _PHASE_LIST, True)
 
 
 # Qobuz discovery worker logic lives in core/discovery/qobuz.py.
@@ -22284,39 +22217,7 @@ def delete_spotify_public_playlist(url_hash):
 @app.route('/api/spotify-public/update_phase/<url_hash>', methods=['POST'])
 def update_spotify_public_playlist_phase(url_hash):
     """Update Spotify Public playlist phase (used when modal closes to reset from download_complete to discovered)"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        data = request.get_json()
-        if not data or 'phase' not in data:
-            return jsonify({"error": "Phase not provided"}), 400
-
-        new_phase = data['phase']
-        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
-
-        if new_phase not in valid_phases:
-            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
-
-        state = spotify_public_discovery_states[url_hash]
-        old_phase = state.get('phase', 'unknown')
-        state['phase'] = new_phase
-        state['last_accessed'] = time.time()
-
-        # Update download process ID if provided (for download persistence)
-        if 'download_process_id' in data:
-            state['download_process_id'] = data['download_process_id']
-
-        # Update converted Spotify playlist ID if provided (for download persistence)
-        if 'converted_spotify_playlist_id' in data:
-            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
-
-        logger.info(f"Updated Spotify Public playlist {url_hash} phase: {old_phase} → {new_phase}")
-        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
-
-    except Exception as e:
-        logger.error(f"Error updating Spotify Public playlist phase: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _update_source_playlist_phase(spotify_public_discovery_states, url_hash, "Spotify Public playlist not found", "Spotify Public", _PHASE_LIST, True)
 
 
 # Spotify Public discovery worker logic lives in core/discovery/spotify_public.py.
@@ -23423,31 +23324,7 @@ def delete_youtube_playlist(url_hash):
 @app.route('/api/youtube/update_phase/<url_hash>', methods=['POST'])
 def update_youtube_playlist_phase(url_hash):
     """Update YouTube playlist phase (used when modal closes to reset from download_complete to discovered)"""
-    try:
-        if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
-        
-        data = request.get_json()
-        if not data or 'phase' not in data:
-            return jsonify({"error": "Phase not provided"}), 400
-        
-        new_phase = data['phase']
-        valid_phases = ['fresh', 'parsed', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
-        
-        if new_phase not in valid_phases:
-            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
-        
-        state = youtube_playlist_states[url_hash]
-        old_phase = state.get('phase', 'unknown')
-        state['phase'] = new_phase
-        state['last_accessed'] = time.time()
-        
-        logger.info(f"Updated YouTube playlist {url_hash} phase: {old_phase} → {new_phase}")
-        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
-        
-    except Exception as e:
-        logger.error(f"Error updating YouTube playlist phase: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _update_source_playlist_phase(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube", _PHASE_LIST_YT, False)
 
 def convert_youtube_results_to_spotify_tracks(discovery_results):
     """Convert YouTube discovery results to Spotify tracks format for sync"""

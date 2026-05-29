@@ -398,6 +398,65 @@ def get_playlist_states(
         return {"error": str(e)}, 500
 
 
+def update_playlist_phase(
+    states: Dict[str, Any],
+    key: str,
+    get_json,
+    *,
+    not_found_message: str,
+    error_label: str,
+    valid_phases: List[str],
+    apply_extra_fields: bool,
+) -> Tuple[Dict[str, Any], int]:
+    """Update a discovery playlist's phase (used when the modal closes, e.g. to
+    reset download_complete -> discovered).
+
+    1:1 lift of the ``update_<source>_playlist_phase`` bodies for the five
+    sources with the identical validation + full-message response (Tidal,
+    Deezer, Qobuz, Spotify-Public, YouTube). Per-source params:
+
+    - ``valid_phases`` — YouTube's list additionally includes 'parsed'.
+    - ``apply_extra_fields`` — Deezer/Qobuz/Spotify-Public also persist
+      download_process_id / converted_spotify_playlist_id from the body;
+      Tidal/YouTube do NOT (so pass False to keep them 1:1).
+    - ``not_found_message`` / ``error_label``; ``get_json`` invoked inside the
+      try like the original ``request.get_json()``.
+
+    Returns ``(payload, status_code)``.
+
+    NOT folded in: iTunes-Link — it uses ``data.get('phase')`` (no separate
+    "Phase not provided" 400) and returns a no-message payload.
+    """
+    try:
+        if key not in states:
+            return {"error": not_found_message}, 404
+
+        data = get_json()
+        if not data or 'phase' not in data:
+            return {"error": "Phase not provided"}, 400
+
+        new_phase = data['phase']
+        if new_phase not in valid_phases:
+            return {"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}, 400
+
+        state = states[key]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        if apply_extra_fields:
+            if 'download_process_id' in data:
+                state['download_process_id'] = data['download_process_id']
+            if 'converted_spotify_playlist_id' in data:
+                state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+
+        logger.info(f"Updated {error_label} playlist {key} phase: {old_phase} → {new_phase}")
+        return {"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase}, 200
+    except Exception as e:
+        logger.error(f"Error updating {error_label} playlist phase: {e}")
+        return {"error": str(e)}, 500
+
+
 def first_artist_str_or_obj(original_track: Dict[str, Any]) -> str:
     """Tidal: first artist from an artists list that may hold strings OR
     objects ({'name': ...}); '' when empty."""
