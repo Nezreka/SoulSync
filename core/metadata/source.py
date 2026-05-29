@@ -1032,11 +1032,19 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         album_artists = album_ctx.get("artists", [])
         if album_artists:
             first_album_artist = album_artists[0]
-            if isinstance(first_album_artist, dict) and first_album_artist.get("name"):
-                raw_album_artist = first_album_artist["name"]
-            elif isinstance(first_album_artist, str) and first_album_artist:
-                raw_album_artist = first_album_artist
-            album_artists_for_collab = album_artists
+            if isinstance(first_album_artist, dict):
+                candidate = first_album_artist.get("name", "")
+            elif isinstance(first_album_artist, str):
+                candidate = first_album_artist
+            else:
+                candidate = ""
+            # An unresolved "Unknown Artist" placeholder from the album context
+            # must NOT clobber the real track artist already in raw_album_artist
+            # (bug #735: album-artist tag overwritten to "Unknown Artist" on
+            # import). Only override when the album context names a real artist.
+            if candidate and candidate != "Unknown Artist":
+                raw_album_artist = candidate
+                album_artists_for_collab = album_artists
 
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:
