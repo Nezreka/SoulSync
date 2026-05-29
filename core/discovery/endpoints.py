@@ -398,6 +398,154 @@ def get_playlist_states(
         return {"error": str(e)}, 500
 
 
+def first_artist_str_or_obj(original_track: Dict[str, Any]) -> str:
+    """Tidal: first artist from an artists list that may hold strings OR
+    objects ({'name': ...}); '' when empty."""
+    artists = original_track.get('artists', [])
+    if artists:
+        return artists[0] if isinstance(artists[0], str) else artists[0].get('name', '')
+    return ''
+
+
+def first_artist_plain(original_track: Dict[str, Any]) -> str:
+    """Deezer/Qobuz/Spotify-Public: first artist assuming a list of strings;
+    '' when empty."""
+    artists = original_track.get('artists', [])
+    return artists[0] if artists else ''
+
+
+def update_discovery_match(
+    states: Dict[str, Any],
+    get_json,
+    *,
+    source_log_label: str,
+    error_label: str,
+    original_track_key: str,
+    original_artist_getter,
+    join_artist_names,
+    extract_artist_name,
+    build_fix_modal_spotify_data,
+    get_discovery_cache_key,
+    get_database,
+    get_active_discovery_source,
+) -> Tuple[Dict[str, Any], int]:
+    """Apply a manually-selected Spotify track to a discovery result (the
+    fix-modal flow) and persist it to the discovery cache.
+
+    1:1 lift of the ``update_<source>_discovery_match`` bodies for the four
+    sources with the identical structure (Tidal, Deezer, Qobuz, Spotify-Public).
+    Per-source pieces are params:
+
+    - ``source_log_label`` (lowercase, e.g. "tidal") for the "Manual match
+      updated: ..." line; ``error_label`` for the except log.
+    - ``original_track_key`` — the raw-source track key on the result
+      ('tidal_track', 'deezer_track', ...).
+    - ``original_artist_getter`` — Tidal handles string-or-object artists
+      (``first_artist_str_or_obj``); the rest assume strings
+      (``first_artist_plain``).
+    - the web_server helpers (join/extract artist, build_fix_modal_spotify_data,
+      cache-key, get_database, active-discovery-source) are injected so this
+      stays free of those globals.
+    - ``get_json`` is called INSIDE the try (like the original's
+      ``request.get_json()``) so a malformed body yields the same 500.
+
+    Returns ``(payload, status_code)``.
+
+    NOT folded in: iTunes-Link (saves spotify_data directly via a different
+    cache signature), YouTube (multi-key original_track fallback), ListenBrainz
+    (entirely different unmatch-capable structure, no cache write), Beatport.
+    """
+    try:
+        data = get_json()
+        identifier = data.get('identifier')
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return {'error': 'Missing required fields'}, 400
+
+        state = states.get(identifier)
+        if not state:
+            return {'error': 'Discovery state not found'}, 404
+
+        if track_index >= len(state['discovery_results']):
+            return {'error': 'Invalid track index'}, 400
+
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        result['status'] = 'Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else extract_artist_name(spotify_track['artists'])
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        result['spotify_data'] = build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
+        result['manual_match'] = True
+
+        if old_status != 'found' and old_status != 'Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        logger.info(f"Manual match updated: {source_log_label} - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        try:
+            original_track = result.get(original_track_key, {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artist = original_artist_getter(original_track)
+
+            cache_key = get_discovery_cache_key(original_name, original_artist)
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            image_url = spotify_track.get('image_url') or ''
+            album_raw = spotify_track.get('album', '')
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], get_active_discovery_source(), 1.0, matched_data,
+                original_name, original_artist
+            )
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
+
+        return {'success': True, 'result': result}, 200
+    except Exception as e:
+        logger.error(f"Error updating {error_label} discovery match: {e}")
+        return {'error': str(e)}, 500
+
+
 def start_sync(
     states: Dict[str, Any],
     key: str,

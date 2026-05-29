@@ -20566,117 +20566,7 @@ def get_tidal_discovery_status(playlist_id):
 @app.route('/api/tidal/discovery/update_match', methods=['POST'])
 def update_tidal_discovery_match():
     """Update a Tidal discovery result with manually selected Spotify track"""
-    try:
-        data = request.get_json()
-        identifier = data.get('identifier')  # playlist_id
-        track_index = data.get('track_index')
-        spotify_track = data.get('spotify_track')
-
-        if not identifier or track_index is None or not spotify_track:
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        # Get the state
-        state = tidal_discovery_states.get(identifier)
-
-        if not state:
-            return jsonify({'error': 'Discovery state not found'}), 404
-
-        if track_index >= len(state['discovery_results']):
-            return jsonify({'error': 'Invalid track index'}), 400
-
-        # Update the result
-        result = state['discovery_results'][track_index]
-        old_status = result.get('status')
-
-        # Update with user-selected track
-        result['status'] = 'Found'
-        result['status_class'] = 'found'
-        result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
-        result['spotify_album'] = spotify_track['album']
-        result['spotify_id'] = spotify_track['id']
-
-        # Format duration (Tidal doesn't show duration in table, but store it anyway)
-        duration_ms = spotify_track.get('duration_ms', 0)
-        if duration_ms:
-            minutes = duration_ms // 60000
-            seconds = (duration_ms % 60000) // 1000
-            result['duration'] = f"{minutes}:{seconds:02d}"
-        else:
-            result['duration'] = '0:00'
-
-        # IMPORTANT: Also set spotify_data for sync/download compatibility.
-        # Manual match from the fix modal — build a rich spotify_data (album
-        # as dict with image info) matching the normal discovery shape, and
-        # explicitly clear any prior wing-it flag since the user picked a
-        # real metadata match.
-        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
-        result['wing_it_fallback'] = False
-
-        result['manual_match'] = True  # Flag for tracking
-
-        # Update match count if status changed from not found/error
-        if old_status != 'found' and old_status != 'Found':
-            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
-
-        logger.info(f"Manual match updated: tidal - {identifier} - track {track_index}")
-        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
-
-        # Save manual fix to discovery cache so it appears in discovery pool
-        try:
-            original_track = result.get('tidal_track', {})
-            original_name = original_track.get('name', spotify_track['name'])
-            original_artist = ''
-            original_artists = original_track.get('artists', [])
-            if original_artists:
-                original_artist = original_artists[0] if isinstance(original_artists[0], str) else original_artists[0].get('name', '')
-
-            cache_key = _get_discovery_cache_key(original_name, original_artist)
-            # Normalize artists to plain strings for cache consistency
-            artists_list = spotify_track['artists']
-            if isinstance(artists_list, list):
-                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
-            # Preserve cover image info so the download pipeline can find
-            # artwork when this cached match is used later. The fix modal
-            # sends image_url at the top level; search results often return
-            # album as a bare string, which previously dropped the artwork.
-            image_url = spotify_track.get('image_url') or ''
-            album_raw = spotify_track.get('album', '')
-            if isinstance(album_raw, dict):
-                album_obj = dict(album_raw)
-                if image_url and not album_obj.get('image_url'):
-                    album_obj['image_url'] = image_url
-                if image_url and not album_obj.get('images'):
-                    album_obj['images'] = [{'url': image_url}]
-            else:
-                album_obj = {'name': album_raw or ''}
-                if image_url:
-                    album_obj['image_url'] = image_url
-                    album_obj['images'] = [{'url': image_url}]
-
-            matched_data = {
-                'id': spotify_track['id'],
-                'name': spotify_track['name'],
-                'artists': artists_list,
-                'album': album_obj,
-                'duration_ms': spotify_track.get('duration_ms', 0),
-                'image_url': image_url,
-                'source': 'spotify',
-            }
-            cache_db = get_database()
-            cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
-                original_name, original_artist
-            )
-            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
-        except Exception as cache_err:
-            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
-
-        return jsonify({'success': True, 'result': result})
-
-    except Exception as e:
-        logger.error(f"Error updating Tidal discovery match: {e}")
-        return jsonify({'error': str(e)}), 500
+    return _update_source_discovery_match(tidal_discovery_states, "tidal", "Tidal", "tidal_track", _first_artist_str_or_obj)
 
 
 @app.route('/api/tidal/playlists/states', methods=['GET'])
@@ -20988,12 +20878,15 @@ from core.discovery.endpoints import (
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
     start_sync as _start_sync_core,
+    update_discovery_match as _update_discovery_match_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
     playlist_name_obj as _pl_name_obj,
     playlist_image_obj as _pl_image_obj,
     playlist_image_dict as _pl_image_dict,
+    first_artist_str_or_obj as _first_artist_str_or_obj,
+    first_artist_plain as _first_artist_plain,
 )
 
 
@@ -21078,6 +20971,22 @@ def _start_source_sync(states, key, *, sync_id_prefix, not_found_message,
         error_label=error_label, sync_lock=sync_lock, sync_states=sync_states,
         active_sync_workers=active_sync_workers, submit_sync_task=_submit_sync_task,
         add_activity_item=add_activity_item,
+    )
+    return jsonify(body), code
+
+
+def _update_source_discovery_match(states, source_log_label, error_label,
+                                   original_track_key, artist_getter):
+    """Thin glue for the per-source update_*_discovery_match (fix-modal) routes
+    (Tidal/Deezer/Qobuz/Spotify-Public) — injects the web_server helpers."""
+    body, code = _update_discovery_match_core(
+        states, lambda: request.get_json(),
+        source_log_label=source_log_label, error_label=error_label,
+        original_track_key=original_track_key, original_artist_getter=artist_getter,
+        join_artist_names=_join_artist_names, extract_artist_name=_extract_artist_name,
+        build_fix_modal_spotify_data=_build_fix_modal_spotify_data,
+        get_discovery_cache_key=_get_discovery_cache_key, get_database=get_database,
+        get_active_discovery_source=_get_active_discovery_source,
     )
     return jsonify(body), code
 
@@ -21364,115 +21273,7 @@ def get_deezer_discovery_status(playlist_id):
 @app.route('/api/deezer/discovery/update_match', methods=['POST'])
 def update_deezer_discovery_match():
     """Update a Deezer discovery result with manually selected Spotify track"""
-    try:
-        data = request.get_json()
-        identifier = data.get('identifier')  # playlist_id
-        track_index = data.get('track_index')
-        spotify_track = data.get('spotify_track')
-
-        if not identifier or track_index is None or not spotify_track:
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        # Get the state
-        state = deezer_discovery_states.get(identifier)
-
-        if not state:
-            return jsonify({'error': 'Discovery state not found'}), 404
-
-        if track_index >= len(state['discovery_results']):
-            return jsonify({'error': 'Invalid track index'}), 400
-
-        # Update the result
-        result = state['discovery_results'][track_index]
-        old_status = result.get('status')
-
-        # Update with user-selected track
-        result['status'] = 'Found'
-        result['status_class'] = 'found'
-        result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
-        result['spotify_album'] = spotify_track['album']
-        result['spotify_id'] = spotify_track['id']
-
-        # Format duration
-        duration_ms = spotify_track.get('duration_ms', 0)
-        if duration_ms:
-            minutes = duration_ms // 60000
-            seconds = (duration_ms % 60000) // 1000
-            result['duration'] = f"{minutes}:{seconds:02d}"
-        else:
-            result['duration'] = '0:00'
-
-        # IMPORTANT: Also set spotify_data for sync/download compatibility.
-        # Manual match from the fix modal — build a rich spotify_data (album
-        # as dict with image info) matching the normal discovery shape, and
-        # explicitly clear any prior wing-it flag since the user picked a
-        # real metadata match.
-        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
-        result['wing_it_fallback'] = False
-
-        result['manual_match'] = True
-
-        # Update match count if status changed from not found/error
-        if old_status != 'found' and old_status != 'Found':
-            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
-
-        logger.info(f"Manual match updated: deezer - {identifier} - track {track_index}")
-        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
-
-        # Save manual fix to discovery cache so it appears in discovery pool
-        try:
-            original_track = result.get('deezer_track', {})
-            original_name = original_track.get('name', spotify_track['name'])
-            original_artists = original_track.get('artists', [])
-            original_artist = original_artists[0] if original_artists else ''
-
-            cache_key = _get_discovery_cache_key(original_name, original_artist)
-            # Normalize artists to plain strings for cache consistency
-            artists_list = spotify_track['artists']
-            if isinstance(artists_list, list):
-                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
-            # Preserve cover image info so the download pipeline can find
-            # artwork when this cached match is used later. The fix modal
-            # sends image_url at the top level; search results often return
-            # album as a bare string, which previously dropped the artwork.
-            image_url = spotify_track.get('image_url') or ''
-            album_raw = spotify_track.get('album', '')
-            if isinstance(album_raw, dict):
-                album_obj = dict(album_raw)
-                if image_url and not album_obj.get('image_url'):
-                    album_obj['image_url'] = image_url
-                if image_url and not album_obj.get('images'):
-                    album_obj['images'] = [{'url': image_url}]
-            else:
-                album_obj = {'name': album_raw or ''}
-                if image_url:
-                    album_obj['image_url'] = image_url
-                    album_obj['images'] = [{'url': image_url}]
-
-            matched_data = {
-                'id': spotify_track['id'],
-                'name': spotify_track['name'],
-                'artists': artists_list,
-                'album': album_obj,
-                'duration_ms': spotify_track.get('duration_ms', 0),
-                'image_url': image_url,
-                'source': 'spotify',
-            }
-            cache_db = get_database()
-            cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
-                original_name, original_artist
-            )
-            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
-        except Exception as cache_err:
-            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
-
-        return jsonify({'success': True, 'result': result})
-
-    except Exception as e:
-        logger.error(f"Error updating Deezer discovery match: {e}")
-        return jsonify({'error': str(e)}), 500
+    return _update_source_discovery_match(deezer_discovery_states, "deezer", "Deezer", "deezer_track", _first_artist_plain)
 
 @app.route('/api/deezer/playlists/states', methods=['GET'])
 def get_deezer_playlist_states():
@@ -21814,101 +21615,8 @@ def get_qobuz_discovery_status(playlist_id):
 
 @app.route('/api/qobuz/discovery/update_match', methods=['POST'])
 def update_qobuz_discovery_match():
-    """Update a Qobuz discovery result with a manually selected Spotify track."""
-    try:
-        data = request.get_json()
-        identifier = data.get('identifier')  # playlist_id
-        track_index = data.get('track_index')
-        spotify_track = data.get('spotify_track')
-
-        if not identifier or track_index is None or not spotify_track:
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        state = qobuz_discovery_states.get(identifier)
-        if not state:
-            return jsonify({'error': 'Discovery state not found'}), 404
-
-        if track_index >= len(state['discovery_results']):
-            return jsonify({'error': 'Invalid track index'}), 400
-
-        result = state['discovery_results'][track_index]
-        old_status = result.get('status')
-
-        result['status'] = 'Found'
-        result['status_class'] = 'found'
-        result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
-        result['spotify_album'] = spotify_track['album']
-        result['spotify_id'] = spotify_track['id']
-
-        duration_ms = spotify_track.get('duration_ms', 0)
-        if duration_ms:
-            minutes = duration_ms // 60000
-            seconds = (duration_ms % 60000) // 1000
-            result['duration'] = f"{minutes}:{seconds:02d}"
-        else:
-            result['duration'] = '0:00'
-
-        # Manual match from the fix modal — build rich spotify_data matching
-        # the normal discovery shape, clear wing-it flag since the user
-        # picked a real metadata match.
-        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
-        result['wing_it_fallback'] = False
-        result['manual_match'] = True
-
-        if old_status != 'found' and old_status != 'Found':
-            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
-
-        logger.info(f"Manual match updated: qobuz - {identifier} - track {track_index}")
-        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
-
-        try:
-            original_track = result.get('qobuz_track', {})
-            original_name = original_track.get('name', spotify_track['name'])
-            original_artists = original_track.get('artists', [])
-            original_artist = original_artists[0] if original_artists else ''
-
-            cache_key = _get_discovery_cache_key(original_name, original_artist)
-            artists_list = spotify_track['artists']
-            if isinstance(artists_list, list):
-                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
-            image_url = spotify_track.get('image_url') or ''
-            album_raw = spotify_track.get('album', '')
-            if isinstance(album_raw, dict):
-                album_obj = dict(album_raw)
-                if image_url and not album_obj.get('image_url'):
-                    album_obj['image_url'] = image_url
-                if image_url and not album_obj.get('images'):
-                    album_obj['images'] = [{'url': image_url}]
-            else:
-                album_obj = {'name': album_raw or ''}
-                if image_url:
-                    album_obj['image_url'] = image_url
-                    album_obj['images'] = [{'url': image_url}]
-
-            matched_data = {
-                'id': spotify_track['id'],
-                'name': spotify_track['name'],
-                'artists': artists_list,
-                'album': album_obj,
-                'duration_ms': spotify_track.get('duration_ms', 0),
-                'image_url': image_url,
-                'source': 'spotify',
-            }
-            cache_db = get_database()
-            cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
-                original_name, original_artist
-            )
-            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
-        except Exception as cache_err:
-            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
-
-        return jsonify({'success': True, 'result': result})
-
-    except Exception as e:
-        logger.error(f"Error updating Qobuz discovery match: {e}")
-        return jsonify({'error': str(e)}), 500
+    """Update a Qobuz discovery result with manually selected Spotify track"""
+    return _update_source_discovery_match(qobuz_discovery_states, "qobuz", "Qobuz", "qobuz_track", _first_artist_plain)
 
 
 @app.route('/api/qobuz/playlists/states', methods=['GET'])
@@ -22524,115 +22232,7 @@ def get_spotify_public_discovery_status(url_hash):
 @app.route('/api/spotify-public/discovery/update_match', methods=['POST'])
 def update_spotify_public_discovery_match():
     """Update a Spotify Public discovery result with manually selected Spotify track"""
-    try:
-        data = request.get_json()
-        identifier = data.get('identifier')  # url_hash
-        track_index = data.get('track_index')
-        spotify_track = data.get('spotify_track')
-
-        if not identifier or track_index is None or not spotify_track:
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        # Get the state
-        state = spotify_public_discovery_states.get(identifier)
-
-        if not state:
-            return jsonify({'error': 'Discovery state not found'}), 404
-
-        if track_index >= len(state['discovery_results']):
-            return jsonify({'error': 'Invalid track index'}), 400
-
-        # Update the result
-        result = state['discovery_results'][track_index]
-        old_status = result.get('status')
-
-        # Update with user-selected track
-        result['status'] = 'Found'
-        result['status_class'] = 'found'
-        result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
-        result['spotify_album'] = spotify_track['album']
-        result['spotify_id'] = spotify_track['id']
-
-        # Format duration
-        duration_ms = spotify_track.get('duration_ms', 0)
-        if duration_ms:
-            minutes = duration_ms // 60000
-            seconds = (duration_ms % 60000) // 1000
-            result['duration'] = f"{minutes}:{seconds:02d}"
-        else:
-            result['duration'] = '0:00'
-
-        # IMPORTANT: Also set spotify_data for sync/download compatibility.
-        # Manual match from the fix modal — build a rich spotify_data (album
-        # as dict with image info) matching the normal discovery shape, and
-        # explicitly clear any prior wing-it flag since the user picked a
-        # real metadata match.
-        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
-        result['wing_it_fallback'] = False
-
-        result['manual_match'] = True
-
-        # Update match count if status changed from not found/error
-        if old_status != 'found' and old_status != 'Found':
-            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
-
-        logger.info(f"Manual match updated: spotify_public - {identifier} - track {track_index}")
-        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
-
-        # Save manual fix to discovery cache so it appears in discovery pool
-        try:
-            original_track = result.get('spotify_public_track', {})
-            original_name = original_track.get('name', spotify_track['name'])
-            original_artists = original_track.get('artists', [])
-            original_artist = original_artists[0] if original_artists else ''
-
-            cache_key = _get_discovery_cache_key(original_name, original_artist)
-            # Normalize artists to plain strings for cache consistency
-            artists_list = spotify_track['artists']
-            if isinstance(artists_list, list):
-                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
-            # Preserve cover image info so the download pipeline can find
-            # artwork when this cached match is used later. The fix modal
-            # sends image_url at the top level; search results often return
-            # album as a bare string, which previously dropped the artwork.
-            image_url = spotify_track.get('image_url') or ''
-            album_raw = spotify_track.get('album', '')
-            if isinstance(album_raw, dict):
-                album_obj = dict(album_raw)
-                if image_url and not album_obj.get('image_url'):
-                    album_obj['image_url'] = image_url
-                if image_url and not album_obj.get('images'):
-                    album_obj['images'] = [{'url': image_url}]
-            else:
-                album_obj = {'name': album_raw or ''}
-                if image_url:
-                    album_obj['image_url'] = image_url
-                    album_obj['images'] = [{'url': image_url}]
-
-            matched_data = {
-                'id': spotify_track['id'],
-                'name': spotify_track['name'],
-                'artists': artists_list,
-                'album': album_obj,
-                'duration_ms': spotify_track.get('duration_ms', 0),
-                'image_url': image_url,
-                'source': 'spotify',
-            }
-            cache_db = get_database()
-            cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
-                original_name, original_artist
-            )
-            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
-        except Exception as cache_err:
-            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
-
-        return jsonify({'success': True, 'result': result})
-
-    except Exception as e:
-        logger.error(f"Error updating Spotify Public discovery match: {e}")
-        return jsonify({'error': str(e)}), 500
+    return _update_source_discovery_match(spotify_public_discovery_states, "spotify_public", "Spotify Public", "spotify_public_track", _first_artist_plain)
 
 @app.route('/api/spotify-public/playlists/states', methods=['GET'])
 def get_spotify_public_playlist_states():
