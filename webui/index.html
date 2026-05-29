@@ -136,13 +136,13 @@
                             <input type="checkbox" id="new-profile-can-download" checked> Can download music
                         </label>
                     </div>
-                    <button id="create-profile-btn" class="profile-create-btn">Create Profile</button>
+                    <button id="create-profile-btn" class="btn btn--block btn--primary profile-create-btn">Create Profile</button>
                 </div>
                 <div id="admin-pin-section" class="admin-pin-section" style="display: none;">
                     <h4>Admin PIN</h4>
                     <p class="admin-pin-note">Required when multiple profiles exist</p>
                     <input type="password" id="admin-pin-input" class="profile-input" placeholder="Set admin PIN" maxlength="6">
-                    <button id="set-admin-pin-btn" class="profile-create-btn">Set Admin PIN</button>
+                    <button id="set-admin-pin-btn" class="btn btn--block btn--primary profile-create-btn">Set Admin PIN</button>
                 </div>
             </div>
         </div>
@@ -2761,8 +2761,8 @@
                         <!-- Populated dynamically -->
                     </div>
                     <div class="enhanced-bulk-modal-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeBulkEditModal()">Cancel</button>
-                        <button class="enhanced-bulk-btn primary" onclick="executeBulkEdit()">Apply Changes</button>
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBulkEditModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" onclick="executeBulkEdit()">Apply Changes</button>
                     </div>
                 </div>
             </div>
@@ -2774,10 +2774,10 @@
                     <span class="enhanced-bulk-bar-label">tracks selected</span>
                 </div>
                 <div class="enhanced-bulk-bar-actions">
-                    <button class="enhanced-bulk-btn secondary" onclick="showBulkEditModal()">Edit Selected</button>
-                    <button class="enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
-                    <button class="enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
-                    <button class="enhanced-bulk-btn clear" onclick="clearTrackSelection()">Clear Selection</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="showBulkEditModal()">Edit Selected</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
+                    <button class="btn btn--sm btn--danger enhanced-bulk-btn" onclick="clearTrackSelection()">Clear Selection</button>
                 </div>
             </div>
 
@@ -2801,8 +2801,8 @@
                             <span id="tag-preview-sync-text">Sync to server</span>
                         </label>
                         <div class="tag-preview-footer-actions">
-                            <button class="enhanced-bulk-btn secondary" onclick="closeTagPreviewModal()">Cancel</button>
-                            <button class="enhanced-bulk-btn primary" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
                         </div>
                     </div>
                 </div>
@@ -2829,8 +2829,8 @@
                             <span id="batch-tag-preview-sync-text">Sync to server</span>
                         </label>
                         <div class="tag-preview-footer-actions">
-                            <button class="enhanced-bulk-btn secondary" onclick="closeBatchTagPreviewModal()">Cancel</button>
-                            <button class="enhanced-bulk-btn primary" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBatchTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
                         </div>
                     </div>
                 </div>
@@ -2847,8 +2847,8 @@
                         <!-- Populated dynamically -->
                     </div>
                     <div class="enhanced-bulk-modal-footer" id="reorganize-modal-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeReorganizeModal()">Cancel</button>
-                        <button class="enhanced-bulk-btn primary" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeReorganizeModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
                     </div>
                 </div>
             </div>
@@ -3043,13 +3043,13 @@
                                 <p class="discover-section-subtitle" id="your-artists-subtitle">Artists you follow across your music services</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="ya-header-btn ya-refresh-btn" id="your-artists-refresh-btn" onclick="refreshYourArtists()" title="Refresh from services">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-refresh-btn" id="your-artists-refresh-btn" onclick="refreshYourArtists()" title="Refresh from services">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-settings-btn" onclick="openYourArtistsSourcesModal()" title="Configure sources">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-settings-btn" onclick="openYourArtistsSourcesModal()" title="Configure sources">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-viewall-btn" onclick="openYourArtistsModal()">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" onclick="openYourArtistsModal()">
                                     <span>View All</span>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                                 </button>
@@ -3068,13 +3068,13 @@
                                 <p class="discover-section-subtitle" id="your-albums-subtitle">Albums you've saved across your music services</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="ya-header-btn ya-refresh-btn" id="your-albums-refresh-btn" onclick="refreshYourAlbums()" title="Refresh from services">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-refresh-btn" id="your-albums-refresh-btn" onclick="refreshYourAlbums()" title="Refresh from services">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-settings-btn" onclick="openYourAlbumsSourcesModal()" title="Configure sources">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-settings-btn" onclick="openYourAlbumsSourcesModal()" title="Configure sources">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                                 </button>
-                                <button class="ya-header-btn" id="your-albums-download-btn" onclick="downloadMissingYourAlbums()" style="display:none;" title="Download missing albums">
+                                <button class="btn btn--sm btn--secondary ya-header-btn" id="your-albums-download-btn" onclick="downloadMissingYourAlbums()" style="display:none;" title="Download missing albums">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                                 </button>
                             </div>
@@ -3679,15 +3679,15 @@
                             <span class="explorer-selection-count" id="explorer-selection-count">0 albums selected</span>
                         </div>
                         <div class="explorer-action-buttons">
-                            <button class="explorer-action-btn" onclick="explorerSelectAll()">
+                            <button class="btn btn--sm btn--secondary" onclick="explorerSelectAll()">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                                 Select All
                             </button>
-                            <button class="explorer-action-btn" onclick="explorerDeselectAll()">
+                            <button class="btn btn--sm btn--secondary" onclick="explorerDeselectAll()">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
                                 Deselect
                             </button>
-                            <button class="explorer-action-btn primary" onclick="explorerAddToWishlist()">
+                            <button class="btn btn--sm btn--primary" onclick="explorerAddToWishlist()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                                 Add to Wishlist
                             </button>
@@ -6395,9 +6395,9 @@
                                 </label>
                                 <div class="repair-findings-bulk" id="repair-findings-bulk" style="display:none;">
                                     <span class="repair-bulk-count" id="repair-bulk-count"></span>
-                                    <button class="repair-bulk-btn fix" onclick="bulkFixFindings()">Fix Selected</button>
-                                    <button class="repair-bulk-btn" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
-                                    <button class="repair-bulk-btn fix-all" id="repair-fix-all-btn" style="display:none;" onclick="fixAllMatchingFindings()">Fix All</button>
+                                    <button class="btn btn--sm btn--primary" onclick="bulkFixFindings()">Fix Selected</button>
+                                    <button class="btn btn--sm btn--secondary" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
+                                    <button class="btn btn--sm btn--warning" id="repair-fix-all-btn" style="display:none;" onclick="fixAllMatchingFindings()">Fix All</button>
                                 </div>
                                 <button class="repair-clear-btn" onclick="clearRepairFindings()" title="Clear findings matching current filters">Clear Findings</button>
                             </div>

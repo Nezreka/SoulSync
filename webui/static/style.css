@@ -34318,13 +34318,9 @@ div.artist-hero-badge {
 .ya-watchlist-btn.active { color: var(--accent); border-color: rgba(var(--accent-rgb),0.3); background: rgba(var(--accent-rgb),0.15); }
 
 /* Your Artists header buttons */
-.ya-header-btn {
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.5);
-}
-.ya-header-btn:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.12); }
+/* .ya-header-btn base styling migrated to .btn .btn--sm .btn--secondary.
+   Class kept on the markup (discover.js injects it) along with the
+   .ya-refresh-btn / .ya-settings-btn / .ya-viewall-btn co-modifiers. */
 .ya-refresh-btn { padding: 7px 10px; }
 .ya-refresh-btn:hover svg { transform: rotate(45deg); }
 .ya-refresh-btn svg { transition: transform 0.3s; }
@@ -43230,22 +43226,9 @@ div.artist-hero-badge {
     border-color: #fff;
 }
 
-.profile-create-btn {
-    width: 100%;
-    padding: 10px;
-    background: #6366f1;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.profile-create-btn:hover {
-    background: #4f46e5;
-}
+/* .profile-create-btn migrated to .btn .btn--block .btn--primary. The class
+   is kept on the markup (init.js sets it) as a hook for the scoped
+   `.profile-edit-buttons .profile-create-btn { flex: 1 }` layout rule. */
 
 .admin-pin-section {
     margin-top: 20px;
@@ -46445,36 +46428,11 @@ textarea.enhanced-meta-field-input {
     display: flex;
     gap: 8px;
 }
-.enhanced-bulk-btn {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.enhanced-bulk-btn.primary {
-    background: rgb(var(--accent-rgb));
-    color: #ffffff;
-}
-.enhanced-bulk-btn.primary:hover {
-    background: rgb(var(--accent-light-rgb));
-}
-.enhanced-bulk-btn.secondary {
-    background: rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.8);
-}
-.enhanced-bulk-btn.secondary:hover {
-    background: rgba(255,255,255,0.15);
-}
-.enhanced-bulk-btn.clear {
-    background: rgba(255, 65, 54, 0.1);
-    color: #ff4136;
-}
-.enhanced-bulk-btn.clear:hover {
-    background: rgba(255, 65, 54, 0.2);
-}
+/* .enhanced-bulk-btn base + .primary/.secondary/.clear migrated to
+   .btn .btn--sm (.btn--primary / .btn--secondary / .btn--danger). The
+   .enhanced-bulk-btn class is kept on the markup as a hook for the mobile
+   size override (.enhanced-bulk-bar .enhanced-bulk-btn) and the special
+   .tag-write / .rg-analyze color variants below. */
 
 /* Bulk Edit Modal */
 .enhanced-bulk-modal {
@@ -52329,42 +52287,8 @@ tr.tag-diff-same {
     margin-right: 4px;
 }
 
-.repair-bulk-btn {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.7);
-    padding: 6px 14px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.repair-bulk-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-}
-
-.repair-bulk-btn.fix {
-    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
-    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
-    color: rgb(var(--accent-light-rgb, 129, 140, 248));
-    font-weight: 600;
-}
-
-.repair-bulk-btn.fix:hover {
-    background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
-}
-
-.repair-bulk-btn.fix-all {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.3);
-    color: #fbbf24;
-    font-weight: 600;
-}
-.repair-bulk-btn.fix-all:hover {
-    background: rgba(245, 158, 11, 0.22);
-}
+/* .repair-bulk-btn / .fix / .fix-all migrated to .btn .btn--sm
+   (.btn--secondary / .btn--primary / .btn--warning). */
 
 .repair-clear-btn {
     margin-left: auto;
@@ -54910,57 +54834,8 @@ tr.tag-diff-same {
     gap: 6px;
 }
 
-.explorer-action-btn {
-    padding: 7px 14px;
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-    letter-spacing: 0.2px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-.explorer-action-btn svg { opacity: 0.5; }
-
-.explorer-action-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.85);
-    border-color: rgba(255, 255, 255, 0.12);
-}
-.explorer-action-btn:hover svg { opacity: 0.8; }
-
-.explorer-action-btn.primary {
-    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 80%, #fff));
-    border-color: transparent;
-    color: #fff;
-    font-weight: 700;
-    padding: 8px 20px;
-    font-size: 12px;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.2);
-}
-.explorer-action-btn.primary svg { opacity: 1; }
-
-.explorer-action-btn.primary::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
-    border-radius: inherit;
-    pointer-events: none;
-}
-
-.explorer-action-btn.primary:hover {
-    box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.4);
-    filter: brightness(1.1);
-    transform: translateY(-1px);
-}
+/* .explorer-action-btn / .primary migrated to .btn .btn--sm
+   (.btn--secondary / .btn--primary). */
 
 /* Viewport */
 .explorer-viewport {

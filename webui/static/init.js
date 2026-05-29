@@ -1829,7 +1829,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     btnRow.className = 'profile-edit-buttons';
 
     const saveBtn = document.createElement('button');
-    saveBtn.className = 'profile-create-btn';
+    saveBtn.className = 'btn btn--block btn--primary profile-create-btn';
     saveBtn.textContent = 'Save';
     saveBtn.onclick = async () => {
         const newName = nameInput.value.trim();
@@ -1957,7 +1957,7 @@ function showSelfEditForm() {
     btnRow.style.marginTop = '12px';
 
     const saveBtn = document.createElement('button');
-    saveBtn.className = 'profile-create-btn';
+    saveBtn.className = 'btn btn--block btn--primary profile-create-btn';
     saveBtn.textContent = 'Save';
     saveBtn.onclick = async () => {
         const newName = nameInput.value.trim();
