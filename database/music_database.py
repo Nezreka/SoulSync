@@ -312,6 +312,19 @@ class MusicDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration ledger — a single, readable record of which one-time
+            # migrations have run. ADDITIVE backstop only: existing migrations
+            # keep their own idempotency gates (PRAGMA checks, marker tables,
+            # metadata flags); this table just unifies that scattered state so a
+            # half-migrated DB is detectable. Nothing GATES on it. Paired with
+            # PRAGMA user_version (set at the end of init).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # Wishlist table for storing failed download tracks for retry
             cursor.execute("""
@@ -794,6 +807,9 @@ class MusicDatabase:
 
             self._ensure_core_media_schema_columns(cursor)
             self._normalize_genres_to_json(cursor)
+            # Unify scattered migration state into the ledger + stamp the schema
+            # version. Additive backstop — runs last, gates nothing.
+            self._sync_migration_ledger(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -803,6 +819,70 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+
+    # Bump when the schema's generation meaningfully changes. Stamped into
+    # PRAGMA user_version as a backstop indicator; nothing GATES on it yet.
+    SCHEMA_VERSION = 1
+
+    # Maps a ledger name to the EXISTING idempotency signal that proves a
+    # one-time migration ran: ('table', <marker table>) or ('flag', <metadata
+    # key>). Used to back-fill the ledger for DBs created before it existed.
+    # The ledger is a non-gating backstop, so this can grow lazily — a missing
+    # entry just means that migration isn't surfaced in the ledger (harmless).
+    _KNOWN_MIGRATION_SIGNALS = {
+        'id_columns_to_text':       ('flag', 'id_columns_migrated'),
+        'genres_json':              ('flag', 'genres_json_normalized'),
+        'metadata_cache_v1':        ('flag', 'metadata_cache_v1'),
+        'repair_worker_v2':         ('flag', 'repair_worker_v2'),
+        'spotify_library_cache_v1': ('flag', 'spotify_library_cache_v1'),
+        'profiles_v1':              ('flag', 'profiles_migration_v1'),
+        'profiles_v2':              ('flag', 'profiles_migration_v2'),
+        'profiles_v3':              ('flag', 'profiles_migration_v3'),
+        'profiles_v4':              ('flag', 'profiles_migration_v4'),
+        'discovery_cache_v2':       ('table', '_discovery_cache_v2_migrated'),
+        'deezer_cache_v2':          ('table', '_deezer_cache_v2_migrated'),
+        'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
+        'genius_search_fix':        ('table', '_genius_search_fix_applied'),
+    }
+
+    def _record_migration(self, cursor, name):
+        """Record a one-time migration in the schema_migrations ledger.
+
+        Idempotent (INSERT OR IGNORE). New one-time migrations should call this
+        when they complete; the ledger is a non-gating backstop, so a failure to
+        record never affects correctness.
+        """
+        try:
+            cursor.execute(
+                "INSERT OR IGNORE INTO schema_migrations (name, applied_at) "
+                "VALUES (?, CURRENT_TIMESTAMP)", (name,)
+            )
+        except Exception as e:
+            logger.debug("Could not record migration %s in ledger: %s", name, e)
+
+    def _sync_migration_ledger(self, cursor):
+        """Back-fill the ledger from existing idempotency signals and stamp
+        PRAGMA user_version.
+
+        ADDITIVE + non-gating: this only RECORDS state that already exists (which
+        marker tables / metadata flags are present); it never decides whether a
+        migration runs. Safe to run on every startup.
+        """
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            for ledger_name, (kind, signal) in self._KNOWN_MIGRATION_SIGNALS.items():
+                if kind == 'table':
+                    present = signal in tables
+                else:  # 'flag' — a metadata row
+                    cursor.execute("SELECT 1 FROM metadata WHERE key = ? LIMIT 1", (signal,))
+                    present = cursor.fetchone() is not None
+                if present:
+                    self._record_migration(cursor, ledger_name)
+            # Backstop version stamp; nothing gates on it.
+            cursor.execute(f"PRAGMA user_version = {int(self.SCHEMA_VERSION)}")
+        except Exception as e:
+            logger.error(f"Error syncing migration ledger: {e}")
 
     def _normalize_genres_to_json(self, cursor):
         """One-time: rewrite legacy comma-separated genres to canonical JSON arrays.
@@ -850,6 +930,7 @@ class MusicDatabase:
                 "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
                 "VALUES ('genres_json_normalized', 'true', CURRENT_TIMESTAMP)"
             )
+            self._record_migration(cursor, 'genres_json')
             if total:
                 logger.info("Normalized %d legacy genres value(s) to JSON", total)
         except Exception as e:
