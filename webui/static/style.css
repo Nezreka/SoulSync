@@ -8059,6 +8059,30 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 8px 24px rgba(29, 185, 84, 0.4);
 }
 
+/* Amber "caution" color (e.g. bulk fix-all). */
+.btn--warning {
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.btn--warning:hover:not(:disabled) {
+    background: rgba(245, 158, 11, 0.22);
+    border-color: rgba(245, 158, 11, 0.45);
+}
+
+/* Compact toolbar size — the second button tier used in headers, bulk-action
+   rows and toolbars (smaller than the default large action button). Combine
+   with a color modifier, e.g. `.btn .btn--sm .btn--secondary`. */
+.btn--sm {
+    padding: 6px 14px;
+    font-size: 12px;
+    border-radius: 8px;
+    gap: 6px;
+}
+
+/* Full-width (form submit buttons, etc.). */
+.btn--block { width: 100%; }
+
 /* Shared loading state (JS toggles `.loading`). */
 .btn.loading {
     background: rgba(255, 193, 7, 0.9);
@@ -11298,12 +11322,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .sync-history-page-btn:hover:not(:disabled) { color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.1); }
 .sync-history-page-btn:disabled { opacity: 0.3; cursor: default; }
 .sync-history-page-info { font-size: 12px; color: rgba(255, 255, 255, 0.35); }
-.sync-history-btn {
-    font-size: 12px; font-weight: 500; color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px; padding: 5px 12px; cursor: pointer; transition: all 0.2s ease;
-}
-.sync-history-btn:hover { color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.1); border-color: rgba(var(--accent-rgb), 0.3); }
+/* .sync-history-btn styling migrated to .btn .btn--sm .btn--secondary.
+   The class is kept on the markup as a JS/onboarding selector hook, and
+   .auto-sync-manager-btn still tints the Auto-Sync button accent. */
 
 .auto-sync-manager-btn {
     color: rgb(var(--accent-light-rgb));
