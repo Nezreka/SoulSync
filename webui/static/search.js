@@ -288,7 +288,12 @@ function initializeSearchModeToggle() {
             const isClickOnSourceRow = e.target.closest('#enh-source-row');
             // Modal sits above the dropdown; closing it shouldn't dismiss results.
             const isClickInModal = e.target.closest('.download-missing-modal');
-            if (!isClickInside && !isClickOnSourceRow && !isClickInModal) {
+            // The media player (mini bar + expanded now-playing modal) floats
+            // above the page. Interacting with it — e.g. clicking the mini
+            // player to open the full modal, or anywhere inside that modal —
+            // must NOT dismiss the search results (#732).
+            const isClickInPlayer = e.target.closest('#media-player, #np-modal-overlay');
+            if (!isClickInside && !isClickOnSourceRow && !isClickInModal && !isClickInPlayer) {
                 hideDropdown();
             }
         }
