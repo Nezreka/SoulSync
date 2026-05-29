@@ -311,7 +311,7 @@
 
             <!-- Dashboard Page -->
             <div class="page" id="dashboard-page">
-                <div class="dashboard-container">
+                <div class="page-shell dashboard-container">
                     <div class="dashboard-header">
                         <div class="header-text">
                             <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>System Dashboard</span></h2>
@@ -976,6 +976,7 @@
 
             <!-- Main container for the Sync page -->
             <div class="page" id="sync-page">
+                <div class="page-shell">
                 <!-- Header -->
                 <div class="sync-header">
                     <div class="sync-header-row">
@@ -2059,6 +2060,7 @@
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Search Page -->
@@ -2280,7 +2282,7 @@
             <div class="page" id="automations-page">
                 <!-- List View -->
                 <div class="automations-list-view" id="automations-list-view">
-                    <div class="automations-container">
+                    <div class="page-shell automations-container">
                         <div class="dashboard-header">
                             <div class="header-text">
                                 <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
@@ -3632,7 +3634,7 @@
 
             <!-- Playlist Explorer Page -->
             <div class="page" id="playlist-explorer-page">
-                <div class="explorer-container">
+                <div class="page-shell explorer-container">
                     <!-- Header (compact) -->
                     <div class="dashboard-header" style="margin-bottom: 12px;">
                         <div class="header-text">
@@ -3735,6 +3737,7 @@
 
             <!-- Settings Page -->
             <div class="page" id="settings-page">
+                <div class="page-shell">
                 <div class="dashboard-header">
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
@@ -6200,6 +6203,7 @@
                         <button class="save-button" id="save-settings">Save Settings</button>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Hydrabase Page (Dev Mode Only) -->
@@ -6322,7 +6326,7 @@
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="tools-page">
-                <div class="tools-page-container">
+                <div class="page-shell tools-page-container">
                     <div class="tools-page-header">
                         <div class="tools-page-header-left">
                             <h2 class="tools-page-title">
@@ -6779,7 +6783,7 @@
                  WATCHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="watchlist-page">
-                <div class="watchlist-page-container">
+                <div class="page-shell watchlist-page-container">
                     <!-- Header -->
                     <div class="watchlist-page-header">
                         <div class="watchlist-page-header-left">
@@ -6895,7 +6899,7 @@
                  WISHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="wishlist-page">
-                <div class="wishlist-page-container">
+                <div class="page-shell wishlist-page-container">
                     <!-- Header -->
                     <div class="wishlist-page-header">
                         <div class="wishlist-page-header-left">
@@ -7288,15 +7292,15 @@
 
                 <div class="add-to-wishlist-modal-footer">
                     <div class="wishlist-modal-actions">
-                        <button class="wishlist-modal-btn wishlist-modal-btn-secondary"
+                        <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">
                             Close
                         </button>
-                        <button class="wishlist-modal-btn wishlist-modal-btn-download" id="wishlist-download-now-btn"
+                        <button class="btn btn--download" id="wishlist-download-now-btn"
                             onclick="handleWishlistDownloadNow()">
                             Download Now
                         </button>
-                        <button class="wishlist-modal-btn wishlist-modal-btn-primary" id="confirm-add-to-wishlist-btn">
+                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn">
                             Add to Wishlist
                         </button>
                     </div>
@@ -7465,11 +7469,11 @@
 
                 <div class="watchlist-artist-config-footer">
                     <div class="config-modal-actions">
-                        <button class="config-modal-btn config-modal-btn-secondary"
+                        <button class="btn btn--secondary"
                             onclick="closeWatchlistArtistConfigModal()">
                             Cancel
                         </button>
-                        <button class="config-modal-btn config-modal-btn-primary" id="save-artist-config-btn">
+                        <button class="btn btn--primary" id="save-artist-config-btn">
                             Save Preferences
                         </button>
                     </div>
@@ -7649,11 +7653,11 @@
 
             <div class="watchlist-artist-config-footer">
                 <div class="config-modal-actions">
-                    <button class="config-modal-btn config-modal-btn-secondary"
+                    <button class="btn btn--secondary"
                         onclick="closeWatchlistGlobalSettingsModal()">
                         Cancel
                     </button>
-                    <button class="config-modal-btn config-modal-btn-primary" id="save-global-config-btn"
+                    <button class="btn btn--primary" id="save-global-config-btn"
                         onclick="saveWatchlistGlobalConfig()">
                         Save Global Settings
                     </button>
