@@ -793,6 +793,7 @@ class MusicDatabase:
                 logger.error(f"Personalized-playlist schema init failed: {ps_err}")
 
             self._ensure_core_media_schema_columns(cursor)
+            self._normalize_genres_to_json(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -802,6 +803,57 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+
+    def _normalize_genres_to_json(self, cursor):
+        """One-time: rewrite legacy comma-separated genres to canonical JSON arrays.
+
+        ``artists.genres`` / ``albums.genres`` historically stored EITHER a JSON
+        array (new writes) OR a comma-separated string (old writes), so every
+        reader has to try-JSON-then-split. This normalizes existing rows to JSON
+        in place. It mirrors the readers' exact parse (JSON list, else
+        comma-split/strip/drop-empties), so the genre VALUES are unchanged — only
+        the storage format. Marker-gated to run once, and per-row diffed so a
+        re-run (or a row already in JSON form) is a no-op. Non-fatal on error,
+        like the other migrations.
+        """
+        import json
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'genres_json_normalized' LIMIT 1")
+            if cursor.fetchone():
+                return
+
+            def _to_list(raw):
+                # Identical semantics to the genres readers elsewhere in this file.
+                try:
+                    parsed = json.loads(raw)
+                    return parsed if isinstance(parsed, list) else [str(parsed)]
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    return [g.strip() for g in raw.split(',') if g.strip()]
+
+            total = 0
+            for table in ('artists', 'albums'):
+                cursor.execute(
+                    f"SELECT id, genres FROM {table} "
+                    f"WHERE genres IS NOT NULL AND TRIM(genres) != ''"
+                )
+                pending = []
+                for row in cursor.fetchall():
+                    rid, raw = row[0], row[1]
+                    canonical = json.dumps(_to_list(raw))
+                    if canonical != raw:  # leave already-canonical rows untouched
+                        pending.append((canonical, rid))
+                for canonical, rid in pending:
+                    cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (canonical, rid))
+                    total += 1
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                "VALUES ('genres_json_normalized', 'true', CURRENT_TIMESTAMP)"
+            )
+            if total:
+                logger.info("Normalized %d legacy genres value(s) to JSON", total)
+        except Exception as e:
+            logger.error(f"Error normalizing genres to JSON: {e}")
 
     def _ensure_core_media_schema_columns(self, cursor):
         """Repair required media-library columns that older migrations may miss.
