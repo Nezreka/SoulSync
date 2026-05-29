@@ -20748,35 +20748,7 @@ def get_tidal_playlist_state(playlist_id):
 @app.route('/api/tidal/reset/<playlist_id>', methods=['POST'])
 def reset_tidal_playlist(playlist_id):
     """Reset Tidal playlist to fresh phase (clear discovery/sync data)"""
-    try:
-        if playlist_id not in tidal_discovery_states:
-            return jsonify({"error": "Tidal playlist not found"}), 404
-        
-        state = tidal_discovery_states[playlist_id]
-        
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-        
-        # Reset state to fresh (preserve original playlist data)
-        state['phase'] = 'fresh'
-        state['status'] = 'fresh'
-        state['discovery_results'] = []
-        state['discovery_progress'] = 0
-        state['spotify_matches'] = 0
-        state['sync_playlist_id'] = None
-        state['converted_spotify_playlist_id'] = None
-        state['download_process_id'] = None
-        state['sync_progress'] = {}
-        state['discovery_future'] = None
-        state['last_accessed'] = time.time()
-        
-        logger.info(f"Reset Tidal playlist to fresh: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
-        
-    except Exception as e:
-        logger.error(f"Error resetting Tidal playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _reset_source_playlist(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
 
 @app.route('/api/tidal/delete/<playlist_id>', methods=['POST'])
 def delete_tidal_playlist(playlist_id):
@@ -21041,6 +21013,7 @@ from core.discovery.endpoints import (
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
     get_discovery_status as _get_discovery_status_core,
+    reset_playlist as _reset_playlist_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
@@ -21083,6 +21056,15 @@ def _get_source_discovery_status(states, key, not_found_message, error_label):
     """Thin glue for the per-source get_*_discovery_status routes."""
     body, code = _get_discovery_status_core(
         states, key, not_found_message=not_found_message, error_label=error_label,
+    )
+    return jsonify(body), code
+
+
+def _reset_source_playlist(states, key, label, not_found_message):
+    """Thin glue for the per-source reset routes that share the identical
+    reset body (Tidal/Deezer/Qobuz/Spotify-Public)."""
+    body, code = _reset_playlist_core(
+        states, key, label=label, not_found_message=not_found_message,
     )
     return jsonify(body), code
 
@@ -21588,35 +21570,7 @@ def get_deezer_playlist_state(playlist_id):
 @app.route('/api/deezer/reset/<playlist_id>', methods=['POST'])
 def reset_deezer_playlist(playlist_id):
     """Reset Deezer playlist to fresh phase (clear discovery/sync data)"""
-    try:
-        if playlist_id not in deezer_discovery_states:
-            return jsonify({"error": "Deezer playlist not found"}), 404
-
-        state = deezer_discovery_states[playlist_id]
-
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        # Reset state to fresh (preserve original playlist data)
-        state['phase'] = 'fresh'
-        state['status'] = 'fresh'
-        state['discovery_results'] = []
-        state['discovery_progress'] = 0
-        state['spotify_matches'] = 0
-        state['sync_playlist_id'] = None
-        state['converted_spotify_playlist_id'] = None
-        state['download_process_id'] = None
-        state['sync_progress'] = {}
-        state['discovery_future'] = None
-        state['last_accessed'] = time.time()
-
-        logger.info(f"Reset Deezer playlist to fresh: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
-
-    except Exception as e:
-        logger.error(f"Error resetting Deezer playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _reset_source_playlist(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
 
 @app.route('/api/deezer/delete/<playlist_id>', methods=['POST'])
 def delete_deezer_playlist(playlist_id):
@@ -22122,33 +22076,7 @@ def get_qobuz_playlist_state(playlist_id):
 @app.route('/api/qobuz/reset/<playlist_id>', methods=['POST'])
 def reset_qobuz_playlist(playlist_id):
     """Reset Qobuz playlist to fresh phase (clear discovery/sync data)."""
-    try:
-        if playlist_id not in qobuz_discovery_states:
-            return jsonify({"error": "Qobuz playlist not found"}), 404
-
-        state = qobuz_discovery_states[playlist_id]
-
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        state['phase'] = 'fresh'
-        state['status'] = 'fresh'
-        state['discovery_results'] = []
-        state['discovery_progress'] = 0
-        state['spotify_matches'] = 0
-        state['sync_playlist_id'] = None
-        state['converted_spotify_playlist_id'] = None
-        state['download_process_id'] = None
-        state['sync_progress'] = {}
-        state['discovery_future'] = None
-        state['last_accessed'] = time.time()
-
-        logger.info(f"Reset Qobuz playlist to fresh: {playlist_id}")
-        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
-
-    except Exception as e:
-        logger.error(f"Error resetting Qobuz playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _reset_source_playlist(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
 
 
 @app.route('/api/qobuz/delete/<playlist_id>', methods=['POST'])
@@ -22930,35 +22858,7 @@ def get_spotify_public_playlist_state(url_hash):
 @app.route('/api/spotify-public/reset/<url_hash>', methods=['POST'])
 def reset_spotify_public_playlist(url_hash):
     """Reset Spotify Public playlist to fresh phase (clear discovery/sync data)"""
-    try:
-        if url_hash not in spotify_public_discovery_states:
-            return jsonify({"error": "Spotify Public playlist not found"}), 404
-
-        state = spotify_public_discovery_states[url_hash]
-
-        # Stop any active discovery
-        if 'discovery_future' in state and state['discovery_future']:
-            state['discovery_future'].cancel()
-
-        # Reset state to fresh (preserve original playlist data)
-        state['phase'] = 'fresh'
-        state['status'] = 'fresh'
-        state['discovery_results'] = []
-        state['discovery_progress'] = 0
-        state['spotify_matches'] = 0
-        state['sync_playlist_id'] = None
-        state['converted_spotify_playlist_id'] = None
-        state['download_process_id'] = None
-        state['sync_progress'] = {}
-        state['discovery_future'] = None
-        state['last_accessed'] = time.time()
-
-        logger.info(f"Reset Spotify Public playlist to fresh: {url_hash}")
-        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
-
-    except Exception as e:
-        logger.error(f"Error resetting Spotify Public playlist: {e}")
-        return jsonify({"error": str(e)}), 500
+    return _reset_source_playlist(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
 
 @app.route('/api/spotify-public/delete/<url_hash>', methods=['POST'])
 def delete_spotify_public_playlist(url_hash):

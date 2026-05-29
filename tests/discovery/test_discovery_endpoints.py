@@ -445,3 +445,63 @@ def test_discovery_status_missing_field_raises_500():
     body, code = get_discovery_status(states, 'pl',
                                       not_found_message='nf', error_label='Beatport')
     assert code == 500 and "error" in body
+
+
+# ---------------------------------------------------------------------------
+# reset_playlist
+# ---------------------------------------------------------------------------
+
+def test_reset_not_found():
+    from core.discovery.endpoints import reset_playlist
+    body, code = reset_playlist({}, 'missing', label='Tidal',
+                                not_found_message='Tidal playlist not found')
+    assert code == 404 and body == {"error": "Tidal playlist not found"}
+
+
+def test_reset_clears_state_preserving_playlist_and_cancels_future():
+    from core.discovery.endpoints import reset_playlist
+    fut = _FakeFuture()
+    state = {
+        'playlist': {'name': 'keep me'},
+        'phase': 'discovered', 'status': 'done',
+        'discovery_results': [{'x': 1}], 'discovery_progress': 100,
+        'spotify_matches': 5, 'sync_playlist_id': 'sp', 'last_accessed': 0,
+        'converted_spotify_playlist_id': 'cv', 'download_process_id': 'dp',
+        'sync_progress': {'n': 1}, 'discovery_future': fut,
+    }
+    states = {'pl': state}
+    body, code = reset_playlist(states, 'pl', label='Tidal', not_found_message='nf')
+
+    assert code == 200
+    assert body == {"success": True, "message": "Playlist reset to fresh phase"}
+    assert fut.cancelled is True
+    # cleared
+    assert state['phase'] == 'fresh'
+    assert state['status'] == 'fresh'
+    assert state['discovery_results'] == []
+    assert state['discovery_progress'] == 0
+    assert state['spotify_matches'] == 0
+    assert state['sync_playlist_id'] is None
+    assert state['converted_spotify_playlist_id'] is None
+    assert state['download_process_id'] is None
+    assert state['sync_progress'] == {}
+    assert state['discovery_future'] is None
+    assert state['last_accessed'] != 0
+    # original playlist payload preserved
+    assert state['playlist'] == {'name': 'keep me'}
+
+
+def test_reset_without_discovery_future():
+    from core.discovery.endpoints import reset_playlist
+    state = {'phase': 'discovered'}  # no discovery_future key
+    body, code = reset_playlist({'pl': state}, 'pl', label='Deezer', not_found_message='nf')
+    assert code == 200
+    assert state['phase'] == 'fresh'
+
+
+def test_reset_exception_returns_500():
+    from core.discovery.endpoints import reset_playlist
+    fut = object()  # .cancel missing -> AttributeError in try
+    states = {'pl': {'discovery_future': fut}}
+    body, code = reset_playlist(states, 'pl', label='Qobuz', not_found_message='nf')
+    assert code == 500 and "error" in body
