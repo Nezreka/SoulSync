@@ -59728,65 +59728,10 @@ body.reduce-effects *::after {
     padding: 0 4px;
 }
 
-.watchlist-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 9px 18px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    white-space: nowrap;
-    letter-spacing: 0.1px;
-}
-
-.watchlist-action-primary {
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.85));
-    color: #fff;
-    border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.watchlist-action-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.3);
-    filter: brightness(1.1);
-}
-
-.watchlist-action-primary:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-.watchlist-action-secondary {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.7);
-    border-color: rgba(255, 255, 255, 0.08);
-}
-
-.watchlist-action-secondary:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: translateY(-1px);
-}
-
-.watchlist-action-danger {
-    background: rgba(239, 68, 68, 0.1);
-    color: #f87171;
-    border-color: rgba(239, 68, 68, 0.15);
-}
-
-.watchlist-action-danger:hover {
-    background: rgba(239, 68, 68, 0.18);
-    border-color: rgba(239, 68, 68, 0.25);
-    transform: translateY(-1px);
-}
+/* .watchlist-action-btn* migrated to the shared .btn / .btn--primary /
+   .btn--secondary / .btn--danger primitive (watchlist + wishlist headers).
+   The .watchlist-batch-remove-btn / .wishlist-batch-remove-btn hook classes
+   are kept on those buttons for their own overrides. */
 
 /* ── Scan status card ── */
 .watchlist-page-scan-status {

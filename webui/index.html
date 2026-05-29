@@ -6822,19 +6822,19 @@
 
                     <!-- Action buttons -->
                     <div class="watchlist-page-actions">
-                        <button class="watchlist-action-btn watchlist-action-primary" id="scan-watchlist-btn" onclick="startWatchlistScan()">
+                        <button class="btn btn--primary" id="scan-watchlist-btn" onclick="startWatchlistScan()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             Scan for New Releases
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
+                        <button class="btn btn--secondary" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             Cancel Scan
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
+                        <button class="btn btn--secondary" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Update Similar Artists
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
+                        <button class="btn btn--secondary" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             Global Settings
                         </button>
@@ -6874,7 +6874,7 @@
                             <span>Select All</span>
                         </label>
                         <span class="watchlist-batch-count" id="watchlist-batch-count"></span>
-                        <button class="watchlist-action-btn watchlist-action-secondary watchlist-batch-remove-btn" id="watchlist-batch-remove-btn" onclick="batchRemoveFromWatchlist()" style="display: none;">
+                        <button class="btn btn--secondary watchlist-batch-remove-btn" id="watchlist-batch-remove-btn" onclick="batchRemoveFromWatchlist()" style="display: none;">
                             Remove Selected
                         </button>
                     </div>
@@ -6891,7 +6891,7 @@
                         </div>
                         <h3>Your watchlist is empty</h3>
                         <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
-                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('search')">Open Search</button>
+                        <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
                     </div>
                 </div>
             </div>
@@ -6914,11 +6914,11 @@
                             </div>
                         </div>
                         <div class="wishlist-page-header-right">
-                            <button class="watchlist-action-btn watchlist-action-secondary" onclick="cleanupWishlistOverview()">
+                            <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
                                 Cleanup
                             </button>
-                            <button class="watchlist-action-btn watchlist-action-danger" onclick="clearEntireWishlist()">
+                            <button class="btn btn--danger" onclick="clearEntireWishlist()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
                                 Clear All
                             </button>
@@ -6948,7 +6948,7 @@
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
                             <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
-                            <button class="watchlist-action-btn watchlist-action-primary" onclick="_nebulaDownload()">
+                            <button class="btn btn--primary" onclick="_nebulaDownload()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Download Wishlist
                             </button>
@@ -6966,14 +6966,14 @@
                             <span id="wishlist-category-name" class="wishlist-category-name"></span>
                             <div class="wishlist-category-header-right">
                                 <button class="wishlist-select-all-btn" id="wishlist-select-all-btn" onclick="toggleWishlistSelectAll()">Select All</button>
-                                <button id="wishlist-download-btn" class="watchlist-action-btn watchlist-action-primary" style="display: none;" onclick="downloadSelectedCategory()">
+                                <button id="wishlist-download-btn" class="btn btn--primary" style="display: none;" onclick="downloadSelectedCategory()">
                                     Download Selection
                                 </button>
                             </div>
                         </div>
                         <div class="wishlist-batch-bar" id="wishlist-batch-bar" style="display: none;">
                             <span class="wishlist-batch-count" id="wishlist-batch-count">0 selected</span>
-                            <button class="watchlist-action-btn watchlist-action-secondary wishlist-batch-remove-btn" onclick="batchRemoveFromWishlist()">
+                            <button class="btn btn--secondary wishlist-batch-remove-btn" onclick="batchRemoveFromWishlist()">
                                 Remove Selected
                             </button>
                         </div>
