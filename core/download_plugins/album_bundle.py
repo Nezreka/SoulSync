@@ -202,6 +202,34 @@ def get_transient_miss_threshold() -> int:
     return DEFAULT_TRANSIENT_MISS_THRESHOLD
 
 
+# How long to keep polling after the client reports terminal success
+# but hasn't yet exposed a final save_path. Distinct from the
+# transient-miss threshold because the two model different things:
+# a transient miss is "the job vanished — fail fast (~10s) so a deleted
+# job doesn't hang"; a completed-no-path read is "the download SUCCEEDED
+# and the files are on disk — SAB just hasn't finished writing the
+# ``storage`` field." The #706 fix reused the 5-poll (~10s) miss window
+# here, but #721's own report shows SAB can take 2+ minutes (or, on some
+# versions, never expose ``storage`` at all) — so a 10s window false-fails
+# a download that actually completed. Expressed in SECONDS (converted to
+# a poll count against the live interval) so it's interval-independent.
+# Override via ``download_source.album_bundle_completed_no_path_seconds``.
+DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS = 120.0
+
+
+def get_completed_no_path_window_seconds() -> float:
+    """Return the completed-but-no-save_path tolerance window (seconds)."""
+    raw = config_manager.get('download_source.album_bundle_completed_no_path_seconds',
+                             DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS)
+    try:
+        value = float(raw)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
 class TransientMissCounter:
     """Bounded retry counter for adapter status reads.
 
@@ -237,6 +265,7 @@ def poll_album_download(
     failed_states: frozenset = frozenset(['failed']),
     is_shutdown: Optional[Callable[[], bool]] = None,
     transient_miss_threshold: int = DEFAULT_TRANSIENT_MISS_THRESHOLD,
+    completed_no_path_threshold: Optional[int] = None,
     poll_interval: Optional[float] = None,
     timeout: Optional[float] = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -270,16 +299,28 @@ def poll_album_download(
       'error' → poll infinite-looped until the 6-hour timeout.
     - ``transient_miss_threshold`` is the number of consecutive None /
       'error' reads tolerated before declaring the job gone. Sized for
-      the SAB queue→history gap window.
+      the SAB queue→history gap window (~10s) — a vanished job should
+      fail fast.
+    - ``completed_no_path_threshold`` is a SEPARATE, longer window for
+      the "client says complete but no save_path yet" case. The download
+      already succeeded, so this defaults to ~120s (configurable via
+      ``download_source.album_bundle_completed_no_path_seconds``) instead
+      of reusing the 10s miss window — #721 showed SAB can take 2+ minutes
+      to write ``storage``. When the window is exhausted the loop falls
+      back to the adapter's ``incomplete_path`` (the on-disk in-progress
+      dir) if present, and only emits terminal ``failed`` when there's no
+      path of any kind to scan.
 
-    Returns the adapter's reported save_path on terminal success, or
-    ``None`` on any failure (timeout / disappeared / explicit failed
-    / shutdown). On every failure path emits ``'failed'`` once with an
-    ``error`` field describing why.
+    Returns the adapter's reported save_path (or, as a last resort, its
+    ``incomplete_path``) on terminal success, or ``None`` on any failure
+    (timeout / disappeared / explicit failed / shutdown). On every
+    failure path emits ``'failed'`` once with an ``error`` field
+    describing why.
     """
     interval = poll_interval if poll_interval is not None else get_poll_interval()
     deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
     last_save_path: Optional[str] = None
+    last_incomplete_path: Optional[str] = None
     misses = TransientMissCounter(transient_miss_threshold)
     # Separate counter for "client reports terminal-success state but no
     # save_path field has landed yet." SAB History flips ``status`` to
@@ -290,15 +331,35 @@ def poll_album_download(
     # seconds because ``storage`` isn't populated yet. Pre-fix the
     # poll returned ``None`` on the first such read, the bundle
     # plugin marked the batch failed, but the UI still displayed the
-    # last ``downloading`` progress emit. Now we retry up to the
-    # same threshold so SAB has a window to write the path.
-    completed_no_path_misses = TransientMissCounter(transient_miss_threshold)
+    # last ``downloading`` progress emit.
+    #
+    # This window is intentionally LONGER than the transient-miss window:
+    # the download already SUCCEEDED, so being patient here is cheap and
+    # correct, whereas the original 5-poll (~10s) reuse false-failed real
+    # completions (#721 reported SAB taking 2+ minutes). Default ~120s,
+    # converted from seconds to a poll count against the live interval.
+    if completed_no_path_threshold is None:
+        completed_no_path_threshold = max(
+            transient_miss_threshold,
+            int(get_completed_no_path_window_seconds() / max(interval, 0.001)) or 1,
+        )
+    completed_no_path_misses = TransientMissCounter(completed_no_path_threshold)
 
     def _fail(reason: str) -> None:
         try:
             emit('failed', release=title, error=reason)
         except Exception as cb_exc:
             logger.debug("%s terminal emit failed: %s", log_prefix, cb_exc)
+
+    # Heartbeat so the otherwise-silent download loop is diagnosable.
+    # The loop emits progress to the UI on every poll but logs nothing
+    # during normal operation — which made the #721 "stuck at N%" reports
+    # impossible to triage from logs alone (we couldn't tell if the poll
+    # was alive, what state SAB returned, or whether it had wedged). Log
+    # the raw adapter read at most once per heartbeat interval.
+    HEARTBEAT_SECONDS = 30.0
+    last_heartbeat = monotonic()
+    poll_count = 0
 
     while monotonic() < deadline:
         if is_shutdown and is_shutdown():
@@ -311,6 +372,21 @@ def poll_album_download(
         except Exception as e:
             logger.warning("%s Poll error: %s", log_prefix, e)
             status = None
+
+        poll_count += 1
+        now = monotonic()
+        if now - last_heartbeat >= HEARTBEAT_SECONDS:
+            last_heartbeat = now
+            if status is None:
+                logger.info("%s '%s' poll #%d: client returned no status (miss %d/%d)",
+                            log_prefix, title, poll_count, misses.misses, misses.threshold)
+            else:
+                logger.info(
+                    "%s '%s' poll #%d: state=%r progress=%.2f save_path=%r",
+                    log_prefix, title, poll_count,
+                    getattr(status, 'state', None), getattr(status, 'progress', 0.0) or 0.0,
+                    getattr(status, 'save_path', None),
+                )
 
         if status is None:
             if misses.record_miss():
@@ -334,6 +410,12 @@ def poll_album_download(
              speed=status.download_speed)
         if status.save_path:
             last_save_path = status.save_path
+        # Remember the in-progress dir too — never used on a normal
+        # completion, only as the last-resort fallback below when the
+        # final save_path provably never lands.
+        incomplete_path = getattr(status, 'incomplete_path', None)
+        if incomplete_path:
+            last_incomplete_path = incomplete_path
 
         if status.state in complete_states:
             if last_save_path:
@@ -341,11 +423,27 @@ def poll_album_download(
                 return last_save_path
             # Terminal-success state but no save_path landed yet.
             # SAB History flips ``Completed`` a few seconds before
-            # ``storage`` is populated — give the adapter a few more
-            # polls before declaring this a hard failure. Without this
+            # ``storage`` is populated — give the adapter a generous
+            # window before declaring this a hard failure. Without this
             # tolerance, every TAR / unrar-bearing usenet release
             # would race the path-write window and randomly fail.
             if completed_no_path_misses.record_miss():
+                # Last resort before failing: SAB finished and the files
+                # are physically on disk (#721), but the final ``storage``
+                # field never landed. Fall back to the in-progress dir so
+                # the bundle can still scan + stage the audio, rather than
+                # leaving the user stuck with a completed-in-SAB download
+                # that SoulSync never imports.
+                if last_incomplete_path:
+                    logger.warning(
+                        "%s '%s' completed on the client but never exposed a final "
+                        "save_path after %d polls — falling back to the in-progress "
+                        "path %r as a last resort. If staging fails, the SAB job "
+                        "likely needs its post-process move to finish first.",
+                        log_prefix, title, completed_no_path_misses.misses,
+                        last_incomplete_path,
+                    )
+                    return last_incomplete_path
                 logger.error(
                     "%s '%s' reported terminal success but no save_path landed "
                     "after %d consecutive polls — bundle cannot stage. Adapter "
@@ -419,9 +517,11 @@ __all__ = [
     "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_POLL_TIMEOUT_SECONDS",
     "DEFAULT_TRANSIENT_MISS_THRESHOLD",
+    "DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS",
     "TransientMissCounter",
     "atomic_copy_to_staging",
     "copy_audio_files_atomically",
+    "get_completed_no_path_window_seconds",
     "get_poll_interval",
     "get_poll_timeout",
     "get_transient_miss_threshold",

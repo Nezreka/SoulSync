@@ -20,7 +20,6 @@ are passed via `StatusDeps` so the module is web_server-import-free.
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -32,8 +31,10 @@ from core.runtime_state import (
     download_tasks,
     tasks_lock,
 )
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Project logger factory so these lines reach app.log (soulsync.* namespace).
+logger = get_logger("downloads.status")
 
 
 def _schedule_completion_callback(deps, batch_id: str, task_id: str, success: bool) -> None:

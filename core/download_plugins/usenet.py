@@ -24,6 +24,7 @@ from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
+    get_completed_no_path_window_seconds,
     pick_best_album_release,
     poll_album_download,
 )
@@ -229,11 +230,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
 
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
+        last_incomplete_path: Optional[str] = None
         # Tolerate transient None / unmapped 'error' reads — SAB
         # removes a job from the queue before adding it to history,
         # and on busy servers that gap spans several polls. See
         # ``album_bundle.TransientMissCounter`` for the shared rule.
         misses = TransientMissCounter()
+        # Separate, LONGER window for "SAB says completed but hasn't
+        # written the final save_path yet" — the per-track sibling of the
+        # bundle fix (#721). Without this the thread called
+        # ``_finalize_download(None)`` on the first Completed-no-path read
+        # and errored a download that actually succeeded in SAB. Default
+        # ~120s, converted to a poll count against the live interval.
+        completed_no_path_misses = TransientMissCounter(
+            max(misses.threshold,
+                int(get_completed_no_path_window_seconds() / max(_POLL_INTERVAL_SECONDS, 0.001)) or 1)
+        )
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -267,10 +279,41 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     row['error'] = status.error
             if status.save_path:
                 last_save_path = status.save_path
+            incomplete_path = getattr(status, 'incomplete_path', None)
+            if incomplete_path:
+                last_incomplete_path = incomplete_path
 
             if status.state in _COMPLETE_STATES:
-                self._finalize_download(download_id, last_save_path)
-                return
+                if last_save_path:
+                    self._finalize_download(download_id, last_save_path)
+                    return
+                # Completed but no final save_path yet — SAB flips
+                # History to 'Completed' before writing ``storage``.
+                # Wait out the (longer) completed-no-path window rather
+                # than erroring a download that actually succeeded.
+                if completed_no_path_misses.record_miss():
+                    if last_incomplete_path:
+                        logger.warning(
+                            "Usenet %s: '%s' completed but no final save_path after "
+                            "%d polls — falling back to in-progress path %r",
+                            download_id[:8], job_id, completed_no_path_misses.misses,
+                            last_incomplete_path,
+                        )
+                        self._finalize_download(download_id, last_incomplete_path)
+                        return
+                    self._mark_error(
+                        download_id,
+                        "Usenet job completed but client never reported a save_path",
+                    )
+                    return
+                logger.info(
+                    "Usenet %s: '%s' completed on client but save_path not yet set — "
+                    "retrying (poll %d/%d)",
+                    download_id[:8], job_id,
+                    completed_no_path_misses.misses, completed_no_path_misses.threshold,
+                )
+                time.sleep(_POLL_INTERVAL_SECONDS)
+                continue
             if status.state == 'failed':
                 self._mark_error(download_id, status.error or "Usenet client reported failure")
                 return
