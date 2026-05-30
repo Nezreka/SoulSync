@@ -303,6 +303,8 @@ async function handlePlayPause() {
 }
 
 async function handleStop() {
+    // Tear down any in-flight crossfade so its second audio doesn't keep playing.
+    npCancelCrossfade();
     // Use new streaming system stop function
     await stopStream();
     clearTrack();
@@ -1206,6 +1208,11 @@ function onAudioEnded() {
         currentTimeElement.textContent = '0:00';
     }
 
+    // If a crossfade is mid-flight it OWNS the advance to the next track —
+    // bail so we don't double-advance (crossfade's npFinishCrossfade →
+    // playQueueItem already handles it).
+    if (npXfadeActive) return;
+
     // Repeat-one is handled by audioPlayer.loop (set in handleNpRepeat)
     // Auto-advance to next track if queue has a next item (guard against race conditions)
     if (npQueue.length > 0 && !npLoadingQueueItem) {
@@ -1833,6 +1840,21 @@ function npPunchUpColor(r, g, b) {
 const NP_CROSSFADE_SECONDS = 6;
 let npXfadeAudio = null;
 let npXfadeActive = false;
+let npXfadeTimer = null;
+let npXfadeMainVol = null;   // main-player volume to restore if a crossfade is aborted
+
+// Abort an in-flight crossfade (manual skip / stop during the fade). Restores
+// the main player's volume and tears down the second audio element. Safe to
+// call when no crossfade is active (no-op).
+function npCancelCrossfade() {
+    if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
+    if (npXfadeAudio) { try { npXfadeAudio.pause(); } catch (_) {} npXfadeAudio.src = ''; npXfadeAudio.volume = 0; npXfadeAudio = null; }
+    if (npXfadeActive && audioPlayer && npXfadeMainVol !== null) {
+        audioPlayer.volume = npXfadeMainVol; // undo any partial fade-down
+    }
+    npXfadeActive = false;
+    npXfadeMainVol = null;
+}
 
 function npCrossfadeTick() {
     if (!npCrossfadeOn || npXfadeActive || npRepeatMode === 'one') return;
@@ -1856,6 +1878,7 @@ function npStartCrossfade(nextIdx, next) {
     npXfadeAudio = xa;
 
     const targetVol = audioPlayer.volume; // fade the new track up to current level
+    npXfadeMainVol = targetVol;            // remember to restore on abort
     xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}&t=${Date.now()}`;
     xa.volume = 0;
     xa.play().then(() => {
@@ -1864,13 +1887,16 @@ function npStartCrossfade(nextIdx, next) {
         const steps = Math.max(1, Math.floor(fadeMs / step));
         let n = 0;
         const startOutVol = audioPlayer.volume;
-        const timer = setInterval(() => {
+        npXfadeTimer = setInterval(() => {
+            // A manual skip/stop may have cancelled us mid-fade.
+            if (!npXfadeActive) { clearInterval(npXfadeTimer); npXfadeTimer = null; return; }
             n++;
             const t = Math.min(1, n / steps);
             audioPlayer.volume = Math.max(0, startOutVol * (1 - t));
             xa.volume = Math.min(targetVol, targetVol * t);
             if (t >= 1) {
-                clearInterval(timer);
+                clearInterval(npXfadeTimer);
+                npXfadeTimer = null;
                 npFinishCrossfade(nextIdx, targetVol);
             }
         }, step);
@@ -1879,6 +1905,7 @@ function npStartCrossfade(nextIdx, next) {
         // the normal 'ended' hard-cut advance handle it.
         npXfadeActive = false;
         npXfadeAudio = null;
+        npXfadeMainVol = null;
     });
 }
 
@@ -1890,6 +1917,8 @@ function npFinishCrossfade(nextIdx, restoreVol) {
     if (xa) { try { xa.pause(); } catch (_) {} xa.src = ''; xa.volume = 0; }
     npXfadeAudio = null;
     npXfadeActive = false;
+    npXfadeMainVol = null;
+    if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
     if (audioPlayer) audioPlayer.volume = restoreVol;
     // playQueueItem re-points stream_state + reloads audioPlayer for the next
     // track; there's a brief silent reload, but the perceived crossfade already
@@ -2145,6 +2174,10 @@ function playPreviousInQueue() {
 async function playQueueItem(index) {
     if (index < 0 || index >= npQueue.length) return;
     if (npLoadingQueueItem) return; // Prevent race condition from double-advance
+    // Manual skip / row-click during a crossfade: tear down the stray fade so it
+    // can't fire npFinishCrossfade on top of this change. No-op for the
+    // legitimate handoff (npFinishCrossfade already cleared the flag first).
+    npCancelCrossfade();
     npLoadingQueueItem = true;
     npQueueIndex = index;
     const track = npQueue[index];

@@ -11787,6 +11787,7 @@ def library_radio():
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     """Start streaming a track in the background (per-listener session)."""
+    global stream_background_task
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No track data provided"}), 400
@@ -11816,7 +11817,6 @@ def stream_start():
         fut = stream_executor.submit(_prepare_stream_task, data, sess, sid)
         stream_tasks[sid] = fut
         if sid == _DEFAULT_STREAM_SESSION:
-            global stream_background_task
             stream_background_task = fut  # keep legacy alias in sync
 
         return jsonify({"success": True, "message": "Streaming started"})
