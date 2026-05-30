@@ -48664,6 +48664,18 @@ textarea.enhanced-meta-field-input {
     box-shadow: 0 30px 92px rgba(0,0,0,0.66), 0 12px 40px rgba(var(--accent-rgb),0.28) !important;
 }
 
+/* ── "Playing from" context label (above the title) ── */
+.np-play-context { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+.np-play-context.hidden { display: none; }
+.np-play-context-label {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255,255,255,0.32);
+}
+.np-play-context-name {
+    font-size: 12px; font-weight: 700; color: rgb(var(--accent-light-rgb));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+
 /* ── Track meta ── */
 .np-track-info { text-align: left !important; }
 .np-track-title { font-size: 28px !important; font-weight: 800 !important; letter-spacing: -0.02em !important; line-height: 1.1 !important; }
