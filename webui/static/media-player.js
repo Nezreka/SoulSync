@@ -1537,6 +1537,23 @@ function initExpandedPlayer() {
     npProgressBar.addEventListener('mousedown', () => { npProgressBar.dataset.seeking = 'true'; });
     npProgressBar.addEventListener('mouseup', () => { delete npProgressBar.dataset.seeking; });
 
+    // Seek hover tooltip — shows the timestamp the cursor is over.
+    const npSeekTip = document.getElementById('np-seek-tip');
+    if (npSeekTip) {
+        npProgressBar.addEventListener('mousemove', (e) => {
+            if (!audioPlayer || !isFinite(audioPlayer.duration) || audioPlayer.duration <= 0) {
+                npSeekTip.classList.remove('visible');
+                return;
+            }
+            const rect = npProgressBar.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            npSeekTip.textContent = formatTime(frac * audioPlayer.duration);
+            npSeekTip.style.left = (frac * 100) + '%';
+            npSeekTip.classList.add('visible');
+        });
+        npProgressBar.addEventListener('mouseleave', () => npSeekTip.classList.remove('visible'));
+    }
+
     // Progress bar (touch)
     npProgressBar.addEventListener('touchstart', () => { npProgressBar.dataset.seeking = 'true'; }, { passive: true });
     npProgressBar.addEventListener('touchmove', (e) => {

@@ -48705,6 +48705,16 @@ textarea.enhanced-meta-field-input {
 .np-progress-bar-container:hover .np-progress-fill { box-shadow: 0 0 12px rgba(var(--accent-rgb),0.6) !important; }
 .np-time-display { font-variant-numeric: tabular-nums !important; }
 
+/* Seek hover tooltip — timestamp under the cursor on the progress bar. */
+.np-progress-bar-container { position: relative; }
+.np-seek-tip {
+    position: absolute; bottom: 150%; transform: translateX(-50%);
+    background: #000; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums;
+    padding: 3px 7px; border-radius: 6px; white-space: nowrap; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 5;
+}
+.np-seek-tip.visible { opacity: 1; }
+
 /* ── Transport: dominant gradient play button ── */
 .np-controls-row { gap: 24px !important; }
 .np-btn {
