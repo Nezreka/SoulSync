@@ -12796,19 +12796,24 @@ class MusicDatabase:
                 seed = dict(seed)
                 artist_name = seed['artist_name']
 
-                # Build the set of IDs to exclude (seed + caller-supplied)
-                excluded = {str(track_id)}
+                # Selection decisions (dedup, caps, tag parsing, condition
+                # building) live in core.radio.selection so they're unit-
+                # testable without a live DB. The cursor work stays here.
+                from core.radio.selection import (
+                    RadioCollector,
+                    build_like_conditions,
+                    merge_tags,
+                    parse_tags,
+                    same_artist_cap,
+                )
+
+                # Seed + caller-supplied IDs to exclude (seeds the collector's
+                # seen-set so excluded tracks never collect and the NOT IN
+                # placeholders/values stay in sync).
+                exclude_seed = [str(track_id)]
                 if exclude_ids:
-                    excluded.update(str(eid) for eid in exclude_ids)
-
-                collected: list[dict] = []
-                seen_ids: set[str] = set(excluded)
-
-                def _exclude_placeholders():
-                    return ','.join('?' * len(seen_ids))
-
-                def _exclude_values():
-                    return list(seen_ids)
+                    exclude_seed.extend(str(eid) for eid in exclude_ids)
+                collector = RadioCollector(limit, exclude_ids=exclude_seed)
 
                 _track_select = """
                     SELECT t.id, t.title, t.track_number, t.duration,
@@ -12824,98 +12829,71 @@ class MusicDatabase:
                 # Only return tracks that have actual files on disk
                 _file_filter = "t.file_path IS NOT NULL AND t.file_path != ''"
 
-                def _collect(rows, cap=None):
-                    """Append rows to collected. Stop at cap or limit."""
-                    target = min(limit, (len(collected) + cap)) if cap else limit
-                    for row in rows:
-                        r = dict(row)
-                        rid = str(r['id'])
-                        if rid not in seen_ids:
-                            seen_ids.add(rid)
-                            collected.append(r)
-                            if len(collected) >= target:
-                                return True
-                    return len(collected) >= limit
-
-                def _parse_tags(raw_val):
-                    """Parse a JSON array or comma-separated string into a list."""
-                    if not raw_val:
-                        return []
-                    try:
-                        parsed = json.loads(raw_val)
-                        return parsed if isinstance(parsed, list) else [str(parsed)]
-                    except (json.JSONDecodeError, ValueError):
-                        return [t.strip() for t in raw_val.split(',') if t.strip()]
-
                 # --- 1. Same artist, different albums (capped at 30% of limit) ---
-                same_artist_cap = max(5, limit * 3 // 10)
+                artist_cap = same_artist_cap(limit)
                 cursor.execute(f"""
                     {_track_select}
-                    WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({_exclude_placeholders()})
+                    WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({collector.exclude_placeholders()})
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, [artist_name, seed['album_id']] + _exclude_values() + [same_artist_cap])
-                _collect(cursor.fetchall(), cap=same_artist_cap)
+                """, [artist_name, seed['album_id']] + collector.exclude_values() + [artist_cap])
+                collector.collect(cursor.fetchall(), cap=artist_cap)
 
-                if len(collected) >= limit:
-                    return {'success': True, 'tracks': collected}
+                if collector.filled:
+                    return {'success': True, 'tracks': collector.tracks}
 
                 # --- 2. Same genre (album genres + artist genres, other artists) ---
-                genre_list = _parse_tags(seed.get('album_genres'))
-                artist_genre_list = _parse_tags(seed.get('artist_genres'))
-                all_genres = list(dict.fromkeys(genre_list + artist_genre_list))  # dedupe, preserve order
-
-                if all_genres:
-                    genre_conditions = ' OR '.join(
-                        ['al.genres LIKE ?' for _ in all_genres] +
-                        ['ar.genres LIKE ?' for _ in all_genres]
-                    )
-                    genre_params = [f'%{g}%' for g in all_genres] * 2
+                all_genres = merge_tags(
+                    parse_tags(seed.get('album_genres')),
+                    parse_tags(seed.get('artist_genres')),
+                )
+                genre_conditions, genre_params = build_like_conditions(
+                    all_genres, ('al.genres', 'ar.genres')
+                )
+                if genre_conditions:
                     cursor.execute(f"""
                         {_track_select}
                         WHERE {_file_filter} AND ({genre_conditions})
                           AND ar.name != ?
-                          AND t.id NOT IN ({_exclude_placeholders()})
+                          AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, genre_params + [artist_name] + _exclude_values() + [limit - len(collected)])
-                    if _collect(cursor.fetchall()):
-                        return {'success': True, 'tracks': collected}
+                    """, genre_params + [artist_name] + collector.exclude_values() + [collector.remaining()])
+                    if collector.collect(cursor.fetchall()):
+                        return {'success': True, 'tracks': collector.tracks}
 
                 # --- 3. Same mood / style (album + artist level) ---
                 for field_name in ('mood', 'style'):
-                    album_tags = _parse_tags(seed.get(f'album_{field_name}'))
-                    artist_tags = _parse_tags(seed.get(f'artist_{field_name}'))
-                    all_tags = list(dict.fromkeys(album_tags + artist_tags))
-
-                    if all_tags:
-                        tag_conditions = ' OR '.join(
-                            [f'al.{field_name} LIKE ?' for _ in all_tags] +
-                            [f'ar.{field_name} LIKE ?' for _ in all_tags]
-                        )
-                        tag_params = [f'%{t}%' for t in all_tags] * 2
+                    all_tags = merge_tags(
+                        parse_tags(seed.get(f'album_{field_name}')),
+                        parse_tags(seed.get(f'artist_{field_name}')),
+                    )
+                    tag_conditions, tag_params = build_like_conditions(
+                        all_tags, (f'al.{field_name}', f'ar.{field_name}')
+                    )
+                    if tag_conditions:
                         cursor.execute(f"""
                             {_track_select}
                             WHERE {_file_filter} AND ({tag_conditions})
                               AND ar.name != ?
-                              AND t.id NOT IN ({_exclude_placeholders()})
+                              AND t.id NOT IN ({collector.exclude_placeholders()})
                             ORDER BY RANDOM()
                             LIMIT ?
-                        """, tag_params + [artist_name] + _exclude_values() + [limit - len(collected)])
-                        if _collect(cursor.fetchall()):
-                            return {'success': True, 'tracks': collected}
+                        """, tag_params + [artist_name] + collector.exclude_values() + [collector.remaining()])
+                        if collector.collect(cursor.fetchall()):
+                            return {'success': True, 'tracks': collector.tracks}
 
                 # --- 4. Random library tracks ---
-                if len(collected) < limit:
+                if not collector.filled:
                     cursor.execute(f"""
                         {_track_select}
-                        WHERE {_file_filter} AND t.id NOT IN ({_exclude_placeholders()})
+                        WHERE {_file_filter} AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, _exclude_values() + [limit - len(collected)])
-                    _collect(cursor.fetchall())
+                    """, collector.exclude_values() + [collector.remaining()])
+                    collector.collect(cursor.fetchall())
 
-                return {'success': True, 'tracks': collected}
+                return {'success': True, 'tracks': collector.tracks}
 
         except Exception as e:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")
