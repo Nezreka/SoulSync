@@ -4740,9 +4740,12 @@ async function playArtistRadio() {
             audioPlayer.pause();
         }
 
-        // Play the track first, then enable radio mode after a short delay
-        // so currentTrack is set and the radio queue fill triggers
-        playLibraryTrack({
+        // Play the track and WAIT for it to resolve (playLibraryTrack is async
+        // and fetches the canonical DB row before setting currentTrack) — so
+        // currentTrack.id is reliably set before we fetch the radio queue. A
+        // fixed setTimeout raced this and often fired before the id existed,
+        // leaving the queue empty until the song ended.
+        await playLibraryTrack({
             id: random.track.id,
             title: random.track.title,
             file_path: random.track.file_path,
@@ -4751,12 +4754,14 @@ async function playArtistRadio() {
             album_id: random.album.id,
         }, random.album.title || '', artistName);
 
-        // Enable radio mode after track starts loading
-        setTimeout(() => {
+        // Enable radio mode + immediately seed the queue with similar tracks —
+        // same path the modal's Radio button uses (fetchIfNeeded also adds the
+        // current track to the queue first).
+        if (typeof npSetRadioMode === 'function') {
+            npSetRadioMode(true, { toast: false, fetchIfNeeded: true });
+        } else {
             npRadioMode = true;
-            const radioBtn = document.querySelector('.np-radio-btn');
-            if (radioBtn) radioBtn.classList.add('active');
-        }, 1000);
+        }
 
         showToast(`Playing ${artistName} radio — similar tracks will auto-queue`, 'success');
     } catch (e) {
