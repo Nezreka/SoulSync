@@ -693,6 +693,48 @@ body {
     cursor: not-allowed;
 }
 
+/* Mini shuffle / repeat toggle buttons (parity with the modal). Smaller than
+   nav buttons; accent when active; repeat-one shows a tiny badge. */
+.mini-toggle-btn {
+    position: relative;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.38);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.18s ease, background 0.18s ease;
+    padding: 0;
+    flex-shrink: 0;
+}
+.mini-toggle-btn:hover {
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.08);
+}
+.mini-toggle-btn.active {
+    color: rgb(var(--accent-light-rgb));
+}
+.mini-repeat-one {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1;
+    background: rgb(var(--accent-light-rgb));
+    color: #06140b;
+    border-radius: 50%;
+    width: 10px;
+    height: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 /* Controls cluster in the mini player */
 .mini-player-controls {
     display: flex;

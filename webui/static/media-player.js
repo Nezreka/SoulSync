@@ -61,6 +61,12 @@ function initializeMediaPlayer() {
     if (miniPrevBtn) miniPrevBtn.addEventListener('click', (e) => { e.stopPropagation(); playPreviousInQueue(); });
     if (miniNextBtn) miniNextBtn.addEventListener('click', (e) => { e.stopPropagation(); playNextInQueue(); });
 
+    // Mini shuffle / repeat — share the modal handlers (which now sync both UIs)
+    const miniShuffleBtn = document.getElementById('mini-shuffle-btn');
+    const miniRepeatBtn = document.getElementById('mini-repeat-btn');
+    if (miniShuffleBtn) miniShuffleBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpShuffle(); });
+    if (miniRepeatBtn) miniRepeatBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpRepeat(); });
+
     // Restore a previously-saved queue (does not auto-play)
     npRestoreQueue();
 }
@@ -2064,15 +2070,32 @@ function updateNpMuteIcon() {
     if (muteBtn) muteBtn.classList.toggle('muted', npMuted);
 }
 
+// Reflect shuffle/repeat state on BOTH the modal and mini-player buttons.
+function syncShuffleRepeatUI() {
+    const npShuffle = document.getElementById('np-shuffle-btn');
+    const miniShuffle = document.getElementById('mini-shuffle-btn');
+    if (npShuffle) npShuffle.classList.toggle('active', npShuffleOn);
+    if (miniShuffle) miniShuffle.classList.toggle('active', npShuffleOn);
+
+    const repeatOn = npRepeatMode !== 'off';
+    const repeatOne = npRepeatMode === 'one';
+    const npRepeat = document.getElementById('np-repeat-btn');
+    const miniRepeat = document.getElementById('mini-repeat-btn');
+    if (npRepeat) npRepeat.classList.toggle('active', repeatOn);
+    if (miniRepeat) miniRepeat.classList.toggle('active', repeatOn);
+    const npBadge = document.getElementById('np-repeat-one-badge');
+    const miniBadge = document.getElementById('mini-repeat-one-badge');
+    if (npBadge) npBadge.classList.toggle('hidden', !repeatOne);
+    if (miniBadge) miniBadge.style.display = repeatOne ? '' : 'none';
+}
+
 function handleNpShuffle() {
     npShuffleOn = !npShuffleOn;
-    const btn = document.getElementById('np-shuffle-btn');
-    if (btn) btn.classList.toggle('active', npShuffleOn);
+    syncShuffleRepeatUI();
     updateNpPrevNextButtons();
 }
 
 function handleNpRepeat() {
-    const badge = document.getElementById('np-repeat-one-badge');
     if (npRepeatMode === 'off') {
         npRepeatMode = 'all';
         if (audioPlayer) audioPlayer.loop = false;
@@ -2083,9 +2106,7 @@ function handleNpRepeat() {
         npRepeatMode = 'off';
         if (audioPlayer) audioPlayer.loop = false;
     }
-    const btn = document.getElementById('np-repeat-btn');
-    if (btn) btn.classList.toggle('active', npRepeatMode !== 'off');
-    if (badge) badge.classList.toggle('hidden', npRepeatMode !== 'one');
+    syncShuffleRepeatUI();
     updateNpPrevNextButtons();
 }
 
