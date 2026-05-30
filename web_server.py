@@ -15155,6 +15155,7 @@ def start_wishlist_missing_downloads():
             download_batches=download_batches,
             tasks_lock=tasks_lock,
             missing_download_executor=missing_download_executor,
+            album_bundle_executor=album_bundle_executor,
             run_full_missing_tracks_process=_run_full_missing_tracks_process,
             get_batch_max_concurrent=_get_batch_max_concurrent,
             add_activity_item=add_activity_item,

@@ -110,6 +110,17 @@ def _run_submitted_bg_job(executor):
     fn(*args, **kwargs)
 
 
+def _dispatched(executor, runtime):
+    """The run_full_missing_tracks_process dispatches the shared engine submitted
+    to the executor (everything after the initial bg-job submission). Manual now
+    parallel-dispatches via the engine instead of running them serially inline,
+    so the master worker is *submitted*, not called directly."""
+    return [
+        s for s in executor.submissions
+        if s[0] is runtime.run_full_missing_tracks_process
+    ]
+
+
 def test_start_manual_wishlist_download_batch_returns_immediately_with_placeholder():
     """Endpoint returns 200 immediately; cleanup runs in the bg job."""
     runtime, service, _db, executor, _logger, activity_calls, batch_map, master_calls = _build_runtime(
@@ -174,11 +185,15 @@ def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch
     _run_submitted_bg_job(executor)
 
     assert activity_calls == [("", "Wishlist Download Started", "1 tracks", "Now")]
-    assert len(master_calls) == 1
-    master_args, _ = master_calls[0]
-    assert master_args[1] == "wishlist"
-    assert master_args[2][0]["id"] == "track-2"
-    assert master_args[2][0]["_original_index"] == 0
+    # One track → no album group (threshold 2) → one residual batch, dispatched
+    # via the shared engine (submitted to the executor, not called inline).
+    dispatched = _dispatched(executor, runtime)
+    assert len(dispatched) == 1
+    args = dispatched[0][1]
+    assert args[1] == "wishlist"
+    assert args[2][0]["id"] == "track-2"
+    assert args[2][0]["_original_index"] == 0
+    assert args[0] == payload["batch_id"]  # placeholder batch_id reused as first sub-batch
     assert batch_map[payload["batch_id"]]["analysis_total"] == 1
     assert batch_map[payload["batch_id"]]["force_download_all"] is True
     assert any("Filtered to 1 specific tracks by ID" in msg for msg in logger.info_messages)
@@ -224,10 +239,12 @@ def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():
     # The library check is skipped entirely — no per-track DB lookups.
     assert db.track_checks == []
 
-    # All tracks are submitted to the master worker — including the "owned" one.
-    assert len(master_calls) == 1
-    master_args, _ = master_calls[0]
-    assert [track["id"] for track in master_args[2]] == ["enhance-1", "owned-1"]
+    # All tracks are dispatched to the master worker — including the "owned" one.
+    # Two single-track albums → no album groups → one residual batch of both.
+    dispatched = _dispatched(executor, runtime)
+    assert len(dispatched) == 1
+    args = dispatched[0][1]
+    assert [track["id"] for track in args[2]] == ["enhance-1", "owned-1"]
     assert batch_map[payload["batch_id"]]["analysis_total"] == 2
     assert activity_calls == [("", "Wishlist Download Started", "2 tracks", "Now")]
 
@@ -293,28 +310,33 @@ def test_manual_wishlist_splits_into_per_album_sub_batches():
     assert status == 200
     _run_submitted_bg_job(executor)
 
-    # Two album groups → two master-worker calls.
-    assert len(master_calls) == 2
+    # Two album groups → two album sub-batches, PARALLEL-dispatched via the shared
+    # engine (same as auto) — not serial inline calls.
+    dispatched = _dispatched(executor, runtime)
+    assert len(dispatched) == 2
+    assert master_calls == []  # nothing run synchronously inline anymore
 
-    # First sub-batch uses the caller-allocated batch_id.
-    first_args, _ = master_calls[0]
+    # First sub-batch reuses the caller-allocated placeholder batch_id.
+    first_args = dispatched[0][1]
     assert first_args[0] == payload["batch_id"]
     assert batch_map[payload["batch_id"]].get("is_album_download") is True
+    # Both dispatched batches are album bundles.
+    for _fn, args, _kw in dispatched:
+        assert batch_map[args[0]].get("is_album_download") is True
 
     # Second sub-batch gets a fresh uuid; its row exists in batch_map.
-    second_args, _ = master_calls[1]
+    second_args = dispatched[1][1]
     assert second_args[0] != payload["batch_id"]
     assert second_args[0] in batch_map
-    assert batch_map[second_args[0]].get("is_album_download") is True
 
     # Track counts across the two sub-batches: 2 each at threshold=2.
-    counts = sorted(len(args[2]) for args, _ in master_calls)
+    counts = sorted(len(args[2]) for _fn, args, _kw in dispatched)
     assert counts == [2, 2]
 
     # Both sub-batches carry album context populated from spotify_data.
     album_names = {
         batch_map[args[0]]["album_context"]["name"]
-        for args, _ in master_calls
+        for _fn, args, _kw in dispatched
     }
     assert album_names == {"Album One", "Album Two"}
 
