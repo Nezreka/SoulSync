@@ -1700,6 +1700,22 @@ class SoulseekClient(DownloadSourcePlugin):
         # Seconds an "slskd Completed but locally unresolved" key
         # has to stay stuck before we give up on it.
         _unresolved_grace = 45.0
+        # Bundle-level stall guard. The #715 grace above only covers
+        # "slskd says Completed but the file isn't on disk yet". It does NOT
+        # cover a transfer the peer stalls on — stuck InProgress / Queued, or
+        # dropped by slskd entirely — which is never failed, never completed,
+        # and never marked unresolved, so it blocks BOTH the all-terminal
+        # finish check AND the grace exit, and the poll spun to the full
+        # ``get_poll_timeout()`` deadline (the Slipknot hang). If NOTHING
+        # progresses — no transfer completes/fails and no pending transfer's
+        # byte count moves — for this long, the folder has stalled: mark the
+        # stuck transfers failed so the bundle resolves with whatever
+        # completed (the per-track matcher then handles the missing tracks).
+        # Conservative on purpose: only trips when EVERYTHING is frozen, so a
+        # slow-but-progressing or still-queued-then-starting transfer is safe.
+        _stall_grace = 180.0
+        _last_progress_marker = None
+        _last_progress_at = time.monotonic()
         while time.monotonic() < deadline:
             try:
                 downloads = run_async(self.get_all_downloads())
@@ -1755,6 +1771,40 @@ class SoulseekClient(DownloadSourcePlugin):
                 count=len(completed_paths),
                 failed=len(failed_states),
             )
+
+            # Bundle-level stall detection (see ``_stall_grace`` above). Advance
+            # the progress marker on ANY forward motion — a transfer reaching a
+            # terminal state, or a still-pending transfer downloading more bytes.
+            # If the marker is frozen for ``_stall_grace``, the peer has stalled;
+            # mark the stuck transfers failed so the finish/all-failed checks
+            # below resolve the bundle instead of spinning to the deadline.
+            now = time.monotonic()
+            stall_pending = [
+                k for k in transfer_keys
+                if k not in completed_paths and k not in failed_states
+            ]
+            pending_bytes = 0
+            for k in stall_pending:
+                dl = by_key.get(k) or by_key.get((
+                    k[0], os.path.basename((k[1] or '').replace('\\', '/')),
+                ))
+                pending_bytes += (getattr(dl, 'transferred', 0) or 0) if dl else 0
+            marker = (len(completed_paths) + len(failed_states), pending_bytes)
+            if marker != _last_progress_marker:
+                _last_progress_marker = marker
+                _last_progress_at = now
+            elif stall_pending and (now - _last_progress_at) >= _stall_grace:
+                logger.warning(
+                    "[Soulseek album] No progress for %.0fs — peer stalled on %d "
+                    "transfer(s) (stuck / queued / dropped). Marking them failed and "
+                    "resolving with what completed; missing tracks fall back to "
+                    "per-track. Stalled: %s",
+                    _stall_grace, len(stall_pending),
+                    [transfer_keys[k].filename for k in stall_pending[:5]],
+                )
+                for k in stall_pending:
+                    failed_states[k] = 'Stalled'
+
             if completed_paths and len(completed_paths) + len(failed_states) == len(transfer_keys):
                 logger.warning(
                     "[Soulseek album] Selected folder finished with %d completed and %d failed transfer(s)",
