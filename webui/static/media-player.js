@@ -1735,29 +1735,69 @@ function npExtractAmbientColor(imgEl) {
     try {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = 50;
-        canvas.height = 50;
-        ctx.drawImage(imgEl, 0, 0, 50, 50);
-        const data = ctx.getImageData(0, 0, 50, 50).data;
-        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+        canvas.width = 64;
+        canvas.height = 64;
+        ctx.drawImage(imgEl, 0, 0, 64, 64);
+        const data = ctx.getImageData(0, 0, 64, 64).data;
+
+        // Dominant VIBRANT color, not a flat average (averaging muddies to
+        // grey-brown). Bin colors into a coarse 4-bit-per-channel histogram,
+        // weight each bin by saturation² × pixel-count so a punchy accent in
+        // the cover wins over a large dull background. Apple-Music-style.
+        const bins = new Map();
         for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel
-            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+            if (a < 128) continue;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
             const brightness = (r + g + b) / 3;
-            if (brightness > 20 && brightness < 230) {
-                rSum += r; gSum += g; bSum += b; count++;
-            }
+            if (brightness < 24 || brightness > 240) continue; // skip near-black/white
+            const sat = max === 0 ? 0 : (max - min) / max; // 0..1
+            const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+            const weight = (0.15 + sat * sat) ; // floor so greys still count a little
+            const bin = bins.get(key);
+            if (bin) { bin.r += r; bin.g += g; bin.b += b; bin.n++; bin.w += weight; }
+            else bins.set(key, { r, g, b, n: 1, w: weight });
         }
-        if (count > 0) {
+        let best = null, bestScore = -1;
+        for (const bin of bins.values()) {
+            const score = bin.w; // saturation-weighted population
+            if (score > bestScore) { bestScore = score; best = bin; }
+        }
+        if (best) {
+            let r = Math.round(best.r / best.n);
+            let g = Math.round(best.g / best.n);
+            let b = Math.round(best.b / best.n);
+            // Nudge toward vivid: lift saturation/brightness a touch so the
+            // glow reads as a color, not a wash.
+            [r, g, b] = npPunchUpColor(r, g, b);
             const modal = document.querySelector('.np-modal');
             if (modal) {
-                modal.style.setProperty('--np-ambient-r', Math.round(rSum / count));
-                modal.style.setProperty('--np-ambient-g', Math.round(gSum / count));
-                modal.style.setProperty('--np-ambient-b', Math.round(bSum / count));
+                modal.style.setProperty('--np-ambient-r', r);
+                modal.style.setProperty('--np-ambient-g', g);
+                modal.style.setProperty('--np-ambient-b', b);
             }
         }
     } catch (e) {
         // Cross-origin or canvas error — ignore silently
     }
+}
+
+// Lift a color toward vividness for the ambient glow (boost saturation,
+// floor brightness) without fully desaturating dark/pastel covers.
+function npPunchUpColor(r, g, b) {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    if (max === min) return [r, g, b]; // grey — leave it
+    // Pull each channel away from the mid to boost perceived saturation ~1.3x.
+    const mid = (max + min) / 2;
+    const boost = 1.3;
+    let nr = Math.round(mid + (r - mid) * boost);
+    let ng = Math.round(mid + (g - mid) * boost);
+    let nb = Math.round(mid + (b - mid) * boost);
+    // Floor overall brightness so very dark covers still glow.
+    const bright = (nr + ng + nb) / 3;
+    if (bright < 70) { const lift = 70 / Math.max(bright, 1); nr *= lift; ng *= lift; nb *= lift; }
+    const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+    return [clamp(nr), clamp(ng), clamp(nb)];
 }
 
 function npResetAmbientGlow() {
@@ -2103,6 +2143,14 @@ function renderNpQueue() {
         item.className = 'np-queue-item' + (i === npQueueIndex ? ' active' : '');
         item.onclick = () => playQueueItem(i);
 
+        // Drag-to-reorder
+        item.draggable = true;
+        item.dataset.qindex = i;
+        item.addEventListener('dragstart', npQueueDragStart);
+        item.addEventListener('dragover', npQueueDragOver);
+        item.addEventListener('drop', npQueueDrop);
+        item.addEventListener('dragend', npQueueDragEnd);
+
         // Album thumbnail
         const art = document.createElement('img');
         art.className = 'np-queue-item-art';
@@ -2157,6 +2205,56 @@ function renderNpQueue() {
     });
 
     npUpdateUpNext();
+}
+
+// ── Queue drag-to-reorder ──
+let npDragFromIndex = null;
+
+function npQueueDragStart(e) {
+    npDragFromIndex = Number(e.currentTarget.dataset.qindex);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox requires data to be set for drag to fire.
+    try { e.dataTransfer.setData('text/plain', String(npDragFromIndex)); } catch (_) {}
+}
+
+function npQueueDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.currentTarget;
+    document.querySelectorAll('.np-queue-item.drag-over').forEach(r => r.classList.remove('drag-over'));
+    row.classList.add('drag-over');
+}
+
+function npQueueDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const to = Number(e.currentTarget.dataset.qindex);
+    npReorderQueue(npDragFromIndex, to);
+}
+
+function npQueueDragEnd() {
+    document.querySelectorAll('.np-queue-item').forEach(r => r.classList.remove('dragging', 'drag-over'));
+    npDragFromIndex = null;
+}
+
+// Move a queue item, keeping npQueueIndex pointed at the SAME playing track.
+function npReorderQueue(from, to) {
+    if (from === null || from === to || from < 0 || to < 0) return;
+    if (from >= npQueue.length || to >= npQueue.length) return;
+    const [moved] = npQueue.splice(from, 1);
+    npQueue.splice(to, 0, moved);
+
+    // Recompute which index now holds the currently-playing track.
+    if (npQueueIndex === from) {
+        npQueueIndex = to;
+    } else if (from < npQueueIndex && to >= npQueueIndex) {
+        npQueueIndex -= 1;
+    } else if (from > npQueueIndex && to <= npQueueIndex) {
+        npQueueIndex += 1;
+    }
+    renderNpQueue();
+    updateNpPrevNextButtons();
 }
 
 // Up-next peek: show the track that plays after the current one.

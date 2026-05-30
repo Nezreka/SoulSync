@@ -48767,6 +48767,12 @@ textarea.enhanced-meta-field-input {
 .np-queue-item-remove { opacity: 0; transition: opacity 0.14s, color 0.14s; }
 .np-queue-item:hover .np-queue-item-remove { opacity: 1; }
 
+/* Drag-to-reorder states */
+.np-queue-item { cursor: grab; }
+.np-queue-item:active { cursor: grabbing; }
+.np-queue-item.dragging { opacity: 0.4; background: rgba(255,255,255,0.07) !important; }
+.np-queue-item.drag-over { box-shadow: inset 0 2px 0 rgb(var(--accent-light-rgb)); }
+
 /* Queue button in enhanced track table */
 .col-queue {
     width: 36px;
