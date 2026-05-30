@@ -372,3 +372,156 @@ def test_build_final_path_for_track_with_cdnum_template_skips_disc_folder(monkey
     )
     # Verify the disc folder was not created either.
     assert not (tmp_path / "Transfer" / "Artist One" / "Artist One - Album One" / "Disc 2").exists()
+
+
+# ── #745: $year must validate, never blind-slice release_date ──────────────
+
+def test_extract_year_accepts_real_dates():
+    assert import_paths._extract_year_from_release_date("2026-01-01") == "2026"
+    assert import_paths._extract_year_from_release_date("1999") == "1999"
+    assert import_paths._extract_year_from_release_date("2026") == "2026"
+    # Datetime-ish string — still leads with a valid year.
+    assert import_paths._extract_year_from_release_date("2010-12-31T00:00:00Z") == "2010"
+
+
+def test_extract_year_rejects_non_date_values():
+    # #745 exact case: release_date poisoned with the album NAME.
+    assert import_paths._extract_year_from_release_date("Mantras (Deluxe)") == ""
+    assert import_paths._extract_year_from_release_date("Mant") == ""
+    # Implausible / sentinel years are rejected.
+    assert import_paths._extract_year_from_release_date("0000") == ""
+    assert import_paths._extract_year_from_release_date("1800") == ""
+    assert import_paths._extract_year_from_release_date("9999") == ""
+    # Empty / None.
+    assert import_paths._extract_year_from_release_date("") == ""
+    assert import_paths._extract_year_from_release_date(None) == ""
+    # Fewer than 4 leading digits.
+    assert import_paths._extract_year_from_release_date("202") == ""
+
+
+def test_build_final_path_drops_garbage_year_from_folder(monkeypatch, tmp_path):
+    """#745 reproduction: release_date carries the album NAME, not a date.
+    The $year slot must resolve to empty and the bracket cleanup must drop the
+    empty () — producing 'Album One' NOT 'Album One (Mant)'."""
+    config = _Config(
+        {
+            "soulseek.transfer_path": str(tmp_path / "Transfer"),
+            "file_organization.enabled": True,
+            "file_organization.templates": {
+                # Template that uses $year, like the reporter's.
+                "album_path": "$albumartist/$album ($year) [$albumtype]/$track - $title",
+                "single_path": "$artist/$artist - $title",
+            },
+            "file_organization.collab_artist_mode": "first",
+            "file_organization.disc_label": "Disc",
+        }
+    )
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(
+        import_paths, "_get_album_tracks_for_source",
+        lambda source, album_id: {"items": [{"disc_number": 1}]},
+    )
+
+    context = {
+        "artist": {"name": "Katie Pruitt"},
+        "album": {
+            "name": "Mantras (Deluxe)",
+            "id": "album-1",
+            # POISONED: the album name landed in release_date (the #745 bug).
+            "release_date": "Mantras (Deluxe)",
+            "total_tracks": 12,
+            "album_type": "album",
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "track_info": {
+            "name": "White Lies, White Jesus And You",
+            "id": "track-1",
+            "track_number": 1,
+            "disc_number": 1,
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "original_search_result": {
+            "title": "White Lies, White Jesus And You",
+            "clean_title": "White Lies, White Jesus And You",
+            "clean_album": "Mantras (Deluxe)",
+            "clean_artist": "Katie Pruitt",
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "source": "deezer",
+        "is_album_download": False,
+    }
+
+    final_path, created = import_paths.build_final_path_for_track(
+        context,
+        {"name": "Katie Pruitt"},
+        {"is_album": True, "album_name": "Mantras (Deluxe)", "track_number": 1, "disc_number": 1},
+        ".flac",
+    )
+
+    assert created is True
+    # The album folder must NOT contain "(Mant)" or any "(...)" year artifact.
+    album_folder = os.path.basename(os.path.dirname(final_path))
+    assert "(Mant" not in album_folder
+    assert "()" not in album_folder
+    # Empty () collapses; [Album] type stays.
+    assert album_folder == "Mantras (Deluxe) [Album]"
+
+
+def test_build_final_path_keeps_real_year_in_folder(monkeypatch, tmp_path):
+    """Positive control: a genuine release_date still produces the (YYYY)
+    folder — proves the guard didn't break the happy path."""
+    config = _Config(
+        {
+            "soulseek.transfer_path": str(tmp_path / "Transfer"),
+            "file_organization.enabled": True,
+            "file_organization.templates": {
+                "album_path": "$albumartist/$album ($year) [$albumtype]/$track - $title",
+                "single_path": "$artist/$artist - $title",
+            },
+            "file_organization.collab_artist_mode": "first",
+            "file_organization.disc_label": "Disc",
+        }
+    )
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+    monkeypatch.setattr(
+        import_paths, "_get_album_tracks_for_source",
+        lambda source, album_id: {"items": [{"disc_number": 1}]},
+    )
+
+    context = {
+        "artist": {"name": "Katie Pruitt"},
+        "album": {
+            "name": "Mantras (Deluxe)",
+            "id": "album-1",
+            "release_date": "2026-04-12",
+            "total_tracks": 12,
+            "album_type": "album",
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "track_info": {
+            "name": "White Lies, White Jesus And You",
+            "id": "track-1",
+            "track_number": 1,
+            "disc_number": 1,
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "original_search_result": {
+            "title": "White Lies, White Jesus And You",
+            "clean_title": "White Lies, White Jesus And You",
+            "clean_album": "Mantras (Deluxe)",
+            "clean_artist": "Katie Pruitt",
+            "artists": [{"name": "Katie Pruitt"}],
+        },
+        "source": "deezer",
+        "is_album_download": False,
+    }
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        context,
+        {"name": "Katie Pruitt"},
+        {"is_album": True, "album_name": "Mantras (Deluxe)", "track_number": 1, "disc_number": 1},
+        ".flac",
+    )
+
+    album_folder = os.path.basename(os.path.dirname(final_path))
+    assert album_folder == "Mantras (Deluxe) (2026) [Album]"
