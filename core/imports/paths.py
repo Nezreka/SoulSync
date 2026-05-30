@@ -38,6 +38,26 @@ def _get_config_manager():
         return _FallbackConfig()
 
 
+def _extract_year_from_release_date(release_date) -> str:
+    """Return a validated 4-digit year from a release_date, or '' .
+
+    The ``$year`` template variable used to be a blind ``release_date[:4]``
+    slice. When something upstream poisons ``release_date`` with a non-date
+    value (e.g. the album NAME — #745, where "Mantras (Deluxe)" produced a
+    "(Mant)" folder), that slice happily emitted garbage. Validate that the
+    leading 4 chars are a plausible year, matching the guard the rest of the
+    codebase already uses (see ``soulid_worker._extract_year``). Anything
+    that isn't a real year resolves to '' — the template's bracket-cleanup
+    then drops the empty ``()`` instead of writing rubbish into the path.
+    """
+    if not release_date:
+        return ""
+    candidate = str(release_date)[:4]
+    if candidate.isdigit() and 1900 < int(candidate) <= 2100:
+        return candidate
+    return ""
+
+
 def _get_itunes_client():
     try:
         from core.metadata_service import get_itunes_client
@@ -426,9 +446,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
 
     year = ""
     if album_context and album_context.get("release_date"):
-        release_date = album_context["release_date"]
-        if release_date and len(release_date) >= 4:
-            year = release_date[:4]
+        year = _extract_year_from_release_date(album_context["release_date"])
 
     raw_album_type = ""
     if album_context:
