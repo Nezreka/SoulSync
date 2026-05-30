@@ -23,9 +23,13 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
         audioPlayer.addEventListener('canplay', onAudioCanPlay);
 
-        // Set initial volume
-        audioPlayer.volume = 0.7; // 70%
-        if (volumeSlider) volumeSlider.value = 70;
+        // Set initial volume — restore the saved level (Spotify-style), else 70%.
+        const _savedVol = npLoadSavedVolume();
+        const _initialVol = _savedVol === null ? 70 : _savedVol;
+        audioPlayer.volume = _initialVol / 100;
+        if (volumeSlider) volumeSlider.value = _initialVol;
+        // Sync the modal slider/fill too once DOM is ready.
+        syncVolumeUI(_initialVol);
     }
 
     // Track title click handled by initExpandedPlayer's media-player click handler
@@ -313,6 +317,7 @@ async function handleStop() {
 function handleVolumeChange(event) {
     const volume = event.target.value;
     updateVolumeSliderAppearance();
+    npPersistVolume(volume);
 
     // Update HTML5 audio player volume
     if (audioPlayer) {
@@ -2011,6 +2016,7 @@ function handleNpProgressBarChange(event) {
 function handleNpVolumeChange(event) {
     const volume = parseInt(event.target.value);
     if (audioPlayer) audioPlayer.volume = volume / 100;
+    npPersistVolume(volume);
 
     // Sync sidebar volume slider
     const sidebarVol = document.getElementById('volume-slider');
@@ -2520,7 +2526,18 @@ function handlePlayerKeyboardShortcuts(event) {
             break;
         case 'm':
         case 'M':
-            if (npModalOpen) handleNpMuteToggle();
+            event.preventDefault();
+            handleNpMuteToggle();   // works whether or not the modal is open
+            break;
+        case 'n':
+        case 'N':
+            event.preventDefault();
+            if (npQueue.length > 0) playNextInQueue();
+            break;
+        case 'p':
+        case 'P':
+            event.preventDefault();
+            playPreviousInQueue();
             break;
         case 'Escape':
             if (npModalOpen) closeNowPlayingModal();
@@ -2542,6 +2559,21 @@ function syncVolumeUI(volumePercent) {
     }
     if (npVol) npVol.value = volumePercent;
     if (npFill) npFill.style.width = volumePercent + '%';
+    npPersistVolume(volumePercent);
+}
+
+// Remember volume across reloads (Spotify-style). Stored 0..100.
+const NP_VOLUME_STORAGE_KEY = 'soulsync-volume';
+function npPersistVolume(percent) {
+    try { localStorage.setItem(NP_VOLUME_STORAGE_KEY, String(Math.round(percent))); } catch (e) {}
+}
+function npLoadSavedVolume() {
+    try {
+        const raw = localStorage.getItem(NP_VOLUME_STORAGE_KEY);
+        if (raw === null) return null;
+        const v = parseInt(raw, 10);
+        return (isFinite(v) && v >= 0 && v <= 100) ? v : null;
+    } catch (e) { return null; }
 }
 
 function getNpAlbumArtUrl() {
