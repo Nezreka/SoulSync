@@ -12815,10 +12815,34 @@ class MusicDatabase:
                     exclude_seed.extend(str(eid) for eid in exclude_ids)
                 collector = RadioCollector(limit, exclude_ids=exclude_seed)
 
-                _track_select = """
+                # Phase 2 smart radio: each tier pulls a generous RANDOM pool,
+                # then core.radio.selection ranks it (play_count + lastfm
+                # popularity, recency penalty, stable jitter) and the collector
+                # keeps the best. Pool factor keeps SQL cheap while giving the
+                # ranker real choice; bumped, then floored so small tiers still
+                # over-fetch a little.
+                _POOL_FACTOR = 4
+
+                def _pool(n):
+                    return max(n * _POOL_FACTOR, n + 10)
+
+                # Ranking signals (play_count / lastfm_playcount) are added by a
+                # migration, but probe for them so radio still works on a DB that
+                # predates it — the ranker treats missing columns as score 0, so
+                # we simply omit them from the SELECT when absent rather than
+                # crashing on "no such column".
+                cursor.execute("PRAGMA table_info(tracks)")
+                _track_cols = {row[1] for row in cursor.fetchall()}
+                _rank_cols = "".join(
+                    f"t.{c}, " for c in ("play_count", "lastfm_playcount")
+                    if c in _track_cols
+                )
+
+                _track_select = f"""
                     SELECT t.id, t.title, t.track_number, t.duration,
                            t.file_path, t.bitrate,
                            t.album_id, t.artist_id,
+                           {_rank_cols}
                            al.title   AS album,
                            COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
                            ar.name    AS artist
@@ -12836,8 +12860,8 @@ class MusicDatabase:
                     WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({collector.exclude_placeholders()})
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, [artist_name, seed['album_id']] + collector.exclude_values() + [artist_cap])
-                collector.collect(cursor.fetchall(), cap=artist_cap)
+                """, [artist_name, seed['album_id']] + collector.exclude_values() + [_pool(artist_cap)])
+                collector.collect(cursor.fetchall(), cap=artist_cap, rank=True)
 
                 if collector.filled:
                     return {'success': True, 'tracks': collector.tracks}
@@ -12858,8 +12882,8 @@ class MusicDatabase:
                           AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, genre_params + [artist_name] + collector.exclude_values() + [collector.remaining()])
-                    if collector.collect(cursor.fetchall()):
+                    """, genre_params + [artist_name] + collector.exclude_values() + [_pool(collector.remaining())])
+                    if collector.collect(cursor.fetchall(), rank=True):
                         return {'success': True, 'tracks': collector.tracks}
 
                 # --- 3. Same mood / style (album + artist level) ---
@@ -12879,19 +12903,20 @@ class MusicDatabase:
                               AND t.id NOT IN ({collector.exclude_placeholders()})
                             ORDER BY RANDOM()
                             LIMIT ?
-                        """, tag_params + [artist_name] + collector.exclude_values() + [collector.remaining()])
-                        if collector.collect(cursor.fetchall()):
+                        """, tag_params + [artist_name] + collector.exclude_values() + [_pool(collector.remaining())])
+                        if collector.collect(cursor.fetchall(), rank=True):
                             return {'success': True, 'tracks': collector.tracks}
 
-                # --- 4. Random library tracks ---
+                # --- 4. Random library tracks (ranked: popular-but-unheard
+                # beats pure noise even in the last-resort tier) ---
                 if not collector.filled:
                     cursor.execute(f"""
                         {_track_select}
                         WHERE {_file_filter} AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, collector.exclude_values() + [collector.remaining()])
-                    collector.collect(cursor.fetchall())
+                    """, collector.exclude_values() + [_pool(collector.remaining())])
+                    collector.collect(cursor.fetchall(), rank=True)
 
                 return {'success': True, 'tracks': collector.tracks}
 
