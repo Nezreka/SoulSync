@@ -11800,6 +11800,73 @@ def stream_status():
             "error_message": str(e)
         }), 500
 
+_AUDIO_MIME_TYPES = {
+    '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg',
+    '.aac': 'audio/aac', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
+    '.opus': 'audio/ogg', '.webm': 'audio/webm', '.wma': 'audio/x-ms-wma',
+}
+
+
+def _serve_audio_file_with_range(file_path):
+    """Serve an on-disk audio file with HTTP range support (HTML5 seeking).
+
+    Shared by /stream/audio (current track) and /stream/library-audio (the
+    crossfade pre-loader, which plays the NEXT track on a second <audio>).
+    """
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Audio file not found"}), 404
+
+    file_ext = os.path.splitext(file_path)[1].lower()
+    mimetype = _AUDIO_MIME_TYPES.get(file_ext, 'audio/mpeg')
+    file_size = os.path.getsize(file_path)
+
+    range_header = request.headers.get('Range', None)
+    if range_header:
+        byte_start = 0
+        byte_end = file_size - 1
+        try:
+            range_match = re.match(r'bytes=(\d*)-(\d*)', range_header)
+            if range_match:
+                start_str, end_str = range_match.groups()
+                if start_str:
+                    byte_start = int(start_str)
+                if end_str:
+                    byte_end = int(end_str)
+                else:
+                    byte_end = file_size - 1
+        except (ValueError, AttributeError):
+            pass
+
+        byte_start = max(0, byte_start)
+        byte_end = min(file_size - 1, byte_end)
+        content_length = byte_end - byte_start + 1
+
+        def generate():
+            with open(file_path, 'rb') as f:
+                f.seek(byte_start)
+                remaining = content_length
+                while remaining:
+                    chunk_size = min(8192, remaining)
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        response = Response(generate(), status=206, mimetype=mimetype, direct_passthrough=True)
+        response.headers.add('Content-Range', f'bytes {byte_start}-{byte_end}/{file_size}')
+        response.headers.add('Accept-Ranges', 'bytes')
+        response.headers.add('Content-Length', str(content_length))
+        response.headers.add('Cache-Control', 'no-cache')
+        return response
+    else:
+        response = send_file(file_path, as_attachment=False, mimetype=mimetype)
+        response.headers.add('Accept-Ranges', 'bytes')
+        response.headers.add('Content-Length', str(file_size))
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+
 @app.route('/stream/audio')
 def stream_audio():
     """Serve the audio file from the Stream folder with range request support"""
@@ -11807,97 +11874,35 @@ def stream_audio():
         with stream_lock:
             if stream_state["status"] != "ready" or not stream_state["file_path"]:
                 return jsonify({"error": "No audio file ready for streaming"}), 404
-            
             file_path = stream_state["file_path"]
-        
-        if not os.path.exists(file_path):
-            return jsonify({"error": "Audio file not found"}), 404
-        
+
         logger.info(f"Serving audio file: {os.path.basename(file_path)}")
-        
-        # Determine MIME type based on file extension
-        file_ext = os.path.splitext(file_path)[1].lower()
-        mime_types = {
-            '.mp3': 'audio/mpeg',
-            '.flac': 'audio/flac',
-            '.ogg': 'audio/ogg',
-            '.aac': 'audio/aac',
-            '.m4a': 'audio/mp4',
-            '.wav': 'audio/wav',
-            '.opus': 'audio/ogg',
-            '.webm': 'audio/webm',
-            '.wma': 'audio/x-ms-wma'
-        }
-        
-        mimetype = mime_types.get(file_ext, 'audio/mpeg')
-        
-        # Get file size
-        file_size = os.path.getsize(file_path)
-        
-        # Handle range requests (important for HTML5 audio seeking)
-        range_header = request.headers.get('Range', None)
-        if range_header:
-            byte_start = 0
-            byte_end = file_size - 1
-            
-            # Parse range header (format: "bytes=start-end")
-            try:
-                range_match = re.match(r'bytes=(\d*)-(\d*)', range_header)
-                if range_match:
-                    start_str, end_str = range_match.groups()
-                    if start_str:
-                        byte_start = int(start_str)
-                    if end_str:
-                        byte_end = int(end_str)
-                    else:
-                        # If no end specified, serve from start to end of file
-                        byte_end = file_size - 1
-            except (ValueError, AttributeError):
-                # Invalid range header, serve full file
-                pass
-            
-            # Ensure valid range
-            byte_start = max(0, byte_start)
-            byte_end = min(file_size - 1, byte_end)
-            content_length = byte_end - byte_start + 1
-            
-            # Create response with partial content
-            def generate():
-                with open(file_path, 'rb') as f:
-                    f.seek(byte_start)
-                    remaining = content_length
-                    while remaining:
-                        chunk_size = min(8192, remaining)  # 8KB chunks
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-            
-            response = Response(generate(), 
-                              status=206,  # Partial Content
-                              mimetype=mimetype,
-                              direct_passthrough=True)
-            
-            # Set range headers
-            response.headers.add('Content-Range', f'bytes {byte_start}-{byte_end}/{file_size}')
-            response.headers.add('Accept-Ranges', 'bytes')
-            response.headers.add('Content-Length', str(content_length))
-            response.headers.add('Cache-Control', 'no-cache')
-            
-            return response
-        else:
-            # No range request, serve entire file
-            response = send_file(file_path, as_attachment=False, mimetype=mimetype)
-            response.headers.add('Accept-Ranges', 'bytes')
-            response.headers.add('Content-Length', str(file_size))
-            # Override the default static-cache max-age — streaming media
-            # bypasses caching (range requests, mid-track seeks).
-            response.headers['Cache-Control'] = 'no-cache'
-            return response
-        
+        return _serve_audio_file_with_range(file_path)
     except Exception as e:
         logger.error(f"Error serving audio file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/stream/library-audio')
+def stream_library_audio():
+    """Serve an arbitrary LIBRARY audio file by path, with range support.
+
+    Powers crossfade: the player preloads the NEXT queued track on a second
+    <audio> element and fades between them. Security: the path is resolved
+    through ``_resolve_library_file_path`` — the same validator /api/library/play
+    uses — which only resolves files within the configured transfer/download/
+    media-library directories, so this can't be used to read arbitrary disk.
+    """
+    try:
+        raw_path = request.args.get('path', '')
+        if not raw_path:
+            return jsonify({"error": "path is required"}), 400
+        resolved = _resolve_library_file_path(raw_path)
+        if not resolved or not os.path.exists(resolved):
+            return jsonify({"error": _get_file_not_found_error(raw_path)}), 404
+        return _serve_audio_file_with_range(resolved)
+    except Exception as e:
+        logger.error(f"Error serving library audio file: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stream/stop', methods=['POST'])

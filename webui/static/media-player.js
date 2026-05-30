@@ -16,6 +16,7 @@ function initializeMediaPlayer() {
     if (audioPlayer) {
         // Set up audio event listeners
         audioPlayer.addEventListener('timeupdate', updateAudioProgress);
+        audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
         audioPlayer.addEventListener('ended', onAudioEnded);
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
@@ -1468,13 +1469,17 @@ function initExpandedPlayer() {
     const sleepBtn = document.getElementById('np-sleep-btn');
     if (sleepBtn) sleepBtn.addEventListener('click', npCycleSleepTimer);
 
-    // Crossfade toggle (visual state now; dual-audio crossfade wired later)
+    // Crossfade toggle (real dual-audio crossfade for library tracks)
     const xfadeBtn = document.getElementById('np-crossfade-btn');
-    if (xfadeBtn) xfadeBtn.addEventListener('click', () => {
-        npCrossfadeOn = !npCrossfadeOn;
+    if (xfadeBtn) {
+        try { npCrossfadeOn = localStorage.getItem('soulsync-crossfade') === '1'; } catch (e) {}
         xfadeBtn.classList.toggle('active', npCrossfadeOn);
-        try { localStorage.setItem('soulsync-crossfade', npCrossfadeOn ? '1' : '0'); } catch (e) {}
-    });
+        xfadeBtn.addEventListener('click', () => {
+            npCrossfadeOn = !npCrossfadeOn;
+            xfadeBtn.classList.toggle('active', npCrossfadeOn);
+            try { localStorage.setItem('soulsync-crossfade', npCrossfadeOn ? '1' : '0'); } catch (e) {}
+        });
+    }
 
     shuffleBtn.addEventListener('click', handleNpShuffle);
     repeatBtn.addEventListener('click', handleNpRepeat);
@@ -1798,6 +1803,79 @@ function npPunchUpColor(r, g, b) {
     if (bright < 70) { const lift = 70 / Math.max(bright, 1); nr *= lift; ng *= lift; nb *= lift; }
     const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
     return [clamp(nr), clamp(ng), clamp(nb)];
+}
+
+// ── Crossfade engine (library tracks only) ──
+// EXPERIMENTAL. Real crossfade needs two tracks playing at once; /stream/audio
+// only serves the ONE current track (single global stream_state), so we use a
+// dedicated /stream/library-audio endpoint + a second <audio> to play the NEXT
+// library track and ramp volumes. Streamed (non-library) tracks can't crossfade
+// and fall back to the normal hard cut.
+const NP_CROSSFADE_SECONDS = 6;
+let npXfadeAudio = null;
+let npXfadeActive = false;
+
+function npCrossfadeTick() {
+    if (!npCrossfadeOn || npXfadeActive || npRepeatMode === 'one') return;
+    if (!audioPlayer || !audioPlayer.duration || !isFinite(audioPlayer.duration)) return;
+    const remaining = audioPlayer.duration - audioPlayer.currentTime;
+    if (remaining > NP_CROSSFADE_SECONDS || remaining <= 0.2) return;
+
+    // Determine the next track (respects shuffle/repeat-all the same way
+    // playNextInQueue does, but we only crossfade plain sequential next).
+    const nextIdx = npQueueIndex + 1;
+    const next = npQueue[nextIdx];
+    if (!next || !next.is_library || !next.file_path) return; // only library→library
+
+    npStartCrossfade(nextIdx, next);
+}
+
+function npStartCrossfade(nextIdx, next) {
+    npXfadeActive = true;
+    const xa = document.getElementById('audio-player-xfade');
+    if (!xa) { npXfadeActive = false; return; }
+    npXfadeAudio = xa;
+
+    const targetVol = audioPlayer.volume; // fade the new track up to current level
+    xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}&t=${Date.now()}`;
+    xa.volume = 0;
+    xa.play().then(() => {
+        const fadeMs = NP_CROSSFADE_SECONDS * 1000;
+        const step = 60; // ms between volume steps
+        const steps = Math.max(1, Math.floor(fadeMs / step));
+        let n = 0;
+        const startOutVol = audioPlayer.volume;
+        const timer = setInterval(() => {
+            n++;
+            const t = Math.min(1, n / steps);
+            audioPlayer.volume = Math.max(0, startOutVol * (1 - t));
+            xa.volume = Math.min(targetVol, targetVol * t);
+            if (t >= 1) {
+                clearInterval(timer);
+                npFinishCrossfade(nextIdx, targetVol);
+            }
+        }, step);
+    }).catch(() => {
+        // Couldn't preload (e.g. endpoint/file issue) — abort gracefully, let
+        // the normal 'ended' hard-cut advance handle it.
+        npXfadeActive = false;
+        npXfadeAudio = null;
+    });
+}
+
+function npFinishCrossfade(nextIdx, restoreVol) {
+    // The crossfade audio has fully faded in; promote the queue index and let
+    // the normal play path take over so all the usual state (track info, art,
+    // visualizer, server stream_state) is set for the now-current track.
+    const xa = npXfadeAudio;
+    if (xa) { try { xa.pause(); } catch (_) {} xa.src = ''; xa.volume = 0; }
+    npXfadeAudio = null;
+    npXfadeActive = false;
+    if (audioPlayer) audioPlayer.volume = restoreVol;
+    // playQueueItem re-points stream_state + reloads audioPlayer for the next
+    // track; there's a brief silent reload, but the perceived crossfade already
+    // happened. Honest trade-off of the single-stream-state design.
+    playQueueItem(nextIdx);
 }
 
 function npResetAmbientGlow() {
