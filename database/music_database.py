@@ -312,6 +312,19 @@ class MusicDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration ledger — a single, readable record of which one-time
+            # migrations have run. ADDITIVE backstop only: existing migrations
+            # keep their own idempotency gates (PRAGMA checks, marker tables,
+            # metadata flags); this table just unifies that scattered state so a
+            # half-migrated DB is detectable. Nothing GATES on it. Paired with
+            # PRAGMA user_version (set at the end of init).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # Wishlist table for storing failed download tracks for retry
             cursor.execute("""
@@ -337,6 +350,7 @@ class MusicDatabase:
                     deezer_artist_id TEXT,
                     discogs_artist_id TEXT,
                     musicbrainz_artist_id TEXT,
+                    amazon_artist_id TEXT,
                     artist_name TEXT NOT NULL,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_scan_timestamp TIMESTAMP,
@@ -792,6 +806,10 @@ class MusicDatabase:
                 logger.error(f"Personalized-playlist schema init failed: {ps_err}")
 
             self._ensure_core_media_schema_columns(cursor)
+            self._normalize_genres_to_json(cursor)
+            # Unify scattered migration state into the ledger + stamp the schema
+            # version. Additive backstop — runs last, gates nothing.
+            self._sync_migration_ledger(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -801,6 +819,122 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+
+    # Bump when the schema's generation meaningfully changes. Stamped into
+    # PRAGMA user_version as a backstop indicator; nothing GATES on it yet.
+    SCHEMA_VERSION = 1
+
+    # Maps a ledger name to the EXISTING idempotency signal that proves a
+    # one-time migration ran: ('table', <marker table>) or ('flag', <metadata
+    # key>). Used to back-fill the ledger for DBs created before it existed.
+    # The ledger is a non-gating backstop, so this can grow lazily — a missing
+    # entry just means that migration isn't surfaced in the ledger (harmless).
+    _KNOWN_MIGRATION_SIGNALS = {
+        'id_columns_to_text':       ('flag', 'id_columns_migrated'),
+        'genres_json':              ('flag', 'genres_json_normalized'),
+        'metadata_cache_v1':        ('flag', 'metadata_cache_v1'),
+        'repair_worker_v2':         ('flag', 'repair_worker_v2'),
+        'spotify_library_cache_v1': ('flag', 'spotify_library_cache_v1'),
+        'profiles_v1':              ('flag', 'profiles_migration_v1'),
+        'profiles_v2':              ('flag', 'profiles_migration_v2'),
+        'profiles_v3':              ('flag', 'profiles_migration_v3'),
+        'profiles_v4':              ('flag', 'profiles_migration_v4'),
+        'discovery_cache_v2':       ('table', '_discovery_cache_v2_migrated'),
+        'deezer_cache_v2':          ('table', '_deezer_cache_v2_migrated'),
+        'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
+        'genius_search_fix':        ('table', '_genius_search_fix_applied'),
+    }
+
+    def _record_migration(self, cursor, name):
+        """Record a one-time migration in the schema_migrations ledger.
+
+        Idempotent (INSERT OR IGNORE). New one-time migrations should call this
+        when they complete; the ledger is a non-gating backstop, so a failure to
+        record never affects correctness.
+        """
+        try:
+            cursor.execute(
+                "INSERT OR IGNORE INTO schema_migrations (name, applied_at) "
+                "VALUES (?, CURRENT_TIMESTAMP)", (name,)
+            )
+        except Exception as e:
+            logger.debug("Could not record migration %s in ledger: %s", name, e)
+
+    def _sync_migration_ledger(self, cursor):
+        """Back-fill the ledger from existing idempotency signals and stamp
+        PRAGMA user_version.
+
+        ADDITIVE + non-gating: this only RECORDS state that already exists (which
+        marker tables / metadata flags are present); it never decides whether a
+        migration runs. Safe to run on every startup.
+        """
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            for ledger_name, (kind, signal) in self._KNOWN_MIGRATION_SIGNALS.items():
+                if kind == 'table':
+                    present = signal in tables
+                else:  # 'flag' — a metadata row
+                    cursor.execute("SELECT 1 FROM metadata WHERE key = ? LIMIT 1", (signal,))
+                    present = cursor.fetchone() is not None
+                if present:
+                    self._record_migration(cursor, ledger_name)
+            # Backstop version stamp; nothing gates on it.
+            cursor.execute(f"PRAGMA user_version = {int(self.SCHEMA_VERSION)}")
+        except Exception as e:
+            logger.error(f"Error syncing migration ledger: {e}")
+
+    def _normalize_genres_to_json(self, cursor):
+        """One-time: rewrite legacy comma-separated genres to canonical JSON arrays.
+
+        ``artists.genres`` / ``albums.genres`` historically stored EITHER a JSON
+        array (new writes) OR a comma-separated string (old writes), so every
+        reader has to try-JSON-then-split. This normalizes existing rows to JSON
+        in place. It mirrors the readers' exact parse (JSON list, else
+        comma-split/strip/drop-empties), so the genre VALUES are unchanged — only
+        the storage format. Marker-gated to run once, and per-row diffed so a
+        re-run (or a row already in JSON form) is a no-op. Non-fatal on error,
+        like the other migrations.
+        """
+        import json
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'genres_json_normalized' LIMIT 1")
+            if cursor.fetchone():
+                return
+
+            def _to_list(raw):
+                # Identical semantics to the genres readers elsewhere in this file.
+                try:
+                    parsed = json.loads(raw)
+                    return parsed if isinstance(parsed, list) else [str(parsed)]
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    return [g.strip() for g in raw.split(',') if g.strip()]
+
+            total = 0
+            for table in ('artists', 'albums'):
+                cursor.execute(
+                    f"SELECT id, genres FROM {table} "
+                    f"WHERE genres IS NOT NULL AND TRIM(genres) != ''"
+                )
+                pending = []
+                for row in cursor.fetchall():
+                    rid, raw = row[0], row[1]
+                    canonical = json.dumps(_to_list(raw))
+                    if canonical != raw:  # leave already-canonical rows untouched
+                        pending.append((canonical, rid))
+                for canonical, rid in pending:
+                    cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (canonical, rid))
+                    total += 1
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                "VALUES ('genres_json_normalized', 'true', CURRENT_TIMESTAMP)"
+            )
+            self._record_migration(cursor, 'genres_json')
+            if total:
+                logger.info("Normalized %d legacy genres value(s) to JSON", total)
+        except Exception as e:
+            logger.error(f"Error normalizing genres to JSON: {e}")
 
     def _ensure_core_media_schema_columns(self, cursor):
         """Repair required media-library columns that older migrations may miss.
@@ -1826,6 +1960,7 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -1854,7 +1989,8 @@ class MusicDatabase:
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
-                            musicbrainz_artist_id TEXT
+                            musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT
                         )
                     """)
 
@@ -1867,7 +2003,7 @@ class MusicDatabase:
                             'include_remixes', 'include_acoustic', 'include_compilations',
                             'include_instrumentals', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                            'musicbrainz_artist_id', 'profile_id']
+                            'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
@@ -2711,6 +2847,7 @@ class MusicDatabase:
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
                             musicbrainz_artist_id TEXT,
+                            amazon_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -2724,7 +2861,7 @@ class MusicDatabase:
                                 'include_remixes', 'include_acoustic', 'include_compilations',
                                 'include_instrumentals', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
-                                'musicbrainz_artist_id', 'profile_id']
+                                'musicbrainz_artist_id', 'amazon_artist_id', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
 
@@ -9983,6 +10120,24 @@ class MusicDatabase:
                 # Get artist with all columns
                 cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
                 artist_row = cursor.fetchone()
+                if not artist_row:
+                    # `artist_id` may be a *source* ID (e.g. a MusicBrainz MBID
+                    # from a search result) rather than the integer library PK.
+                    # The /api/artist-detail route resolves this upstream via
+                    # find_library_artist_for_source, but the enhanced-view and
+                    # quality-analysis endpoints call this method directly with
+                    # whatever ID the page holds — for a library artist opened
+                    # from a non-library search result that's the source ID, so
+                    # the page 404'd. Resolve by matching any per-service ID
+                    # column (single source of truth: SOURCE_ID_FIELD).
+                    from core.artist_source_lookup import SOURCE_ID_FIELD
+                    id_columns = list(dict.fromkeys(SOURCE_ID_FIELD.values()))
+                    where = ' OR '.join(f"{col} = ?" for col in id_columns)
+                    cursor.execute(
+                        f"SELECT * FROM artists WHERE {where} LIMIT 1",
+                        tuple(str(artist_id) for _ in id_columns),
+                    )
+                    artist_row = cursor.fetchone()
                 if not artist_row:
                     return {'success': False, 'error': f'Artist with ID {artist_id} not found'}
 

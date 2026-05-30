@@ -10,6 +10,7 @@
     <meta name="theme-color" content="#1db954">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     {{ vite_assets('head')|safe }}
@@ -135,13 +136,13 @@
                             <input type="checkbox" id="new-profile-can-download" checked> Can download music
                         </label>
                     </div>
-                    <button id="create-profile-btn" class="profile-create-btn">Create Profile</button>
+                    <button id="create-profile-btn" class="btn btn--block btn--primary profile-create-btn">Create Profile</button>
                 </div>
                 <div id="admin-pin-section" class="admin-pin-section" style="display: none;">
                     <h4>Admin PIN</h4>
                     <p class="admin-pin-note">Required when multiple profiles exist</p>
                     <input type="password" id="admin-pin-input" class="profile-input" placeholder="Set admin PIN" maxlength="6">
-                    <button id="set-admin-pin-btn" class="profile-create-btn">Set Admin PIN</button>
+                    <button id="set-admin-pin-btn" class="btn btn--block btn--primary profile-create-btn">Set Admin PIN</button>
                 </div>
             </div>
         </div>
@@ -224,14 +225,14 @@
                     <span class="nav-text">Wishlist</span>
                     <span class="dl-nav-badge hidden" id="wishlist-nav-badge">0</span>
                 </a>
-                <a class="nav-button" data-page="automations" href="/automations">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-                    <span class="nav-text">Automations</span>
-                </a>
                 <a class="nav-button" data-page="active-downloads" href="/active-downloads">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Downloads</span>
                     <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
+                </a>
+                <a class="nav-button" data-page="automations" href="/automations">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+                    <span class="nav-text">Automations</span>
                 </a>
                 <a class="nav-button" data-page="import" href="/import">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
@@ -310,7 +311,7 @@
 
             <!-- Dashboard Page -->
             <div class="page" id="dashboard-page">
-                <div class="dashboard-container">
+                <div class="page-shell dashboard-container">
                     <div class="dashboard-header">
                         <div class="header-text">
                             <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>System Dashboard</span></h2>
@@ -975,6 +976,7 @@
 
             <!-- Main container for the Sync page -->
             <div class="page" id="sync-page">
+                <div class="page-shell">
                 <!-- Header -->
                 <div class="sync-header">
                     <div class="sync-header-row">
@@ -984,9 +986,9 @@
                                 server</p>
                         </div>
                         <div style="display:flex;gap:8px;align-items:center;">
-                            <button class="sync-history-btn auto-sync-manager-btn" onclick="openAutoSyncScheduleModal()" title="Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
-                            <button class="sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
-                            <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                            <button class="btn btn--sm btn--secondary sync-history-btn auto-sync-manager-btn" onclick="openAutoSyncScheduleModal()" title="Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
+                            <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
+                            <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
                         </div>
                     </div>
                 </div>
@@ -2058,6 +2060,7 @@
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Search Page -->
@@ -2088,103 +2091,71 @@
                              results are cached per (query, source) pair. -->
                         <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
-                        <!-- Basic Search Section (Current) -->
+                        <!-- Basic Search Section -->
                         <div id="basic-search-section" class="search-section">
-                            <!-- Search Bar: Replicates create_elegant_search_bar() -->
-                            <div class="search-bar-container">
-                                <input type="text" id="downloads-search-input"
-                                    placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
-                                <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
-                                <button id="downloads-search-btn">🔍 Search</button>
+
+                            <!-- Source picker: chip row, one chip per active download source.
+                                 Populated by downloads.js:initBasicSearchSources().
+                                 Hidden until sources load; in single-source mode shows one
+                                 non-interactive chip so the user knows what they're searching. -->
+                            <div class="bs-source-row" id="bs-source-row" aria-label="Search source" role="tablist"></div>
+
+                            <!-- Search bar -->
+                            <div class="bs-search-bar">
+                                <div class="bs-search-input-wrap">
+                                    <svg class="bs-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/></svg>
+                                    <input type="text" id="downloads-search-input"
+                                           placeholder="Search artists, albums, tracks…"
+                                           autocomplete="off" spellcheck="false">
+                                    <button id="downloads-cancel-btn" class="bs-cancel-btn hidden" aria-label="Cancel">✕</button>
+                                </div>
+                                <button id="downloads-search-btn" class="bs-search-btn">Search</button>
                             </div>
 
-
-                            <div id="filters-container" class="filters-container hidden">
-                                <div class="filter-toggle-header">
-                                    <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
-                                </div>
-
-                                <div id="filter-content" class="filter-content hidden">
-                                    <!-- Filter by Type -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Type:</label>
-                                        <button class="filter-btn active" data-filter-type="type"
-                                            data-value="all">All</button>
-                                        <button class="filter-btn" data-filter-type="type"
-                                            data-value="album">Albums</button>
-                                        <button class="filter-btn" data-filter-type="type"
-                                            data-value="track">Singles</button>
-                                    </div>
-
-                                    <!-- Filter by Format -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Format:</label>
-                                        <button class="filter-btn active" data-filter-type="format"
-                                            data-value="all">All</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="flac">FLAC</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="mp3">MP3</button>
-                                        <!-- Added missing format buttons -->
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="ogg">OGG</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="aac">AAC</button>
-                                        <button class="filter-btn" data-filter-type="format"
-                                            data-value="wma">WMA</button>
-                                    </div>
-
-                                    <!-- Sort Controls -->
-                                    <div class="filter-group">
-                                        <label class="filter-label">Sort by:</label>
-                                        <button id="sort-order-btn" class="filter-btn sort-order-btn"
-                                            data-order="desc">↓</button>
-                                        <!-- Added all sort options from the GUI -->
-                                        <button class="filter-btn active" data-filter-type="sort"
-                                            data-value="relevance">Relevance</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="quality_score">Quality</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="size">Size</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="title">Name</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="username">Uploader</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="bitrate">Bitrate</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="duration">Duration</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="availability">Available</button>
-                                        <button class="filter-btn" data-filter-type="sort"
-                                            data-value="upload_speed">Speed</button>
-                                    </div>
-                                </div>
-                            </div>
-
-
-                            <!-- Search Status Bar -->
-                            <div class="search-status-container">
+                            <!-- Status / loading bar -->
+                            <div class="bs-status-bar">
                                 <div class="spinner-animation hidden"></div>
-                                <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
+                                <span id="search-status-text" class="bs-status-text">Enter an artist, album, or track name to search</span>
                                 <div class="dots-animation hidden"></div>
                             </div>
 
-                            <!-- Search Results Area: Replicates the QScrollArea -->
-                            <div class="search-results-container">
-                                <div class="search-results-header">
-                                    <h3>Search Results</h3>
+                            <!-- Filters: always-visible compact pill row -->
+                            <div id="filters-container" class="bs-filters hidden">
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Type</span>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="type" data-value="all">All</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="album">Albums</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="track">Tracks</button>
                                 </div>
-                                <div class="search-results-scroll-area" id="search-results-area">
-                                    <!-- 
-                                The placeholder search results have been removed.
-                                This area will now be populated by JavaScript based on API responses.
-                                -->
-                                    <div class="search-results-placeholder">
-                                        <p>Your search results will appear here.</p>
-                                    </div>
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Format</span>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="format" data-value="all">All</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="flac">FLAC</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="mp3">MP3</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="ogg">OGG</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="aac">AAC</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="wma">WMA</button>
+                                </div>
+                                <div class="bs-filter-group">
+                                    <span class="bs-filter-label">Sort</span>
+                                    <button id="sort-order-btn" class="filter-btn bs-filter-pill sort-order-btn" data-order="desc">↓</button>
+                                    <button class="filter-btn bs-filter-pill active" data-filter-type="sort" data-value="relevance">Relevance</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="quality_score">Quality</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="size">Size</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="title">Name</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="username">Uploader</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="bitrate">Bitrate</button>
+                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="duration">Duration</button>
                                 </div>
                             </div>
+
+                            <!-- Results area -->
+                            <div class="bs-results-wrap" id="search-results-area">
+                                <div class="search-results-placeholder">
+                                    <p>Enter a search term to get started.</p>
+                                </div>
+                            </div>
+
                         </div>
                         <!-- End Basic Search Section -->
 
@@ -2311,7 +2282,7 @@
             <div class="page" id="automations-page">
                 <!-- List View -->
                 <div class="automations-list-view" id="automations-list-view">
-                    <div class="automations-container">
+                    <div class="page-shell automations-container">
                         <div class="dashboard-header">
                             <div class="header-text">
                                 <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
@@ -2790,8 +2761,8 @@
                         <!-- Populated dynamically -->
                     </div>
                     <div class="enhanced-bulk-modal-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeBulkEditModal()">Cancel</button>
-                        <button class="enhanced-bulk-btn primary" onclick="executeBulkEdit()">Apply Changes</button>
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBulkEditModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" onclick="executeBulkEdit()">Apply Changes</button>
                     </div>
                 </div>
             </div>
@@ -2803,10 +2774,10 @@
                     <span class="enhanced-bulk-bar-label">tracks selected</span>
                 </div>
                 <div class="enhanced-bulk-bar-actions">
-                    <button class="enhanced-bulk-btn secondary" onclick="showBulkEditModal()">Edit Selected</button>
-                    <button class="enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
-                    <button class="enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
-                    <button class="enhanced-bulk-btn clear" onclick="clearTrackSelection()">Clear Selection</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="showBulkEditModal()">Edit Selected</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
+                    <button class="btn btn--sm btn--danger enhanced-bulk-btn" onclick="clearTrackSelection()">Clear Selection</button>
                 </div>
             </div>
 
@@ -2830,8 +2801,8 @@
                             <span id="tag-preview-sync-text">Sync to server</span>
                         </label>
                         <div class="tag-preview-footer-actions">
-                            <button class="enhanced-bulk-btn secondary" onclick="closeTagPreviewModal()">Cancel</button>
-                            <button class="enhanced-bulk-btn primary" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
                         </div>
                     </div>
                 </div>
@@ -2858,8 +2829,8 @@
                             <span id="batch-tag-preview-sync-text">Sync to server</span>
                         </label>
                         <div class="tag-preview-footer-actions">
-                            <button class="enhanced-bulk-btn secondary" onclick="closeBatchTagPreviewModal()">Cancel</button>
-                            <button class="enhanced-bulk-btn primary" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBatchTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
                         </div>
                     </div>
                 </div>
@@ -2876,8 +2847,8 @@
                         <!-- Populated dynamically -->
                     </div>
                     <div class="enhanced-bulk-modal-footer" id="reorganize-modal-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeReorganizeModal()">Cancel</button>
-                        <button class="enhanced-bulk-btn primary" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeReorganizeModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
                     </div>
                 </div>
             </div>
@@ -3072,13 +3043,13 @@
                                 <p class="discover-section-subtitle" id="your-artists-subtitle">Artists you follow across your music services</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="ya-header-btn ya-refresh-btn" id="your-artists-refresh-btn" onclick="refreshYourArtists()" title="Refresh from services">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-refresh-btn" id="your-artists-refresh-btn" onclick="refreshYourArtists()" title="Refresh from services">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-settings-btn" onclick="openYourArtistsSourcesModal()" title="Configure sources">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-settings-btn" onclick="openYourArtistsSourcesModal()" title="Configure sources">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-viewall-btn" onclick="openYourArtistsModal()">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" onclick="openYourArtistsModal()">
                                     <span>View All</span>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                                 </button>
@@ -3097,13 +3068,13 @@
                                 <p class="discover-section-subtitle" id="your-albums-subtitle">Albums you've saved across your music services</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="ya-header-btn ya-refresh-btn" id="your-albums-refresh-btn" onclick="refreshYourAlbums()" title="Refresh from services">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-refresh-btn" id="your-albums-refresh-btn" onclick="refreshYourAlbums()" title="Refresh from services">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 </button>
-                                <button class="ya-header-btn ya-settings-btn" onclick="openYourAlbumsSourcesModal()" title="Configure sources">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-settings-btn" onclick="openYourAlbumsSourcesModal()" title="Configure sources">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                                 </button>
-                                <button class="ya-header-btn" id="your-albums-download-btn" onclick="downloadMissingYourAlbums()" style="display:none;" title="Download missing albums">
+                                <button class="btn btn--sm btn--secondary ya-header-btn" id="your-albums-download-btn" onclick="downloadMissingYourAlbums()" style="display:none;" title="Download missing albums">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                                 </button>
                             </div>
@@ -3663,7 +3634,7 @@
 
             <!-- Playlist Explorer Page -->
             <div class="page" id="playlist-explorer-page">
-                <div class="explorer-container">
+                <div class="page-shell explorer-container">
                     <!-- Header (compact) -->
                     <div class="dashboard-header" style="margin-bottom: 12px;">
                         <div class="header-text">
@@ -3708,15 +3679,15 @@
                             <span class="explorer-selection-count" id="explorer-selection-count">0 albums selected</span>
                         </div>
                         <div class="explorer-action-buttons">
-                            <button class="explorer-action-btn" onclick="explorerSelectAll()">
+                            <button class="btn btn--sm btn--secondary" onclick="explorerSelectAll()">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                                 Select All
                             </button>
-                            <button class="explorer-action-btn" onclick="explorerDeselectAll()">
+                            <button class="btn btn--sm btn--secondary" onclick="explorerDeselectAll()">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
                                 Deselect
                             </button>
-                            <button class="explorer-action-btn primary" onclick="explorerAddToWishlist()">
+                            <button class="btn btn--sm btn--primary" onclick="explorerAddToWishlist()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                                 Add to Wishlist
                             </button>
@@ -3766,6 +3737,7 @@
 
             <!-- Settings Page -->
             <div class="page" id="settings-page">
+                <div class="page-shell">
                 <div class="dashboard-header">
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
@@ -6231,6 +6203,7 @@
                         <button class="save-button" id="save-settings">Save Settings</button>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Hydrabase Page (Dev Mode Only) -->
@@ -6353,7 +6326,7 @@
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="tools-page">
-                <div class="tools-page-container">
+                <div class="page-shell tools-page-container">
                     <div class="tools-page-header">
                         <div class="tools-page-header-left">
                             <h2 class="tools-page-title">
@@ -6422,9 +6395,9 @@
                                 </label>
                                 <div class="repair-findings-bulk" id="repair-findings-bulk" style="display:none;">
                                     <span class="repair-bulk-count" id="repair-bulk-count"></span>
-                                    <button class="repair-bulk-btn fix" onclick="bulkFixFindings()">Fix Selected</button>
-                                    <button class="repair-bulk-btn" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
-                                    <button class="repair-bulk-btn fix-all" id="repair-fix-all-btn" style="display:none;" onclick="fixAllMatchingFindings()">Fix All</button>
+                                    <button class="btn btn--sm btn--primary" onclick="bulkFixFindings()">Fix Selected</button>
+                                    <button class="btn btn--sm btn--secondary" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
+                                    <button class="btn btn--sm btn--warning" id="repair-fix-all-btn" style="display:none;" onclick="fixAllMatchingFindings()">Fix All</button>
                                 </div>
                                 <button class="repair-clear-btn" onclick="clearRepairFindings()" title="Clear findings matching current filters">Clear Findings</button>
                             </div>
@@ -6474,6 +6447,7 @@
                                 <select id="db-refresh-type">
                                     <option value="incremental">Incremental Update</option>
                                     <option value="full">Full Refresh</option>
+                                    <option value="deep">Deep Scan</option>
                                 </select>
                                 <button id="db-update-button">Update Database</button>
                             </div>
@@ -6810,7 +6784,7 @@
                  WATCHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="watchlist-page">
-                <div class="watchlist-page-container">
+                <div class="page-shell watchlist-page-container">
                     <!-- Header -->
                     <div class="watchlist-page-header">
                         <div class="watchlist-page-header-left">
@@ -6848,19 +6822,19 @@
 
                     <!-- Action buttons -->
                     <div class="watchlist-page-actions">
-                        <button class="watchlist-action-btn watchlist-action-primary" id="scan-watchlist-btn" onclick="startWatchlistScan()">
+                        <button class="btn btn--primary" id="scan-watchlist-btn" onclick="startWatchlistScan()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             Scan for New Releases
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
+                        <button class="btn btn--secondary" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             Cancel Scan
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
+                        <button class="btn btn--secondary" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Update Similar Artists
                         </button>
-                        <button class="watchlist-action-btn watchlist-action-secondary" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
+                        <button class="btn btn--secondary" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             Global Settings
                         </button>
@@ -6900,7 +6874,7 @@
                             <span>Select All</span>
                         </label>
                         <span class="watchlist-batch-count" id="watchlist-batch-count"></span>
-                        <button class="watchlist-action-btn watchlist-action-secondary watchlist-batch-remove-btn" id="watchlist-batch-remove-btn" onclick="batchRemoveFromWatchlist()" style="display: none;">
+                        <button class="btn btn--secondary watchlist-batch-remove-btn" id="watchlist-batch-remove-btn" onclick="batchRemoveFromWatchlist()" style="display: none;">
                             Remove Selected
                         </button>
                     </div>
@@ -6917,7 +6891,7 @@
                         </div>
                         <h3>Your watchlist is empty</h3>
                         <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
-                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('search')">Open Search</button>
+                        <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
                     </div>
                 </div>
             </div>
@@ -6926,7 +6900,7 @@
                  WISHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
             <div class="page" id="wishlist-page">
-                <div class="wishlist-page-container">
+                <div class="page-shell wishlist-page-container">
                     <!-- Header -->
                     <div class="wishlist-page-header">
                         <div class="wishlist-page-header-left">
@@ -6940,11 +6914,11 @@
                             </div>
                         </div>
                         <div class="wishlist-page-header-right">
-                            <button class="watchlist-action-btn watchlist-action-secondary" onclick="cleanupWishlistOverview()">
+                            <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
                                 Cleanup
                             </button>
-                            <button class="watchlist-action-btn watchlist-action-danger" onclick="clearEntireWishlist()">
+                            <button class="btn btn--danger" onclick="clearEntireWishlist()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
                                 Clear All
                             </button>
@@ -6974,7 +6948,7 @@
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
                             <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
-                            <button class="watchlist-action-btn watchlist-action-primary" onclick="_nebulaDownload()">
+                            <button class="btn btn--primary" onclick="_nebulaDownload()">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Download Wishlist
                             </button>
@@ -6992,14 +6966,14 @@
                             <span id="wishlist-category-name" class="wishlist-category-name"></span>
                             <div class="wishlist-category-header-right">
                                 <button class="wishlist-select-all-btn" id="wishlist-select-all-btn" onclick="toggleWishlistSelectAll()">Select All</button>
-                                <button id="wishlist-download-btn" class="watchlist-action-btn watchlist-action-primary" style="display: none;" onclick="downloadSelectedCategory()">
+                                <button id="wishlist-download-btn" class="btn btn--primary" style="display: none;" onclick="downloadSelectedCategory()">
                                     Download Selection
                                 </button>
                             </div>
                         </div>
                         <div class="wishlist-batch-bar" id="wishlist-batch-bar" style="display: none;">
                             <span class="wishlist-batch-count" id="wishlist-batch-count">0 selected</span>
-                            <button class="watchlist-action-btn watchlist-action-secondary wishlist-batch-remove-btn" onclick="batchRemoveFromWishlist()">
+                            <button class="btn btn--secondary wishlist-batch-remove-btn" onclick="batchRemoveFromWishlist()">
                                 Remove Selected
                             </button>
                         </div>
@@ -7319,15 +7293,15 @@
 
                 <div class="add-to-wishlist-modal-footer">
                     <div class="wishlist-modal-actions">
-                        <button class="wishlist-modal-btn wishlist-modal-btn-secondary"
+                        <button class="btn btn--secondary"
                             onclick="closeAddToWishlistModal()">
                             Close
                         </button>
-                        <button class="wishlist-modal-btn wishlist-modal-btn-download" id="wishlist-download-now-btn"
+                        <button class="btn btn--download" id="wishlist-download-now-btn"
                             onclick="handleWishlistDownloadNow()">
                             Download Now
                         </button>
-                        <button class="wishlist-modal-btn wishlist-modal-btn-primary" id="confirm-add-to-wishlist-btn">
+                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn">
                             Add to Wishlist
                         </button>
                     </div>
@@ -7496,11 +7470,11 @@
 
                 <div class="watchlist-artist-config-footer">
                     <div class="config-modal-actions">
-                        <button class="config-modal-btn config-modal-btn-secondary"
+                        <button class="btn btn--secondary"
                             onclick="closeWatchlistArtistConfigModal()">
                             Cancel
                         </button>
-                        <button class="config-modal-btn config-modal-btn-primary" id="save-artist-config-btn">
+                        <button class="btn btn--primary" id="save-artist-config-btn">
                             Save Preferences
                         </button>
                     </div>
@@ -7680,11 +7654,11 @@
 
             <div class="watchlist-artist-config-footer">
                 <div class="config-modal-actions">
-                    <button class="config-modal-btn config-modal-btn-secondary"
+                    <button class="btn btn--secondary"
                         onclick="closeWatchlistGlobalSettingsModal()">
                         Cancel
                     </button>
-                    <button class="config-modal-btn config-modal-btn-primary" id="save-global-config-btn"
+                    <button class="btn btn--primary" id="save-global-config-btn"
                         onclick="saveWatchlistGlobalConfig()">
                         Save Global Settings
                     </button>

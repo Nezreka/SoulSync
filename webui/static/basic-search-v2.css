@@ -1,0 +1,694 @@
+/* =====================================================================
+ * Basic Search — visual redesign (functional behaviour untouched)
+ *
+ * Self-contained sheet appended via index.html link. Targets the new
+ * markup (``bs-*`` prefixed classes). Existing
+ * ``.search-bar-container`` / ``.filter-btn`` / ``.search-results-container``
+ * rules earlier in style.css still apply elsewhere (other search UIs reuse
+ * them); they no longer match the new basic-search markup so this redesign
+ * is fully scoped.
+ * ===================================================================== */
+
+
+/* — Source chip row above the search bar. One chip per active hybrid
+ *   source; in single-source mode the only chip is rendered with the
+ *   ``.single`` modifier so it reads as a label rather than a control. */
+.bs-source-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    align-items: center;
+    min-height: 32px;
+}
+
+.bs-source-row:empty {
+    display: none;
+}
+
+.bs-source-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.035) 0%,
+            rgba(0, 0, 0, 0.2) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bs-source-chip:hover:not(.active):not(.single):not(:disabled) {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.08) 0%,
+            rgba(0, 0, 0, 0.2) 100%);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.bs-source-chip.active {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%),
+            color-mix(in srgb, rgb(var(--accent-rgb)) 78%, black 22%));
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: #fff;
+    box-shadow:
+        0 4px 14px color-mix(in srgb, rgb(var(--accent-rgb)) 25%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.bs-source-chip.single {
+    cursor: default;
+    border-style: dashed;
+    border-color: rgba(var(--accent-rgb), 0.35);
+    background: transparent;
+    color: rgb(var(--accent-light-rgb));
+}
+
+
+/* — Search bar: glass card matching the dashboard / auto-sync vibe. */
+.bs-search-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    background:
+        radial-gradient(ellipse at 0% 0%,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 6%, transparent) 0%,
+            transparent 60%),
+        linear-gradient(160deg,
+            rgba(22, 25, 36, 0.7) 0%,
+            rgba(14, 16, 24, 0.85) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 16px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 6px 20px rgba(0, 0, 0, 0.25);
+    margin-bottom: 12px;
+}
+
+.bs-search-input-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    background: rgba(0, 0, 0, 0.32);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    height: 42px;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.bs-search-input-wrap:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 3px color-mix(in srgb, rgb(var(--accent-rgb)) 12%, transparent);
+}
+
+.bs-search-icon {
+    width: 16px;
+    height: 16px;
+    color: rgba(255, 255, 255, 0.4);
+    flex-shrink: 0;
+}
+
+.bs-search-input-wrap:focus-within .bs-search-icon {
+    color: rgb(var(--accent-light-rgb));
+}
+
+#basic-search-section #downloads-search-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    outline: none;
+    padding: 0;
+    height: 100%;
+}
+
+#basic-search-section #downloads-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.32);
+}
+
+.bs-cancel-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.bs-cancel-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fff;
+}
+
+.bs-search-btn {
+    padding: 0 22px;
+    height: 42px;
+    border: 1px solid rgba(var(--accent-rgb), 0.55);
+    border-radius: 12px;
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%),
+            color-mix(in srgb, rgb(var(--accent-rgb)) 78%, black 22%));
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 14px color-mix(in srgb, rgb(var(--accent-rgb)) 28%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.bs-search-btn:hover {
+    transform: translateY(-1px);
+    box-shadow:
+        0 6px 18px color-mix(in srgb, rgb(var(--accent-rgb)) 40%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.bs-search-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+
+/* — Status bar: thin accent-tinted pill matching the dashboard vibe. */
+.bs-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 4%, transparent),
+            transparent);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
+
+.bs-status-text {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: 0;
+    flex: 1;
+}
+
+
+/* — Filters: compact pill row, always visible after first search. */
+.bs-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 24px;
+    padding: 12px 14px;
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.025) 0%,
+            rgba(0, 0, 0, 0.15) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+.bs-filter-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.bs-filter-label {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-right: 4px;
+}
+
+.bs-filter-pill {
+    padding: 4px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 99px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.bs-filter-pill:hover:not(.active) {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: #fff;
+}
+
+.bs-filter-pill.active {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 80%, white 20%),
+            rgb(var(--accent-rgb)));
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: #fff;
+    box-shadow:
+        0 2px 8px color-mix(in srgb, rgb(var(--accent-rgb)) 25%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+
+/* — Results area: glass surface for cards. */
+.bs-results-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.bs-results-wrap .search-results-placeholder {
+    text-align: center;
+    padding: 60px 30px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 13px;
+}
+
+
+/* — Album result card: glass + accent left-edge stripe + cover icon.
+ *   ``!important`` is used liberally below because the original
+ *   ``.album-result-card`` / ``.album-icon`` / etc. rules in style.css
+ *   (~7247 onwards) are unscoped and apply heavyweight styles (24px
+ *   padding, 56px icon, 24px border-radius, big box-shadows) that
+ *   collide with this redesign. Scoping with ``#basic-search-section``
+ *   wins on specificity for some properties but the original
+ *   ``box-shadow`` and ``padding`` rules need explicit override to
+ *   defeat the cascade interaction with hover / pseudo states. */
+#basic-search-section .album-result-card {
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.04) 0%,
+            rgba(0, 0, 0, 0.2) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 14px !important;
+    position: relative;
+    transition: border-color 0.2s, transform 0.2s !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.03),
+        0 2px 10px rgba(0, 0, 0, 0.2) !important;
+    transform: none !important;
+}
+
+#basic-search-section .album-result-card::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    bottom: 14px;
+    left: 0;
+    width: 3px;
+    background: linear-gradient(180deg,
+        rgb(var(--accent-light-rgb)),
+        rgb(var(--accent-rgb)));
+    border-radius: 0 3px 3px 0;
+    box-shadow: 0 0 12px color-mix(in srgb, rgb(var(--accent-rgb)) 50%, transparent);
+    z-index: 2;
+}
+
+#basic-search-section .album-result-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.35) !important;
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.06) 0%,
+            rgba(0, 0, 0, 0.2) 100%) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 6px 20px rgba(0, 0, 0, 0.3) !important;
+    transform: translateY(-1px) !important;
+}
+
+#basic-search-section .album-card-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+    padding: 18px 22px !important;
+    cursor: pointer;
+}
+
+#basic-search-section .album-expand-indicator {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+
+#basic-search-section .album-result-card.expanded .album-expand-indicator {
+    transform: rotate(90deg);
+}
+
+#basic-search-section .album-icon {
+    width: 52px !important;
+    height: 52px !important;
+    min-width: 52px;
+    border-radius: 10px !important;
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 35%, transparent),
+            rgba(0, 0, 0, 0.4)) !important;
+    border: 1px solid rgba(var(--accent-rgb), 0.3) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 26px !important;
+    flex-shrink: 0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    color: rgba(var(--accent-rgb), 1.0);
+}
+
+#basic-search-section .album-info {
+    flex: 1 1 auto !important;
+    min-width: 0;
+    display: block;
+}
+
+#basic-search-section .album-title {
+    color: rgba(255, 255, 255, 0.95) !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.005em;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 0 4px 0 !important;
+}
+
+#basic-search-section .album-artist {
+    color: rgba(255, 255, 255, 0.65) !important;
+    font-size: 13px !important;
+    font-weight: 500;
+    line-height: 1.3;
+    margin: 0 0 6px 0 !important;
+}
+
+#basic-search-section .album-details {
+    color: rgb(var(--accent-light-rgb)) !important;
+    font-size: 11px !important;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.3;
+    margin: 0 0 3px 0 !important;
+}
+
+#basic-search-section .album-uploader {
+    color: rgba(255, 255, 255, 0.4) !important;
+    font-size: 11px !important;
+    line-height: 1.3;
+    margin: 0 !important;
+}
+
+#basic-search-section .album-actions {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    flex-shrink: 0;
+}
+
+
+/* — Track result card: glass row, similar height to album cards. */
+#basic-search-section .track-result-card {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+    padding: 16px 22px !important;
+    background:
+        linear-gradient(160deg,
+            rgba(255, 255, 255, 0.03) 0%,
+            rgba(0, 0, 0, 0.18) 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 14px !important;
+    position: relative;
+    transition: border-color 0.2s, transform 0.2s, background 0.2s !important;
+    margin: 0 !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.03),
+        0 2px 10px rgba(0, 0, 0, 0.2) !important;
+    transform: none !important;
+}
+
+#basic-search-section .track-result-card::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    bottom: 14px;
+    left: 0;
+    width: 2px;
+    background: linear-gradient(180deg,
+        rgba(var(--accent-rgb), 0.7),
+        rgba(var(--accent-rgb), 0.3));
+    border-radius: 0 2px 2px 0;
+    z-index: 2;
+}
+
+#basic-search-section .track-result-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.3) !important;
+    background:
+        linear-gradient(160deg,
+            rgba(var(--accent-rgb), 0.06) 0%,
+            rgba(0, 0, 0, 0.18) 100%) !important;
+    transform: translateY(-1px) !important;
+}
+
+#basic-search-section .track-icon {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 22px !important;
+    flex-shrink: 0;
+}
+
+#basic-search-section .track-info {
+    flex: 1 1 auto !important;
+    min-width: 0;
+}
+
+#basic-search-section .track-title {
+    color: rgba(255, 255, 255, 0.95) !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 0 3px 0 !important;
+}
+
+#basic-search-section .track-artist {
+    color: rgba(255, 255, 255, 0.6) !important;
+    font-size: 12px !important;
+    line-height: 1.3;
+    margin: 0 0 5px 0 !important;
+}
+
+#basic-search-section .track-details {
+    color: rgba(255, 255, 255, 0.5) !important;
+    font-size: 11px !important;
+    line-height: 1.3;
+    margin: 0 0 3px 0 !important;
+}
+
+#basic-search-section .track-uploader {
+    color: rgba(255, 255, 255, 0.38) !important;
+    font-size: 11px !important;
+    line-height: 1.3;
+    margin: 0 !important;
+}
+
+#basic-search-section .track-actions {
+    display: flex !important;
+    gap: 6px !important;
+    flex-shrink: 0;
+}
+
+
+/* — Action buttons inside album / track cards: pill primary + ghost. */
+#basic-search-section .album-download-btn,
+#basic-search-section .album-matched-btn,
+#basic-search-section .track-download-btn,
+#basic-search-section .track-matched-btn,
+#basic-search-section .track-stream-btn {
+    padding: 6px 12px;
+    border-radius: 99px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+}
+
+#basic-search-section .album-download-btn,
+#basic-search-section .track-download-btn {
+    background:
+        linear-gradient(135deg,
+            color-mix(in srgb, rgb(var(--accent-rgb)) 92%, white 8%),
+            rgb(var(--accent-rgb)));
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+    box-shadow: 0 2px 8px color-mix(in srgb, rgb(var(--accent-rgb)) 22%, transparent);
+}
+
+#basic-search-section .album-download-btn:hover,
+#basic-search-section .track-download-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 14px color-mix(in srgb, rgb(var(--accent-rgb)) 35%, transparent);
+}
+
+#basic-search-section .album-matched-btn,
+#basic-search-section .track-matched-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-light-rgb));
+}
+
+#basic-search-section .album-matched-btn:hover,
+#basic-search-section .track-matched-btn:hover {
+    background: color-mix(in srgb, rgb(var(--accent-rgb)) 12%, transparent);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+}
+
+#basic-search-section .track-stream-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.65);
+}
+
+#basic-search-section .track-stream-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #fff;
+}
+
+
+/* — Expanded album track list */
+#basic-search-section .album-track-list {
+    background: rgba(0, 0, 0, 0.18);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    padding: 4px 0;
+}
+
+#basic-search-section .track-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px 10px 50px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background 0.15s;
+}
+
+#basic-search-section .track-item:last-child {
+    border-bottom: none;
+}
+
+#basic-search-section .track-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+#basic-search-section .track-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+#basic-search-section .track-item-title {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#basic-search-section .track-item-details {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
+    margin-top: 2px;
+}
+
+#basic-search-section .track-item-actions {
+    display: flex;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+#basic-search-section .track-item-actions .track-stream-btn,
+#basic-search-section .track-item-actions .track-download-btn,
+#basic-search-section .track-item-actions .track-matched-btn {
+    padding: 4px 10px;
+    font-size: 9px;
+}
+
+#basic-search-section .disc-separator {
+    padding: 8px 18px 6px 50px !important;
+    font-weight: 700 !important;
+    font-size: 10px !important;
+    color: rgb(var(--accent-light-rgb)) !important;
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.2) !important;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: none !important;
+    margin: 0 !important;
+}
+
+
+/* — Responsive: collapse action button row on narrow viewports. */
+@media (max-width: 900px) {
+    #basic-search-section .album-actions,
+    #basic-search-section .track-actions {
+        flex-direction: column;
+    }
+    .bs-filters {
+        gap: 10px 16px;
+    }
+}

@@ -6395,8 +6395,8 @@ function openHaveMissingTrackModal(track, album) {
             <div class="enhanced-have-import-detail">Waiting to start.</div>
         </div>
         <div class="enhanced-bulk-modal-footer">
-            <button class="enhanced-bulk-btn secondary" type="button" id="enhanced-have-cancel">Cancel</button>
-            <button class="enhanced-bulk-btn primary" type="button" id="enhanced-have-confirm" disabled>Import Track</button>
+            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" type="button" id="enhanced-have-cancel">Cancel</button>
+            <button class="btn btn--sm btn--primary enhanced-bulk-btn" type="button" id="enhanced-have-confirm" disabled>Import Track</button>
         </div>
     `;
     overlay.appendChild(modal);

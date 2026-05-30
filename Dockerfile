@@ -79,8 +79,15 @@ COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/
 # fails silently on rootless Docker where the soulsync UID can't write
 # to /app — playback then errors out with no obvious cause. Pre-baking
 # at build time (when the layer is owned by root) avoids that path.
-RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/MusicVideos /app/scripts && \
-    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/MusicVideos /app/scripts
+# NOTE: /app/storage is the PRIVATE album-bundle staging area for the
+# torrent / usenet whole-release flow (download_source.album_bundle_staging_path
+# defaults to 'storage/album_bundle_staging'). Like /app/Stream it's created
+# lazily at runtime via mkdir(parents=True); without pre-baking it owned by
+# soulsync, the album-bundle copy fails with "[Errno 13] Permission denied:
+# 'storage'" because /app itself is root-owned and the soulsync UID can't
+# create a top-level dir there.
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts && \
+    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts
 
 # Create defaults directory and copy template files
 # These will be used by entrypoint.sh to initialize empty volumes

@@ -165,6 +165,192 @@ def test_sab_parse_history_slot_marks_failures() -> None:
     assert success.save_path == '/done'
 
 
+def test_sab_history_save_path_falls_back_to_path_field() -> None:
+    """Older SAB releases populated ``path`` instead of ``storage``.
+    The adapter must fall through the field-name chain so we pick it
+    up either way."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'z', 'name': 'Z', 'status': 'Completed',
+        'bytes': 0, 'path': '/legacy/sab/path',
+    })
+    assert slot.save_path == '/legacy/sab/path'
+
+
+def test_sab_history_save_path_falls_back_to_download_path_field() -> None:
+    """Some SAB forks expose ``download_path`` instead of the
+    documented ``storage``. Same fallback chain catches it."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'z2', 'name': 'Z2', 'status': 'Completed',
+        'bytes': 0, 'download_path': '/fork/dl',
+    })
+    assert slot.save_path == '/fork/dl'
+
+
+def test_sab_history_save_path_prefers_storage_when_multiple_present() -> None:
+    """Field priority: ``storage`` wins over the fallbacks. The
+    documented final-path key must be preferred so SAB upgrades
+    don't subtly change the resolved path."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'p', 'name': 'P', 'status': 'Completed',
+        'bytes': 0,
+        'storage': '/final/storage',
+        'path': '/legacy/path',
+        'download_path': '/fork/dl',
+        'dirname': '/dirname',
+    })
+    assert slot.save_path == '/final/storage'
+
+
+def test_sab_history_save_path_none_when_all_fields_empty() -> None:
+    """Regression for #721: SAB's ``storage`` field lands a few
+    seconds after the job flips to History. During that window
+    EVERY known path field can be empty. The adapter must return
+    ``save_path=None`` (not a stale string) so
+    ``poll_album_download``'s retry loop can engage and wait for
+    the next poll where ``storage`` lands."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'gap', 'name': 'Forty Licks', 'status': 'Completed',
+        'bytes': 0,
+        # No storage / path / download_path / dirname.
+    })
+    assert slot.state == 'completed'
+    assert slot.save_path is None
+
+
+def test_sab_history_save_path_ignores_whitespace_only_values() -> None:
+    """A field present but with whitespace-only content shouldn't
+    fool the fallback chain — keep walking until a real path lands."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'ws', 'name': 'W', 'status': 'Completed',
+        'bytes': 0,
+        'storage': '   ',
+        'path': '\t',
+        'download_path': '/actual/path',
+    })
+    assert slot.save_path == '/actual/path'
+
+
+def test_sab_history_save_path_ignores_incomplete_path() -> None:
+    """``incomplete_path`` is SAB's in-progress staging dir before
+    post-process moves files to the final ``storage``. Using it as
+    a save_path fallback would bypass ``poll_album_download``'s
+    retry window AND point the bundle plugin at the wrong dir —
+    the in-progress staging files might be gone by the time we
+    walk it, or they might be partially-extracted. Safer to return
+    ``None`` so the poll retries until ``storage`` lands. Pinned
+    here so a future "let's add another fallback" change doesn't
+    silently re-introduce the foot-gun."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'inc', 'name': 'Inc', 'status': 'Completed',
+        'bytes': 0,
+        'incomplete_path': '/sab/incomplete/job',
+    })
+    assert slot.save_path is None
+
+
+def test_sab_history_post_processing_states_are_not_terminal() -> None:
+    """#721 production root cause: SAB keeps a job in History while it
+    post-processes (verify / repair / unpack / move), exposing the live
+    stage in ``status``. Those must map to NON-terminal states so the
+    poll keeps waiting — NOT to 'completed', which would make the poll
+    treat a still-extracting album as "completed but no save_path" and
+    bail mid-PP (the stuck-at-99% bug). Only a real 'Completed' is
+    terminal success."""
+    adapter = _sab_with_config()
+    for sab_status, expected in [
+        ('Verifying', 'verifying'),
+        ('Repairing', 'repairing'),
+        ('Extracting', 'extracting'),
+        ('Moving', 'extracting'),
+        ('Running', 'extracting'),
+        ('Queued', 'queued'),
+    ]:
+        slot = adapter._parse_history_slot({
+            'nzo_id': 'pp', 'name': 'PP', 'status': sab_status,
+            'bytes': 1000,
+            # ``storage`` not written yet — PP still in flight.
+        })
+        assert slot.state == expected, f'{sab_status} -> {slot.state}, want {expected}'
+        # Non-terminal: not 'completed', not 'failed'.
+        assert slot.state not in ('completed', 'failed')
+        # Download is done, so progress is full, but no final path yet.
+        assert slot.progress == 1.0
+        assert slot.save_path is None
+
+
+def test_sab_history_completed_still_resolves_save_path() -> None:
+    """The true-completion path is unchanged: status 'Completed' with a
+    populated ``storage`` resolves to terminal success + final path."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'done', 'name': 'D', 'status': 'Completed',
+        'bytes': 1000, 'storage': '/data/downloads/music/Album',
+    })
+    assert slot.state == 'completed'
+    assert slot.progress == 1.0
+    assert slot.save_path == '/data/downloads/music/Album'
+
+
+def test_sab_history_post_processing_ignores_storage_until_completed() -> None:
+    """Even if SAB has written a (possibly incomplete-dir) path field
+    while still post-processing, the adapter must NOT expose it as
+    save_path until the slot flips to 'Completed' — otherwise the bundle
+    could stage from a half-unpacked directory."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'pp2', 'name': 'PP2', 'status': 'Extracting',
+        'bytes': 1000, 'storage': '/data/downloads/music/Album',
+    })
+    assert slot.state == 'extracting'
+    assert slot.save_path is None
+
+
+def test_sab_history_surfaces_incomplete_path_separately_from_save_path() -> None:
+    """``incomplete_path`` must be exposed on its OWN field, never folded
+    into ``save_path``. The poll loops fall back to it only as a last
+    resort after the completed-no-path window is exhausted (#721) — using
+    it as save_path would bypass that window and point staging at the
+    pre-move dir on every normal completion."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'gap2', 'name': 'No Storage', 'status': 'Completed',
+        'bytes': 0,
+        # storage / path / download_path / dirname all absent — the
+        # #721 gap window — but the in-progress dir is known.
+        'incomplete_path': '/sab/incomplete/No Storage',
+    })
+    assert slot.save_path is None
+    assert slot.incomplete_path == '/sab/incomplete/No Storage'
+
+
+def test_sab_history_incomplete_path_ignores_whitespace_only() -> None:
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'gap3', 'name': 'WS', 'status': 'Completed',
+        'bytes': 0, 'incomplete_path': '   ',
+    })
+    assert slot.incomplete_path is None
+
+
+def test_sab_history_prefers_storage_and_still_carries_incomplete_path() -> None:
+    """When ``storage`` IS present, save_path resolves to it normally,
+    and incomplete_path is carried alongside (harmless — the poll only
+    consults it when save_path never lands)."""
+    adapter = _sab_with_config()
+    slot = adapter._parse_history_slot({
+        'nzo_id': 'both', 'name': 'B', 'status': 'Completed',
+        'bytes': 0, 'storage': '/final', 'incomplete_path': '/inc',
+    })
+    assert slot.save_path == '/final'
+    assert slot.incomplete_path == '/inc'
+
+
 def test_sab_add_nzb_via_url_returns_first_nzo_id() -> None:
     adapter = _sab_with_config()
     with patch('core.usenet_clients.sabnzbd.http_requests.get',
@@ -333,6 +519,86 @@ def test_sab_poll_recovers_after_queue_to_history_handoff_gap() -> None:
 
     assert result == '/done/Album'
     # Terminal failure must NOT have been emitted — the gap was transient.
+    assert 'failed' not in [e[0] for e in emits]
+
+
+def test_sab_poll_waits_through_history_post_processing_then_completes() -> None:
+    """Integration regression for the #721 PRODUCTION root cause
+    (David Bowie - Hunky Dory, 1.7 GB FLAC, stuck at 99%).
+
+    SAB moves a finished download into History and runs par2 verify +
+    unpack THERE, exposing the live stage in ``status`` while ``storage``
+    stays empty until the final move. For a 1.7 GB FLAC album that
+    post-processing window is far longer than the ~10s completed-no-path
+    budget. Pre-fix the adapter mapped 'Extracting' → 'completed', so the
+    poll saw "completed but no save_path" the instant download finished,
+    burned its budget mid-PP, and bailed — freezing the UI on the last
+    'downloading' emit (99%). SAB then finished fine, which is why the
+    job shows Completed in History but SoulSync never staged it.
+
+    Post-fix the in-PP History slots map to NON-terminal states, so the
+    poll just keeps waiting (as 'downloading') until SAB flips the slot
+    to 'Completed' with a real ``storage`` path — no matter how long PP
+    takes — then returns it."""
+    from core.download_plugins.album_bundle import poll_album_download
+
+    adapter = _sab_with_config()
+    downloading = _mock_response(200, {'queue': {'slots': [
+        {'nzo_id': 'hd', 'filename': 'Hunky Dory', 'status': 'Downloading',
+         'percentage': '99', 'mb': '1700', 'mbleft': '17', 'timeleft': '0:00:05'},
+    ]}})
+    empty_queue = _mock_response(200, {'queue': {'slots': []}})
+    # Long post-processing window, reported via HISTORY (download already
+    # left the queue). storage NOT yet written.
+    pp_verify = _mock_response(200, {'history': {'slots': [
+        {'nzo_id': 'hd', 'name': 'Hunky Dory', 'status': 'Verifying', 'bytes': 1_700_000_000},
+    ]}})
+    pp_extract = _mock_response(200, {'history': {'slots': [
+        {'nzo_id': 'hd', 'name': 'Hunky Dory', 'status': 'Extracting', 'bytes': 1_700_000_000},
+    ]}})
+    done = _mock_response(200, {'history': {'slots': [
+        {'nzo_id': 'hd', 'name': 'Hunky Dory', 'status': 'Completed',
+         'bytes': 1_700_000_000,
+         'storage': '/data/downloads/music/David.Bowie-Hunky.Dory'},
+    ]}})
+
+    # Each poll = queue call + (if empty) history call.
+    poll_results = [
+        downloading,                 # poll 1: queue has it @99%  (1 call)
+        empty_queue, pp_verify,      # poll 2: PP verifying in history
+        empty_queue, pp_verify,      # poll 3: still verifying
+        empty_queue, pp_extract,     # poll 4: extracting
+        empty_queue, pp_extract,     # poll 5: still extracting
+        empty_queue, pp_extract,     # poll 6: still extracting (past old 5-poll budget)
+        empty_queue, pp_extract,     # poll 7
+        empty_queue, done,           # poll 8: completed + storage
+    ]
+
+    class _Clock:
+        def __init__(self): self.now = 0.0
+        def monotonic(self): return self.now
+        def sleep(self, s): self.now += s
+
+    clock = _Clock()
+    emits: list = []
+    with patch('core.usenet_clients.sabnzbd.http_requests.get',
+               side_effect=poll_results):
+        result = poll_album_download(
+            get_status=lambda: adapter._get_status_sync('hd'),
+            title='David Bowie - Hunky Dory',
+            emit=lambda state, **kw: emits.append((state, kw)),
+            complete_states=frozenset(['completed']),
+            failed_states=frozenset(['failed']),
+            transient_miss_threshold=5,
+            # Short no-path budget proves PP is NOT consuming it anymore.
+            completed_no_path_threshold=2,
+            sleep=clock.sleep, monotonic=clock.monotonic,
+            poll_interval=2.0, timeout=600.0,
+        )
+
+    assert result == '/data/downloads/music/David.Bowie-Hunky.Dory'
+    # Never failed despite PP outlasting both the miss budget AND the
+    # (deliberately tiny) completed-no-path budget — PP is non-terminal.
     assert 'failed' not in [e[0] for e in emits]
 
 
