@@ -48673,6 +48673,22 @@ textarea.enhanced-meta-field-input {
 .np-btn-shuffle.active, .np-btn-repeat.active { color: rgb(var(--accent-light-rgb)) !important; }
 .np-btn-shuffle.active::after, .np-btn-repeat.active::after { background: rgb(var(--accent-light-rgb)) !important; }
 
+/* Stop is a text pill, NOT a circular transport button — exempt it from the
+   round .np-btn sizing above (which was squashing "Stop" into a tiny circle). */
+.np-btn.np-btn-stop {
+    width: auto !important; height: auto !important;
+    border-radius: 999px !important;
+    padding: 8px 20px !important;
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+}
+.np-btn.np-btn-stop:hover {
+    background: rgba(255,60,60,0.1) !important;
+    border-color: rgba(255,60,60,0.25) !important;
+    color: rgba(255,90,90,0.9) !important;
+    transform: none !important;
+}
+
 /* ── Visualizer bars: accent gradient ── */
 .np-viz-bar {
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb),0.35)) !important;
@@ -48689,6 +48705,18 @@ textarea.enhanced-meta-field-input {
 /* ── Close button + lyrics active line ── */
 .np-close-btn:hover { color: #fff !important; background: rgba(255,255,255,0.1) !important; }
 .np-lyrics-line.active { color: rgb(var(--accent-light-rgb)) !important; font-weight: 700 !important; }
+
+/* ── Crafted entrance: controls stagger-fade in when modal opens ──
+   (Art container is intentionally excluded — its transform is reserved for the
+   play-scale; it gets its own scale-in via the box transition.) */
+.np-modal-overlay:not(.hidden) .np-track-info { animation: npRiseIn 0.55s cubic-bezier(0.16,1,0.3,1) 0.06s both; }
+.np-modal-overlay:not(.hidden) .np-right > * { animation: npRiseIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+.np-modal-overlay:not(.hidden) .np-util-row { animation-delay: 0.08s; }
+.np-modal-overlay:not(.hidden) .np-progress-section { animation-delay: 0.12s; }
+.np-modal-overlay:not(.hidden) .np-controls-row { animation-delay: 0.16s; }
+.np-modal-overlay:not(.hidden) .np-volume-row { animation-delay: 0.20s; }
+.np-modal-overlay:not(.hidden) .np-upnext { animation-delay: 0.24s; }
+@keyframes npRiseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Click-art → music-synced visualizer takeover (Plexamp-style) ── */
 .np-album-art-container { cursor: pointer; }

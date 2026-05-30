@@ -55,6 +55,9 @@ function initializeMediaPlayer() {
     const miniNextBtn = document.getElementById('mini-next-btn');
     if (miniPrevBtn) miniPrevBtn.addEventListener('click', (e) => { e.stopPropagation(); playPreviousInQueue(); });
     if (miniNextBtn) miniNextBtn.addEventListener('click', (e) => { e.stopPropagation(); playNextInQueue(); });
+
+    // Restore a previously-saved queue (does not auto-play)
+    npRestoreQueue();
 }
 
 function toggleMediaPlayerExpansion() {
@@ -2283,6 +2286,38 @@ function renderNpQueue() {
     });
 
     npUpdateUpNext();
+    npPersistQueue();
+}
+
+// ── Queue persistence across page reloads (localStorage) ──
+const NP_QUEUE_STORAGE_KEY = 'soulsync-np-queue';
+
+function npPersistQueue() {
+    try {
+        if (!npQueue.length) { localStorage.removeItem(NP_QUEUE_STORAGE_KEY); return; }
+        localStorage.setItem(NP_QUEUE_STORAGE_KEY, JSON.stringify({
+            queue: npQueue,
+            index: npQueueIndex,
+            savedAt: Date.now(),
+        }));
+    } catch (e) { /* quota / disabled storage — non-fatal */ }
+}
+
+// Restore the saved queue into the panel WITHOUT auto-playing (the user
+// reloaded; resume playback is their choice via clicking a row).
+function npRestoreQueue() {
+    try {
+        const raw = localStorage.getItem(NP_QUEUE_STORAGE_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.queue) && data.queue.length) {
+            npQueue = data.queue;
+            // Don't claim a track is "playing" on a fresh load — nothing is.
+            npQueueIndex = -1;
+            renderNpQueue();
+            updateNpPrevNextButtons();
+        }
+    } catch (e) { /* corrupt entry — ignore */ }
 }
 
 // ── Queue drag-to-reorder ──
