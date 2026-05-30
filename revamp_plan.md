@@ -8,7 +8,7 @@ Rule for every phase: kettui standard — importable/testable logic, seam-level 
 
 ## Phase 0 — Make it provable (foundation, no user-visible change)
 
-- [ ] **0a. Extract radio selection logic into testable `core/radio/`.** The algorithm (tier orchestration, cap math, dedup, tag parsing, SQL-condition building) is currently tangled with `cursor.execute` inside `database/music_database.py:get_radio_tracks` (~12756) — untestable without a live DB. Pull the pure decisions into `core/radio/selection.py`; the DB method keeps SQL execution but delegates the decisions. Differential-test: same inputs → same output as today.
+- [x] **0a. Extract radio selection logic into testable `core/radio/`.** DONE (commit cbc001e2). `core/radio/selection.py` owns parse_tags/merge_tags/same_artist_cap/build_like_conditions/RadioCollector; DB method delegates. 29 tests, refactor-equivalence proven (behavioral tests pass against old AND new).
 - [ ] **0b. Centralize frontend player state.** ~10 scattered `np*` globals in `media-player.js` → one `PlayerState` object. Seam for every later frontend phase. No behavior change.
 
 ## Phase 1 — Polish / feel (frontend)
@@ -22,7 +22,8 @@ Rule for every phase: kettui standard — importable/testable logic, seam-level 
 
 ## Phase 2 — Smart radio (backend algorithm)
 
-- [ ] Replace `ORDER BY RANDOM()` with real seeding: play-count + recency weighting, genre-adjacency, recently-played memory. Slots into the Phase-0a pure module → fully unit-testable (seed → expected ordering). Both radio buttons benefit (shared function).
+- [x] **Weighted ranking** DONE. Each tier now fetches a random POOL (4x, floored) and `core/radio/selection.rank_candidates` orders it by `score_candidate`: play_count + lastfm_playcount (log-damped), recently-played penalty, stable per-id jitter for run variety. Defensive column-probe → still works on a DB predating the play_count/lastfm migration. 43 radio tests; ranking math is deterministic-unit-proven; DB wiring shown via decoy-pool test (probabilistic by nature — documented).
+- [ ] **Future (optional deepening):** wire `_recently_played` from `listening_history` (column + scorer support already exist; not yet populated in the query), genre-adjacency graph (currently exact-genre LIKE only).
 
 ## Phase 3 — Architecture (deepest, riskiest — listener decision lands here)
 

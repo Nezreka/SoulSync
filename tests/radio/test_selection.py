@@ -12,7 +12,9 @@ from core.radio.selection import (
     build_like_conditions,
     merge_tags,
     parse_tags,
+    rank_candidates,
     same_artist_cap,
+    score_candidate,
 )
 
 
@@ -137,3 +139,82 @@ class TestRadioCollector:
         c.collect(self._rows("c"))
         assert c.exclude_placeholders() == "?,?,?"
         assert set(c.exclude_values()) == {"a", "b", "c"}
+
+    def test_ranked_collect_prefers_high_play_count(self):
+        # Pool given in worst-first order; rank=True should reorder so the
+        # most-played track is collected first.
+        c = RadioCollector(limit=2)
+        pool = [
+            {"id": 1, "play_count": 0},
+            {"id": 2, "play_count": 500},
+            {"id": 3, "play_count": 50},
+        ]
+        c.collect(pool, rank=True)
+        assert [t["id"] for t in c.tracks] == [2, 3]   # 500 then 50, 0 dropped at limit
+
+
+# ── Phase 2: smart ranking ─────────────────────────────────────────────────
+
+class TestScoreCandidate:
+    def test_missing_signals_score_is_pure_jitter(self):
+        # No play data → score is just the stable jitter, in [0, 1).
+        s = score_candidate({"id": "x"})
+        assert 0.0 <= s < 1.0
+
+    def test_higher_play_count_scores_higher(self):
+        low = score_candidate({"id": "same", "play_count": 1})
+        high = score_candidate({"id": "same", "play_count": 1000})
+        assert high > low   # same id → same jitter, so play_count decides
+
+    def test_lastfm_contributes(self):
+        base = score_candidate({"id": "same"})
+        with_lastfm = score_candidate({"id": "same", "lastfm_playcount": 100000})
+        assert with_lastfm > base
+
+    def test_recently_played_is_penalized(self):
+        normal = score_candidate({"id": "same", "play_count": 10})
+        recent = score_candidate({"id": "same", "play_count": 10, "_recently_played": True})
+        assert recent < normal
+
+    def test_invalid_counts_treated_as_zero(self):
+        # Garbage values must not crash; they score as 0 (jitter only).
+        s = score_candidate({"id": "x", "play_count": None, "lastfm_playcount": "n/a"})
+        assert 0.0 <= s < 1.0
+
+    def test_jitter_is_stable_per_id(self):
+        a = score_candidate({"id": "track-42"})
+        b = score_candidate({"id": "track-42"})
+        assert a == b   # deterministic — reproducible runs/tests
+
+    def test_jitter_differs_between_ids(self):
+        a = score_candidate({"id": "track-1"})
+        b = score_candidate({"id": "track-2"})
+        assert a != b
+
+
+class TestRankCandidates:
+    def test_orders_best_first(self):
+        rows = [
+            {"id": 1, "play_count": 0},
+            {"id": 2, "play_count": 1000},
+            {"id": 3, "play_count": 100},
+        ]
+        ranked = rank_candidates(rows)
+        assert [r["id"] for r in ranked] == [2, 3, 1]
+
+    def test_does_not_mutate_input(self):
+        rows = [{"id": 1, "play_count": 0}, {"id": 2, "play_count": 9}]
+        original = list(rows)
+        rank_candidates(rows)
+        assert rows == original
+
+    def test_empty(self):
+        assert rank_candidates([]) == []
+
+    def test_popularity_beats_jitter_at_scale(self):
+        # A heavily-played track must always outrank an unplayed one regardless
+        # of jitter (jitter is bounded to [0,1), play_count is log-scaled * 1.0).
+        pool = [{"id": f"unplayed-{i}", "play_count": 0} for i in range(20)]
+        pool.append({"id": "hit", "play_count": 5000})
+        ranked = rank_candidates(pool)
+        assert ranked[0]["id"] == "hit"

@@ -95,6 +95,23 @@ def _schema(db):
         CREATE TABLE tracks (
             id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
             title TEXT, track_number INTEGER, duration INTEGER,
+            file_path TEXT, bitrate INTEGER,
+            play_count INTEGER DEFAULT 0, lastfm_playcount INTEGER
+        )
+    """)
+    db._conn.commit()
+
+
+def _schema_no_rank_cols(db):
+    """Schema WITHOUT play_count / lastfm_playcount — proves radio still works
+    on a DB that predates the smart-ranking migration (defensive column probe)."""
+    cur = db._conn.cursor()
+    cur.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT, genres TEXT, mood TEXT, style TEXT, thumb_url TEXT)")
+    cur.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, genres TEXT, mood TEXT, style TEXT, thumb_url TEXT)")
+    cur.execute("""
+        CREATE TABLE tracks (
+            id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
+            title TEXT, track_number INTEGER, duration INTEGER,
             file_path TEXT, bitrate INTEGER
         )
     """)
@@ -115,11 +132,11 @@ def _add_album(db, alid, aid, title, genres="", mood="", style=""):
     )
 
 
-def _add_track(db, tid, alid, aid, title, file_path="/m/x.flac"):
+def _add_track(db, tid, alid, aid, title, file_path="/m/x.flac", play_count=0):
     db._conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        (tid, alid, aid, title, 1, 200, file_path, 1000),
+        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, play_count) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (tid, alid, aid, title, 1, 200, file_path, 1000, play_count),
     )
 
 
@@ -127,6 +144,13 @@ def _add_track(db, tid, alid, aid, title, file_path="/m/x.flac"):
 def db():
     d = _InMemoryDB()
     _schema(d)
+    return d
+
+
+@pytest.fixture
+def db_no_rank():
+    d = _InMemoryDB()
+    _schema_no_rank_cols(d)
     return d
 
 
@@ -220,3 +244,50 @@ def test_no_duplicate_ids_across_tiers(db):
     res = db.get_radio_tracks("seed", limit=10)
     ids = [t["id"] for t in res["tracks"]]
     assert ids.count("dup") == 1
+
+
+def test_smart_ranking_prefers_more_played_in_same_tier(db):
+    """Phase 2: within a tier, the ranker surfaces the heavily-played track
+    first out of the fetched pool.
+
+    Robustness note: this proves the ranking is WIRED IN end-to-end. The pool
+    factor (4x, floored) means with these few candidates the whole set is
+    fetched, so ranking is deterministic here. The deterministic guarantee of
+    the ranking *math* lives in TestRankCandidates / TestScoreCandidate (unit
+    level) — those can't pass against pre-Phase-2 code at all. We seed many
+    unplayed decoys so a pre-Phase-2 ``ORDER BY RANDOM()`` would only return
+    'hit' first by a ~1-in-N fluke, making the wiring claim meaningful."""
+    _add_artist(db, "ar1", "Artist One")
+    _add_album(db, "al1", "ar1", "Seed Album")
+    _add_album(db, "al2", "ar1", "Other Album")
+    _add_track(db, "seed", "al1", "ar1", "Seed")
+    for i in range(15):
+        _add_track(db, f"rare{i}", "al2", "ar1", f"Rarely Played {i}", play_count=0)
+    _add_track(db, "hit", "al2", "ar1", "Big Hit", play_count=5000)
+    db._conn.commit()
+
+    res = db.get_radio_tracks("seed", limit=5)
+    assert res["success"] is True
+    ids = [t["id"] for t in res["tracks"]]
+    # The heavily-played track is ranked first out of the same-artist pool.
+    assert ids[0] == "hit"
+
+
+def test_works_without_ranking_columns(db_no_rank):
+    """Defensive: a DB predating the play_count/lastfm migration must still
+    return radio tracks (column probe omits the missing fields)."""
+    _add_artist(db_no_rank, "ar1", "Artist One")
+    _add_album(db_no_rank, "al1", "ar1", "Album A")
+    _add_album(db_no_rank, "al2", "ar1", "Album B")
+    # _add_track inserts play_count, so insert directly without it here.
+    db_no_rank._conn.execute(
+        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate) "
+        "VALUES (?,?,?,?,?,?,?,?)", ("seed", "al1", "ar1", "Seed", 1, 200, "/m/s.flac", 1000))
+    db_no_rank._conn.execute(
+        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path, bitrate) "
+        "VALUES (?,?,?,?,?,?,?,?)", ("t2", "al2", "ar1", "Other", 1, 200, "/m/t2.flac", 1000))
+    db_no_rank._conn.commit()
+
+    res = db_no_rank.get_radio_tracks("seed", limit=10)
+    assert res["success"] is True
+    assert "t2" in [t["id"] for t in res["tracks"]]
