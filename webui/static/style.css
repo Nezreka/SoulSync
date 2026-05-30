@@ -48581,6 +48581,192 @@ textarea.enhanced-meta-field-input {
     background: rgba(255, 80, 80, 0.1);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   NOW PLAYING — full redesign (player revamp). Comprehensive override of the
+   .np-* modal styling to the approved mockup look. !important is used through-
+   out to guarantee these win over the original block above regardless of
+   source order. Accent-driven via --accent-rgb / --accent-light-rgb.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.np-modal {
+    width: min(960px, 94vw) !important;
+    max-width: 960px !important;
+    border-radius: 28px !important;
+    background: linear-gradient(180deg, rgba(26,26,28,0.97) 0%, rgba(11,11,12,0.99) 100%) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.72),
+                0 0 0 1px rgba(255,255,255,0.03) inset,
+                0 1px 0 rgba(255,255,255,0.06) inset !important;
+}
+.np-modal::before {
+    top: -30% !important;
+    height: 72% !important;
+    background: radial-gradient(ellipse at 28% 18%,
+        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.45) 0%,
+        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.12) 38%,
+        transparent 68%) !important;
+    filter: blur(48px) !important;
+}
+.np-body { padding: 54px 44px 38px !important; gap: 48px !important; align-items: flex-start !important; }
+
+/* ── Album art: big, rounded, accent depth, scales while playing ── */
+.np-album-art-container {
+    width: 340px !important;
+    height: 340px !important;
+    border-radius: 22px !important;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6), 0 6px 22px rgba(var(--accent-rgb),0.16) !important;
+    transition: transform 0.5s cubic-bezier(0.16,1,0.3,1), box-shadow 0.5s !important;
+}
+.np-modal.playing .np-album-art-container {
+    transform: scale(1.02) !important;
+    box-shadow: 0 30px 92px rgba(0,0,0,0.66), 0 12px 40px rgba(var(--accent-rgb),0.28) !important;
+}
+
+/* ── Track meta ── */
+.np-track-info { text-align: left !important; }
+.np-track-title { font-size: 28px !important; font-weight: 800 !important; letter-spacing: -0.02em !important; line-height: 1.1 !important; }
+.np-artist-name { font-size: 15px !important; font-weight: 600 !important; color: rgb(var(--accent-light-rgb)) !important; }
+.np-album-name { font-size: 13px !important; color: rgba(255,255,255,0.4) !important; }
+
+/* ── Format badges → accent pills ── */
+.np-format-badges { display: flex !important; gap: 8px !important; flex-wrap: wrap !important; margin-top: 16px !important; }
+.np-format-badge {
+    font-size: 10.5px !important; font-weight: 700 !important; letter-spacing: 0.04em !important; text-transform: uppercase !important;
+    padding: 5px 11px !important; border-radius: 999px !important;
+    background: rgba(255,255,255,0.07) !important; border: 1px solid rgba(255,255,255,0.08) !important;
+    color: rgba(255,255,255,0.62) !important;
+}
+.np-format-badge.flac {
+    color: rgb(var(--accent-light-rgb)) !important;
+    border-color: rgba(var(--accent-rgb),0.4) !important;
+    background: rgba(var(--accent-rgb),0.12) !important;
+}
+
+/* ── Progress / volume: thicker track, accent gradient fill, glow on hover ── */
+.np-progress-track, .np-volume-track { height: 6px !important; border-radius: 999px !important; background: rgba(255,255,255,0.12) !important; }
+.np-progress-fill, .np-volume-fill {
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb))) !important;
+    border-radius: 999px !important;
+}
+.np-progress-bar-container:hover .np-progress-fill { box-shadow: 0 0 12px rgba(var(--accent-rgb),0.6) !important; }
+.np-time-display { font-variant-numeric: tabular-nums !important; }
+
+/* ── Transport: dominant gradient play button ── */
+.np-controls-row { gap: 24px !important; }
+.np-btn {
+    width: 46px !important; height: 46px !important; border-radius: 50% !important;
+    color: rgba(255,255,255,0.62) !important; transition: all 0.16s ease !important;
+}
+.np-btn:hover { color: #fff !important; background: rgba(255,255,255,0.07) !important; transform: scale(1.08) !important; }
+.np-btn-play {
+    width: 70px !important; height: 70px !important; border-radius: 50% !important;
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb))) !important;
+    color: #06140b !important;
+    box-shadow: 0 8px 30px rgba(var(--accent-rgb),0.5), inset 0 1px 0 rgba(255,255,255,0.35) !important;
+}
+.np-btn-play:hover {
+    filter: none !important;
+    transform: scale(1.06) !important;
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb))) !important;
+    box-shadow: 0 12px 40px rgba(var(--accent-rgb),0.66), inset 0 1px 0 rgba(255,255,255,0.45) !important;
+}
+.np-btn-shuffle.active, .np-btn-repeat.active { color: rgb(var(--accent-light-rgb)) !important; }
+.np-btn-shuffle.active::after, .np-btn-repeat.active::after { background: rgb(var(--accent-light-rgb)) !important; }
+
+/* ── Visualizer bars: accent gradient ── */
+.np-viz-bar {
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb),0.35)) !important;
+    border-radius: 3px !important;
+}
+
+/* ── Queue rows: rounded, hover, accent active row + accent title ── */
+.np-queue-item { border-radius: 12px !important; transition: background 0.14s !important; }
+.np-queue-item:hover { background: rgba(255,255,255,0.05) !important; }
+.np-queue-item.active { background: rgba(var(--accent-rgb),0.12) !important; }
+.np-queue-item.active .np-queue-item-title { color: rgb(var(--accent-light-rgb)) !important; }
+.np-radio-btn.active, .np-queue-toggle.active { color: rgb(var(--accent-light-rgb)) !important; }
+
+/* ── Close button + lyrics active line ── */
+.np-close-btn:hover { color: #fff !important; background: rgba(255,255,255,0.1) !important; }
+.np-lyrics-line.active { color: rgb(var(--accent-light-rgb)) !important; font-weight: 700 !important; }
+
+/* ── Click-art → music-synced visualizer takeover (Plexamp-style) ── */
+.np-album-art-container { cursor: pointer; }
+.np-art-hint {
+    position: absolute; bottom: 12px; right: 12px; z-index: 4;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+    display: grid; place-items: center; color: #fff;
+    opacity: 0; transition: opacity 0.2s ease; pointer-events: none;
+}
+.np-album-art-container:hover .np-art-hint { opacity: 1; }
+.np-album-art-container.viz-on .np-art-hint { opacity: 1; color: rgb(var(--accent-light-rgb)); }
+
+.np-art-viz {
+    position: absolute; inset: 0; z-index: 3;
+    display: none; align-items: center; justify-content: center; gap: 5px;
+    background: radial-gradient(circle at 50% 60%, rgba(var(--accent-rgb),0.20), rgba(0,0,0,0.88));
+}
+.np-album-art-container.viz-on .np-art-viz { display: flex; }
+.np-album-art-container.viz-on .np-album-art,
+.np-album-art-container.viz-on .np-album-art-placeholder { opacity: 0; transition: opacity 0.35s ease; }
+.np-art-viz-bar {
+    width: 7px; border-radius: 5px; height: 12%;
+    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb),0.35));
+    transform-origin: bottom; transition: height 0.08s linear;
+}
+
+/* ── Sleep / Crossfade utility row (top-right of controls) ── */
+.np-util-row { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 4px; }
+.np-util-btn {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; padding: 6px 11px; border-radius: 999px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.16s ease;
+}
+.np-util-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.18); }
+.np-util-btn.active {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb),0.12);
+    border-color: rgba(var(--accent-rgb),0.32);
+}
+
+/* ── Up-next peek ── */
+.np-upnext {
+    display: flex; align-items: center; gap: 11px;
+    padding: 10px 12px; border-radius: 14px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+}
+.np-upnext.hidden { display: none; }
+.np-upnext-label {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.38); flex-shrink: 0;
+}
+.np-upnext-art { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: rgba(255,255,255,0.05); }
+.np-upnext-info { min-width: 0; }
+.np-upnext-title { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-upnext-artist { font-size: 11.5px; color: rgba(255,255,255,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Rich queue rows: thumbnail + meta + duration/eq + remove ── */
+.np-queue-item {
+    display: grid !important;
+    grid-template-columns: 44px 1fr auto auto !important;
+    align-items: center !important; gap: 13px !important;
+    padding: 8px 10px !important;
+}
+.np-queue-item-art { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,0.05); }
+.np-queue-item-info { min-width: 0; }
+.np-queue-item-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-queue-item-artist { font-size: 12px; color: rgba(255,255,255,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-queue-item-duration { font-size: 12px; font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.38); }
+.np-queue-item-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.np-queue-item-eq i { width: 3px; border-radius: 2px; background: rgb(var(--accent-light-rgb)); animation: npQueueEq 0.9s ease-in-out infinite; }
+.np-queue-item-eq i:nth-child(2) { animation-delay: 0.2s; }
+.np-queue-item-eq i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes npQueueEq { 0%,100% { height: 30%; } 50% { height: 100%; } }
+.np-queue-item-remove { opacity: 0; transition: opacity 0.14s, color 0.14s; }
+.np-queue-item:hover .np-queue-item-remove { opacity: 1; }
+
 /* Queue button in enhanced track table */
 .col-queue {
     width: 36px;

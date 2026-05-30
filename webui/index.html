@@ -7017,12 +7017,17 @@
             <div class="np-body">
                 <!-- Left: album art + track info -->
                 <div class="np-left">
-                    <div class="np-album-art-container">
+                    <div class="np-album-art-container" id="np-album-art-container" title="Click for visualizer">
                         <img class="np-album-art hidden" id="np-album-art" src="" alt="Album Art">
                         <div class="np-album-art-placeholder" id="np-album-art-placeholder">
                             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
                             </svg>
+                        </div>
+                        <!-- Big music-synced visualizer takeover (Plexamp-style); click art to toggle -->
+                        <div class="np-art-viz" id="np-art-viz" aria-hidden="true"></div>
+                        <div class="np-art-hint" id="np-art-hint" title="Visualizer">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="10" width="3" height="11" rx="1"/><rect x="10.5" y="4" width="3" height="17" rx="1"/><rect x="18" y="13" width="3" height="8" rx="1"/></svg>
                         </div>
                     </div>
                     <div class="np-track-info">
@@ -7041,6 +7046,16 @@
                 </div>
                 <!-- Right: controls -->
                 <div class="np-right">
+                    <div class="np-util-row">
+                        <button class="np-util-btn" id="np-sleep-btn" title="Sleep timer">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            <span id="np-sleep-label">Sleep</span>
+                        </button>
+                        <button class="np-util-btn" id="np-crossfade-btn" title="Crossfade between tracks">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8l-4 4 4 4"/><path d="M17 8l4 4-4 4"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                            <span>Crossfade</span>
+                        </button>
+                    </div>
                     <div class="np-progress-section">
                         <div class="np-progress-bar-container">
                             <div class="np-progress-track">
@@ -7083,6 +7098,15 @@
                                 <div class="np-volume-fill" id="np-volume-fill"></div>
                             </div>
                             <input type="range" class="np-volume-slider" id="np-volume-slider" min="0" max="100" value="70">
+                        </div>
+                    </div>
+                    <!-- Up-next peek (hidden when queue has no next track) -->
+                    <div class="np-upnext hidden" id="np-upnext">
+                        <span class="np-upnext-label">Next</span>
+                        <img class="np-upnext-art" id="np-upnext-art" alt="">
+                        <div class="np-upnext-info">
+                            <div class="np-upnext-title" id="np-upnext-title"></div>
+                            <div class="np-upnext-artist" id="np-upnext-artist"></div>
                         </div>
                     </div>
                     <div class="np-stop-row">
