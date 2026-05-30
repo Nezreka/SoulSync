@@ -28,7 +28,7 @@ Rule for every phase: kettui standard — importable/testable logic, seam-level 
 ## Phase 3 — Architecture (deepest, riskiest — multi-listener)
 
 - [x] **3a. Stream-state store extracted + wired (foundation).** DONE. `core/streaming/state.py`: `StreamSession` (dict-compatible, own RLock) + `StreamStateStore` (named-session registry, lazy create, race-safe). `web_server.py` now binds `stream_state` to the store's DEFAULT session — behavior identical to the old single global (proven by call-site-compat + real-session worker tests). 33 streaming tests. This is the provable foundation multi-listener needs.
-- [ ] **3b. Per-listener session id (the unprovable-here part).** Derive a session id per browser/device (cookie/header) and key `stream_state_store.get(session_id)` off it in the stream routes; per-session `Stream/` staging subdir; drop session on disconnect; bump `stream_executor` past max_workers=1. Needs live multi-client testing — do in a session where Boulder can drive 2+ clients. The store API (`get(id)`, `drop`, `active_ids`, per-session staging) is already built for it.
+- [x] **3b. Per-listener session id.** DONE (commit f6174589). _stream_session_id() from the Flask cookie; all 5 stream routes route to the caller's session + lock; per-session background tasks (stream_tasks[sid]); per-session Stream/<sid> staging; executor 1→4 workers. Single-user behavior unchanged. EXPERIMENTAL — route-level two-client no-collision needs Boulder's live multi-client verification (can't boot Flask + 2 cookies in tests). Isolation invariant covered by test_stream_state_store.py.
 - [ ] Server-side persistent queue (resume across devices/refresh).
 
 ---
