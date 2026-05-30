@@ -4085,6 +4085,13 @@ function _buildTrackRow(track, album, admin) {
     const queueTd = document.createElement('td');
     queueTd.className = 'col-queue';
     if (!track._missingExpected && track.file_path) {
+        const playNextBtn = document.createElement('button');
+        playNextBtn.className = 'enhanced-playnext-btn';
+        // Play-next glyph (queue-with-arrow feel)
+        playNextBtn.innerHTML = '&#8677;';   // ⇥
+        playNextBtn.title = 'Play next';
+        queueTd.appendChild(playNextBtn);
+
         const queueBtn = document.createElement('button');
         queueBtn.className = 'enhanced-queue-btn';
         queueBtn.innerHTML = '&#43;';
@@ -4270,8 +4277,10 @@ function _attachTableDelegation(table, album) {
             }
         }
 
-        // Queue button
-        if (target.closest('.enhanced-queue-btn')) {
+        // Queue / Play-next buttons (share the same track payload)
+        const isQueueBtn = target.closest('.enhanced-queue-btn');
+        const isPlayNextBtn = target.closest('.enhanced-playnext-btn');
+        if (isQueueBtn || isPlayNextBtn) {
             e.stopPropagation();
             if (track.file_path) {
                 const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
@@ -4279,7 +4288,7 @@ function _attachTableDelegation(table, album) {
                 if (!albumArt && artistDetailPageState.enhancedData) {
                     albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
                 }
-                addToQueue({
+                const payload = {
                     title: track.title || 'Unknown Track',
                     artist: artistName || 'Unknown Artist',
                     album: album.title || 'Unknown Album',
@@ -4292,7 +4301,9 @@ function _attachTableDelegation(table, album) {
                     album_id: album.id,
                     bitrate: track.bitrate,
                     sample_rate: track.sample_rate
-                });
+                };
+                if (isPlayNextBtn && typeof playNext === 'function') playNext(payload);
+                else addToQueue(payload);
             }
             return;
         }
