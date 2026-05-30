@@ -1382,6 +1382,9 @@ let npAnalyser = null;
 let npMediaSource = null;
 let npVizAnimFrame = null;
 let npVizInitialized = false;
+let npCrossfadeOn = false;
+let npSleepMinutes = 0;       // 0 = off
+let npSleepTimerId = null;
 
 function npQueueHasNext() {
     if (npQueue.length === 0) return false;
@@ -1451,6 +1454,28 @@ function initExpandedPlayer() {
     // Control handlers
     playBtn.addEventListener('click', () => { togglePlayback(); });
     stopBtn.addEventListener('click', async () => { await handleStop(); closeNowPlayingModal(); });
+
+    // Click album art → toggle the music-synced visualizer takeover
+    const artContainer = document.getElementById('np-album-art-container');
+    if (artContainer) {
+        artContainer.addEventListener('click', () => {
+            const on = artContainer.classList.toggle('viz-on');
+            if (on) { npBuildArtViz(); npInitVisualizer(); npStartVisualizerLoop(); }
+        });
+    }
+
+    // Sleep timer — cycles off → 15 → 30 → 60 min → off
+    const sleepBtn = document.getElementById('np-sleep-btn');
+    if (sleepBtn) sleepBtn.addEventListener('click', npCycleSleepTimer);
+
+    // Crossfade toggle (visual state now; dual-audio crossfade wired later)
+    const xfadeBtn = document.getElementById('np-crossfade-btn');
+    if (xfadeBtn) xfadeBtn.addEventListener('click', () => {
+        npCrossfadeOn = !npCrossfadeOn;
+        xfadeBtn.classList.toggle('active', npCrossfadeOn);
+        try { localStorage.setItem('soulsync-crossfade', npCrossfadeOn ? '1' : '0'); } catch (e) {}
+    });
+
     shuffleBtn.addEventListener('click', handleNpShuffle);
     repeatBtn.addEventListener('click', handleNpRepeat);
     muteBtn.addEventListener('click', handleNpMuteToggle);
@@ -1587,6 +1612,10 @@ function syncExpandedPlayerUI() {
     // Visualizer
     const viz = document.getElementById('np-visualizer');
     if (viz) viz.classList.toggle('playing', isPlaying);
+
+    // Album-art scale-on-play (Phase A restyle — CSS keys off .np-modal.playing)
+    const npModalEl = document.querySelector('.np-modal');
+    if (npModalEl) npModalEl.classList.toggle('playing', isPlaying);
 
     // Queue
     renderNpQueue();
@@ -2074,6 +2103,18 @@ function renderNpQueue() {
         item.className = 'np-queue-item' + (i === npQueueIndex ? ' active' : '');
         item.onclick = () => playQueueItem(i);
 
+        // Album thumbnail
+        const art = document.createElement('img');
+        art.className = 'np-queue-item-art';
+        art.alt = '';
+        if (track.image_url) {
+            art.src = track.image_url;
+            art.onerror = () => { art.style.visibility = 'hidden'; };
+        } else {
+            art.style.visibility = 'hidden';
+        }
+        item.appendChild(art);
+
         const info = document.createElement('div');
         info.className = 'np-queue-item-info';
 
@@ -2089,6 +2130,19 @@ function renderNpQueue() {
         info.appendChild(artist);
         item.appendChild(info);
 
+        // Active row → equalizer animation; others → duration
+        if (i === npQueueIndex) {
+            const eq = document.createElement('div');
+            eq.className = 'np-queue-item-eq';
+            eq.innerHTML = '<i></i><i></i><i></i>';
+            item.appendChild(eq);
+        } else if (track.duration) {
+            const dur = document.createElement('span');
+            dur.className = 'np-queue-item-duration';
+            dur.textContent = formatTime(track.duration);
+            item.appendChild(dur);
+        }
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'np-queue-item-remove';
         removeBtn.innerHTML = '&#10005;';
@@ -2101,6 +2155,48 @@ function renderNpQueue() {
 
         listEl.appendChild(item);
     });
+
+    npUpdateUpNext();
+}
+
+// Up-next peek: show the track that plays after the current one.
+function npUpdateUpNext() {
+    const box = document.getElementById('np-upnext');
+    if (!box) return;
+    const next = npQueue[npQueueIndex + 1];
+    if (!next) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const art = document.getElementById('np-upnext-art');
+    const title = document.getElementById('np-upnext-title');
+    const artist = document.getElementById('np-upnext-artist');
+    if (title) title.textContent = next.title || 'Unknown Track';
+    if (artist) artist.textContent = next.artist || 'Unknown Artist';
+    if (art) {
+        if (next.image_url) { art.src = next.image_url; art.style.visibility = ''; art.onerror = () => { art.style.visibility = 'hidden'; }; }
+        else { art.style.visibility = 'hidden'; }
+    }
+}
+
+// Sleep timer: cycle off → 15 → 30 → 60 → off; stops playback when it fires.
+function npCycleSleepTimer() {
+    const steps = [0, 15, 30, 60];
+    npSleepMinutes = steps[(steps.indexOf(npSleepMinutes) + 1) % steps.length];
+    const btn = document.getElementById('np-sleep-btn');
+    const label = document.getElementById('np-sleep-label');
+    if (npSleepTimerId) { clearTimeout(npSleepTimerId); npSleepTimerId = null; }
+    if (npSleepMinutes > 0) {
+        if (label) label.textContent = `Sleep ${npSleepMinutes}m`;
+        if (btn) btn.classList.add('active');
+        npSleepTimerId = setTimeout(() => {
+            handleStop();
+            npSleepMinutes = 0;
+            if (label) label.textContent = 'Sleep';
+            if (btn) btn.classList.remove('active');
+        }, npSleepMinutes * 60 * 1000);
+    } else {
+        if (label) label.textContent = 'Sleep';
+        if (btn) btn.classList.remove('active');
+    }
 }
 
 function updateNpPrevNextButtons() {
@@ -2220,6 +2316,19 @@ function npInitVisualizer() {
     }
 }
 
+// Number of bars in the big album-art visualizer takeover.
+const NP_ART_VIZ_BAR_COUNT = 28;
+
+function npBuildArtViz() {
+    const container = document.getElementById('np-art-viz');
+    if (!container || container.children.length > 0) return;
+    for (let i = 0; i < NP_ART_VIZ_BAR_COUNT; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'np-art-viz-bar';
+        container.appendChild(bar);
+    }
+}
+
 function npStartVisualizerLoop() {
     if (npVizAnimFrame) return; // Already running
     if (!npAnalyser) return; // No analyser — CSS fallback handles it
@@ -2229,7 +2338,6 @@ function npStartVisualizerLoop() {
     }
 
     const bars = document.querySelectorAll('.np-viz-bar');
-    if (bars.length === 0) return;
     const bufferLength = npAnalyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
@@ -2237,13 +2345,24 @@ function npStartVisualizerLoop() {
         npVizAnimFrame = requestAnimationFrame(draw);
         npAnalyser.getByteFrequencyData(dataArray);
 
-        // Map 7 bars to frequency bins (skip bin 0 which is DC offset)
-        const binCount = Math.min(bufferLength - 1, 7);
+        // Map 7 transport bars to frequency bins (skip bin 0 = DC offset)
         for (let i = 0; i < bars.length; i++) {
             const binIndex = Math.min(i + 1, bufferLength - 1);
             const value = dataArray[binIndex] / 255; // 0..1
             const scale = Math.max(0.08, value); // minimum visible height
             bars[i].style.transform = `scaleY(${scale})`;
+        }
+
+        // Big album-art visualizer (when toggled on) — same real analyser,
+        // spread across more bars for a fuller spectrum.
+        const artBars = document.querySelectorAll('.np-art-viz-bar');
+        if (artBars.length) {
+            const span = bufferLength - 1;
+            for (let i = 0; i < artBars.length; i++) {
+                const binIndex = 1 + Math.floor((i / artBars.length) * span);
+                const value = dataArray[Math.min(binIndex, bufferLength - 1)] / 255;
+                artBars[i].style.height = Math.max(6, value * 100) + '%';
+            }
         }
     }
     draw();
