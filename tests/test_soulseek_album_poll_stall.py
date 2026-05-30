@@ -137,6 +137,22 @@ def test_dropped_transfers_also_stall_out():
     assert clock.now < 600.0
 
 
+def test_completed_aborted_classified_as_failed_not_unresolved():
+    """slskd reports a peer-side abort as 'Completed, Aborted' at 0 bytes. Because
+    that string contains 'Completed', it was misread as 'completed but file
+    missing' (#715 path). It must be classified as FAILED — so an all-aborted
+    folder resolves immediately, not after the unresolved/stall grace."""
+    tk = _keys("01.flac", "02.flac")
+    aborted = [
+        _dl("peer", "01.flac", "Completed, Aborted", transferred=0, size=3_600_000),
+        _dl("peer", "02.flac", "Completed, Aborted", transferred=0, size=24_700_000),
+    ]
+    stub = _StubClient([aborted], resolvable=set())
+    result, clock, _ = _run_poll(stub, tk, timeout=7200.0, interval=2.0)
+    assert result == []          # all failed → empty (caller falls back)
+    assert clock.now < 30.0      # resolved on the first poll, no 45s/180s wait
+
+
 def test_clean_finish_unaffected():
     tk = _keys("01.flac", "02.flac")
     done = [_dl("peer", "01.flac", "Completed"), _dl("peer", "02.flac", "Succeeded")]
