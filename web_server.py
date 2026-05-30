@@ -1418,8 +1418,10 @@ def validate_and_heal_batch_states():
                 queue = batch_data.get('queue', [])
                 phase = batch_data.get('phase', 'unknown')
 
-                # AUTO-CLEANUP: Remove completed batches after 5 minutes to prevent stale state
-                if phase in ['complete', 'error', 'cancelled']:
+                # AUTO-CLEANUP: Remove terminal batches after 5 minutes to prevent stale state.
+                # 'failed' (e.g. an album-bundle hard failure) was missing here, so a failed
+                # batch lingered in the UI forever ("No tracks loaded") and never cleared.
+                if phase in ['complete', 'error', 'cancelled', 'failed']:
                     # Check if batch has a completion timestamp
                     completion_time = batch_data.get('completion_time')
                     if not completion_time:
