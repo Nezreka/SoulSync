@@ -48702,9 +48702,11 @@ textarea.enhanced-meta-field-input {
 .np-queue-item.active .np-queue-item-title { color: rgb(var(--accent-light-rgb)) !important; }
 .np-radio-btn.active, .np-queue-toggle.active { color: rgb(var(--accent-light-rgb)) !important; }
 
-/* ── Close button + lyrics active line ── */
+/* ── Close button + lyrics (active line + click-to-seek affordance) ── */
 .np-close-btn:hover { color: #fff !important; background: rgba(255,255,255,0.1) !important; }
 .np-lyrics-line.active { color: rgb(var(--accent-light-rgb)) !important; font-weight: 700 !important; }
+.np-lyrics-line { cursor: pointer; border-radius: 6px; transition: background 0.12s, color 0.12s; }
+.np-lyrics-line:hover { background: rgba(var(--accent-rgb),0.10); color: rgb(var(--accent-light-rgb)); }
 
 /* ── Crafted entrance: controls stagger-fade in when modal opens ──
    (Art container is intentionally excluded — its transform is reserved for the
