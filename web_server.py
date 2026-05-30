@@ -744,14 +744,20 @@ logger.info("Core service initialization complete.")
 # modules and handlers were still referencing names that never got created.
 
 # Global Streaming State Management
-stream_state = {
-    "status": "stopped",  # States: stopped, loading, queued, ready, error
-    "progress": 0,
-    "track_info": None,
-    "file_path": None,  # Path to the audio file in the Stream folder
-    "error_message": None,
-}
-stream_lock = threading.Lock()  # Prevent race conditions
+# Stream playback state. Lifted into core.streaming.state.StreamStateStore —
+# a per-session registry that's unit-tested and is the foundation for
+# multi-listener playback (player-revamp Phase 3). Today we use only the
+# DEFAULT session, so behavior is identical to the old single global: the
+# whole server still shares one "currently playing". The store just makes the
+# eventual per-listener split a wiring change instead of a rewrite.
+#
+# ``stream_state`` is the default session — dict-compatible (s["k"], s.get,
+# s.update) so the ~20 existing call sites work unchanged. ``stream_lock`` is
+# that session's own lock, so ``with stream_lock:`` guards exactly what it did.
+from core.streaming.state import StreamStateStore as _StreamStateStore
+stream_state_store = _StreamStateStore()
+stream_state = stream_state_store.get()      # DEFAULT_SESSION
+stream_lock = stream_state.lock
 stream_background_task = None
 stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
 
@@ -1782,8 +1788,13 @@ def _build_prepare_stream_deps():
         return stream_state
 
     def _set_stream_state(value):
-        global stream_state
-        stream_state = value
+        # prepare.py only ever mutates in place (.update / [k]=), so this is
+        # effectively dead — but if anything DOES reassign, route it through
+        # the session's replace() so the store's default session stays the live
+        # object instead of being detached by a global rebind.
+        if value is stream_state:
+            return
+        stream_state.replace(dict(value))
 
     return _streaming_prepare.PrepareStreamDeps(
         config_manager=config_manager,

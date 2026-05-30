@@ -25,11 +25,11 @@ Rule for every phase: kettui standard — importable/testable logic, seam-level 
 - [x] **Weighted ranking** DONE. Each tier now fetches a random POOL (4x, floored) and `core/radio/selection.rank_candidates` orders it by `score_candidate`: play_count + lastfm_playcount (log-damped), recently-played penalty, stable per-id jitter for run variety. Defensive column-probe → still works on a DB predating the play_count/lastfm migration. 43 radio tests; ranking math is deterministic-unit-proven; DB wiring shown via decoy-pool test (probabilistic by nature — documented).
 - [ ] **Future (optional deepening):** wire `_recently_played` from `listening_history` (column + scorer support already exist; not yet populated in the query), genre-adjacency graph (currently exact-genre LIKE only).
 
-## Phase 3 — Architecture (deepest, riskiest — listener decision lands here)
+## Phase 3 — Architecture (deepest, riskiest — multi-listener)
 
-- [ ] Per-session (or multi-tenant) stream state — replaces the single global `stream_state` + 1-worker executor + single `Stream/` staging file (`web_server.py:747`).
+- [x] **3a. Stream-state store extracted + wired (foundation).** DONE. `core/streaming/state.py`: `StreamSession` (dict-compatible, own RLock) + `StreamStateStore` (named-session registry, lazy create, race-safe). `web_server.py` now binds `stream_state` to the store's DEFAULT session — behavior identical to the old single global (proven by call-site-compat + real-session worker tests). 33 streaming tests. This is the provable foundation multi-listener needs.
+- [ ] **3b. Per-listener session id (the unprovable-here part).** Derive a session id per browser/device (cookie/header) and key `stream_state_store.get(session_id)` off it in the stream routes; per-session `Stream/` staging subdir; drop session on disconnect; bump `stream_executor` past max_workers=1. Needs live multi-client testing — do in a session where Boulder can drive 2+ clients. The store API (`get(id)`, `drop`, `active_ids`, per-session staging) is already built for it.
 - [ ] Server-side persistent queue (resume across devices/refresh).
-- [ ] Final multi-listener vs single-listener scope decided here, with real usage in hand.
 
 ---
 
