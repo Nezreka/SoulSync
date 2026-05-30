@@ -4022,11 +4022,17 @@ async function handleDbUpdateButtonClick() {
 
     if (currentAction === 'Update Database') {
         const refreshSelect = document.getElementById('db-refresh-type');
-        const isFullRefresh = refreshSelect.value === 'full';
+        const refreshType = refreshSelect.value;
+        const isFullRefresh = refreshType === 'full';
+        const isDeepScan = refreshType === 'deep';
 
         if (isFullRefresh) {
             // Replicates the QMessageBox confirmation from the GUI
             const confirmed = await showConfirmDialog({ title: 'Full Refresh', message: 'This will clear and rebuild the database for the active server. It can take a long time.\n\nAre you sure you want to proceed?', confirmText: 'Proceed' });
+            if (!confirmed) return;
+        } else if (isDeepScan) {
+            // Deep scan removes stale entries — confirm like the dashboard deep scan does.
+            const confirmed = await showConfirmDialog({ title: 'Deep Scan', message: 'A deep scan re-checks every track in your media server library against the database.\n\n• Adds any new tracks that were missed\n• Removes tracks no longer on your server\n• Preserves all existing metadata and enrichment data\n\nThis may take a while for large libraries. Proceed?', confirmText: 'Proceed' });
             if (!confirmed) return;
         }
 
@@ -4036,7 +4042,9 @@ async function handleDbUpdateButtonClick() {
             const response = await fetch('/api/database/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ full_refresh: isFullRefresh })
+                // Deep scan and full refresh use distinct backend flags; deep
+                // scan takes precedence server-side, so send only its flag.
+                body: JSON.stringify(isDeepScan ? { deep_scan: true } : { full_refresh: isFullRefresh })
             });
 
             if (response.ok) {

@@ -956,6 +956,17 @@ def preview_album_reorganize(
             'disc_number': None,
         }
 
+        # #746: never reorganize files sitting in the duplicate-cleaner
+        # quarantine (<transfer>/deleted). Surface as a non-matched skip so
+        # the preview shows WHY and apply leaves them put. Checked before the
+        # matched branch so a quarantined track that happens to match the API
+        # tracklist is still skipped.
+        if _is_in_deleted_quarantine(resolved, transfer_dir):
+            item['matched'] = False
+            item['reason'] = 'In deleted/quarantine folder — skipped'
+            preview_tracks.append(item)
+            continue
+
         if not plan_item['matched']:
             preview_tracks.append(item)
             continue
@@ -1009,6 +1020,42 @@ def preview_album_reorganize(
         **common,
         'tracks': preview_tracks,
     }
+
+
+def _is_in_deleted_quarantine(resolved_path, transfer_dir) -> bool:
+    """True when ``resolved_path`` lives inside the duplicate-cleaner
+    quarantine folder (``<transfer_dir>/deleted/...``).
+
+    The Duplicate Cleaner (``core/library/duplicate_cleaner.py``) moves
+    de-duplicated files into ``<transfer_dir>/deleted/``. If the user's
+    media server scans the transfer folder (e.g. a ``/music`` root that
+    contains both the library and the transfer dir), those quarantined
+    files get real rows in SoulSync's DB — and Reorganize, being purely
+    DB-driven, would otherwise dutifully move them back OUT of /deleted
+    to the template location. This guard makes Reorganize skip them so
+    the quarantine stays quarantined (#746).
+
+    Anchored to ``<transfer_dir>/deleted`` specifically so a legitimately
+    named artist/album like "Deleted" elsewhere in the library is NOT
+    skipped. When ``transfer_dir`` is unavailable we fall back to an exact
+    ``deleted`` path-SEGMENT match (mirrors the cleaner's own
+    ``if 'deleted' in dirs`` skip) — never a substring, so "Undeleted"
+    or "deleted scenes" stay safe.
+    """
+    if not resolved_path:
+        return False
+
+    def _norm(p):
+        # normpath collapses redundant separators / '..'; normcase applies
+        # the platform's case rule (lowercases on Windows, no-op on posix);
+        # fold to '/' so the segment/prefix checks are separator-agnostic.
+        return os.path.normcase(os.path.normpath(p)).replace('\\', '/')
+
+    norm = _norm(resolved_path)
+    if transfer_dir:
+        quarantine = _norm(os.path.join(transfer_dir, 'deleted'))
+        return norm == quarantine or norm.startswith(quarantine + '/')
+    return 'deleted' in norm.split('/')
 
 
 def _trim_to_transfer(db_path, resolved, transfer_dir):
@@ -1094,6 +1141,7 @@ class _RunContext:
     update_track_path_fn: Optional[Callable[[Any, str], None]] = None
     on_progress: Optional[Callable[[dict], None]] = None
     stop_check: Optional[Callable[[], bool]] = None
+    transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1269,6 +1317,15 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
     if not resolved_src:
         ctx.record_error(track_id, title,
                          f"File not found on disk — DB path: {db_path or '(empty)'}")
+        return
+
+    # #746: leave duplicate-cleaner quarantine files (<transfer>/deleted)
+    # where they are. Matches the preview's skip so apply never yanks a file
+    # back out of /deleted. (Mirrors the preview guard in
+    # preview_album_reorganize.)
+    if _is_in_deleted_quarantine(resolved_src, ctx.transfer_dir):
+        ctx.record_error(track_id, title,
+                         'In deleted/quarantine folder — skipped')
         return
 
     staging_file = _stage_track(ctx, track_id, title, resolved_src)
@@ -1470,6 +1527,7 @@ def reorganize_album(
         update_track_path_fn=update_track_path_fn,
         on_progress=on_progress,
         stop_check=stop_check,
+        transfer_dir=transfer_dir,
     )
 
     try:

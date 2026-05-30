@@ -4772,7 +4772,69 @@ function updateModalSyncProgress(playlistId, progress) {
 }
 
 
-// Raw Soulseek file search (used by the 'Soulseek (raw files)' source picker option).
+// ── Basic-search source picker ──────────────────────────────────────────────
+// Tracks which download source the user has selected in the chip row. Null
+// means "use the orchestrator's default" (same as pre-redesign behaviour).
+let _bsActiveSource = null;
+
+async function initBasicSearchSources() {
+    const row = document.getElementById('bs-source-row');
+    if (!row) return;
+    try {
+        const resp = await fetch('/api/search/sources');
+        if (!resp.ok) return;
+        const { mode, sources } = await resp.json();
+        if (!sources || !sources.length) return;
+
+        row.innerHTML = '';
+        const isSingle = mode !== 'hybrid' || sources.length < 2;
+
+        sources.forEach((src, i) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'bs-source-chip' + (i === 0 ? ' active' : '');
+            btn.dataset.source = src.name;
+            btn.setAttribute('role', 'tab');
+            btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+            btn.setAttribute('title', src.display_name);
+            btn.innerHTML = `<span class="bs-source-label">${_escBsHtml(src.display_name)}</span>`;
+
+            if (isSingle) {
+                // Non-interactive: single source, just a label.
+                btn.classList.add('single');
+                btn.disabled = true;
+            } else {
+                btn.addEventListener('click', () => {
+                    row.querySelectorAll('.bs-source-chip').forEach(c => {
+                        c.classList.remove('active');
+                        c.setAttribute('aria-selected', 'false');
+                    });
+                    btn.classList.add('active');
+                    btn.setAttribute('aria-selected', 'true');
+                    _bsActiveSource = src.name;
+                    // Re-run last search with new source if results already showing.
+                    const query = document.getElementById('downloads-search-input')?.value?.trim();
+                    if (query && window.currentSearchResults?.length) {
+                        performDownloadsSearch();
+                    }
+                });
+            }
+            row.appendChild(btn);
+        });
+
+        // Default active source = first in chain.
+        _bsActiveSource = isSingle ? null : sources[0]?.name ?? null;
+    } catch (_err) {
+        // Non-fatal — search still works without the picker.
+    }
+}
+
+function _escBsHtml(str) {
+    return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+
+// Raw download-source file search (basic search tab).
 async function performDownloadsSearch() {
     const query = document.getElementById('downloads-search-input').value.trim();
     if (!query) {
@@ -4802,10 +4864,15 @@ async function performDownloadsSearch() {
         displayDownloadsResults([]); // Clear previous results
 
         // --- 2. Perform the Fetch Request ---
+        // Source param routes the search to a specific download source in
+        // hybrid mode. Omitted in single-source mode (backend falls through
+        // to orchestrator.search() which targets the configured source).
+        const body = { query };
+        if (_bsActiveSource) body.source = _bsActiveSource;
         const response = await fetch('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
+            body: JSON.stringify(body),
             signal: searchAbortController.signal // Link fetch to the AbortController
         });
 
@@ -4825,7 +4892,8 @@ async function performDownloadsSearch() {
             statusText.textContent = `No results found for '${query}'`;
             showToast('No results found', 'error');
         } else {
-            document.getElementById('filters-container').classList.remove('hidden');
+            const filtersEl = document.getElementById('filters-container');
+            if (filtersEl) filtersEl.classList.remove('hidden');
 
             // Count albums and singles like the GUI app
             let totalAlbums = 0;
@@ -5641,6 +5709,11 @@ let _gsController = null;
                 const freshResults = document.getElementById('gsearch-results');
                 const target = e.target;
                 if (freshBar?.contains(target) || freshResults?.contains(target)) return;
+                // The media player (mini bar + expanded now-playing modal)
+                // floats above the page. Clicking it — e.g. opening the full
+                // modal from the mini player, or anything inside that modal —
+                // must NOT tear down the global search results (#732).
+                if (target.closest && target.closest('#media-player, #np-modal-overlay')) return;
                 _gsDeactivate();
             }, 100);
         });
@@ -5656,6 +5729,15 @@ let _gsController = null;
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { _doInit(); _gsUpdateVisibility(); });
     else { _doInit(); setTimeout(_gsUpdateVisibility, 500); }
+})();
+
+// Init basic-search source chip row once the DOM is ready.
+(function _bsInit() {
+    const run = () => {
+        if (typeof initBasicSearchSources === 'function') initBasicSearchSources();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+    else run();
 })();
 
 function _gsUpdateVisibility() {

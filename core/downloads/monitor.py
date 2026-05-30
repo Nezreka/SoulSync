@@ -5,7 +5,6 @@ The class body is byte-identical to the original. Module-level globals
 helpers and orchestrator handles. ``IS_SHUTTING_DOWN`` is a module-level
 flag mirrored from web_server's own flag in ``_shutdown_runtime_components``.
 """
-import logging
 import threading
 import time
 
@@ -18,8 +17,10 @@ from core.runtime_state import (
     tasks_lock,
 )
 from utils.async_helpers import run_async
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Project logger factory so these lines reach app.log (soulsync.* namespace).
+logger = get_logger("downloads.monitor")
 
 # Mirrored from web_server.IS_SHUTTING_DOWN via _shutdown_runtime_components.
 IS_SHUTTING_DOWN = False

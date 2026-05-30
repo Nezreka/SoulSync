@@ -4654,15 +4654,15 @@ async function openYourArtistInfoModal(poolId) {
         // Footer
         if (footerEl) {
             const watchBtn = pool.on_watchlist
-                ? `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Done'; this.disabled=true">Remove from Watchlist</button>`
-                : `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Added!'; this.disabled=true">Add to Watchlist</button>`;
+                ? `<button class="btn btn--sm btn--secondary ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Done'; this.disabled=true">Remove from Watchlist</button>`
+                : `<button class="btn btn--sm btn--secondary ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Added!'; this.disabled=true">Add to Watchlist</button>`;
             footerEl.innerHTML = `
                 ${watchBtn}
-                <button class="ya-header-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); openArtistMapExplorerDirect('${escapeForInlineJs(artistName)}')">
+                <button class="btn btn--sm btn--secondary ya-header-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); openArtistMapExplorerDirect('${escapeForInlineJs(artistName)}')">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span>Explore</span>
                 </button>
-                <a class="ya-header-btn ya-viewall-btn" href="${buildArtistDetailPath(artistId, pool.active_source || null)}" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="text-decoration:none;color:inherit;">
+                <a class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" href="${buildArtistDetailPath(artistId, pool.active_source || null)}" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove();" style="text-decoration:none;color:inherit;">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                 </a>
@@ -6436,8 +6436,8 @@ function _showArtistMapSearchPrompt() {
                 </div>
                 <input type="text" id="artmap-explore-input" class="artmap-explore-input" placeholder="Artist name..." autofocus>
                 <div class="artmap-search-prompt-actions">
-                    <button class="ya-header-btn" onclick="document.getElementById('artmap-search-prompt').remove()">Cancel</button>
-                    <button class="ya-header-btn ya-viewall-btn" id="artmap-explore-go">
+                    <button class="btn btn--sm btn--secondary ya-header-btn" onclick="document.getElementById('artmap-search-prompt').remove()">Cancel</button>
+                    <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" id="artmap-explore-go">
                         <span>Explore</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                     </button>

@@ -361,6 +361,102 @@ def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:
     assert plugin.active_downloads['u-1']['file_path'].endswith('track1.flac')
 
 
+class _FakeClock:
+    """Deterministic monotonic + sleep so the per-track poll loop runs
+    in microseconds and never actually blocks."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _drive_download_thread(plugin, statuses, *, window_seconds=10.0):
+    """Run ``_download_thread`` end-to-end against a scripted adapter.
+
+    ``statuses`` is the sequence of ``UsenetStatus`` reads the poll loop
+    will see (one per poll). Returns the finished active_downloads row."""
+    download_id = 'u-poll'
+    plugin.active_downloads[download_id] = {
+        'id': download_id, 'filename': 'x', 'username': 'usenet',
+        'display_name': 'X', 'state': 'Initializing', 'progress': 0.0,
+        'size': 0, 'transferred': 0, 'speed': 0, 'file_path': None,
+        'audio_files': [], 'job_id': None, 'error': None,
+    }
+    adapter = MagicMock()
+    adapter.is_configured.return_value = True
+    adapter.add_nzb.return_value = 'job1'
+    adapter.get_status.side_effect = list(statuses)
+    clock = _FakeClock()
+    with patch('core.download_plugins.usenet.get_active_usenet_adapter', return_value=adapter), \
+         patch('core.download_plugins.usenet.run_async', side_effect=lambda x: x), \
+         patch('core.download_plugins.usenet.get_completed_no_path_window_seconds',
+               return_value=window_seconds), \
+         patch('core.download_plugins.usenet.time', clock), \
+         patch('core.download_plugins.usenet.collect_audio_after_extraction',
+               return_value=[Path('/done/track1.flac')]):
+        plugin._download_thread(download_id, 'http://x/y.nzb')
+    return plugin.active_downloads[download_id]
+
+
+def test_usenet_thread_waits_out_completed_no_path_then_finalizes(tmp_path: Path) -> None:
+    """Per-track sibling of the #721 bundle fix. SAB flips History to
+    'completed' before writing ``storage`` — the thread must NOT error
+    on the first such read. It waits out the completed-no-path window;
+    when the path lands it finalizes as Succeeded."""
+    plugin = UsenetDownloadPlugin()
+    statuses = [
+        UsenetStatus(id='job1', name='A', state='downloading', progress=0.6,
+                     size=100, downloaded=60, download_speed=10),
+        UsenetStatus(id='job1', name='A', state='completed', progress=1.0,
+                     size=100, downloaded=100, download_speed=0, save_path=None),
+        UsenetStatus(id='job1', name='A', state='completed', progress=1.0,
+                     size=100, downloaded=100, download_speed=0, save_path=None),
+        UsenetStatus(id='job1', name='A', state='completed', progress=1.0,
+                     size=100, downloaded=100, download_speed=0,
+                     save_path='/done/album'),
+    ]
+    row = _drive_download_thread(plugin, statuses)
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['progress'] == 100.0
+    assert row['file_path'] == str(Path('/done/track1.flac'))
+
+
+def test_usenet_thread_falls_back_to_incomplete_path_when_storage_never_lands() -> None:
+    """If ``storage`` never lands but SAB exposed an ``incomplete_path``
+    (files physically on disk), the thread recovers via the in-progress
+    dir as a last resort rather than erroring a completed download."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0,
+        save_path=None, incomplete_path='/sab/incomplete/A',
+    )
+    # Window of 10s / 2s interval = 5 polls, floored at the miss
+    # threshold; supply plenty so the fallback fires.
+    row = _drive_download_thread(plugin, [completed_no_path] * 12)
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['audio_files'] == [str(Path('/done/track1.flac'))]
+
+
+def test_usenet_thread_errors_when_completed_with_no_path_at_all() -> None:
+    """No final save_path AND no incomplete_path → there's nothing to
+    scan, so the thread errors (rather than spinning or finalizing a
+    phantom path)."""
+    plugin = UsenetDownloadPlugin()
+    completed_no_path = UsenetStatus(
+        id='job1', name='A', state='completed', progress=1.0,
+        size=100, downloaded=100, download_speed=0, save_path=None,
+    )
+    row = _drive_download_thread(plugin, [completed_no_path] * 12)
+    assert row['state'] == 'Completed, Errored'
+    assert 'save_path' in (row['error'] or '').lower()
+
+
 def test_usenet_is_configured_requires_both_sides() -> None:
     plugin = UsenetDownloadPlugin()
     fake_adapter = MagicMock()

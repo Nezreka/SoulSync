@@ -22,14 +22,17 @@ import pytest
 from core.download_plugins.album_bundle import (
     ALBUM_PICK_MAX_BYTES,
     ALBUM_PICK_MIN_BYTES,
+    DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_POLL_TIMEOUT_SECONDS,
     atomic_copy_to_staging,
     copy_audio_files_atomically,
+    get_completed_no_path_window_seconds,
     get_poll_interval,
     get_poll_timeout,
     pick_best_album_release,
     quality_score,
+    resolve_reported_save_path,
     unique_staging_path,
 )
 
@@ -301,6 +304,114 @@ def test_get_poll_timeout_falls_back_on_garbage() -> None:
         assert get_poll_timeout() == DEFAULT_POLL_TIMEOUT_SECONDS
 
 
+def test_get_completed_no_path_window_uses_default_when_unset() -> None:
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
+def test_get_completed_no_path_window_honours_override() -> None:
+    """Users whose SAB is slow to write ``storage`` (large box sets,
+    slow disks) can widen the tolerance without touching code."""
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = 300
+        assert get_completed_no_path_window_seconds() == 300.0
+
+
+def test_get_completed_no_path_window_falls_back_on_garbage() -> None:
+    with patch('core.download_plugins.album_bundle.config_manager') as cm:
+        cm.get.return_value = ''
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+        cm.get.return_value = 0
+        assert get_completed_no_path_window_seconds() == DEFAULT_COMPLETED_NO_PATH_WINDOW_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# resolve_reported_save_path — downloader→local path translation. The arr
+# remote-path problem: SAB reports its own container path, SoulSync mounts
+# the same files elsewhere.
+# ---------------------------------------------------------------------------
+
+
+def _cfg(values: dict):
+    """Build a config_manager.get-shaped callable from a dict."""
+    def _get(key, default=None):
+        return values.get(key, default)
+    return _get
+
+
+def test_resolve_returns_reported_path_verbatim_when_readable(tmp_path: Path) -> None:
+    """If the client's path is already readable here (mounts mirror the
+    client), return it unchanged — no translation needed."""
+    album = tmp_path / "MyAlbum"
+    album.mkdir()
+    # config_get should never even be consulted on the happy path.
+    assert resolve_reported_save_path(str(album), config_get=_cfg({})) == str(album)
+
+
+def test_resolve_uses_explicit_prefix_mapping(tmp_path: Path) -> None:
+    """Sonarr/Radarr-style remote path mapping: SAB's prefix is rewritten
+    to a SoulSync-visible root."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'download_source.usenet_path_mappings': [
+        {'from': '/data/downloads/music', 'to': str(tmp_path)},
+    ]})
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
+def test_resolve_basename_fallback_against_download_root(tmp_path: Path) -> None:
+    """Zero-config shared-volume case: the album folder shows up under
+    SoulSync's own download root with the same name SAB reported."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({'soulseek.download_path': str(tmp_path)})
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
+def test_resolve_mapping_takes_priority_over_basename(tmp_path: Path) -> None:
+    """An explicit mapping that resolves wins over the basename scan."""
+    mapped_root = tmp_path / "mapped"
+    dl_root = tmp_path / "dl"
+    (mapped_root / "MyAlbum").mkdir(parents=True)
+    (dl_root / "MyAlbum").mkdir(parents=True)
+    cfg = _cfg({
+        'download_source.usenet_path_mappings': [
+            {'from': '/data/downloads/music', 'to': str(mapped_root)},
+        ],
+        'soulseek.download_path': str(dl_root),
+    })
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(mapped_root / "MyAlbum")
+
+
+def test_resolve_returns_reported_unchanged_when_nothing_found(tmp_path: Path) -> None:
+    """No readable path, no mapping hit, no basename match → return the
+    original so the caller's 'no audio' error still surfaces."""
+    cfg = _cfg({'soulseek.download_path': str(tmp_path)})  # empty root
+    reported = '/data/downloads/music/Missing'
+    assert resolve_reported_save_path(reported, config_get=cfg) == reported
+
+
+def test_resolve_handles_empty_and_none(tmp_path: Path) -> None:
+    assert resolve_reported_save_path('', config_get=_cfg({})) == ''
+    assert resolve_reported_save_path(None, config_get=_cfg({})) is None
+
+
+def test_resolve_skips_mapping_when_target_missing_then_tries_basename(tmp_path: Path) -> None:
+    """A mapping whose translated path doesn't exist must not short-circuit
+    — fall through to the basename scan."""
+    (tmp_path / "MyAlbum").mkdir()
+    cfg = _cfg({
+        'download_source.usenet_path_mappings': [
+            {'from': '/data/downloads/music', 'to': '/nope/not/mounted'},
+        ],
+        'soulseek.download_path': str(tmp_path),
+    })
+    resolved = resolve_reported_save_path('/data/downloads/music/MyAlbum', config_get=cfg)
+    assert resolved == str(tmp_path / "MyAlbum")
+
+
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------
@@ -395,6 +506,7 @@ class _Status:
     downloaded: int = 0
     download_speed: int = 0
     error: Optional[str] = None
+    incomplete_path: Optional[str] = None
 
 
 class _ScriptedClock:
@@ -591,6 +703,171 @@ def test_poll_shutdown_returns_none_without_terminal_emit() -> None:
         poll_interval=2.0, timeout=60.0,
     )
     assert result is None
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_tolerates_completed_with_late_save_path_arrival() -> None:
+    """Regression for #721 (Forty Licks stuck at 61%).
+
+    SAB History flips ``status`` to 'Completed' a few seconds before
+    its post-processing pipeline writes the final ``storage`` field.
+    Pre-fix the poll returned ``None`` on the first such read, the
+    bundle plugin marked the batch failed, and the UI froze on the
+    last 'downloading' emit. Now the poll tolerates up to
+    ``transient_miss_threshold`` consecutive "completed but no
+    save_path" reads, so SAB has a window to finish writing the
+    path. When it lands, return it normally."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter([
+        # Queue phase — SAB still downloading.
+        _Status(state='downloading', progress=0.61),
+        # History phase — flipped to Completed but storage not yet
+        # populated. Pre-fix this branch returned None immediately.
+        _Status(state='completed', save_path=None, progress=1.0),
+        _Status(state='completed', save_path=None, progress=1.0),
+        # SAB finished post-process; storage now set.
+        _Status(state='completed', save_path='/dl/forty-licks', progress=1.0),
+    ])
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Forty Licks',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=5,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=60.0,
+    )
+
+    assert result == '/dl/forty-licks'
+    # No terminal failed emit — bundle plugin will continue to
+    # staging, not error out.
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_gives_up_when_completed_with_no_save_path_persists() -> None:
+    """If SAB stays on 'Completed' but ``storage`` never lands past
+    the threshold, fail loudly with an explicit error pointing at
+    the missing save_path field — instead of silently sitting on
+    the last 'downloading' UI emit until the 6-hour deadline."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(state='completed', save_path=None, progress=1.0),
+        title='Forty Licks',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    err = failed_calls[0][1].get('error', '').lower()
+    assert 'save_path' in err or 'success but never' in err
+
+
+def test_poll_completed_no_path_window_is_longer_than_miss_window() -> None:
+    """#721 follow-up: the completed-but-no-save_path window must be
+    DECOUPLED from (and far longer than) the transient-miss window. SAB
+    can take 2+ minutes to write ``storage``; the old code reused the
+    5-poll (~10s) miss window here and false-failed real completions.
+    With a small miss threshold but the default long no-path window, a
+    download that takes 8 completed-no-path polls before ``storage``
+    lands must still succeed."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter(
+        [_Status(state='completed', save_path=None, progress=1.0)] * 8
+        + [_Status(state='completed', save_path='/dl/late', progress=1.0)]
+    )
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Slow SAB',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        transient_miss_threshold=3,   # vanished-job window stays short
+        # completed_no_path_threshold left to default (~120s / interval).
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+    assert result == '/dl/late'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_falls_back_to_incomplete_path_after_window_exhausted() -> None:
+    """When SAB reports the job completed but the final save_path NEVER
+    lands (some SAB versions / no post-process move), the files are
+    still physically on disk in the in-progress dir. Rather than failing
+    a download that actually succeeded, the poll falls back to the
+    adapter's ``incomplete_path`` as a last resort once the window is
+    exhausted — no terminal 'failed' emit."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(
+            state='completed', save_path=None,
+            incomplete_path='/sab/incomplete/album', progress=1.0,
+        ),
+        title='No Storage Field',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+    assert result == '/sab/incomplete/album'
+    assert 'failed' not in [c[0] for c in calls]
+
+
+def test_poll_fails_when_no_path_and_no_incomplete_path() -> None:
+    """Last resort only fires when there's actually a path to scan.
+    With neither a final save_path nor an incomplete_path, the poll
+    still fails loudly after the window so the UI doesn't freeze."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    result = poll_album_download(
+        get_status=lambda: _Status(state='completed', save_path=None,
+                                   incomplete_path=None, progress=1.0),
+        title='Truly Pathless',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        completed_no_path_threshold=3,
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=600.0,
+    )
+    assert result is None
+    failed_calls = [c for c in calls if c[0] == 'failed']
+    assert len(failed_calls) == 1
+    err = failed_calls[0][1].get('error', '').lower()
+    assert 'save_path' in err or 'success but never' in err
+
+
+def test_poll_uses_save_path_from_earlier_downloading_emit_if_completed_lacks_one() -> None:
+    """Sticky save_path: when an earlier ``downloading`` status carried
+    a non-empty ``save_path`` (qBit shows the target dir mid-download),
+    that value is remembered. A later ``completed`` read with an empty
+    save_path still resolves cleanly because the sticky value applies.
+    Important so torrent clients (which set save_path from the start)
+    don't trip the completed-no-path retry."""
+    clock = _ScriptedClock()
+    emit, calls = _make_emit_recorder()
+    sequence = iter([
+        _Status(state='downloading', save_path='/qb/album-target', progress=0.5),
+        _Status(state='completed', save_path=None, progress=1.0),
+    ])
+    result = poll_album_download(
+        get_status=lambda: next(sequence),
+        title='Some Album',
+        emit=emit,
+        complete_states=frozenset(['completed']),
+        sleep=clock.sleep, monotonic=clock.monotonic,
+        poll_interval=2.0, timeout=60.0,
+    )
+
+    assert result == '/qb/album-target'
     assert 'failed' not in [c[0] for c in calls]
 
 
