@@ -1601,7 +1601,15 @@ class SoulseekClient(DownloadSourcePlugin):
         result['fallback'] = False
         completed = self._poll_album_bundle_downloads(transfer_keys, _emit)
         if not completed:
-            result['error'] = 'Soulseek album download failed or timed out'
+            # The selected folder yielded ZERO usable files — every transfer
+            # failed / aborted / stalled (a dead or unwilling peer). Don't hard-
+            # fail the batch: fall back to the per-track flow, which searches ALL
+            # sources per track and can pull each from a live peer. We reuse that
+            # proven multi-source robustness instead of looping candidate folders
+            # here. (Per-track only fires for a genuinely-missing album anyway.)
+            result['error'] = ('Soulseek album folder produced no usable files '
+                               '(peer failed/aborted/stalled) — falling back to per-track')
+            result['fallback'] = True
             return result
 
         _emit('staging', release=getattr(picked, 'album_title', folder_path) if picked else folder_path)
