@@ -17,6 +17,7 @@ function initializeMediaPlayer() {
         // Set up audio event listeners
         audioPlayer.addEventListener('timeupdate', updateAudioProgress);
         audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
+        audioPlayer.addEventListener('timeupdate', npThrottledPositionState);
         audioPlayer.addEventListener('ended', onAudioEnded);
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
@@ -165,6 +166,8 @@ function setTrackInfo(track) {
     updateNpTrackInfo();
     updateMediaSessionMetadata();
     updateMediaSessionPlaybackState();
+    // Reset the lock-screen scrubber when duration becomes known for the new track.
+    if (audioPlayer) audioPlayer.addEventListener('loadedmetadata', updateMediaSessionPositionState, { once: true });
 
     // Kick off lyrics fetch for the new track. The panel stays
     // collapsed by default — fetching in the background means the
@@ -1954,6 +1957,7 @@ function handleNpProgressBarChange(event) {
 
     try {
         audioPlayer.currentTime = newTime;
+        updateMediaSessionPositionState();
 
         // Sync sidebar progress
         const sidebarBar = document.getElementById('progress-bar');
@@ -2995,6 +2999,41 @@ function initMediaSession() {
     navigator.mediaSession.setActionHandler('nexttrack', () => {
         if (npQueue.length > 0) playNextInQueue();
     });
+    // Scrub from the lock screen / notification scrubber.
+    try {
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+            if (!audioPlayer || !isFinite(audioPlayer.duration)) return;
+            if (details.fastSeek && 'fastSeek' in audioPlayer) {
+                audioPlayer.fastSeek(details.seekTime);
+            } else if (typeof details.seekTime === 'number') {
+                audioPlayer.currentTime = details.seekTime;
+            }
+            updateMediaSessionPositionState();
+        });
+    } catch (e) { /* some browsers don't support seekto — handlers above still work */ }
+}
+
+// timeupdate fires ~4x/s; only push position to the OS ~1x/s.
+let _npPosStateLast = 0;
+function npThrottledPositionState() {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - _npPosStateLast < 950) return;
+    _npPosStateLast = now;
+    updateMediaSessionPositionState();
+}
+
+// Feeds the lock-screen scrubber its progress (elapsed / duration / rate).
+// Without this the OS shows a dead, position-less media control.
+function updateMediaSessionPositionState() {
+    if (!('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
+    if (!audioPlayer || !isFinite(audioPlayer.duration) || audioPlayer.duration <= 0) return;
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: audioPlayer.duration,
+            playbackRate: audioPlayer.playbackRate || 1,
+            position: Math.min(audioPlayer.currentTime, audioPlayer.duration),
+        });
+    } catch (e) { /* invalid state (e.g. mid-load) — skip this tick */ }
 }
 
 function updateMediaSessionMetadata() {
