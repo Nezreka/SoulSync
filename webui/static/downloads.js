@@ -5658,7 +5658,10 @@ let _gsController = null;
             if (clearBtn) clearBtn.style.display = q.length > 0 ? '' : 'none';
             if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
             if (q.length < 2) { _gsHideResults(); return; }
-            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 300);
+            // 600ms (was 300) — coalesce a name being typed into one search
+            // instead of one external-API search per letter (#751). Enter still
+            // fires immediately via the keydown handler.
+            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 600);
         });
 
         if (clearBtn) {
