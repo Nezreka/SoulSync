@@ -48808,26 +48808,29 @@ textarea.enhanced-meta-field-input {
     width: 36px;
     text-align: center;
 }
-.enhanced-queue-btn {
+.enhanced-queue-btn,
+.enhanced-playnext-btn {
     background: none;
-    border: 1px solid rgba(29, 185, 84, 0.2);
-    color: rgba(29, 185, 84, 0.5);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    color: rgba(var(--accent-rgb), 0.5);
     border-radius: 50%;
     width: 24px;
     height: 24px;
     font-size: 14px;
     font-weight: bold;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     transition: all 0.15s ease;
     padding: 0;
+    margin: 0 2px;
 }
-.enhanced-queue-btn:hover {
-    background: rgba(29, 185, 84, 0.12);
-    color: rgba(29, 185, 84, 0.9);
-    border-color: rgba(29, 185, 84, 0.4);
+.enhanced-queue-btn:hover,
+.enhanced-playnext-btn:hover {
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.4);
     transform: scale(1.1);
 }
 

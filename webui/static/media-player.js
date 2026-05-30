@@ -2104,6 +2104,19 @@ function addToQueue(track) {
     }
 }
 
+// Insert a track to play right after the current one (Spotify "Play next").
+function playNext(track) {
+    if (npQueue.length === 0 || npQueueIndex < 0) {
+        // Nothing queued / playing — same as add-to-queue (which auto-plays).
+        addToQueue(track);
+        return;
+    }
+    npQueue.splice(npQueueIndex + 1, 0, track);
+    showToast('Playing next', 'success');
+    renderNpQueue();
+    updateNpPrevNextButtons();
+}
+
 function removeFromQueue(index) {
     if (index < 0 || index >= npQueue.length) return;
     const wasCurrentTrack = (index === npQueueIndex);
