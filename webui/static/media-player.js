@@ -222,6 +222,7 @@ function clearTrack() {
     // Clear track state
     currentTrack = null;
     isPlaying = false;
+    npSetPlayContext('');   // hide "Playing from" when nothing's playing
 
     const trackTitleElement = document.getElementById('track-title');
     trackTitleElement.innerHTML = '<span class="title-text">No track</span>';
@@ -1466,6 +1467,13 @@ function npSetRadioMode(enabled, options = {}) {
     if (toast) {
         showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
     }
+    // Context label: only set the generic "Radio" if a more specific one (e.g.
+    // "<Artist> Radio") wasn't already set by the caller.
+    if (npRadioMode) {
+        if (!npPlayContext || !/radio/i.test(npPlayContext)) npSetPlayContext('Radio');
+    } else if (/radio/i.test(npPlayContext)) {
+        npSetPlayContext('');
+    }
     if (npRadioMode && fetchIfNeeded && currentTrack && currentTrack.id && !npLoadingQueueItem && !npQueueHasNext()) {
         npEnsureCurrentTrackInQueue();
         npFetchRadioTracks();
@@ -2113,6 +2121,21 @@ function handleNpRepeat() {
 // ===============================
 // QUEUE MANAGEMENT
 // ===============================
+
+// "Playing from" context shown above the track title (Spotify-style).
+let npPlayContext = '';
+function npSetPlayContext(text) {
+    npPlayContext = text || '';
+    const box = document.getElementById('np-play-context');
+    const nameEl = document.getElementById('np-play-context-name');
+    if (!box || !nameEl) return;
+    if (npPlayContext) {
+        nameEl.textContent = npPlayContext;
+        box.classList.remove('hidden');
+    } else {
+        box.classList.add('hidden');
+    }
+}
 
 function addToQueue(track) {
     npQueue.push(track);

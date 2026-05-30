@@ -4757,6 +4757,9 @@ async function playArtistRadio() {
         // Enable radio mode + immediately seed the queue with similar tracks —
         // same path the modal's Radio button uses (fetchIfNeeded also adds the
         // current track to the queue first).
+        if (typeof npSetPlayContext === 'function') {
+            npSetPlayContext(`${artistName || 'Artist'} Radio`);
+        }
         if (typeof npSetRadioMode === 'function') {
             npSetRadioMode(true, { toast: false, fetchIfNeeded: true });
         } else {
