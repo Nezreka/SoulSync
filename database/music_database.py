@@ -3654,6 +3654,36 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def record_web_player_play(self, event):
+        """Record a single SoulSync web-player play: insert the listening_history
+        row AND bump tracks.play_count / last_played for the smart-radio recency
+        signal. ``event`` is the dict from core.playback.play_log.build_play_event.
+
+        Returns True if the history row was newly inserted.
+        """
+        if not event:
+            return False
+        inserted = self.insert_listening_events([event])
+        db_id = event.get('db_track_id')
+        if db_id is not None:
+            conn = None
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE tracks
+                    SET play_count = COALESCE(play_count, 0) + 1,
+                        last_played = ?
+                    WHERE id = ?
+                """, (event.get('played_at'), db_id))
+                conn.commit()
+            except Exception as e:
+                logger.error(f"Error bumping play_count for track {db_id}: {e}")
+            finally:
+                if conn:
+                    conn.close()
+        return inserted > 0
+
     def update_track_play_counts(self, counts):
         """Update play_count and last_played on the tracks table.
 
