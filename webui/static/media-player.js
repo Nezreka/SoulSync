@@ -18,6 +18,7 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('timeupdate', updateAudioProgress);
         audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
         audioPlayer.addEventListener('timeupdate', npThrottledPositionState);
+        audioPlayer.addEventListener('timeupdate', npMaybeLogPlay);
         audioPlayer.addEventListener('ended', onAudioEnded);
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
@@ -122,6 +123,7 @@ function _stripSourceIdPrefix(value) {
 
 function setTrackInfo(track) {
     currentTrack = track;
+    npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
 
     const trackTitleElement = document.getElementById('track-title');
     const trackTitle = _stripSourceIdPrefix(track.title) || 'Unknown Track';
@@ -3133,6 +3135,30 @@ function initMediaSession() {
             updateMediaSessionPositionState();
         });
     } catch (e) { /* some browsers don't support seekto — handlers above still work */ }
+}
+
+// Log a SoulSync play once a track has been heard ~10s (the standard "counts
+// as a play" threshold) — feeds 'recently played' + smart-radio recency.
+let npPlayLogged = false;
+function npMaybeLogPlay() {
+    if (npPlayLogged || !currentTrack || !audioPlayer) return;
+    if (!isFinite(audioPlayer.currentTime) || audioPlayer.currentTime < 10) return;
+    npPlayLogged = true;   // set first so a slow request can't double-fire
+    try {
+        fetch('/api/library/log-play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track: {
+                    id: currentTrack.id,
+                    title: currentTrack.title,
+                    artist: currentTrack.artist,
+                    album: currentTrack.album,
+                },
+                duration_ms: Math.round((audioPlayer.duration || 0) * 1000),
+            }),
+        }).catch(() => {});   // fire-and-forget; logging must never affect playback
+    } catch (e) { /* non-fatal */ }
 }
 
 // timeupdate fires ~4x/s; only push position to the OS ~1x/s.

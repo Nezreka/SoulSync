@@ -10650,6 +10650,30 @@ def library_play_track():
         logger.error(f"Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+@app.route('/api/library/log-play', methods=['POST'])
+def library_log_play():
+    """Record a SoulSync web-player play into listening_history + bump the
+    track's play_count/last_played (feeds 'recently played' and smart radio).
+
+    Fire-and-forget from the frontend ~10s into a track. Best-effort: a logging
+    failure never affects playback, so we always return 200-ish.
+    """
+    try:
+        from core.playback.play_log import build_play_event
+        data = request.get_json(silent=True) or {}
+        track = data.get('track') or data
+        played_at = datetime.now().isoformat()
+        duration_ms = data.get('duration_ms', 0)
+        event = build_play_event(track, played_at, duration_ms)
+        if not event:
+            return jsonify({"success": False, "skipped": True}), 200
+        get_database().record_web_player_play(event)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.debug(f"log-play failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
 
 @app.route('/api/library/enrich', methods=['POST'])
