@@ -13,12 +13,17 @@ Rule for every phase: kettui standard — importable/testable logic, seam-level 
 
 ## Phase 1 — Polish / feel (frontend)
 
-- [ ] Persistent queue across refresh (localStorage first; server-side in P3)
-- [ ] Drag-to-reorder queue; duration + art per queue item
-- [ ] Seek tooltip (hover timestamp); smoother progress
-- [ ] Crossfade via dual-`<audio>` swap (honest approximation of gapless — true gapless impossible w/ single element)
-- [ ] Full Media Session API (lockscreen / hardware transport keys)
-- [ ] Keyboard shortcut overlay + fuller bindings
+- [x] Persistent queue across refresh (localStorage) — commit a8985b31
+- [x] Drag-to-reorder queue; duration + art per queue item — ffbe669c + 3461d923
+- [x] Seek tooltip (hover timestamp) — 112ecbb2
+- [x] Crossfade via dual-`<audio>` swap (library tracks, experimental) — ccfb3fb0 + 592b68c1
+- [x] Full Media Session API (lockscreen / hardware transport keys + position) — 866f2e4a
+- [x] Fuller keyboard bindings (N/P/M/space/seek/vol) — 65f49cce
+- [ ] Keyboard shortcut OVERLAY/cheatsheet (bindings done; no discoverability UI yet)
+- [x] Click-art visualizer, sleep timer, up-next, click-to-seek lyrics, vibrant
+      art-color glow, crafted entrance, mini-player shuffle/repeat parity,
+      'Play next' + queue buttons, 'Playing from' context, web-player play logging
+- [ ] (Optional) Sleep timer 'end of track' mode; waveform seek bar (flourish)
 
 ## Phase 2 — Smart radio (backend algorithm)
 
