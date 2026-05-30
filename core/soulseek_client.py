@@ -1740,7 +1740,14 @@ class SoulseekClient(DownloadSourcePlugin):
                     os.path.basename((key[1] or '').replace('\\', '/')),
                 ))
                 state = (getattr(dl, 'state', '') or '') if dl else ''
-                if any(token in state for token in ('Errored', 'Failed', 'Rejected', 'TimedOut')):
+                # NOTE: check failure tokens BEFORE the 'Completed' branch — slskd
+                # reports terminal failures as "Completed, <reason>" (e.g.
+                # "Completed, Aborted" / "Completed, Cancelled" when a peer accepts
+                # then drops every transfer at 0 bytes). Those contain "Completed",
+                # so without catching the failure reason first they'd be misread as
+                # "completed but file missing" (the #715 download_path path).
+                if any(token in state for token in
+                       ('Errored', 'Failed', 'Rejected', 'TimedOut', 'Aborted', 'Cancelled')):
                     failed_states[key] = state or 'Failed'
                     logger.warning(
                         "[Soulseek album] Transfer failed from selected folder: %s (%s)",
