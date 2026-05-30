@@ -1934,3 +1934,100 @@ def test_stop_check_aborts_remaining_tracks(monkeypatch, tmpdirs):
     # but not ALL 10 — the stop_check cut off the unstarted ones.
     assert pp_count[0] < 10
     assert pp_count[0] >= 2
+
+
+# --- tests: #746 /deleted-quarantine skip ---------------------------------
+
+def test_preview_skips_track_in_deleted_quarantine(monkeypatch, tmpdirs):
+    """A track whose file lives in <transfer>/deleted (duplicate-cleaner
+    quarantine) must be surfaced as a non-matched skip in the preview, even
+    though its title matches the API tracklist — Reorganize must not offer to
+    move it back out of /deleted (#746)."""
+    library, _staging, transfer = tmpdirs
+    db = _FakeDB()
+    # One normal track in the library, one quarantined track under
+    # <transfer>/deleted. Both have titles that match the API list.
+    quarantine = transfer / 'deleted' / 'Aerosmith'
+    quarantine.mkdir(parents=True)
+    deleted_file = quarantine / 'dream.flac'
+    deleted_file.write_bytes(b'dupe')
+    _setup_album(db, deezer_id='dz-1', tracks=[
+        ('t1', 1, 'Same Old Song And Dance', _make_audio_file(library, 't1.flac')),
+        ('t2', 2, 'Dream On', str(deleted_file)),
+    ])
+
+    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr(library_reorganize, 'get_source_priority', lambda p: [p])
+    monkeypatch.setattr(library_reorganize, 'get_album_for_source',
+                        lambda *a: {'id': 'dz-1', 'name': 'Aerosmith'})
+    monkeypatch.setattr(
+        library_reorganize, 'get_album_tracks_for_source',
+        lambda *a: {'items': [
+            {'id': 'a1', 'name': 'Same Old Song And Dance', 'track_number': 1},
+            {'id': 'a2', 'name': 'Dream On', 'track_number': 2},
+        ]},
+    )
+
+    result = library_reorganize.preview_album_reorganize(
+        album_id='alb-1', db=db, transfer_dir=str(transfer),
+        resolve_file_path_fn=lambda p: p,
+        build_final_path_fn=_fake_path_builder,
+    )
+
+    by_title = {it['title']: it for it in result['tracks']}
+    # Normal track: matched + gets a destination.
+    assert by_title['Same Old Song And Dance']['matched'] is True
+    assert by_title['Same Old Song And Dance']['new_path']
+    # Quarantined track: skipped despite matching the API tracklist.
+    assert by_title['Dream On']['matched'] is False
+    assert 'quarantine' in (by_title['Dream On']['reason'] or '').lower()
+    assert by_title['Dream On']['new_path'] == ''
+
+
+def test_apply_skips_track_in_deleted_quarantine(monkeypatch, tmpdirs):
+    """Apply mirrors the preview: post-process is never called for a
+    quarantined track, the original is left in /deleted, and it's counted as
+    skipped (not moved, not failed) (#746)."""
+    library, staging, transfer = tmpdirs
+    db = _FakeDB()
+    quarantine = transfer / 'deleted' / 'Aerosmith'
+    quarantine.mkdir(parents=True)
+    deleted_file = quarantine / 'dream.flac'
+    deleted_file.write_bytes(b'dupe')
+    _setup_album(db, deezer_id='dz-1', tracks=[
+        ('t1', 1, 'Same Old Song And Dance', _make_audio_file(library, 't1.flac')),
+        ('t2', 2, 'Dream On', str(deleted_file)),
+    ])
+
+    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr(library_reorganize, 'get_source_priority', lambda p: [p])
+    monkeypatch.setattr(library_reorganize, 'get_album_for_source',
+                        lambda *a: {'id': 'dz-1', 'name': 'Aerosmith'})
+    monkeypatch.setattr(
+        library_reorganize, 'get_album_tracks_for_source',
+        lambda *a: {'items': [
+            {'id': 'a1', 'name': 'Same Old Song And Dance', 'track_number': 1},
+            {'id': 'a2', 'name': 'Dream On', 'track_number': 2},
+        ]},
+    )
+
+    pp_titles = []
+
+    def pp(key, ctx, fp):
+        pp_titles.append(ctx['track_info']['name'])
+        ctx['_final_processed_path'] = fp
+        with open(fp, 'wb') as f:
+            f.write(b'final')
+
+    summary = library_reorganize.reorganize_album(
+        album_id='alb-1', db=db, staging_root=str(staging),
+        resolve_file_path_fn=lambda p: p, post_process_fn=pp,
+        transfer_dir=str(transfer),
+    )
+
+    # Only the normal track was post-processed; the quarantined one was not.
+    assert pp_titles == ['Same Old Song And Dance']
+    assert summary['moved'] == 1
+    assert summary['skipped'] == 1
+    # The quarantined file is untouched on disk.
+    assert deleted_file.exists()
