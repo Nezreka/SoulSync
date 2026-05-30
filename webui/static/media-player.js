@@ -1038,8 +1038,21 @@ function _npLyricsRenderSynced(lines) {
     }
     content.innerHTML = lines.map((line, idx) => {
         const safe = (line.text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) || '&nbsp;';
-        return `<div class="np-lyrics-line" data-idx="${idx}">${safe}</div>`;
+        return `<div class="np-lyrics-line" data-idx="${idx}" title="Jump to this line">${safe}</div>`;
     }).join('');
+
+    // Click a line → seek playback to its timestamp (synced lyrics only).
+    content.querySelectorAll('.np-lyrics-line').forEach(el => {
+        el.addEventListener('click', () => {
+            const idx = Number(el.dataset.idx);
+            const line = _npLyricsState.lines[idx];
+            if (!line || !audioPlayer || !isFinite(line.time)) return;
+            try {
+                audioPlayer.currentTime = line.time;
+                if (audioPlayer.paused) audioPlayer.play().catch(() => {});
+            } catch (_) {}
+        });
+    });
 }
 
 function _npLyricsRenderPlain(text) {
