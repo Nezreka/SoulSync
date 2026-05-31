@@ -221,3 +221,80 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     )
 
     assert seen["runtime"] is metadata_runtime
+
+
+# ---------------------------------------------------------------------------
+# Quarantine entry-id propagation through the verification wrapper
+# (the wrapper pops task_id out of context, so _mark_task_quarantined can't
+# write to the task directly — it stashes on context and the wrapper applies it)
+# ---------------------------------------------------------------------------
+
+def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():
+    ctx = {}  # wrapper popped task_id before the inner pipeline ran
+    import_pipeline._mark_task_quarantined(ctx, "/q/20260514_120000_song.flac.quarantined")
+    assert ctx["_quarantine_entry_id"] == "20260514_120000_song"
+
+
+def test_mark_task_quarantined_sets_on_task_and_stashes_when_present():
+    original = dict(runtime_state.download_tasks)
+    try:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks["t1"] = {"status": "running"}
+        ctx = {"task_id": "t1"}
+        import_pipeline._mark_task_quarantined(ctx, "/q/20260514_120000_song.flac.quarantined")
+        assert runtime_state.download_tasks["t1"]["quarantine_entry_id"] == "20260514_120000_song"
+        assert ctx["_quarantine_entry_id"] == "20260514_120000_song"
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(original)
+
+
+def test_mark_task_quarantined_noop_without_path():
+    ctx = {"task_id": "t1"}
+    import_pipeline._mark_task_quarantined(ctx, None)
+    assert "_quarantine_entry_id" not in ctx
+
+
+def test_verification_wrapper_applies_quarantine_entry_id_on_integrity_failure(monkeypatch):
+    # End-to-end of the fix: the inner pipeline (mocked) quarantines on
+    # integrity failure and — because the wrapper popped task_id — stashes the
+    # entry id on context. The wrapper must apply it to the real task so the UI
+    # can manage the quarantined file.
+    task_id, batch_id, context_key = "qtask-1", "qbatch-1", "qctx-1"
+    context = {"track_info": {}, "task_id": task_id, "batch_id": batch_id}
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_integrity_failure_msg"] = "Duration mismatch: file is 231.0s, expected 271.0s"
+        ctx["_quarantine_entry_id"] = "20260514_120000_song"
+
+    monkeypatch.setattr(import_pipeline, "post_process_matched_download", _fake_inner)
+
+    original = dict(runtime_state.download_tasks)
+    original_ctx = dict(runtime_state.matched_downloads_context)
+    try:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context[context_key] = context
+
+        completion = []
+        runtime = types.SimpleNamespace(
+            automation_engine=None,
+            on_download_completed=lambda b, t, success: completion.append((b, t, success)),
+            web_scan_manager=None,
+            repair_worker=None,
+        )
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key, context, "/tmp/source.flac", task_id, batch_id, runtime,
+        )
+
+        t = runtime_state.download_tasks[task_id]
+        assert t["status"] == "failed"
+        assert t["error_message"] == "File integrity check failed: Duration mismatch: file is 231.0s, expected 271.0s"
+        assert t["quarantine_entry_id"] == "20260514_120000_song"  # the fix
+        assert completion == [(batch_id, task_id, False)]
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(original)
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context.update(original_ctx)
