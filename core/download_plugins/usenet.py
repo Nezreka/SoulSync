@@ -468,9 +468,15 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No usenet results found for "{query}"'
             return result
 
-        picked = pick_best_album_release(candidates, _guess_quality_from_title)
+        picked = pick_best_album_release(
+            candidates, _guess_quality_from_title,
+            album_name=album_name, artist_name=artist_name,
+        )
         if picked is None:
-            result['error'] = 'No suitable NZB candidate after filtering'
+            # No candidate matched the requested album (or none passed filtering).
+            # Fall back to per-track rather than grabbing a wrong album (#730).
+            result['error'] = 'No NZB candidate matched the requested album'
+            result['fallback'] = True
             return result
 
         logger.info("[Usenet album] Picked '%s' (size=%.1fMB grabs=%s indexer=%s)",
