@@ -115,14 +115,9 @@ class _TempCache(MetadataCache):
                 return _NonClosingConn(outer._conn)
         return _DB()
 
-    # evict_over_capacity uses self._run_maintenance_write -> _get_db; the base
-    # _run_maintenance_write just calls the operation. Add a tiny passthrough
-    # if the base needs it (it does in the real class).
-    def _run_maintenance_write(self, label, operation, default=0):
-        try:
-            return operation(self._get_db()._get_connection())
-        except Exception:
-            return default
+    # NOTE: we deliberately do NOT override _run_maintenance_write — the test
+    # exercises the REAL method (retry + connection handling) so we're testing
+    # production code, not a stub. _get_db is the only injected seam.
 
 
 def _add_rows(cache, specs):
