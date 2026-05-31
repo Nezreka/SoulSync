@@ -498,8 +498,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return result
 
         picked = pick_best_album_release(
-            candidates, _guess_quality_from_title,
-            album_name=album_name, artist_name=artist_name,
+            candidates, _guess_quality_from_title, album_name=album_name,
         )
         if picked is None:
             # No candidate matched the requested album (or none passed filtering).
