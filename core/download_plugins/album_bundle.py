@@ -171,7 +171,7 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
 
 
 def pick_best_album_release(candidates, quality_guess,
-                            album_name: str = "", artist_name: str = "") -> Optional[object]:
+                            album_name: str = "") -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
