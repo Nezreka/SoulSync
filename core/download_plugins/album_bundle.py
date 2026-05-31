@@ -167,7 +167,17 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
     if not album_words:
         return 1.0
     matched = sum(1 for w in album_words if w in title_words)
-    return matched / len(album_words)
+    coverage = matched / len(album_words)
+    # Full-phrase bonus (idea from contributor PR #731): when the album's core
+    # phrase appears intact in the title, we're highly confident it's the right
+    # release even if token-coverage is dragged down by a long multi-word name.
+    # MUST be word-boundary anchored, NOT a raw substring — a naive
+    # `phrase in norm_title` lets "heroes" match "superheroes" and reintroduces
+    # the exact wrong-album bug #730 fixes (PR #731's version has this flaw).
+    core_phrase = " ".join(album_words)
+    if core_phrase and re.search(rf"(?:^| ){re.escape(core_phrase)}(?: |$)", norm_title):
+        coverage = max(coverage, 0.9)
+    return coverage
 
 
 def pick_best_album_release(candidates, quality_guess,

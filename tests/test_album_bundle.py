@@ -163,6 +163,30 @@ def test_relevance_ignores_edition_suffix_on_album_name():
     assert album_title_relevance("Daft Punk - Discovery [FLAC]", "Discovery (Remastered Edition)") >= floor
 
 
+def test_relevance_full_phrase_bonus():
+    """Full core phrase present intact -> high confidence (>=0.9) even when a
+    long multi-word album name would otherwise drag token-coverage down.
+    (Idea grafted from contributor PR #731.)"""
+    # All core words present AND contiguous -> already 1.0; the bonus matters
+    # most when extra album words aren't all matched. Construct that case:
+    # album core = [in, rainbows, the, basement] but title has the phrase
+    # "in rainbows" intact while missing 'basement'.
+    # album core = [in, rainbows, from, basement] ('the' is noise); title has
+    # 'in','rainbows' but not 'from'/'basement', and the full core phrase is
+    # NOT intact -> pure coverage 2/4 = 0.5, no bonus.
+    score = album_title_relevance(
+        "Radiohead - In Rainbows [FLAC]", "In Rainbows from the Basement")
+    assert score == 0.5
+    # Full core phrase intact in the title -> bonus floors at 0.9+ (here it's
+    # already 1.0 since both core words match).
+    score2 = album_title_relevance(
+        "Radiohead - In Rainbows Disc 2 [FLAC]", "In Rainbows")
+    assert score2 >= 0.9
+    # The bonus is word-boundary anchored: a phrase that's only a SUBSTRING of
+    # a title word must NOT get it.
+    assert album_title_relevance("Various - Superheroes", "Heroes") == 0.0
+
+
 def test_relevance_album_named_only_with_noise_or_number():
     # If the album name is JUST a noise/number word, don't strip it to nothing
     # and match everything — keep the literal word.
