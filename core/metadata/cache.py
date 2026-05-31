@@ -14,6 +14,26 @@ from typing import Optional, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Hard ceiling on cached entity rows. TTL-only eviction has no upper bound, so
+# heavy discovery/enrichment within the TTL window let this table reach ~1.8M
+# rows / 7.6 GB (and helped bloat the main DB toward a corruption incident).
+# Beyond this cap we evict least-recently-ACCESSED rows (LRU) — the data to do
+# it (last_accessed_at) is already stored. Tunable via config; 0 disables.
+_DEFAULT_MAX_CACHE_ENTITIES = 250_000
+
+
+def entities_to_evict_for_capacity(total_rows: int, max_rows: int) -> int:
+    """Pure decision: how many LRU rows to drop to bring the cache to ``max_rows``.
+
+    Separated from SQL so it's unit-testable (mirrors core.db_integrity.
+    prune_backups). ``max_rows <= 0`` means "no cap" -> never evict. Never
+    returns negative.
+    """
+    if max_rows <= 0:
+        return 0
+    return max(0, total_rows - max_rows)
+
+
 # Singleton
 _cache_instance = None
 _cache_lock = threading.Lock()
@@ -618,6 +638,43 @@ class MetadataCache:
             return total
 
         return self._run_maintenance_write("Cache eviction", _operation)
+
+    def evict_over_capacity(self, max_rows: int = _DEFAULT_MAX_CACHE_ENTITIES) -> int:
+        """Enforce a hard row ceiling: if the entity cache exceeds ``max_rows``,
+        delete the least-recently-ACCESSED rows down to the cap (LRU). This is
+        the bound TTL-only eviction lacked. Returns the count evicted.
+
+        Runs AFTER evict_expired in the maintenance job, so TTL-expired and junk
+        rows are already gone — this only trims a still-oversized healthy cache.
+        """
+        def _operation(conn):
+            cursor = conn.cursor()
+            total = cursor.execute(
+                "SELECT COUNT(*) FROM metadata_cache_entities"
+            ).fetchone()[0]
+            to_evict = entities_to_evict_for_capacity(total, max_rows)
+            if to_evict <= 0:
+                return 0
+            # Delete the oldest-accessed rows. NULL last_accessed_at sorts first
+            # (evicted earliest) — those were never touched since insert.
+            cursor.execute("""
+                DELETE FROM metadata_cache_entities
+                WHERE id IN (
+                    SELECT id FROM metadata_cache_entities
+                    ORDER BY last_accessed_at ASC
+                    LIMIT ?
+                )
+            """, (to_evict,))
+            evicted = cursor.rowcount
+            conn.commit()
+            if evicted > 0:
+                logger.info(
+                    "Cache over capacity (%d > %d) — evicted %d least-recently-used entities",
+                    total, max_rows, evicted,
+                )
+            return evicted
+
+        return self._run_maintenance_write("Cache capacity eviction", _operation)
 
     def clean_junk_entities(self) -> int:
         """Delete cached entities with empty/placeholder names."""
