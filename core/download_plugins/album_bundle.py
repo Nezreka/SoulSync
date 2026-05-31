@@ -119,16 +119,42 @@ def _normalize_release_text(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+# Edition / format / qualifier words that appear in stored album names or
+# release titles but say nothing about WHICH album it is. Stripped before
+# scoring so "Currents" matches "Currents (Deluxe)" and "Heroes" matches
+# "Heroes (2017 Remaster)" — the #730 fix must not reject the RIGHT album just
+# because the DB name carries an edition suffix the torrent title lacks.
+_ALBUM_NOISE_WORDS = frozenset({
+    "deluxe", "edition", "remaster", "remastered", "remasters", "remix",
+    "expanded", "anniversary", "bonus", "version", "explicit", "clean",
+    "reissue", "special", "limited", "collectors", "collector", "the",
+    "ep", "lp", "album", "single", "disc", "cd", "vol", "volume",
+    "flac", "mp3", "aac", "ogg", "wav", "alac", "m4a", "320", "256", "192",
+    "web", "vinyl", "hi", "res", "hires", "24bit", "16bit", "original",
+    "soundtrack", "ost",
+})
+
+
+def _significant_words(normalized: str) -> list:
+    """Words that actually identify an album: drop pure-digit tokens (years,
+    bitrates) and edition/format noise. Keeps at least the raw words if the
+    filter would empty it (e.g. an album literally named '1989' or 'Deluxe')."""
+    words = [w for w in normalized.split()
+             if w not in _ALBUM_NOISE_WORDS and not w.isdigit()]
+    return words or normalized.split()
+
+
 def album_title_relevance(candidate_title: str, album_name: str) -> float:
     """How well a release title matches the requested album, 0.0–1.0.
 
-    Word-coverage: the fraction of the album-name's words that appear as
-    whole words in the candidate title. Word-boundary (not substring) so
-    "Heroes" does NOT match "Superheroes", and a request for "Heroes" is not
-    satisfied by a different Bowie album whose title shares no words.
+    Scores the fraction of the album's SIGNIFICANT words (edition/format/year
+    noise removed) that appear as whole words in the candidate title.
+    Word-boundary, not substring, so "Heroes" does NOT match "Superheroes" and
+    a different album sharing no significant words scores 0 — while "Currents"
+    still matches "Currents (Deluxe)" and "Heroes" matches the "2017 Remaster".
 
-    Returns 1.0 when there's no album name to check against (can't gate on
-    nothing — preserves old behavior for callers that don't pass a title).
+    Returns 1.0 when there's no album name to check (can't gate on nothing —
+    preserves old behavior for callers that don't pass a title).
     """
     norm_album = _normalize_release_text(album_name)
     if not norm_album:
@@ -136,7 +162,7 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
     norm_title = _normalize_release_text(candidate_title)
     if not norm_title:
         return 0.0
-    album_words = norm_album.split()
+    album_words = _significant_words(norm_album)
     title_words = set(norm_title.split())
     if not album_words:
         return 1.0
