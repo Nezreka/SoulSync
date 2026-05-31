@@ -153,6 +153,24 @@ def test_relevance_no_album_name_is_neutral():
     assert album_title_relevance("anything at all", "") == 1.0
 
 
+def test_relevance_ignores_edition_suffix_on_album_name():
+    """The RIGHT torrent must not be rejected just because the stored album
+    name carries an edition/remaster/format suffix the title lacks. (Caught in
+    review — the naive 'all album words' version wrongly rejected these.)"""
+    floor = 0.6
+    assert album_title_relevance("Tame Impala - Currents [FLAC]", "Currents (Deluxe)") >= floor
+    assert album_title_relevance("David Bowie - Heroes [FLAC]", "Heroes (2017 Remaster)") >= floor
+    assert album_title_relevance("Daft Punk - Discovery [FLAC]", "Discovery (Remastered Edition)") >= floor
+
+
+def test_relevance_album_named_only_with_noise_or_number():
+    # If the album name is JUST a noise/number word, don't strip it to nothing
+    # and match everything — keep the literal word.
+    assert album_title_relevance("Taylor Swift - 1989 [FLAC]", "1989") == 1.0
+    assert album_title_relevance("Taylor Swift - Red [FLAC]", "1989") == 0.0
+    assert album_title_relevance("Various - Deluxe [FLAC]", "Deluxe") == 1.0
+
+
 def test_picker_refuses_wrong_album_falls_back():
     """The #730 scenario: a hugely-popular WRONG album must NOT be picked over
     a less-popular RIGHT one — and if nothing matches, return None so the
