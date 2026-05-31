@@ -115,19 +115,27 @@ def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[s
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_path = f"{db_path}.backup_{timestamp}"
-    # Use SQLite backup API for a safe hot-copy of an active database.
-    src = sqlite3.connect(db_path)
-    dst = sqlite3.connect(backup_path)
-    src.backup(dst)
-    dst.close()
-    src.close()
+    # safe_backup verifies source + result integrity, so an automated backup
+    # can never silently snapshot a corrupt DB (the incident where every
+    # rolling backup faithfully copied the corruption).
+    from core.db_integrity import DBIntegrityError, safe_backup, prune_backups
+    try:
+        safe_backup(db_path, backup_path)
+    except DBIntegrityError as integ:
+        deps.logger.error("Auto-backup refused — DB integrity check failed: %s", integ)
+        deps.update_progress(
+            automation_id,
+            log_line=f'Backup SKIPPED — database failed integrity check: {integ}',
+            log_type='error',
+        )
+        return {'status': 'error', 'reason': f'Database integrity check failed: {integ}'}
     size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
 
-    # Rolling cleanup — keep only the newest N backups.
-    existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
-    while len(existing) > _MAX_BACKUPS:
+    # Rolling cleanup — never evict the most-recent verified-healthy backup.
+    existing = list(_glob.glob(f"{db_path}.backup_*"))
+    for removed in prune_backups(existing, _MAX_BACKUPS):
         try:
-            os.remove(existing.pop(0))
+            os.remove(removed)
         except Exception as e:  # noqa: BLE001 — best-effort cleanup
             deps.logger.debug("rolling backup cleanup failed: %s", e)
     deps.update_progress(
