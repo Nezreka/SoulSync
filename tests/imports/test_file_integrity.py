@@ -125,6 +125,52 @@ def test_accepts_valid_wav_with_no_expected_duration(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Zero-length-but-valid parse (#756): streamed / fragmented FLAC
+# ---------------------------------------------------------------------------
+
+
+def test_accepts_zero_length_when_parse_is_otherwise_valid(tmp_path: Path, monkeypatch) -> None:
+    """#756: HiFi assembles FLAC from HLS segments and demuxes with
+    `ffmpeg -c copy`, leaving STREAMINFO total_samples=0. Mutagen then
+    reports length 0 even though every audio frame is present and the file
+    plays fine. Such a file — large, identifiable format, valid info block —
+    must be ACCEPTED (unknown length), not quarantined as 'zero-length'."""
+    import mutagen
+
+    f = tmp_path / "streamed.flac"
+    f.write_bytes(b"\x00" * (50 * 1024))  # clears size gate; bytes irrelevant (mutagen mocked)
+
+    # Valid parse, valid info block, but length 0 — the streamed-FLAC signature.
+    fake_audio = SimpleNamespace(info=SimpleNamespace(length=0))
+    monkeypatch.setattr(mutagen, "File", lambda *a, **k: fake_audio)
+
+    # Even with an expected duration present, it must accept (can't compare to
+    # an unknown length) rather than reject.
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=200_000)
+
+    assert result.ok is True
+    assert result.checks["mutagen_parse"] == "zero_length_unknown"
+    assert result.checks["length_check"] == "skipped_unknown_length"
+
+
+def test_zero_length_still_rejects_when_too_small(tmp_path: Path, monkeypatch) -> None:
+    """A genuinely empty/stub file with length 0 must still fail — the size
+    gate fires before parse, so the relaxation can't let real stubs through."""
+    import mutagen
+
+    f = tmp_path / "stub.flac"
+    f.write_bytes(b"\x00" * 200)  # below the 10KB size gate
+
+    fake_audio = SimpleNamespace(info=SimpleNamespace(length=0))
+    monkeypatch.setattr(mutagen, "File", lambda *a, **k: fake_audio)
+
+    result = file_integrity.check_audio_integrity(str(f))
+
+    assert result.ok is False
+    assert "too small" in result.reason.lower()
+
+
+# ---------------------------------------------------------------------------
 # Duration agreement check
 # ---------------------------------------------------------------------------
 
