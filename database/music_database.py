@@ -4440,7 +4440,7 @@ class MusicDatabase:
             logger.error(f"Error creating manual_library_track_matches table: {e}")
 
     def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
-                                   library_track_id: int, **meta) -> bool:
+                                   library_track_id: str, **meta) -> bool:
         """Insert or replace a manual match. meta keys: source_title, source_artist,
         source_album, source_context_json, server_source."""
         try:

@@ -14,12 +14,27 @@ from utils.logging_config import get_logger
 logger = get_logger("library.manual_library_match")
 
 
+def normalize_library_track_id(value: Any) -> Optional[str]:
+    """Normalize an incoming library_track_id to the opaque string id we store.
+
+    Library track ids are ``str(ratingKey)`` — numeric strings for Plex, but
+    GUIDs/hashes for Jellyfin, Navidrome, and other Subsonic servers (see
+    ``tracks.id`` which is TEXT). They must NOT be coerced to int: doing so
+    rejected every non-numeric id with "Invalid library track id". We only
+    reject empty/None here; the caller validates existence against the DB.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def save_match(
     db,
     profile_id: int,
     source: str,
     source_track_id: str,
-    library_track_id: int,
+    library_track_id: str,
     **meta,
 ) -> bool:
     """Save (insert or replace) a manual match."""
