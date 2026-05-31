@@ -183,11 +183,29 @@ def check_audio_integrity(
     checks["actual_length_s"] = actual_length_s
 
     if actual_length_s <= 0:
+        # Length 0 is NOT proof of corruption here: the file already passed the
+        # size gate, was identified as a real audio format, and has a valid
+        # info block. A genuinely empty/truncated/stub file fails one of those
+        # earlier checks instead. The real cause of a clean-but-zero-length
+        # parse is "length unknown" — fragmented / streamed FLAC carries
+        # total_samples=0 in its STREAMINFO even though every audio frame is
+        # present and the file plays fine. HiFi is the common trigger: it
+        # assembles FLAC from HLS segments and demuxes with `ffmpeg -c copy`,
+        # which preserves total_samples=0, so mutagen computes length 0 and the
+        # file was wrongly quarantined (#756). Treat it as unknown length:
+        # accept the file and skip the duration cross-check we can't perform
+        # without a length. mutagen never decoded/validated frame data anyway,
+        # so accepting here doesn't weaken real corruption detection.
+        logger.warning(
+            "[Integrity] %s parsed cleanly (%d bytes, format=%s) but reports "
+            "length 0 — treating as unknown length (likely streamed/fragmented "
+            "FLAC), not rejecting",
+            os.path.basename(file_path), size, type(audio).__name__,
+        )
         return IntegrityResult(
-            ok=False,
-            reason="Mutagen reports zero-length audio — file has no playable "
-                   "audio data",
-            checks={**checks, "mutagen_parse": "zero_length"},
+            ok=True,
+            checks={**checks, "mutagen_parse": "zero_length_unknown",
+                    "length_check": "skipped_unknown_length"},
         )
 
     # --- Check 3: duration agreement (optional) ---
