@@ -18608,13 +18608,9 @@ def mlm_save():
         data = request.get_json(force=True) or {}
         source = data.get('source', '').strip()
         source_track_id = data.get('source_track_id', '').strip()
-        library_track_id = data.get('library_track_id')
+        library_track_id = mlm.normalize_library_track_id(data.get('library_track_id'))
         if not source or not source_track_id or not library_track_id:
             return jsonify({"success": False, "error": "source, source_track_id, library_track_id required"}), 400
-        try:
-            library_track_id = int(library_track_id)
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "Invalid library track id"}), 400
         db = get_database()
         profile_id = get_current_profile_id()
         # Validate library track exists before saving

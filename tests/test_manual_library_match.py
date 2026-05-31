@@ -17,6 +17,56 @@ def db(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# normalize_library_track_id — regression guard for issue #754
+# ("Invalid library track id" on Jellyfin/Navidrome/Subsonic servers)
+# ---------------------------------------------------------------------------
+
+def test_normalize_passes_numeric_plex_id():
+    # Plex ratingKeys are numeric strings — must survive unchanged (not int-ified).
+    assert mlm.normalize_library_track_id("12345") == "12345"
+    assert mlm.normalize_library_track_id(12345) == "12345"
+
+
+def test_normalize_passes_guid_id():
+    # The #754 bug: Jellyfin/Navidrome ids are non-numeric. int() rejected them.
+    assert mlm.normalize_library_track_id("a1b2c3d4-e5f6") == "a1b2c3d4-e5f6"
+    assert mlm.normalize_library_track_id("Do I Wanna Know_opus") == "Do I Wanna Know_opus"
+
+
+def test_normalize_trims_whitespace():
+    assert mlm.normalize_library_track_id("  guid-123  ") == "guid-123"
+
+
+def test_normalize_rejects_empty_and_none():
+    assert mlm.normalize_library_track_id(None) is None
+    assert mlm.normalize_library_track_id("") is None
+    assert mlm.normalize_library_track_id("   ") is None
+
+
+def test_guid_library_track_id_round_trips(db):
+    """End-to-end regression for #754: a non-numeric library id must save,
+    read back identically, and enrich — never get coerced or rejected."""
+    guid = "a1b2c3d4e5f6-jellyfin"
+    norm = mlm.normalize_library_track_id(guid)
+    assert norm == guid
+    ok = db.save_manual_library_match(1, "spotify", "src-track-1", norm,
+                                       source_title="Do I Wanna Know?",
+                                       source_artist="Arctic Monkeys")
+    assert ok is True
+    row = db.get_manual_library_match(1, "spotify", "src-track-1")
+    assert row is not None
+    assert row["library_track_id"] == guid  # stored as-is, not mangled to int
+
+    # Enrichment must resolve the GUID against tracks.id (TEXT) without error.
+    with patch.object(db, "api_get_tracks_by_ids", return_value=[
+            {"title": "Do I Wanna Know?", "artist_name": "Arctic Monkeys",
+             "album_title": "AM", "file_path": "/m/x.opus", "bitrate": 196}]) as mock_get:
+        enriched = mlm._enrich_match(row, db)
+    mock_get.assert_called_once_with([guid])  # passes the string id straight through
+    assert enriched["library_title"] == "Do I Wanna Know?"
+
+
+# ---------------------------------------------------------------------------
 # DB-layer tests
 # ---------------------------------------------------------------------------
 
