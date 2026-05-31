@@ -2982,6 +2982,19 @@ function _ensureCandidatesClickListener(statusEl) {
     statusEl.addEventListener('click', function (e) {
         e.stopPropagation();
         _hideErrorTooltip();
+        // Single click handler routes by dataset set at render time. A
+        // quarantined task opens the chooser; everything else opens the search
+        // modal. Deciding at click-time (not bind-time) means a task that fails
+        // first and only quarantines on a later retry can't end up double-bound.
+        if (this.dataset.quarantineEntryId) {
+            showQuarantineChooser({
+                entryId: this.dataset.quarantineEntryId,
+                taskId: this.dataset.taskId,
+                reason: this.dataset.quarantineReason || '',
+                trackName: this.dataset.quarantineTrack || 'this track',
+            });
+            return;
+        }
         const taskId = this.dataset.taskId;
         if (taskId) showCandidatesModal(taskId);
     });
@@ -3377,6 +3390,122 @@ async function approveQuarantineFromDownloadRow(button) {
     }
 }
 
+// ── Quarantine chooser (download-modal status click) ──────────────────────
+// Clicking a 🛡️ Quarantined status opens this instead of the search modal:
+// listen to the file, accept & import it (bypassing the failed check), or fall
+// back to searching for a different result. (Routing is handled inside
+// _ensureCandidatesClickListener so a single listener covers both cases.)
+
+// Stop and unload the chooser's <audio> so the server closes its read handle
+// on the quarantined file. On Windows an open handle blocks the subsequent
+// Approve/Recover move (WinError 32 "file in use") — listening then accepting
+// would otherwise fail. Returns a short promise so callers can let the
+// streaming connection actually tear down before moving the file.
+function _qcReleaseAudio() {
+    const aud = document.getElementById('qc-audio');
+    if (!aud) return Promise.resolve();
+    try {
+        aud.pause();
+        aud.removeAttribute('src');
+        aud.load();  // forces the browser to drop the current stream connection
+    } catch (e) { /* ignore */ }
+    return new Promise((r) => setTimeout(r, 400));
+}
+
+function closeQuarantineChooser() {
+    const o = document.getElementById('quarantine-chooser-overlay');
+    if (o) o.remove();
+}
+
+function showQuarantineChooser({ entryId, taskId, reason, trackName }) {
+    closeQuarantineChooser();
+    const streamUrl = entryId ? `/api/quarantine/${encodeURIComponent(entryId)}/stream` : '';
+    const overlay = document.createElement('div');
+    overlay.id = 'quarantine-chooser-overlay';
+    overlay.className = 'candidates-modal-overlay';
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeQuarantineChooser(); });
+    overlay.innerHTML = `
+        <div class="candidates-modal quarantine-chooser-modal">
+            <div class="candidates-modal-header">
+                <div>
+                    <h2>🛡️ Quarantined File</h2>
+                    <div class="quarantine-chooser-track">${escapeHtml(trackName)}</div>
+                </div>
+                <button class="candidates-modal-close" onclick="closeQuarantineChooser()">×</button>
+            </div>
+            <div class="quarantine-chooser-body">
+                <div class="quarantine-chooser-reason"><strong>Why it was quarantined:</strong><br>${escapeHtml(reason) || 'Unknown reason'}</div>
+                <div class="quarantine-chooser-listen">
+                    <label>Listen before deciding</label>
+                    ${streamUrl ? `<audio id="qc-audio" controls preload="none" src="${streamUrl}"></audio>` : '<span class="quarantine-chooser-muted">Playback unavailable for this entry.</span>'}
+                </div>
+                <div class="quarantine-chooser-actions">
+                    <button class="quarantine-chooser-btn quarantine-chooser-accept" id="qc-accept-btn">✓ Accept &amp; Import</button>
+                    <button class="quarantine-chooser-btn quarantine-chooser-search" id="qc-search-btn">🔍 Search for a different result</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const acceptBtn = overlay.querySelector('#qc-accept-btn');
+    if (acceptBtn) acceptBtn.addEventListener('click', () => acceptQuarantineFromChooser(acceptBtn, entryId));
+    const searchBtn = overlay.querySelector('#qc-search-btn');
+    if (searchBtn) searchBtn.addEventListener('click', () => {
+        closeQuarantineChooser();
+        if (taskId) showCandidatesModal(taskId);
+    });
+}
+
+async function acceptQuarantineFromChooser(button, entryId) {
+    if (!entryId) { showToast('Cannot accept — missing quarantine id.', 'error'); return; }
+    const confirmed = await showConfirmDialog({
+        title: 'Accept Quarantined File',
+        message: 'Import this file and skip the quarantine checks for this approved pass?',
+        confirmText: 'Accept & Import',
+        cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Importing…';
+    const restore = () => { button.disabled = false; button.textContent = original; };
+    // Release the preview stream first so the file isn't locked during the move.
+    await _qcReleaseAudio();
+    try {
+        const resp = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Accepted. Re-running post-processing.', 'success');
+            closeQuarantineChooser();
+            return;
+        }
+        // One-click approve needs the saved import context. Older / orphaned
+        // quarantine entries (thin or missing sidecar) can't be re-imported in
+        // place — fall back to moving the file into Staging so the user can
+        // finish via the Import flow, same as the Quarantine manager does.
+        const needsRecover = /thin sidecar|recover to staging|embedded context|missing file or sidecar/i.test(data.error || '');
+        if (needsRecover) {
+            button.textContent = 'Recovering…';
+            const rec = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/recover`, { method: 'POST' });
+            const recData = await rec.json();
+            if (recData.success) {
+                showToast('Older entry — moved to Staging. Finish it from the Import page.', 'success');
+                closeQuarantineChooser();
+                return;
+            }
+            showToast(`Recover failed: ${recData.error || 'Unknown error'}`, 'error');
+            restore();
+            return;
+        }
+        showToast(`Accept failed: ${data.error || 'Unknown error'}`, 'error');
+        restore();
+    } catch (err) {
+        showToast(`Accept failed: ${err.message}`, 'error');
+        restore();
+    }
+}
+
 function closeCandidatesModal() {
     const overlay = document.getElementById('candidates-modal-overlay');
     if (overlay) {
@@ -3655,6 +3784,19 @@ function processModalStatusUpdate(playlistId, data) {
                 if (task.status === 'not_found' || task.status === 'failed' || task.status === 'cancelled') {
                     statusEl.classList.add('has-candidates');
                     statusEl.dataset.taskId = task.task_id;
+                    // Quarantined files route to the chooser (Listen / Accept /
+                    // Search); everything else to the search modal. Set or CLEAR
+                    // the quarantine flags every render so a row that flips
+                    // between failure kinds always reflects its current state.
+                    if (isQuarantinedTask && task.quarantine_entry_id) {
+                        statusEl.dataset.quarantineEntryId = task.quarantine_entry_id;
+                        statusEl.dataset.quarantineReason = task.error_message || '';
+                        statusEl.dataset.quarantineTrack = (task.track_info && task.track_info.name) || '';
+                    } else {
+                        delete statusEl.dataset.quarantineEntryId;
+                        delete statusEl.dataset.quarantineReason;
+                        delete statusEl.dataset.quarantineTrack;
+                    }
                     _ensureCandidatesClickListener(statusEl);
                 }
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);

@@ -42394,6 +42394,80 @@ div.artist-hero-badge {
     color: #fff;
 }
 
+/* ── Quarantine chooser (download-modal status click) ───────────────────── */
+.quarantine-chooser-modal {
+    max-width: 540px;
+}
+.quarantine-chooser-track {
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 13px;
+    margin-top: 4px;
+}
+.quarantine-chooser-body {
+    padding: 22px 28px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+.quarantine-chooser-reason {
+    background: rgba(250, 204, 21, 0.08);
+    border: 1px solid rgba(250, 204, 21, 0.25);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    line-height: 1.5;
+}
+.quarantine-chooser-listen {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.quarantine-chooser-listen label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.quarantine-chooser-listen audio {
+    width: 100%;
+}
+.quarantine-chooser-muted {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    font-style: italic;
+}
+.quarantine-chooser-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.quarantine-chooser-btn {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.quarantine-chooser-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+}
+.quarantine-chooser-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.quarantine-chooser-accept {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.15);
+}
+.quarantine-chooser-accept:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.28);
+}
+
 .candidates-modal-body {
     padding: 20px 28px;
     overflow-y: auto;
