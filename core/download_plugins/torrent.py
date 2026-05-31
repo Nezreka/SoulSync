@@ -497,9 +497,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['error'] = f'No torrent results found for "{query}"'
             return result
 
-        picked = pick_best_album_release(candidates, _guess_quality_from_title)
+        picked = pick_best_album_release(
+            candidates, _guess_quality_from_title,
+            album_name=album_name, artist_name=artist_name,
+        )
         if picked is None:
-            result['error'] = 'No suitable torrent candidate after filtering'
+            # No candidate matched the requested album (or none passed filtering).
+            # Fall back to the per-track flow rather than downloading a wrong
+            # album (#730) — per-track searches each track individually.
+            result['error'] = 'No torrent candidate matched the requested album'
+            result['fallback'] = True
             return result
 
         download_url = picked.magnet_uri or picked.download_url

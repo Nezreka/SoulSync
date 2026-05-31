@@ -27,6 +27,7 @@ from core.download_plugins.album_bundle import (
     DEFAULT_POLL_TIMEOUT_SECONDS,
     atomic_copy_to_staging,
     copy_audio_files_atomically,
+    album_title_relevance,
     get_completed_no_path_window_seconds,
     get_poll_interval,
     get_poll_timeout,
@@ -115,6 +116,68 @@ def test_picker_rejects_oversized_box_sets() -> None:
     # Sane wins even with 100x fewer seeders, because box is outside
     # the preferred range.
     assert pick_best_album_release([sane, box], _flac_quality_guess) is sane
+
+
+# ---------------------------------------------------------------------------
+# #730 — album-title relevance gate
+# ---------------------------------------------------------------------------
+
+
+def test_relevance_exact_match_is_full():
+    assert album_title_relevance("David Bowie - Heroes (2017 Remaster) [FLAC]", "Heroes") == 1.0
+
+
+def test_relevance_word_boundary_not_substring():
+    # "Heroes" must NOT be satisfied by "Superheroes" (the substring trap).
+    assert album_title_relevance("Various - Superheroes Soundtrack", "Heroes") == 0.0
+
+
+def test_relevance_wrong_album_scores_zero():
+    # The reporter's exact case: a "Heroes" request must not match a different
+    # Bowie album that shares no title words.
+    assert album_title_relevance("David Bowie - Scary Monsters and Super Creeps", "Heroes") == 0.0
+
+
+def test_relevance_accent_folding():
+    # Björk folds to bjork, not "bj rk" — so an accented request still matches.
+    assert album_title_relevance("Bjork - Homogenic [FLAC]", "Björk Homogenic") == 1.0
+
+
+def test_relevance_partial_word_coverage():
+    # 1 of 2 album words present -> 0.5 (below the 0.6 floor).
+    assert album_title_relevance("Artist - Dark Side [FLAC]", "Dark Moon") == 0.5
+
+
+def test_relevance_no_album_name_is_neutral():
+    # Can't gate on nothing — preserves old behavior for callers w/o a title.
+    assert album_title_relevance("anything at all", "") == 1.0
+
+
+def test_picker_refuses_wrong_album_falls_back():
+    """The #730 scenario: a hugely-popular WRONG album must NOT be picked over
+    a less-popular RIGHT one — and if nothing matches, return None so the
+    caller falls back to per-track."""
+    wrong_popular = _Release(title="David Bowie - Scary Monsters [FLAC]",
+                             size=400_000_000, seeders=16000)
+    right_quiet = _Release(title='David Bowie - "Heroes" 2017 Remaster [FLAC]',
+                           size=400_000_000, seeders=10)
+    picked = pick_best_album_release(
+        [wrong_popular, right_quiet], _flac_quality_guess, album_name="Heroes")
+    assert picked is right_quiet   # relevance beats raw popularity
+
+
+def test_picker_returns_none_when_nothing_matches_album():
+    # Only the wrong album is available -> refuse (None) -> per-track fallback.
+    wrong = _Release(title="David Bowie - Scary Monsters [FLAC]",
+                     size=400_000_000, seeders=16000)
+    assert pick_best_album_release([wrong], _flac_quality_guess, album_name="Heroes") is None
+
+
+def test_picker_without_album_name_unchanged():
+    # No album_name passed -> no gating -> old popularity behavior intact.
+    a = _Release(title="Whatever [FLAC]", size=400_000_000, seeders=5)
+    b = _Release(title="Other [FLAC]", size=400_000_000, seeders=999)
+    assert pick_best_album_release([a, b], _flac_quality_guess) is b
 
 
 # ---------------------------------------------------------------------------
