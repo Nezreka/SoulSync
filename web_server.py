@@ -15445,18 +15445,27 @@ _BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
 def backup_database_endpoint():
     """Create a rolling backup of the database (max 5)."""
     try:
-        import sqlite3, glob as _glob
+        import glob as _glob
+        from core.db_integrity import DBIntegrityError, safe_backup, prune_backups
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return jsonify({"success": False, "error": "Database file not found"}), 404
         max_backups = 5
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_path = f"{db_path}.backup_{timestamp}"
-        src = sqlite3.connect(db_path)
-        dst = sqlite3.connect(backup_path)
-        src.backup(dst)
-        dst.close()
-        src.close()
+        # safe_backup verifies the SOURCE is healthy before copying and the
+        # RESULT after — so a corrupt DB can never silently produce a backup
+        # (the incident where every rolling backup copied the corruption).
+        try:
+            safe_backup(db_path, backup_path)
+        except DBIntegrityError as integ:
+            logger.error("Backup refused — database integrity check failed: %s", integ)
+            return jsonify({
+                "success": False,
+                "error": "Database failed its integrity check — backup refused to avoid "
+                         "saving a corrupt copy. Your existing backups are untouched. " + str(integ),
+                "integrity_failed": True,
+            }), 409
         size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
         # Write version metadata sidecar
         meta_path = backup_path + '.meta.json'
@@ -15465,15 +15474,14 @@ def backup_database_endpoint():
                 json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
         except Exception as e:
             logger.debug("backup meta sidecar write: %s", e)
-        # Rolling cleanup
-        existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
-        # Filter out .meta.json files from the backup list
-        existing = [f for f in existing if not f.endswith('.meta.json')]
-        while len(existing) > max_backups:
+        # Rolling cleanup — prune_backups never deletes the most-recent
+        # VERIFIED-HEALTHY backup, even to honor max_backups, so a run of bad
+        # backups can't evict your last good snapshot (the incident).
+        existing = [f for f in _glob.glob(f"{db_path}.backup_*")
+                    if not f.endswith('.meta.json')]
+        for removed in prune_backups(existing, max_backups):
             try:
-                removed = existing.pop(0)
                 os.remove(removed)
-                # Also remove sidecar if present
                 if os.path.exists(removed + '.meta.json'):
                     os.remove(removed + '.meta.json')
             except Exception as e:
