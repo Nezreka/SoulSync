@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -289,6 +290,56 @@ def _restore_filename(quarantined_filename: str, sidecar_original: Optional[str]
     return base
 
 
+def get_quarantine_entry_stream_info(
+    quarantine_dir: str, entry_id: str
+) -> Optional[Tuple[str, str]]:
+    """Resolve a quarantined entry to ``(file_path, original_extension)`` for
+    in-app playback.
+
+    The on-disk file carries a ``.quarantined`` suffix, so its own extension is
+    useless for picking an audio MIME type. Recover the real extension from the
+    sidecar's ``original_filename`` when present, else from the quarantine
+    filename convention. Returns None when the entry's file can't be found.
+    """
+    file_path, sidecar_path = _resolve_entry_paths(quarantine_dir, entry_id)
+    if not file_path or not os.path.isfile(file_path):
+        return None
+
+    sidecar_original: Optional[str] = None
+    if sidecar_path:
+        try:
+            with open(sidecar_path, encoding="utf-8") as f:
+                sidecar_original = json.load(f).get("original_filename")
+        except Exception as exc:
+            logger.debug("stream-info: sidecar read failed for %s: %s", entry_id, exc)
+
+    original_name = _restore_filename(os.path.basename(file_path), sidecar_original)
+    extension = os.path.splitext(original_name)[1].lower()
+    return file_path, extension
+
+
+def _move_with_retry(src: str, dst: str, attempts: int = 4, delay: float = 0.4) -> bool:
+    """Move a file, retrying briefly on transient OS locks.
+
+    On Windows a still-open read handle (e.g. the in-app quarantine preview
+    player that just streamed the file) makes shutil.move raise
+    PermissionError / WinError 32 "file in use". The handle is released a beat
+    after playback stops, so a few short retries clear the common case without
+    failing the whole Approve/Recover. Returns True on success.
+    """
+    last_exc: Optional[BaseException] = None
+    for i in range(attempts):
+        try:
+            shutil.move(src, dst)
+            return True
+        except OSError as exc:
+            last_exc = exc
+            if i < attempts - 1:
+                time.sleep(delay)
+    logger.error("move failed after %d attempts: %s -> %s: %s", attempts, src, dst, last_exc)
+    return False
+
+
 def approve_quarantine_entry(
     quarantine_dir: str,
     entry_id: str,
@@ -334,10 +385,9 @@ def approve_quarantine_entry(
     restored_path = os.path.join(restore_dir, original_name)
     restored_path = _ensure_unique_path(restored_path)
 
-    try:
-        shutil.move(file_path, restored_path)
-    except OSError as exc:
-        logger.error("approve: failed to restore %s -> %s: %s", file_path, restored_path, exc)
+    if not _move_with_retry(file_path, restored_path):
+        logger.error("approve: failed to restore %s -> %s (file may still be in use)",
+                     file_path, restored_path)
         return None
 
     try:
@@ -377,10 +427,8 @@ def recover_to_staging(
     os.makedirs(staging_dir, exist_ok=True)
     target = _ensure_unique_path(os.path.join(staging_dir, restored_name))
 
-    try:
-        shutil.move(file_path, target)
-    except OSError as exc:
-        logger.error("recover: failed to move %s -> %s: %s", file_path, target, exc)
+    if not _move_with_retry(file_path, target):
+        logger.error("recover: failed to move %s -> %s (file may still be in use)", file_path, target)
         return None
 
     if sidecar_path and os.path.isfile(sidecar_path):

@@ -7131,6 +7131,25 @@ def approve_quarantine_item(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/quarantine/<entry_id>/stream', methods=['GET'])
+def stream_quarantine_item(entry_id):
+    """Stream a quarantined audio file in-app (range-supported) so the user can
+    listen before deciding to approve, search again, or delete it. The file
+    lives in the quarantine dir with a `.quarantined` suffix, so the real audio
+    extension (and thus Content-Type) is recovered from the sidecar."""
+    try:
+        from core.imports.quarantine import get_quarantine_entry_stream_info
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        if info is None:
+            return jsonify({"error": "Quarantined file not found"}), 404
+        file_path, extension = info
+        mimetype = _AUDIO_MIME_TYPES.get(extension, 'audio/mpeg')
+        return _serve_audio_file_with_range(file_path, mimetype_override=mimetype)
+    except Exception as e:
+        logger.error(f"[Quarantine] Error streaming {entry_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
 def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
@@ -11877,17 +11896,22 @@ _AUDIO_MIME_TYPES = {
 }
 
 
-def _serve_audio_file_with_range(file_path):
+def _serve_audio_file_with_range(file_path, mimetype_override=None):
     """Serve an on-disk audio file with HTTP range support (HTML5 seeking).
 
     Shared by /stream/audio (current track) and /stream/library-audio (the
     crossfade pre-loader, which plays the NEXT track on a second <audio>).
+
+    ``mimetype_override`` lets callers supply the Content-Type explicitly when
+    the on-disk extension isn't the audio extension — e.g. the quarantine
+    streamer, whose files end in ``.quarantined`` (real type recovered from the
+    sidecar). When None, the type is inferred from the file extension as before.
     """
     if not os.path.exists(file_path):
         return jsonify({"error": "Audio file not found"}), 404
 
     file_ext = os.path.splitext(file_path)[1].lower()
-    mimetype = _AUDIO_MIME_TYPES.get(file_ext, 'audio/mpeg')
+    mimetype = mimetype_override or _AUDIO_MIME_TYPES.get(file_ext, 'audio/mpeg')
     file_size = os.path.getsize(file_path)
 
     range_header = request.headers.get('Range', None)
