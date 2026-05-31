@@ -223,7 +223,10 @@ def test_private_torrent_album_staging_miss_skips_per_track_search():
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
-def test_private_soulseek_album_staging_miss_skips_per_track_search():
+def test_private_usenet_album_staging_miss_skips_per_track_search():
+    # Usenet keeps the short-circuit (the #743 change is Soulseek-only):
+    # per-track NZB search re-adds the same release, so the staged release
+    # stays authoritative.
     _seed_task(track_info={
         'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
         'album': 'Album', 'duration_ms': 180000,
@@ -231,9 +234,9 @@ def test_private_soulseek_album_staging_miss_skips_per_track_search():
     download_batches['b1'] = {
         'album_bundle_private_staging': True,
         'album_bundle_state': 'staged',
-        'album_bundle_source': 'soulseek',
+        'album_bundle_source': 'usenet',
     }
-    client = _FakeClient(results=['should-not-search'], mode='soulseek')
+    client = _FakeClient(results=['should-not-search'], mode='usenet')
     rec = _Recorder()
     deps, _ = _build_deps(
         soulseek=client,
@@ -246,11 +249,43 @@ def test_private_soulseek_album_staging_miss_skips_per_track_search():
 
     assert client.search_calls == []
     assert download_tasks['t1']['status'] == 'not_found'
-    assert 'staged soulseek album release' in download_tasks['t1']['error_message']
+    assert 'staged usenet album release' in download_tasks['t1']['error_message']
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
-def test_private_hybrid_first_soulseek_album_staging_miss_skips_per_track_search():
+def test_private_soulseek_album_staging_miss_falls_through_to_per_track_search():
+    # #743: a track the album needs but that wasn't in the staged Soulseek
+    # folder must NOT be short-circuited to not_found — it falls through to the
+    # normal per-track Soulseek search (unlike torrent/usenet). Even with
+    # album_bundle_partial unset (folder fully downloaded, just incomplete),
+    # Soulseek now always falls through.
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
+        'album': 'Album', 'duration_ms': 180000,
+    })
+    download_batches['b1'] = {
+        'album_bundle_private_staging': True,
+        'album_bundle_state': 'staged',
+        'album_bundle_source': 'soulseek',
+    }
+    client = _FakeClient(results=[], mode='soulseek')
+    deps, _ = _build_deps(
+        soulseek=client,
+        matching=_FakeMatchEngine(queries=['Artist Song']),
+        try_staging_match=lambda *a, **kw: False,
+    )
+
+    tw.download_track_worker('t1', 'b1', deps)
+
+    assert client.search_calls                       # per-track search actually ran
+    assert download_tasks['t1']['status'] == 'not_found'   # nothing found, but via search
+    assert 'staged soulseek album release' not in download_tasks['t1']['error_message']
+
+
+def test_private_hybrid_first_soulseek_album_staging_miss_falls_through_to_per_track_search():
+    # Same as above but Soulseek is FIRST in a hybrid chain. The miss must fall
+    # through to per-track search, which (in hybrid) can then reach later
+    # sources — exactly the cross-source fallback #743 asks for.
     _seed_task(track_info={
         'id': 'sp-1', 'name': 'Song', 'artists': ['Artist'],
         'album': 'Album', 'duration_ms': 180000,
@@ -261,23 +296,21 @@ def test_private_hybrid_first_soulseek_album_staging_miss_skips_per_track_search
         'album_bundle_source': 'soulseek',
     }
     client = _FakeClient(
-        results=['should-not-search'],
+        results=[],
         mode='hybrid',
         subclients={'hybrid_order': ['soulseek', 'hifi']},
     )
-    rec = _Recorder()
     deps, _ = _build_deps(
         soulseek=client,
         matching=_FakeMatchEngine(queries=['Artist Song']),
         try_staging_match=lambda *a, **kw: False,
-        on_download_completed=rec('done'),
     )
 
     tw.download_track_worker('t1', 'b1', deps)
 
-    assert client.search_calls == []
+    assert client.search_calls                       # per-track search ran (not short-circuited)
     assert download_tasks['t1']['status'] == 'not_found'
-    assert 'staged soulseek album release' in download_tasks['t1']['error_message']
+    assert 'staged soulseek album release' not in download_tasks['t1']['error_message']
 
 
 def test_partial_private_hybrid_first_soulseek_album_staging_miss_allows_per_track_search():
