@@ -829,52 +829,74 @@ async function openMirroredPlaylistModal(playlistId) {
         const tracks = data.tracks || [];
         const source = data.source || 'unknown';
         const sourceRef = getMirroredSourceRef(data);
-        const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
+        const sourceIcons = { spotify: '🎵', spotify_public: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛', deezer: '🎧', qobuz: '♫' };
+        const sourceLabels = { spotify: 'Spotify', spotify_public: 'Spotify', tidal: 'Tidal', youtube: 'YouTube', beatport: 'Beatport', deezer: 'Deezer', qobuz: 'Qobuz' };
         const sourceIcon = sourceIcons[source] || '📋';
+        const srcLabel = sourceLabels[source] || source;
+
+        // Hero artwork: playlist cover → first track with art → gradient fallback.
+        const heroArt = data.image_url || (tracks.find(t => t.image_url) || {}).image_url || '';
+
+        // Total runtime for the meta line.
+        const totalMs = tracks.reduce((sum, t) => sum + (t.duration_ms || 0), 0);
+        const totalMin = Math.round(totalMs / 60000);
+        const totalLabel = totalMin >= 60 ? `${Math.floor(totalMin / 60)} hr ${totalMin % 60} min` : `${totalMin} min`;
 
         const trackRows = tracks.map(t => {
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            return `<div class="mirrored-track-row">
-                <span class="track-pos">${t.position}</span>
-                <span class="track-title">${_esc(t.track_name)}</span>
-                <span class="track-artist">${_esc(t.artist_name)}</span>
-                <span class="track-album">${_esc(t.album_name)}</span>
-                <span class="track-duration">${dur}</span>
+            const art = t.image_url
+                ? `<img class="mm-row-art" src="${_escAttr(t.image_url)}" loading="lazy" onerror="this.onerror=null;this.classList.add('mm-art-empty');this.removeAttribute('src');">`
+                : `<span class="mm-row-art mm-art-empty"></span>`;
+            return `<div class="mm-row">
+                <span class="mm-row-pos">${t.position}</span>
+                ${art}
+                <div class="mm-row-main">
+                    <span class="mm-row-title">${_esc(t.track_name)}</span>
+                    <span class="mm-row-artist">${_esc(t.artist_name)}</span>
+                </div>
+                <span class="mm-row-album">${_esc(t.album_name || '')}</span>
+                <span class="mm-row-dur">${dur}</span>
             </div>`;
         }).join('');
 
+        const heroCover = heroArt
+            ? `<div class="mm-cover" style="background-image:url('${_escAttr(heroArt)}')"></div>`
+            : `<div class="mm-cover mm-cover-empty ${_escAttr(source)}">${sourceIcon}</div>`;
+
         overlay.innerHTML = `
             <div class="mirrored-modal">
-                <div class="mirrored-modal-header">
-                    <div class="mirrored-modal-hero">
-                        <div class="mirrored-modal-hero-icon ${_escAttr(source)}">${sourceIcon}</div>
-                        <div class="mirrored-modal-hero-info">
-                            <h2 class="mirrored-modal-hero-title">${_esc(data.name)}</h2>
-                            <div class="mirrored-modal-hero-subtitle">
-                                <span class="mirrored-modal-hero-badge">${_esc(source)}</span>
-                                <span>${tracks.length} tracks</span>
-                                <span>&middot;</span>
-                                <span>Mirrored ${timeAgo(data.updated_at || data.mirrored_at)}</span>
+                <div class="mm-hero">
+                    ${heroArt ? `<div class="mm-hero-bg" style="background-image:url('${_escAttr(heroArt)}')"></div>` : ''}
+                    <div class="mm-hero-content">
+                        ${heroCover}
+                        <div class="mm-hero-info">
+                            <span class="mm-eyebrow">Mirrored Playlist</span>
+                            <h2 class="mm-title">${_esc(data.name)}</h2>
+                            <div class="mm-meta">
+                                <span class="mm-source-pill ${_escAttr(source)}">${_esc(srcLabel)}</span>
+                                ${data.owner ? `<span class="mm-meta-item">${_esc(data.owner)}</span><span class="mm-dot">&middot;</span>` : ''}
+                                <span class="mm-meta-item">${tracks.length} tracks</span>
+                                ${totalMs ? `<span class="mm-dot">&middot;</span><span class="mm-meta-item">${totalLabel}</span>` : ''}
+                                <span class="mm-dot">&middot;</span>
+                                <span class="mm-meta-item">Mirrored ${timeAgo(data.updated_at || data.mirrored_at)}</span>
                             </div>
                         </div>
                     </div>
-                    <span class="mirrored-modal-close" onclick="closeMirroredModal()">&times;</span>
+                    <button class="mm-close" onclick="closeMirroredModal()" aria-label="Close">&times;</button>
                 </div>
-                <div class="mirrored-modal-tracks">
-                    <div class="mirrored-track-header">
-                        <span>#</span><span>Track</span><span>Artist</span><span>Album</span><span style="text-align:right">Time</span>
+                <div class="mm-list">
+                    <div class="mm-list-head">
+                        <span>#</span><span></span><span>Title</span><span>Album</span><span class="mm-col-dur">Time</span>
                     </div>
-                    ${trackRows}
+                    ${trackRows || '<div class="mm-empty">No tracks in this mirror yet.</div>'}
                 </div>
-                <div class="mirrored-modal-footer">
-                    <div class="mirrored-modal-footer-left">
-                        <button class="mirrored-btn-delete" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escJs(data.name)}')">Delete Mirror</button>
-                    </div>
-                    <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
-                        <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escJs(data.name)}', '${_escJs(source)}', '${_escJs(sourceRef)}')">Edit Source</button>
-                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escJs(data.name)}')">Auto-Sync</button>
-                        <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
-                        <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
+                <div class="mm-actions">
+                    <button class="mm-btn mm-btn-danger" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escJs(data.name)}')">Delete Mirror</button>
+                    <div class="mm-actions-right">
+                        <button class="mm-btn mm-btn-ghost" onclick="editMirroredSourceRef(${playlistId}, '${_escJs(data.name)}', '${_escJs(source)}', '${_escJs(sourceRef)}')">Edit Source</button>
+                        <button class="mm-btn mm-btn-secondary" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escJs(data.name)}')">Auto-Sync</button>
+                        <button class="mm-btn mm-btn-ghost" onclick="closeMirroredModal()">Close</button>
+                        <button class="mm-btn mm-btn-primary" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>
                 </div>
             </div>
