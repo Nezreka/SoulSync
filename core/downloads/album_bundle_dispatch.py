@@ -173,7 +173,22 @@ def try_dispatch(
         )
     except Exception as exc:
         logger.exception("[Album Bundle] %s plugin raised: %s", mode, exc)
-        outcome = {'success': False, 'error': f'Plugin error: {exc}'}
+        # An OSError means an I/O step failed after the source already had the
+        # album — most importantly the staging dir not being writable (#760),
+        # but also any transient filesystem error. Treat it as fallback-eligible
+        # so we return to the per-track flow instead of hard-failing the whole
+        # batch (the #715 symptom: files download, then the batch fails).
+        # Programming errors (TypeError, KeyError, …) are NOT OSError and stay
+        # terminal, so genuine bugs still fail loudly. (requests' network
+        # exceptions also subclass OSError, but plugins normally catch those
+        # internally and return an outcome rather than raising; if one does
+        # surface here, falling back to per-track is still the safe choice.)
+        is_io_failure = isinstance(exc, OSError)
+        outcome = {
+            'success': False,
+            'error': f'Plugin error: {exc}',
+            'fallback': is_io_failure,
+        }
 
     if not outcome.get('success'):
         err = outcome.get('error', 'Album bundle download failed')
