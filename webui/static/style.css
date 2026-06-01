@@ -42479,6 +42479,10 @@ div.artist-hero-badge {
     transition: opacity 0.25s ease;
 }
 .td-overlay.visible { opacity: 1; pointer-events: auto; }
+/* The [hidden] attribute must win over our display:flex rules below
+   (.td-thumb-ph, .td-provenance, .td-audio) — otherwise JS-toggled-off
+   elements like the cover-art placeholder stay visible. */
+#track-detail-overlay [hidden] { display: none !important; }
 .td-modal {
     background: linear-gradient(135deg, #1c1c1c 0%, #131313 100%);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
