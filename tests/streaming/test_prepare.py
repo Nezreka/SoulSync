@@ -178,3 +178,25 @@ def test_succeeded_state_with_partial_bytes_keeps_polling(tmp_path):
 
     # Should NOT have gone to 'ready' because bytes were incomplete
     assert deps._state['status'] != 'ready'
+
+
+# ---------------------------------------------------------------------------
+# Real StreamSession compatibility (player-revamp Phase 3 wiring)
+# ---------------------------------------------------------------------------
+
+def test_worker_drives_a_real_stream_session(tmp_path):
+    """web_server.py now binds stream_state to a StreamStateStore session
+    (not a bare dict). Prove the prepare worker drives that real object
+    correctly end-to-end through the deps proxy — the actual production type."""
+    from core.streaming.state import StreamStateStore
+
+    session = StreamStateStore().get()   # the real production object
+    sk = _FakeSoulseek(download_id=None)  # early error exit is enough to mutate state
+    deps = _build_deps(soulseek=sk, project_root=str(tmp_path), state=session)
+
+    sp.prepare_stream_task({'username': 'u', 'filename': 'song.flac', 'size': 1}, deps)
+
+    # Worker mutated the SAME session via update()/[k]= — proves dict-compat.
+    assert session['status'] == 'error'
+    assert 'Failed to initiate' in session['error_message']
+    assert session['track_info'] == {'username': 'u', 'filename': 'song.flac', 'size': 1}

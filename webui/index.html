@@ -2365,6 +2365,9 @@
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                             </button>
                         </div>
+                        <div class="adl-batch-summary" id="adl-batch-summary" style="display:none">
+                            <!-- Live aggregate (batches · downloading · speed · ETA) rendered by JS -->
+                        </div>
                         <div class="adl-batch-active" id="adl-batch-active">
                             <!-- Active batch cards rendered by JS -->
                         </div>
@@ -5467,7 +5470,12 @@
                                                 <input type="checkbox" id="prefer-caa-art">
                                                 Use MusicBrainz Cover Art Archive for album art
                                             </label>
-                                            <small>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640).</small>
+                                            <small>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640). Ignored when a preferred album art source list is set below — add Cover Art Archive to that list instead.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label" style="cursor:default;">Preferred album art sources</label>
+                                            <small class="settings-hint">Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior.</small>
+                                            <div class="hybrid-source-list" id="art-source-list"></div>
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label">
@@ -7007,6 +7015,8 @@
 
     <!-- Hidden HTML5 Audio Player for Streaming -->
     <audio id="audio-player" style="display: none;"></audio>
+    <!-- Secondary audio element used only for crossfade preloading of the next track -->
+    <audio id="audio-player-xfade" style="display: none;"></audio>
 
     <!-- Expanded Now Playing Modal -->
     <div class="np-modal-overlay hidden" id="np-modal-overlay">
@@ -7017,15 +7027,24 @@
             <div class="np-body">
                 <!-- Left: album art + track info -->
                 <div class="np-left">
-                    <div class="np-album-art-container">
+                    <div class="np-album-art-container" id="np-album-art-container" title="Click for visualizer">
                         <img class="np-album-art hidden" id="np-album-art" src="" alt="Album Art">
                         <div class="np-album-art-placeholder" id="np-album-art-placeholder">
                             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
                             </svg>
                         </div>
+                        <!-- Big music-synced visualizer takeover (Plexamp-style); click art to toggle -->
+                        <div class="np-art-viz" id="np-art-viz" aria-hidden="true"></div>
+                        <div class="np-art-hint" id="np-art-hint" title="Visualizer">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="10" width="3" height="11" rx="1"/><rect x="10.5" y="4" width="3" height="17" rx="1"/><rect x="18" y="13" width="3" height="8" rx="1"/></svg>
+                        </div>
                     </div>
                     <div class="np-track-info">
+                        <div class="np-play-context hidden" id="np-play-context">
+                            <span class="np-play-context-label">Playing from</span>
+                            <span class="np-play-context-name" id="np-play-context-name"></span>
+                        </div>
                         <div class="np-track-title" id="np-track-title">No track</div>
                         <div class="np-artist-name" id="np-artist-name">Unknown Artist</div>
                         <div class="np-album-name" id="np-album-name">Unknown Album</div>
@@ -7041,12 +7060,23 @@
                 </div>
                 <!-- Right: controls -->
                 <div class="np-right">
+                    <div class="np-util-row">
+                        <button class="np-util-btn" id="np-sleep-btn" title="Sleep timer">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            <span id="np-sleep-label">Sleep</span>
+                        </button>
+                        <button class="np-util-btn" id="np-crossfade-btn" title="Crossfade between tracks">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8l-4 4 4 4"/><path d="M17 8l4 4-4 4"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                            <span>Crossfade</span>
+                        </button>
+                    </div>
                     <div class="np-progress-section">
                         <div class="np-progress-bar-container">
                             <div class="np-progress-track">
                                 <div class="np-progress-fill" id="np-progress-fill"></div>
                             </div>
                             <input type="range" class="np-progress-bar" id="np-progress-bar" min="0" max="100" value="0" step="0.1">
+                            <div class="np-seek-tip" id="np-seek-tip">0:00</div>
                         </div>
                         <div class="np-time-display">
                             <span class="np-current-time" id="np-current-time">0:00</span>
@@ -7083,6 +7113,15 @@
                                 <div class="np-volume-fill" id="np-volume-fill"></div>
                             </div>
                             <input type="range" class="np-volume-slider" id="np-volume-slider" min="0" max="100" value="70">
+                        </div>
+                    </div>
+                    <!-- Up-next peek (hidden when queue has no next track) -->
+                    <div class="np-upnext hidden" id="np-upnext">
+                        <span class="np-upnext-label">Next</span>
+                        <img class="np-upnext-art" id="np-upnext-art" alt="">
+                        <div class="np-upnext-info">
+                            <div class="np-upnext-title" id="np-upnext-title"></div>
+                            <div class="np-upnext-artist" id="np-upnext-artist"></div>
                         </div>
                     </div>
                     <div class="np-stop-row">
@@ -7981,6 +8020,7 @@
     <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
@@ -8014,6 +8054,8 @@
     </div>
     <div class="gsearch-results" id="gsearch-results"></div>
 
+    {% include 'track-detail-modal.html' %}
+
     <!-- Floating Mini Media Player — fixed bottom-right, above bell/help -->
     <div class="media-player idle" id="media-player">
         <!-- Thin interactive progress bar spanning full width at top -->
@@ -8040,6 +8082,9 @@
                 <div class="artist-name" id="artist-name">Unknown Artist</div>
             </div>
             <div class="mini-player-controls">
+                <button class="mini-toggle-btn" id="mini-shuffle-btn" title="Shuffle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                </button>
                 <button class="mini-nav-btn" id="mini-prev-btn" title="Previous" disabled>
                     <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
                 </button>
@@ -8049,6 +8094,10 @@
                 </button>
                 <button class="mini-nav-btn" id="mini-next-btn" title="Next" disabled>
                     <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                </button>
+                <button class="mini-toggle-btn" id="mini-repeat-btn" title="Repeat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    <span class="mini-repeat-one" id="mini-repeat-one-badge" style="display:none">1</span>
                 </button>
                 <button class="stop-button" id="stop-button" disabled>
                     <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>

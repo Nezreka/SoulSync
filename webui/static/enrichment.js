@@ -2859,12 +2859,21 @@ function _renderFindingDetail(f) {
 
         case 'duplicate_tracks':
             if (!d.tracks || !d.tracks.length) return _gridRows([['Count', d.count || '?']]);
-            // Determine best copy (same logic as backend: highest bitrate, then duration, then track number)
+            // Determine best copy — same logic as the backend
+            // (core/library/duplicate_keep.py): lossless format first, so a FLAC
+            // beats an MP3 even when the FLAC's bitrate is missing, then bitrate,
+            // duration, track number.
+            const _dupFmtRank = (fp) => {
+                const r = { flac: 10, wav: 9, aiff: 9, aif: 9, ape: 8, m4a: 7, ogg: 6, opus: 6, mp3: 5, aac: 5, wma: 3 };
+                return r[String(fp || '').split('.').pop().toLowerCase()] || 1;
+            };
+            const _dupKey = (t) => [_dupFmtRank(t.file_path), t.bitrate || 0, t.duration || 0, t.track_number || 0];
             const bestDup = d.tracks.reduce((best, t) => {
-                const bBr = best.bitrate || 0, tBr = t.bitrate || 0;
-                const bDur = best.duration || 0, tDur = t.duration || 0;
-                const bTn = best.track_number || 0, tTn = t.track_number || 0;
-                return (tBr > bBr || (tBr === bBr && tDur > bDur) || (tBr === bBr && tDur === bDur && tTn > bTn)) ? t : best;
+                const bk = _dupKey(best), tk = _dupKey(t);
+                for (let i = 0; i < bk.length; i++) {
+                    if (tk[i] !== bk[i]) return tk[i] > bk[i] ? t : best;
+                }
+                return best;
             }, d.tracks[0]);
             const findingId = f.id;
             return media + `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {

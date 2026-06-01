@@ -50,8 +50,9 @@ class VerificationResult(Enum):
     """Possible outcomes of audio verification."""
     PASS = "pass"       # Title/artist match - file is correct
     FAIL = "fail"       # Title/artist mismatch - wrong file downloaded
-    SKIP = "skip"       # Could not verify (error or unavailable) - continue normally
+    SKIP = "skip"       # Genuinely couldn't verify (no match in DB) - continue normally
     DISABLED = "disabled"  # Verification not enabled
+    ERROR = "error"     # Lookup errored (invalid key / rate limit / no backend) - continue, but flag it
 
 
 def _normalize(text: str) -> str:
@@ -399,18 +400,33 @@ class AcoustIDVerification:
                 logger.debug(f"AcoustID verification skipped: {reason}")
                 return VerificationResult.SKIP, reason
 
-            # Step 2: Fingerprint and lookup in AcoustID
+            # Step 2: Fingerprint and lookup in AcoustID (structured so an
+            # actual error — invalid key / rate limit / no chromaprint — is
+            # reported distinctly from a genuine no-match, instead of both
+            # silently surfacing as "Skipped").
             logger.info(f"Fingerprinting and looking up: {audio_file_path}")
-            acoustid_result = self.acoustid_client.fingerprint_and_lookup(audio_file_path)
+            lookup = self.acoustid_client.lookup_with_status(audio_file_path) or {}
+            status = lookup.get('status')
+            # Infer status by content when absent (a caller/stub that returned
+            # just recordings): recordings => matched, none => no match.
+            if status is None:
+                status = 'ok' if lookup.get('recordings') else 'no_match'
 
-            if not acoustid_result:
-                return VerificationResult.SKIP, "Track not found in AcoustID database"
+            if status in ('error', 'no_backend', 'fingerprint_error', 'unavailable'):
+                # Something is broken (not the track's fault) — never quarantine
+                # on this; surface it so the user can fix it.
+                return VerificationResult.ERROR, lookup.get('error', 'AcoustID lookup failed')
 
+            if status != 'ok':
+                # no_match / unsupported / not_found — genuinely could not verify.
+                return VerificationResult.SKIP, lookup.get('error', 'No match in AcoustID database')
+
+            acoustid_result = lookup
             recordings = acoustid_result.get('recordings', [])
             best_score = acoustid_result.get('best_score', 0)
 
             if not recordings:
-                return VerificationResult.SKIP, "AcoustID returned no recordings"
+                return VerificationResult.SKIP, "No match in AcoustID database"
 
             logger.debug(
                 f"AcoustID returned {len(recordings)} recording(s) "

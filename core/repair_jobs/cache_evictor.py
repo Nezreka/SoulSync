@@ -89,4 +89,21 @@ class CacheEvictorJob(RepairJob):
             logger.error("MB null cleanup failed: %s", e, exc_info=True)
             result.errors += 1
 
+        if context.check_stop():
+            return result
+
+        # Phase 5: Hard capacity cap (LRU). Runs LAST so TTL/junk/orphan/null
+        # rows are already gone; this only trims a still-oversized HEALTHY cache
+        # down to the row ceiling — the bound TTL-only eviction never had (the
+        # cache previously reached ~1.8M rows / 7.6 GB).
+        try:
+            over = cache.evict_over_capacity()
+            result.auto_fixed += over
+            result.scanned += over
+            if over > 0:
+                logger.info("Phase 5 — capacity cap: evicted %d LRU entries", over)
+        except Exception as e:
+            logger.error("Capacity eviction failed: %s", e, exc_info=True)
+            result.errors += 1
+
         return result

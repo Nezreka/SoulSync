@@ -243,10 +243,13 @@ function initializeSearchModeToggle() {
                 return;
             }
 
-            // Debounce search
+            // Debounce search. 600ms (was 300) so a name being typed coalesces
+            // into ONE search after the user pauses, instead of firing a new
+            // external-API search per letter (#751). Enter still triggers an
+            // immediate search via the keypress handler below.
             debounceTimer = setTimeout(() => {
                 searchController.submitQuery(query);
-            }, 300);
+            }, 600);
         });
 
         enhancedInput.addEventListener('keypress', (e) => {

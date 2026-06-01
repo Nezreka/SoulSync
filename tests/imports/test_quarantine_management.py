@@ -5,6 +5,7 @@ from core.imports.quarantine import (
     approve_quarantine_entry,
     delete_quarantine_entry,
     entry_id_from_quarantined_filename,
+    get_quarantine_entry_stream_info,
     get_quarantined_source_keys,
     list_quarantine_entries,
     recover_to_staging,
@@ -123,6 +124,41 @@ def test_list_handles_orphan_quarantined_file_without_sidecar(tmp_path):
     assert len(entries) == 1
     assert entries[0]["reason"] == "Unknown reason"
     assert entries[0]["has_full_context"] is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# get_quarantine_entry_stream_info — in-app "Listen" support
+# ──────────────────────────────────────────────────────────────────────
+
+def test_stream_info_resolves_path_and_extension_from_sidecar(tmp_path):
+    qfile, _ = _write_entry(tmp_path, "20260514_120000", "song.flac", with_context=True)
+    entry_id = entry_id_from_quarantined_filename(qfile.name)
+
+    info = get_quarantine_entry_stream_info(str(tmp_path), entry_id)
+
+    assert info is not None
+    file_path, ext = info
+    assert file_path == str(qfile)
+    assert ext == ".flac"  # real audio ext, NOT ".quarantined"
+
+
+def test_stream_info_recovers_extension_without_sidecar(tmp_path):
+    # Orphan .quarantined with no sidecar — extension comes from the filename
+    # convention so playback still gets a correct Content-Type.
+    qfile = tmp_path / "20260514_120000_orphan.mp3.quarantined"
+    qfile.write_bytes(b"X" * 100)
+    entry_id = entry_id_from_quarantined_filename(qfile.name)
+
+    info = get_quarantine_entry_stream_info(str(tmp_path), entry_id)
+
+    assert info is not None
+    file_path, ext = info
+    assert file_path == str(qfile)
+    assert ext == ".mp3"
+
+
+def test_stream_info_returns_none_for_missing_entry(tmp_path):
+    assert get_quarantine_entry_stream_info(str(tmp_path), "does_not_exist") is None
 
 
 def test_list_skips_orphan_sidecars_without_file(tmp_path):
@@ -398,3 +434,23 @@ def test_source_keys_dedup_repeated_sources(tmp_path):
     keys = get_quarantined_source_keys(str(tmp_path))
 
     assert keys == {("peer", "dupe.flac")}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# _move_with_retry — resilient move (Windows file-lock case)
+# ──────────────────────────────────────────────────────────────────────
+
+def test_move_with_retry_succeeds(tmp_path):
+    from core.imports.quarantine import _move_with_retry
+    src = tmp_path / "a.flac"; src.write_bytes(b"x" * 10)
+    dst = tmp_path / "out" / "a.flac"
+    (tmp_path / "out").mkdir()
+    assert _move_with_retry(str(src), str(dst)) is True
+    assert dst.exists() and not src.exists()
+
+
+def test_move_with_retry_returns_false_on_missing_source(tmp_path):
+    from core.imports.quarantine import _move_with_retry
+    # attempts=1 keeps the test fast (no retry sleeps)
+    assert _move_with_retry(str(tmp_path / "nope.flac"), str(tmp_path / "dst.flac"),
+                            attempts=1, delay=0) is False

@@ -3654,6 +3654,36 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def record_web_player_play(self, event):
+        """Record a single SoulSync web-player play: insert the listening_history
+        row AND bump tracks.play_count / last_played for the smart-radio recency
+        signal. ``event`` is the dict from core.playback.play_log.build_play_event.
+
+        Returns True if the history row was newly inserted.
+        """
+        if not event:
+            return False
+        inserted = self.insert_listening_events([event])
+        db_id = event.get('db_track_id')
+        if db_id is not None:
+            conn = None
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE tracks
+                    SET play_count = COALESCE(play_count, 0) + 1,
+                        last_played = ?
+                    WHERE id = ?
+                """, (event.get('played_at'), db_id))
+                conn.commit()
+            except Exception as e:
+                logger.error(f"Error bumping play_count for track {db_id}: {e}")
+            finally:
+                if conn:
+                    conn.close()
+        return inserted > 0
+
     def update_track_play_counts(self, counts):
         """Update play_count and last_played on the tracks table.
 
@@ -4237,9 +4267,17 @@ class MusicDatabase:
     def _add_metadata_cache_tables(self, cursor):
         """Create metadata_cache_entities and metadata_cache_searches tables for universal API response caching"""
         try:
+            # Skip only when the marker is set AND the tables actually exist.
+            # A marker-only guard is fragile: if the `metadata` table survives a
+            # corruption-recovery but the (large) cache tables don't, the stale
+            # marker would permanently short-circuit creation and the metadata
+            # cache would silently never work again (nothing lands in the
+            # browser). Verifying the table presence makes this self-heal.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata_cache_entities'")
+            tables_present = cursor.fetchone() is not None
             cursor.execute("SELECT value FROM metadata WHERE key = 'metadata_cache_v1' LIMIT 1")
-            if cursor.fetchone():
-                return  # Already migrated
+            if cursor.fetchone() and tables_present:
+                return  # Already migrated and tables present
 
             logger.info("Creating metadata cache tables...")
 
@@ -4410,7 +4448,7 @@ class MusicDatabase:
             logger.error(f"Error creating manual_library_track_matches table: {e}")
 
     def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
-                                   library_track_id: int, **meta) -> bool:
+                                   library_track_id: str, **meta) -> bool:
         """Insert or replace a manual match. meta keys: source_title, source_artist,
         source_album, source_context_json, server_source."""
         try:
@@ -12796,24 +12834,53 @@ class MusicDatabase:
                 seed = dict(seed)
                 artist_name = seed['artist_name']
 
-                # Build the set of IDs to exclude (seed + caller-supplied)
-                excluded = {str(track_id)}
+                # Selection decisions (dedup, caps, tag parsing, condition
+                # building) live in core.radio.selection so they're unit-
+                # testable without a live DB. The cursor work stays here.
+                from core.radio.selection import (
+                    RadioCollector,
+                    build_like_conditions,
+                    merge_tags,
+                    parse_tags,
+                    same_artist_cap,
+                )
+
+                # Seed + caller-supplied IDs to exclude (seeds the collector's
+                # seen-set so excluded tracks never collect and the NOT IN
+                # placeholders/values stay in sync).
+                exclude_seed = [str(track_id)]
                 if exclude_ids:
-                    excluded.update(str(eid) for eid in exclude_ids)
+                    exclude_seed.extend(str(eid) for eid in exclude_ids)
+                collector = RadioCollector(limit, exclude_ids=exclude_seed)
 
-                collected: list[dict] = []
-                seen_ids: set[str] = set(excluded)
+                # Phase 2 smart radio: each tier pulls a generous RANDOM pool,
+                # then core.radio.selection ranks it (play_count + lastfm
+                # popularity, recency penalty, stable jitter) and the collector
+                # keeps the best. Pool factor keeps SQL cheap while giving the
+                # ranker real choice; bumped, then floored so small tiers still
+                # over-fetch a little.
+                _POOL_FACTOR = 4
 
-                def _exclude_placeholders():
-                    return ','.join('?' * len(seen_ids))
+                def _pool(n):
+                    return max(n * _POOL_FACTOR, n + 10)
 
-                def _exclude_values():
-                    return list(seen_ids)
+                # Ranking signals (play_count / lastfm_playcount) are added by a
+                # migration, but probe for them so radio still works on a DB that
+                # predates it — the ranker treats missing columns as score 0, so
+                # we simply omit them from the SELECT when absent rather than
+                # crashing on "no such column".
+                cursor.execute("PRAGMA table_info(tracks)")
+                _track_cols = {row[1] for row in cursor.fetchall()}
+                _rank_cols = "".join(
+                    f"t.{c}, " for c in ("play_count", "lastfm_playcount")
+                    if c in _track_cols
+                )
 
-                _track_select = """
+                _track_select = f"""
                     SELECT t.id, t.title, t.track_number, t.duration,
                            t.file_path, t.bitrate,
                            t.album_id, t.artist_id,
+                           {_rank_cols}
                            al.title   AS album,
                            COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
                            ar.name    AS artist
@@ -12824,98 +12891,72 @@ class MusicDatabase:
                 # Only return tracks that have actual files on disk
                 _file_filter = "t.file_path IS NOT NULL AND t.file_path != ''"
 
-                def _collect(rows, cap=None):
-                    """Append rows to collected. Stop at cap or limit."""
-                    target = min(limit, (len(collected) + cap)) if cap else limit
-                    for row in rows:
-                        r = dict(row)
-                        rid = str(r['id'])
-                        if rid not in seen_ids:
-                            seen_ids.add(rid)
-                            collected.append(r)
-                            if len(collected) >= target:
-                                return True
-                    return len(collected) >= limit
-
-                def _parse_tags(raw_val):
-                    """Parse a JSON array or comma-separated string into a list."""
-                    if not raw_val:
-                        return []
-                    try:
-                        parsed = json.loads(raw_val)
-                        return parsed if isinstance(parsed, list) else [str(parsed)]
-                    except (json.JSONDecodeError, ValueError):
-                        return [t.strip() for t in raw_val.split(',') if t.strip()]
-
                 # --- 1. Same artist, different albums (capped at 30% of limit) ---
-                same_artist_cap = max(5, limit * 3 // 10)
+                artist_cap = same_artist_cap(limit)
                 cursor.execute(f"""
                     {_track_select}
-                    WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({_exclude_placeholders()})
+                    WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({collector.exclude_placeholders()})
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, [artist_name, seed['album_id']] + _exclude_values() + [same_artist_cap])
-                _collect(cursor.fetchall(), cap=same_artist_cap)
+                """, [artist_name, seed['album_id']] + collector.exclude_values() + [_pool(artist_cap)])
+                collector.collect(cursor.fetchall(), cap=artist_cap, rank=True)
 
-                if len(collected) >= limit:
-                    return {'success': True, 'tracks': collected}
+                if collector.filled:
+                    return {'success': True, 'tracks': collector.tracks}
 
                 # --- 2. Same genre (album genres + artist genres, other artists) ---
-                genre_list = _parse_tags(seed.get('album_genres'))
-                artist_genre_list = _parse_tags(seed.get('artist_genres'))
-                all_genres = list(dict.fromkeys(genre_list + artist_genre_list))  # dedupe, preserve order
-
-                if all_genres:
-                    genre_conditions = ' OR '.join(
-                        ['al.genres LIKE ?' for _ in all_genres] +
-                        ['ar.genres LIKE ?' for _ in all_genres]
-                    )
-                    genre_params = [f'%{g}%' for g in all_genres] * 2
+                all_genres = merge_tags(
+                    parse_tags(seed.get('album_genres')),
+                    parse_tags(seed.get('artist_genres')),
+                )
+                genre_conditions, genre_params = build_like_conditions(
+                    all_genres, ('al.genres', 'ar.genres')
+                )
+                if genre_conditions:
                     cursor.execute(f"""
                         {_track_select}
                         WHERE {_file_filter} AND ({genre_conditions})
                           AND ar.name != ?
-                          AND t.id NOT IN ({_exclude_placeholders()})
+                          AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, genre_params + [artist_name] + _exclude_values() + [limit - len(collected)])
-                    if _collect(cursor.fetchall()):
-                        return {'success': True, 'tracks': collected}
+                    """, genre_params + [artist_name] + collector.exclude_values() + [_pool(collector.remaining())])
+                    if collector.collect(cursor.fetchall(), rank=True):
+                        return {'success': True, 'tracks': collector.tracks}
 
                 # --- 3. Same mood / style (album + artist level) ---
                 for field_name in ('mood', 'style'):
-                    album_tags = _parse_tags(seed.get(f'album_{field_name}'))
-                    artist_tags = _parse_tags(seed.get(f'artist_{field_name}'))
-                    all_tags = list(dict.fromkeys(album_tags + artist_tags))
-
-                    if all_tags:
-                        tag_conditions = ' OR '.join(
-                            [f'al.{field_name} LIKE ?' for _ in all_tags] +
-                            [f'ar.{field_name} LIKE ?' for _ in all_tags]
-                        )
-                        tag_params = [f'%{t}%' for t in all_tags] * 2
+                    all_tags = merge_tags(
+                        parse_tags(seed.get(f'album_{field_name}')),
+                        parse_tags(seed.get(f'artist_{field_name}')),
+                    )
+                    tag_conditions, tag_params = build_like_conditions(
+                        all_tags, (f'al.{field_name}', f'ar.{field_name}')
+                    )
+                    if tag_conditions:
                         cursor.execute(f"""
                             {_track_select}
                             WHERE {_file_filter} AND ({tag_conditions})
                               AND ar.name != ?
-                              AND t.id NOT IN ({_exclude_placeholders()})
+                              AND t.id NOT IN ({collector.exclude_placeholders()})
                             ORDER BY RANDOM()
                             LIMIT ?
-                        """, tag_params + [artist_name] + _exclude_values() + [limit - len(collected)])
-                        if _collect(cursor.fetchall()):
-                            return {'success': True, 'tracks': collected}
+                        """, tag_params + [artist_name] + collector.exclude_values() + [_pool(collector.remaining())])
+                        if collector.collect(cursor.fetchall(), rank=True):
+                            return {'success': True, 'tracks': collector.tracks}
 
-                # --- 4. Random library tracks ---
-                if len(collected) < limit:
+                # --- 4. Random library tracks (ranked: popular-but-unheard
+                # beats pure noise even in the last-resort tier) ---
+                if not collector.filled:
                     cursor.execute(f"""
                         {_track_select}
-                        WHERE {_file_filter} AND t.id NOT IN ({_exclude_placeholders()})
+                        WHERE {_file_filter} AND t.id NOT IN ({collector.exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
-                    """, _exclude_values() + [limit - len(collected)])
-                    _collect(cursor.fetchall())
+                    """, collector.exclude_values() + [_pool(collector.remaining())])
+                    collector.collect(cursor.fetchall(), rank=True)
 
-                return {'success': True, 'tracks': collected}
+                return {'success': True, 'tracks': collector.tracks}
 
         except Exception as e:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")

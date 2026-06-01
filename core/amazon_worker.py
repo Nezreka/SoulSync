@@ -9,6 +9,7 @@ from database.music_database import MusicDatabase
 from core.amazon_client import AmazonClient
 from core.worker_utils import interruptible_sleep, set_album_api_track_count
 from core.enrichment.manual_match_honoring import honor_stored_match
+from core.amazon_outage import is_source_outage, next_poll_delay_seconds
 
 logger = get_logger("amazon_worker")
 
@@ -38,6 +39,11 @@ class AmazonWorker:
 
         self.retry_days = 30
         self.name_similarity_threshold = 0.80
+
+        # Source-outage circuit breaker: counts consecutive whole-source
+        # failures (proxy down / "not initialized" / unreachable) so the loop
+        # backs off instead of grinding the whole library item-by-item.
+        self._outage_streak = 0
 
         logger.info("Amazon background worker initialized")
 
@@ -151,7 +157,9 @@ class AmazonWorker:
                     continue
 
                 self._process_item(item)
-                interruptible_sleep(self._stop_event, 2)
+                # Normal 2s cadence when healthy; escalating back-off (up to
+                # 30 min) while the source is in an outage streak.
+                interruptible_sleep(self._stop_event, next_poll_delay_seconds(self._outage_streak))
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
@@ -275,7 +283,32 @@ class AmazonWorker:
             elif item_type == 'track':
                 self._process_track(item_id, item_name, item.get('artist', ''), item)
 
+            # The source answered (match or not_found) — clear any outage streak.
+            if self._outage_streak:
+                logger.info("Amazon source recovered after %d outage(s), resuming",
+                            self._outage_streak)
+                self._outage_streak = 0
+
         except Exception as e:
+            if is_source_outage(e):
+                # The whole source is down (proxy 5xx / "not initialized" /
+                # unreachable). Do NOT mark the item 'error' — that would burn
+                # the entire library to a state the retry tiers never re-attempt
+                # for a transient outage. Leave it untouched so it's retried once
+                # the instance recovers, and let the loop back off. Log once per
+                # streak to avoid flooding.
+                self._outage_streak += 1
+                if self._outage_streak == 1:
+                    logger.warning("Amazon source unavailable — pausing enrichment "
+                                   "until it recovers: %s", e)
+                else:
+                    logger.debug("Amazon source still unavailable (streak=%d): %s",
+                                 self._outage_streak, e)
+                return
+            # A non-outage error means the source actually answered (e.g. a
+            # 404/parse error on a real response), so the outage is over —
+            # clear the streak and handle this as a normal per-item error.
+            self._outage_streak = 0
             logger.error(f"Error processing {item['type']} #{item['id']}: {e}")
             self.stats['errors'] += 1
             try:

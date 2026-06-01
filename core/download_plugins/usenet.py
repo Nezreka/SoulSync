@@ -465,12 +465,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         candidates = [r for r in search_results
                       if r.protocol == 'usenet' and r.download_url]
         if not candidates:
+            # Album isn't available on this source — fall back to the per-track
+            # flow (next configured source in hybrid mode) rather than hard-
+            # failing the whole batch. Mirrors the torrent plugin + soulseek's
+            # default fallback contract.
             result['error'] = f'No usenet results found for "{query}"'
+            result['fallback'] = True
             return result
 
-        picked = pick_best_album_release(candidates, _guess_quality_from_title)
+        picked = pick_best_album_release(
+            candidates, _guess_quality_from_title, album_name=album_name,
+        )
         if picked is None:
-            result['error'] = 'No suitable NZB candidate after filtering'
+            # No candidate matched the requested album (or none passed filtering).
+            # Fall back to per-track rather than grabbing a wrong album (#730).
+            result['error'] = 'No NZB candidate matched the requested album'
+            result['fallback'] = True
             return result
 
         logger.info("[Usenet album] Picked '%s' (size=%.1fMB grabs=%s indexer=%s)",

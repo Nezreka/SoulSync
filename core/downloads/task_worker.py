@@ -34,11 +34,22 @@ logger = logging.getLogger(__name__)
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
     """Return a user-facing miss reason when per-track search should stop.
 
-    Torrent / usenet / Soulseek album batches first download one private staged release,
+    Torrent / usenet album batches first download one private staged release,
     then each track claims the matching staged file. If that claim fails after
     the release is already staged, falling through to the normal per-track
     search only retries release-level sources N times and can keep re-adding
-    the same torrent. Treat the staged release as authoritative for this pass.
+    the same torrent/NZB. For those two sources we treat the staged release as
+    authoritative for this pass.
+
+    Soulseek is deliberately NOT short-circuited. A Soulseek album bundle stages
+    whichever single folder scored best, and ``album_bundle_partial`` only
+    reflects whether the files found IN that folder downloaded — not whether the
+    folder actually contained every track the album needs. So a track the album
+    needs but that wasn't in the chosen folder would otherwise be marked
+    not_found with no fallback (#743). Unlike torrent/usenet, Soulseek per-track
+    search is a genuine per-file network search — it doesn't re-add a release —
+    so letting these misses fall through to the normal per-track flow (and, in
+    hybrid mode, onward to the next source) is correct and cheap.
     """
     if not batch_id:
         return None
@@ -60,7 +71,7 @@ def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any
         batch.get('album_bundle_private_staging')
         and batch.get('album_bundle_state') == 'staged'
         and not batch.get('album_bundle_partial')
-        and source in ('torrent', 'usenet', 'soulseek')
+        and source in ('torrent', 'usenet')
         and (mode == source or (mode == 'hybrid' and hybrid_first == source))
     ):
         return f'Track was not found in the staged {source} album release'

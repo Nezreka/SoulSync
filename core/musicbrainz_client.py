@@ -7,6 +7,19 @@ from utils.logging_config import get_logger
 
 logger = get_logger("musicbrainz_client")
 
+# Lucene query-syntax characters that must be backslash-escaped when a
+# user-supplied value is interpolated into a query (e.g. artist names like
+# "Sunn O)))", "Anthony Green (Saosin)", "Therapy?", "!!!"). Without this an
+# unbalanced paren or a stray ?/* either breaks the field group (returning
+# unrelated results) or yields zero hits.
+_LUCENE_SPECIAL = set('+-&|!(){}[]^"~*?:\\/')
+
+
+def _escape_lucene(text: str) -> str:
+    """Backslash-escape Lucene special characters in a user-supplied term."""
+    return ''.join('\\' + ch if ch in _LUCENE_SPECIAL else ch for ch in text)
+
+
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
@@ -158,14 +171,14 @@ class MusicBrainzClient:
                     safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
                     query += f' AND artist:"{safe_artist}"'
             else:
-                # Bare query — MB tokenizes against title + artist credit +
-                # alias + sortname indexes together with diacritic folding.
-                # Recovers cases like "Bjork" → "Björk" that strict phrase
-                # queries miss.
-                parts = [album_name]
-                if artist_name:
-                    parts.append(artist_name)
-                query = ' '.join(p for p in parts if p)
+                # Loose title terms (no phrase quotes → diacritic folding and
+                # alias/sortname recall, e.g. "Bjork" → "Björk"), but
+                # FIELD-SCOPE the artist so it constrains rather than floating
+                # as a free fuzzy term that lets unrelated releases whose titles
+                # echo the artist name rank first (same root cause as #754).
+                query = album_name
+                if artist_name and artist_name.strip():
+                    query += f' AND artist:({_escape_lucene(artist_name.strip())})'
 
             params = {
                 'query': query,
@@ -223,18 +236,24 @@ class MusicBrainzClient:
                     safe_artist = artist_name.replace('\\', '\\\\').replace('"', '\\"')
                     query += f' AND artist:"{safe_artist}"'
             else:
-                # Bare query — see search_release for rationale.
-                parts = [track_name]
-                if artist_name:
-                    parts.append(artist_name)
-                query = ' '.join(p for p in parts if p)
+                # Loose track terms (no phrase quotes → tolerant of bracketed
+                # suffixes and diacritics, hitting MB's alias/sortname indexes),
+                # but FIELD-SCOPE the artist so it actually constrains results.
+                # A bare "track artist" blob let the artist float as a free
+                # fuzzy term, so covers/karaoke whose TITLES contain the artist
+                # name outranked the real recording (#754: "Sweet Child O Mine"
+                # / "Guns N Roses" returned only covers). Scoping still folds
+                # diacritics — artist:(Bjork) matches "Björk".
+                query = track_name
+                if artist_name and artist_name.strip():
+                    query += f' AND artist:({_escape_lucene(artist_name.strip())})'
 
             params = {
                 'query': query,
                 'fmt': 'json',
                 'limit': limit
             }
-            
+
             response = self.session.get(
                 f"{self.BASE_URL}/recording",
                 params=params,

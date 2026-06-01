@@ -21,8 +21,10 @@ folder scan.
 
 from __future__ import annotations
 
+import re
 import shutil
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -31,6 +33,13 @@ from config.settings import config_manager
 from utils.logging_config import get_logger
 
 logger = get_logger("download_plugins.album_bundle")
+
+# Minimum album-title relevance a Prowlarr candidate must clear to be eligible
+# for an album-bundle download (#730). Prowlarr returns broad fuzzy matches — a
+# "Heroes" search also returns other Bowie albums — so without this gate the
+# most-popular result wins regardless of whether it's the right album. Below
+# this floor we refuse the bundle and let the caller fall back to per-track.
+_ALBUM_TITLE_RELEVANCE_FLOOR = 0.6
 
 
 # Album-pick size floor / ceiling. Single-track torrents (~10 MB)
@@ -92,10 +101,96 @@ def quality_score(title: str, quality_guess) -> int:
     return _QUALITY_SCORE.get(quality_guess(title) or '', 0)
 
 
-def pick_best_album_release(candidates, quality_guess) -> Optional[object]:
+def _normalize_release_text(text: str) -> str:
+    """Lowercase, fold accents (Björk -> bjork), strip punctuation to spaces.
+
+    NFKD-decompose then drop combining marks so accented characters fold to
+    their base letter instead of fragmenting (the naive approach turned
+    'Björk' into 'bj rk'). Collapses runs of whitespace.
+    """
+    if not text:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", text)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    lowered = stripped.lower()
+    # Punctuation -> space (so "heroes" matches "heroes:" / "heroes -"),
+    # then collapse whitespace.
+    cleaned = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+# Edition / format / qualifier words that appear in stored album names or
+# release titles but say nothing about WHICH album it is. Stripped before
+# scoring so "Currents" matches "Currents (Deluxe)" and "Heroes" matches
+# "Heroes (2017 Remaster)" — the #730 fix must not reject the RIGHT album just
+# because the DB name carries an edition suffix the torrent title lacks.
+_ALBUM_NOISE_WORDS = frozenset({
+    "deluxe", "edition", "remaster", "remastered", "remasters", "remix",
+    "expanded", "anniversary", "bonus", "version", "explicit", "clean",
+    "reissue", "special", "limited", "collectors", "collector", "the",
+    "ep", "lp", "album", "single", "disc", "cd", "vol", "volume",
+    "flac", "mp3", "aac", "ogg", "wav", "alac", "m4a", "320", "256", "192",
+    "web", "vinyl", "hi", "res", "hires", "24bit", "16bit", "original",
+    "soundtrack", "ost",
+})
+
+
+def _significant_words(normalized: str) -> list:
+    """Words that actually identify an album: drop pure-digit tokens (years,
+    bitrates) and edition/format noise. Keeps at least the raw words if the
+    filter would empty it (e.g. an album literally named '1989' or 'Deluxe')."""
+    words = [w for w in normalized.split()
+             if w not in _ALBUM_NOISE_WORDS and not w.isdigit()]
+    return words or normalized.split()
+
+
+def album_title_relevance(candidate_title: str, album_name: str) -> float:
+    """How well a release title matches the requested album, 0.0–1.0.
+
+    Scores the fraction of the album's SIGNIFICANT words (edition/format/year
+    noise removed) that appear as whole words in the candidate title.
+    Word-boundary, not substring, so "Heroes" does NOT match "Superheroes" and
+    a different album sharing no significant words scores 0 — while "Currents"
+    still matches "Currents (Deluxe)" and "Heroes" matches the "2017 Remaster".
+
+    Returns 1.0 when there's no album name to check (can't gate on nothing —
+    preserves old behavior for callers that don't pass a title).
+    """
+    norm_album = _normalize_release_text(album_name)
+    if not norm_album:
+        return 1.0
+    norm_title = _normalize_release_text(candidate_title)
+    if not norm_title:
+        return 0.0
+    album_words = _significant_words(norm_album)
+    title_words = set(norm_title.split())
+    if not album_words:
+        return 1.0
+    matched = sum(1 for w in album_words if w in title_words)
+    coverage = matched / len(album_words)
+    # Full-phrase bonus (idea from contributor PR #731): when the album's core
+    # phrase appears intact in the title, we're highly confident it's the right
+    # release even if token-coverage is dragged down by a long multi-word name.
+    # MUST be word-boundary anchored, NOT a raw substring — a naive
+    # `phrase in norm_title` lets "heroes" match "superheroes" and reintroduces
+    # the exact wrong-album bug #730 fixes (PR #731's version has this flaw).
+    core_phrase = " ".join(album_words)
+    if core_phrase and re.search(rf"(?:^| ){re.escape(core_phrase)}(?: |$)", norm_title):
+        coverage = max(coverage, 0.9)
+    return coverage
+
+
+def pick_best_album_release(candidates, quality_guess,
+                            album_name: str = "") -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
+    0. Album-TITLE relevance gate (#730): drop candidates whose title doesn't
+       sufficiently match the requested album. Prowlarr returns broad fuzzy
+       matches, so without this the most-popular result wins even when it's a
+       different album. When ``album_name`` is given and NOTHING clears the
+       relevance floor, return None — the caller then falls back to per-track
+       rather than downloading a confident mismatch.
     1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
        releases that snuck in and quarantines suspicious giants.
     2. Higher seeders > lower (dead torrents = dead downloads).
@@ -106,6 +201,24 @@ def pick_best_album_release(candidates, quality_guess) -> Optional[object]:
     """
     if not candidates:
         return None
+
+    # 0. Title-relevance gate. Only applied when we know the album name; with
+    # no name we can't judge relevance, so we don't gate (old behavior).
+    if album_name:
+        relevant = [
+            c for c in candidates
+            if album_title_relevance(c.title or "", album_name) >= _ALBUM_TITLE_RELEVANCE_FLOOR
+        ]
+        if not relevant:
+            logger.warning(
+                "[Album Bundle] No candidate cleared the title-relevance floor "
+                "for '%s' (%d candidates rejected as wrong album) — refusing the "
+                "bundle so the caller falls back to per-track.",
+                album_name, len(candidates),
+            )
+            return None
+        candidates = relevant
+
     sized = [c for c in candidates
              if ALBUM_PICK_MIN_BYTES <= (c.size or 0) <= ALBUM_PICK_MAX_BYTES]
     pool = sized or list(candidates)

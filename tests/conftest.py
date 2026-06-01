@@ -4,6 +4,29 @@ Creates a minimal Flask+SocketIO app that replicates the relevant
 endpoints and event handlers without importing the full web_server.py
 (which would try to initialize Spotify, Soulseek, Plex, etc.)."""
 
+# ── TEST-DATABASE ISOLATION — MUST run before any other import ─────────────
+# Force every MusicDatabase()/get_database() call in the suite onto a throwaway
+# temp database so a test can NEVER open or write the real
+# database/music_library.db. MusicDatabase resolves its default path from
+# os.environ['DATABASE_PATH'] (see database/music_database.py); setting it here,
+# at conftest import (before any test module loads), redirects ALL default-path
+# DB access to /tmp.
+#
+# Why this is non-negotiable: tests exercise modules (e.g. album_mbid_cache)
+# that call get_database() with no path → the real DB. Running those writers
+# against the live DB over a WSL-mounted Windows drive corrupted a user's
+# library. This guarantees it can't recur — tests get their own disposable DB.
+import os as _os
+import tempfile as _tempfile
+import atexit as _atexit
+import shutil as _shutil
+
+if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
+    _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
+    _os.environ['DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_music_library.db')
+    _os.environ['SOULSYNC_TEST_DB_READY'] = '1'
+    _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
+
 import copy
 import pytest
 import threading
