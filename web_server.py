@@ -32899,9 +32899,13 @@ try:
     amazon_db = MusicDatabase()
     amazon_worker = AmazonWorker(database=amazon_db)
     amazon_worker.start()
-    if config_manager.get('amazon_enrichment_paused', False):
+    # Opt-in by default: Amazon enrichment depends on an external public proxy
+    # (T2Tunes) that can be down, so it stays paused unless the user has
+    # explicitly enabled it (amazon_enrichment_paused=False). This stops an
+    # instance outage from grinding/log-flooding installs that never opted in.
+    if config_manager.get('amazon_enrichment_paused', True):
         amazon_worker.pause()
-        logger.info("Amazon enrichment worker initialized (paused — restored from config)")
+        logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:
         logger.info("Amazon enrichment worker initialized and started")
 except Exception as e:
