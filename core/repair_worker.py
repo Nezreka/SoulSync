@@ -1364,8 +1364,11 @@ class RepairWorker:
                 return {'success': False, 'error': f'Selected track ID {keep_id} not found in duplicates'}
             best_id = keep_id
         else:
-            # Auto-pick: highest bitrate, then longest duration, then highest track number (correct > 01)
-            best = max(tracks, key=lambda t: (t.get('bitrate', 0) or 0, t.get('duration', 0) or 0, t.get('track_number', 0) or 0))
+            # Auto-pick the keeper: lossless format first (so a FLAC beats an
+            # MP3 even when the FLAC's bitrate is missing in the DB), then
+            # bitrate, duration, and track number as tie-breakers.
+            from core.library.duplicate_keep import pick_duplicate_to_keep
+            best = pick_duplicate_to_keep(tracks)
             best_id = best.get('track_id') or best.get('id')
 
         if not best_id:
