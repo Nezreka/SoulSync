@@ -1,0 +1,44 @@
+{# Track Detail modal — click any track row in the download modal to inspect it.
+   Populated by static/track-detail.js (openTrackDetail). One shell that adapts
+   by status_kind: completed shows play + provenance; quarantined adds the
+   reason + Listen / Accept / Search; failed/not-found offer Search. #}
+<div id="track-detail-overlay" class="td-overlay" aria-hidden="true">
+  <div class="td-modal" role="dialog" aria-modal="true" aria-labelledby="td-title">
+    <div class="td-header">
+      <div class="td-thumb-wrap">
+        <img id="td-thumb" class="td-thumb" alt="" hidden>
+        <div id="td-thumb-ph" class="td-thumb-ph">🎵</div>
+      </div>
+      <div class="td-headtext">
+        <h2 id="td-title" class="td-title">Track</h2>
+        <div id="td-artist" class="td-artist"></div>
+        <div id="td-album" class="td-album"></div>
+      </div>
+      <span id="td-status-badge" class="td-status-badge"></span>
+      <button type="button" class="td-close" aria-label="Close" onclick="closeTrackDetail()">&times;</button>
+    </div>
+
+    <div class="td-body">
+      <audio id="td-audio" class="td-audio" controls preload="none" hidden></audio>
+
+      <div id="td-reason" class="td-reason" hidden></div>
+
+      <div class="td-grid">
+        <div class="td-field"><span class="td-label">Source</span><span id="td-f-source" class="td-value">—</span></div>
+        <div class="td-field"><span class="td-label">Quality</span><span id="td-f-quality" class="td-value">—</span></div>
+        <div class="td-field"><span class="td-label">AcoustID</span><span id="td-f-acoustid" class="td-value">—</span></div>
+        <div class="td-field td-field-wide">
+          <span class="td-label">Location</span>
+          <span id="td-f-location" class="td-value td-mono">—</span>
+        </div>
+      </div>
+
+      <div id="td-provenance" class="td-provenance" hidden>
+        <div class="td-prov-row"><span class="td-prov-k">Expected</span><span id="td-exp" class="td-prov-v"></span></div>
+        <div class="td-prov-row"><span class="td-prov-k">Downloaded</span><span id="td-dl" class="td-prov-v"></span></div>
+      </div>
+
+      <div id="td-actions" class="td-actions"></div>
+    </div>
+  </div>
+</div>

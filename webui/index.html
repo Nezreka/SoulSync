@@ -8012,6 +8012,7 @@
     <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
@@ -8044,6 +8045,8 @@
         <span class="gsearch-shortcut" id="gsearch-shortcut">/</span>
     </div>
     <div class="gsearch-results" id="gsearch-results"></div>
+
+    {% include 'track-detail-modal.html' %}
 
     <!-- Floating Mini Media Player — fixed bottom-right, above bell/help -->
     <div class="media-player idle" id="media-player">
