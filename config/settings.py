@@ -609,7 +609,12 @@ class ConfigManager:
                 # Ordered preferred cover-art sources (empty = use the
                 # download's own art, i.e. today's behavior). Resolved + walked
                 # with fallback by core/metadata/art_sources.py.
-                "album_art_order": []
+                "album_art_order": [],
+                # Minimum cover-art resolution (shortest side, px). A preferred
+                # source whose art is smaller is skipped so the next source is
+                # tried — stops a low-res Cover Art Archive upload from winning.
+                # 0 disables the size gate.
+                "min_art_size": 1000
             },
             "musicbrainz": {
                 "embed_tags": True
