@@ -58939,17 +58939,23 @@ body.reduce-effects *::after {
 
 /* ---- Batch Context Panel ---- */
 .adl-batch-panel {
-    width: 340px;
+    width: 366px;
     flex-shrink: 0;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
-    padding: 0 12px 0 24px;
+    padding: 0 14px 0 22px;
     margin-left: 8px;
     overflow-y: auto;
     overflow-x: hidden;
     max-height: calc(100vh - 120px);
     position: sticky;
     top: 80px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
+.adl-batch-panel::-webkit-scrollbar { width: 7px; }
+.adl-batch-panel::-webkit-scrollbar-track { background: transparent; }
+.adl-batch-panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.adl-batch-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
 
 .adl-batch-panel-header {
     display: flex;
@@ -59229,13 +59235,20 @@ body.reduce-effects *::after {
 /* Expanded tracks list */
 .adl-batch-tracks {
     display: none;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-    max-height: 400px;
+    margin-top: 10px;
+    /* right padding keeps the nested scrollbar off the track text */
+    padding: 8px 8px 2px 2px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    max-height: 360px;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
+.adl-batch-tracks::-webkit-scrollbar { width: 6px; }
+.adl-batch-tracks::-webkit-scrollbar-track { background: transparent; }
+.adl-batch-tracks::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
+.adl-batch-tracks::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
 
 .adl-batch-card.expanded .adl-batch-tracks {
     display: block;
@@ -59254,34 +59267,61 @@ body.reduce-effects *::after {
 }
 
 .adl-batch-track-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
     align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-    font-size: 0.75rem;
-    flex-wrap: wrap;
+    column-gap: 10px;
+    padding: 6px 8px;
+    border-radius: 7px;
+    font-size: 0.76rem;
+    transition: background 0.12s ease;
+}
+.adl-batch-track-row:hover { background: rgba(255, 255, 255, 0.04); }
+
+.adl-batch-track-idx {
+    font-size: 0.66rem;
+    color: rgba(255, 255, 255, 0.28);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.adl-batch-track-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .adl-batch-track-title {
-    flex: 1;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.82);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-width: 0;
 }
 
-.adl-batch-track-status {
-    flex-shrink: 0;
-    font-size: 0.7rem;
-    min-width: 24px;
+.adl-batch-track-sub {
+    font-size: 0.64rem;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-batch-track-state {
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.35);
     text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
-.adl-batch-track-status.completed { color: #22c55e; }
-.adl-batch-track-status.active { color: rgba(var(--accent-rgb), 1); }
-.adl-batch-track-status.failed { color: #ef4444; }
-.adl-batch-track-status.queued { color: rgba(255, 255, 255, 0.3); }
+/* Row-state coloring (class from _adlStatusClass) */
+.adl-batch-track-row.completed .adl-batch-track-state { color: #22c55e; }
+.adl-batch-track-row.completed .adl-batch-track-idx { color: rgba(34, 197, 94, 0.45); }
+.adl-batch-track-row.failed .adl-batch-track-state { color: #ef4444; }
+.adl-batch-track-row.active .adl-batch-track-state { color: rgb(var(--accent-rgb)); }
+.adl-batch-track-row.queued .adl-batch-track-title { color: rgba(255, 255, 255, 0.5); }
+.adl-batch-track-row.cancelled .adl-batch-track-title { color: rgba(255, 255, 255, 0.4); text-decoration: line-through; }
 
 .adl-batch-release-note {
     padding: 6px 0;
@@ -59290,19 +59330,19 @@ body.reduce-effects *::after {
     line-height: 1.4;
 }
 
-/* Mini progress bar per track */
+/* Per-track progress — spans the full row width under a downloading track */
 .adl-batch-track-progress {
-    width: 100%;
+    grid-column: 1 / -1;
     height: 2px;
-    background: rgba(255, 255, 255, 0.04);
+    margin-top: 5px;
+    background: rgba(255, 255, 255, 0.06);
     border-radius: 1px;
     overflow: hidden;
-    margin-top: -2px;
 }
 
 .adl-batch-track-progress-fill {
     height: 100%;
-    background: rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.8);
     border-radius: 1px;
     transition: width 0.4s ease;
 }
