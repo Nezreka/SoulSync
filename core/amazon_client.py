@@ -70,7 +70,16 @@ _meta_cache_lock = threading.Lock()
 
 
 class AmazonClientError(RuntimeError):
-    """Raised on unrecoverable T2Tunes API errors."""
+    """Raised on unrecoverable T2Tunes API errors.
+
+    Carries the HTTP ``status_code`` when the failure was an HTTP error, so
+    callers (the worker's outage detection) can tell a source outage (5xx) from
+    a per-item miss without parsing the message.
+    """
+
+    def __init__(self, *args, status_code=None):
+        super().__init__(*args)
+        self.status_code = status_code
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +712,8 @@ class AmazonClient:
                     )
                     continue
                 raise AmazonClientError(
-                    f"HTTP {exc.response.status_code} for {url} — body: {body!r}"
+                    f"HTTP {exc.response.status_code} for {url} — body: {body!r}",
+                    status_code=exc.response.status_code,
                 ) from exc
             except requests.RequestException as exc:
                 raise AmazonClientError(f"Request failed for {url}: {exc}") from exc
