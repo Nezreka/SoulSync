@@ -7117,14 +7117,33 @@ def approve_quarantine_item(entry_id):
         # for this one restored pass so multi-reason failures do not loop.
         context['_skip_quarantine_check'] = 'all'
         context['_approved_quarantine_trigger'] = trigger
-        # Re-dispatch through the same pipeline. Run async so the HTTP
-        # request returns quickly — UI polls /list to see the entry vanish.
+        # If the caller (download-modal chooser) passed the originating task, run
+        # the re-import through the verification WRAPPER with that task_id so the
+        # task is marked completed on success — otherwise the modal row stays
+        # stuck on "Quarantined" even though the file imported. The sidecar
+        # context lost task_id/batch_id (the wrapper pops them before quarantine),
+        # so we re-supply them here. Manager-tab approvals (no task_id) keep the
+        # original inner-pipeline path.
+        _req = request.get_json(silent=True) or {}
+        _task_id = (_req.get('task_id') or '').strip() or None
+        _batch_id = None
+        if _task_id:
+            with tasks_lock:
+                _t = download_tasks.get(_task_id)
+                if isinstance(_t, dict):
+                    _batch_id = _t.get('batch_id')
+            context['task_id'] = _task_id
+            if _batch_id:
+                context['batch_id'] = _batch_id
         context_key = f"approve_{entry_id}_{int(time.time())}"
-        threading.Thread(
-            target=lambda: _post_process_matched_download(context_key, context, restored_path),
-            daemon=True,
-        ).start()
-        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all) → re-running pipeline")
+        if _task_id:
+            _reprocess = lambda: _post_process_matched_download_with_verification(
+                context_key, context, restored_path, _task_id, _batch_id,
+            )
+        else:
+            _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
+        threading.Thread(target=_reprocess, daemon=True).start()
+        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
