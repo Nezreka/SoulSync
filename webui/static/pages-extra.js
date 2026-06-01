@@ -2738,34 +2738,37 @@ function _adlRenderBatchPanel() {
         let tracksHtml = '';
         if (isExpanded) {
             if (batchTracks.length > 0) {
-                tracksHtml = batchTracks.map(t => {
+                tracksHtml = batchTracks.map((t, i) => {
                     const cls = _adlStatusClass(t.status);
                     const progress = t.progress || 0;
+                    const idx = (t.track_index != null ? t.track_index + 1 : i + 1);
 
-                    // Status indicator with detail
-                    let statusHtml = '';
+                    // Right-aligned state: % / spinner / \u2713 / \u2717 / \u00B7 \u2014 color via row class.
+                    let stateHtml = '';
                     if (t.status === 'downloading' && progress > 0) {
-                        statusHtml = `<span class="adl-batch-track-status active">${Math.round(progress)}%</span>`;
+                        stateHtml = `<span class="adl-batch-track-state">${Math.round(progress)}%</span>`;
                     } else if (t.status === 'searching') {
-                        statusHtml = `<span class="adl-batch-track-status active"><span class="adl-spinner" style="width:8px;height:8px"></span></span>`;
+                        stateHtml = `<span class="adl-batch-track-state"><span class="adl-spinner" style="width:9px;height:9px"></span></span>`;
                     } else if (t.status === 'post_processing') {
-                        statusHtml = `<span class="adl-batch-track-status active" title="Processing">proc</span>`;
+                        stateHtml = `<span class="adl-batch-track-state" title="Processing">proc</span>`;
                     } else if (cls === 'completed') {
-                        statusHtml = `<span class="adl-batch-track-status completed">\u2713</span>`;
+                        stateHtml = `<span class="adl-batch-track-state">\u2713</span>`;
                     } else if (cls === 'failed') {
-                        statusHtml = `<span class="adl-batch-track-status failed">\u2717</span>`;
+                        stateHtml = `<span class="adl-batch-track-state" title="${_adlEsc(t.error || 'Failed')}">\u2717</span>`;
                     } else {
-                        statusHtml = `<span class="adl-batch-track-status queued">\u00B7</span>`;
+                        stateHtml = `<span class="adl-batch-track-state">\u00B7</span>`;
                     }
 
-                    // Mini progress bar for downloading tracks
-                    const miniBar = t.status === 'downloading' && progress > 0
+                    const isDownloading = (t.status === 'downloading' && progress > 0);
+                    const miniBar = isDownloading
                         ? `<div class="adl-batch-track-progress"><div class="adl-batch-track-progress-fill" style="width:${progress}%"></div></div>`
                         : '';
+                    const sub = t.artist ? `<span class="adl-batch-track-sub">${_adlEsc(t.artist)}</span>` : '';
 
-                    return `<div class="adl-batch-track-row">
-                        <span class="adl-batch-track-title">${_adlEsc(t.title || 'Unknown')}</span>
-                        ${statusHtml}
+                    return `<div class="adl-batch-track-row ${cls}${isDownloading ? ' downloading' : ''}">
+                        <span class="adl-batch-track-idx">${idx}</span>
+                        <span class="adl-batch-track-text"><span class="adl-batch-track-title">${_adlEsc(t.title || 'Unknown')}</span>${sub}</span>
+                        ${stateHtml}
                         ${miniBar}
                     </div>`;
                 }).join('');
