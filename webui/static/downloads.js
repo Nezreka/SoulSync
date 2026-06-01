@@ -3357,6 +3357,7 @@ async function downloadCandidate(taskId, candidate, trackName) {
 
 async function approveQuarantineFromDownloadRow(button) {
     const entryId = button?.dataset?.entryId || '';
+    const taskId = button?.dataset?.taskId || '';
     if (!entryId) {
         showToast('Open Quarantine to approve this file.', 'warning');
         return;
@@ -3374,7 +3375,11 @@ async function approveQuarantineFromDownloadRow(button) {
     button.disabled = true;
     button.textContent = 'Approving...';
     try {
-        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: taskId }),
+        });
         const data = await response.json();
         if (data.success) {
             showToast('Approved quarantined file. Re-running post-processing.', 'success');
@@ -3828,7 +3833,7 @@ function processModalStatusUpdate(playlistId, data) {
                 }
             } else if (actionsEl && task.status === 'failed' && isQuarantinedTask && task.quarantine_entry_id) {
                 const entryId = escapeHtml(task.quarantine_entry_id);
-                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" title="Approve quarantined file">Approve</button>`;
+                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" data-task-id="${escapeHtml(task.task_id)}" title="Approve quarantined file">Approve</button>`;
                 const approveBtn = actionsEl.querySelector('.approve-quarantine-inline-btn');
                 if (approveBtn) {
                     approveBtn.addEventListener('click', () => approveQuarantineFromDownloadRow(approveBtn));
