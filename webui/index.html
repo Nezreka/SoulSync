@@ -5470,7 +5470,12 @@
                                                 <input type="checkbox" id="prefer-caa-art">
                                                 Use MusicBrainz Cover Art Archive for album art
                                             </label>
-                                            <small>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640).</small>
+                                            <small>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640). Ignored when a preferred album art source list is set below — add Cover Art Archive to that list instead.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label" style="cursor:default;">Preferred album art sources</label>
+                                            <small class="settings-hint">Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior.</small>
+                                            <div class="hybrid-source-list" id="art-source-list"></div>
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label">

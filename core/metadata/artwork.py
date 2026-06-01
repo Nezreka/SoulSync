@@ -8,7 +8,7 @@ import urllib.request
 from ipaddress import ip_address
 from urllib.parse import quote, urlparse
 
-from core.imports.context import get_import_context_album
+from core.imports.context import get_import_context_album, get_import_context_artist
 from core.metadata.common import (
     get_config_manager,
     get_image_dimensions,
@@ -340,8 +340,27 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         image_data = None
         mime_type = None
 
+        # User-preferred cover-art source. When album_art_order is a non-empty
+        # list it is the SOLE authority for preferred art (put 'caa' in it to use
+        # Cover Art Archive), and the legacy prefer_caa_art toggle below is
+        # skipped. With no list this is a no-op and behavior is exactly as before.
+        album_art_order = cfg.get("metadata_enhancement.album_art_order")
+        art_list_active = isinstance(album_art_order, (list, tuple)) and len(album_art_order) > 0
+        try:
+            from core.metadata.art_lookup import select_preferred_art_url
+            preferred_url = select_preferred_art_url(
+                metadata.get("album_artist") or metadata.get("artist"),
+                metadata.get("album"),
+                metadata,
+                album_art_order,
+            )
+            if preferred_url:
+                image_data, mime_type = _fetch_art_bytes(preferred_url)
+        except Exception as exc:
+            logger.debug("Preferred art-source selection failed: %s", exc)
+
         release_mbid = metadata.get("musicbrainz_release_id")
-        if release_mbid and cfg.get("metadata_enhancement.prefer_caa_art", False):
+        if not image_data and not art_list_active and release_mbid and cfg.get("metadata_enhancement.prefer_caa_art", False):
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
@@ -395,7 +414,12 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
         cover_path = os.path.join(target_dir, "cover.jpg")
         album_info = album_info or {}
         release_mbid = album_info.get("musicbrainz_release_id")
-        prefer_caa = cfg.get("metadata_enhancement.prefer_caa_art", False)
+        # When a preferred-art priority list is configured it is the sole
+        # authority, so the legacy CAA toggle is neutralized for this whole
+        # function (it gates the existing-file upgrade logic too).
+        _art_order = cfg.get("metadata_enhancement.album_art_order")
+        _art_list_active = isinstance(_art_order, (list, tuple)) and len(_art_order) > 0
+        prefer_caa = cfg.get("metadata_enhancement.prefer_caa_art", False) and not _art_list_active
 
         if os.path.exists(cover_path):
             if release_mbid and prefer_caa:
@@ -412,7 +436,27 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
             is_upgrade = False
 
         image_data = None
-        if release_mbid and prefer_caa:
+
+        # User-preferred cover-art source (no-op unless album_art_order is set).
+        # cover.jpg only supports the artist+album sources here (no MBID in
+        # album_info), which matches today's CAA-only special-casing.
+        try:
+            from core.metadata.art_lookup import select_preferred_art_url
+            artist_ctx = get_import_context_artist(context) if context else {}
+            preferred_url = select_preferred_art_url(
+                (artist_ctx or {}).get("name"),
+                album_info.get("album_name"),
+                album_info,
+                cfg.get("metadata_enhancement.album_art_order"),
+            )
+            if preferred_url:
+                pref_data, _ = _fetch_art_bytes(preferred_url)
+                if pref_data and len(pref_data) > 1000:
+                    image_data = pref_data
+        except Exception as exc:
+            logger.debug("Preferred art-source selection failed: %s", exc)
+
+        if not image_data and release_mbid and prefer_caa:
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"

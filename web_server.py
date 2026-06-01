@@ -2996,6 +2996,28 @@ def handle_settings():
             return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/metadata/art-sources', methods=['GET'])
+def get_art_sources():
+    """Cover-art sources the current user can actually use, in default order.
+
+    Free sources (CAA/Deezer/iTunes/AudioDB) are always available; account
+    sources (Spotify) only when connected. The settings UI uses this to offer
+    only sources the user is set up with ("not everybody has every source").
+    """
+    try:
+        from core.metadata.art_lookup import available_art_sources
+        labels = {
+            'caa': 'Cover Art Archive', 'deezer': 'Deezer', 'itunes': 'iTunes',
+            'spotify': 'Spotify', 'audiodb': 'TheAudioDB',
+        }
+        available = [{'id': s, 'name': labels.get(s, s.title())}
+                     for s in available_art_sources()]
+        return jsonify({'available': available})
+    except Exception as e:
+        logger.error(f"Error listing art sources: {e}")
+        return jsonify({'available': [], 'error': str(e)}), 500
+
+
 @app.route('/api/dev-mode', methods=['GET', 'POST'])
 def handle_dev_mode():
     global dev_mode_enabled
