@@ -81,15 +81,15 @@ chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 # Pre-mid-2026 the chown line had `|| true` but mkdir didn't — combined
 # with `set -e`, a permission-denied mkdir crashed the container into a
 # restart loop. Both lines are now best-effort.
-mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream 2>/dev/null || true
-chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream 2>/dev/null || true
+mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
+chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
 
 # Writability audit — surface a loud warning if any bind-mounted dir
 # isn't writable by the soulsync user. The restart-loop fix above makes
 # the container start regardless, but a non-writable Staging / downloads
 # / Transfer will fail silently inside the app (auto-import quarantine,
 # download writes). Better to log now than to debug missing files later.
-for dir in /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/MusicVideos /app/scripts; do
+for dir in /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts; do
     if [ -d "$dir" ] && ! gosu soulsync test -w "$dir" 2>/dev/null; then
         echo "⚠️  WARNING: $dir is not writable by soulsync (uid $(id -u soulsync))."
         echo "   Host bind-mount perms likely mismatch the PUID/PGID env vars."
