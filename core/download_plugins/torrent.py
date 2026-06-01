@@ -494,7 +494,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         candidates = [r for r in search_results
                       if r.protocol == 'torrent' and (r.magnet_uri or r.download_url)]
         if not candidates:
+            # Album isn't available on this source. Mark the failure as
+            # fallback-eligible so the dispatch returns to the per-track flow
+            # instead of hard-failing the batch — in hybrid mode that lets the
+            # next configured source take over. Without this flag a torrent-first
+            # hybrid would get stuck at "searching" forever when Prowlarr
+            # returns nothing, never trying the other sources.
             result['error'] = f'No torrent results found for "{query}"'
+            result['fallback'] = True
             return result
 
         picked = pick_best_album_release(
