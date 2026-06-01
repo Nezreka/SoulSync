@@ -6712,6 +6712,48 @@ def _list_available_download_sources() -> tuple:
     return download_mode, sources
 
 
+def _norm_track_key(s: str) -> str:
+    """Loose normalization for matching a task to its library_history row."""
+    import re
+    return re.sub(r'[^a-z0-9]+', '', (s or '').lower())
+
+
+@app.route('/api/downloads/task/<task_id>/detail', methods=['GET'])
+def get_task_detail(task_id):
+    """Full per-track detail for the track-detail modal: live task state merged
+    with the durable library_history provenance (location, quality, AcoustID
+    verdict, source, expected-vs-downloaded). Thin glue over build_track_detail."""
+    try:
+        from core.downloads.track_detail import build_track_detail
+        with tasks_lock:
+            t = download_tasks.get(task_id)
+            task = dict(t) if isinstance(t, dict) else None
+        if task is None:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        task['task_id'] = task_id
+
+        # Enrich from the most recent download-history row matching this track.
+        history = None
+        try:
+            ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+            want_title = _norm_track_key(ti.get('name', ''))
+            if want_title:
+                db = get_database()
+                entries, _ = db.get_library_history(event_type='download', page=1, limit=100)
+                for e in entries:
+                    if _norm_track_key(e.get('title', '')) == want_title:
+                        history = e
+                        break
+        except Exception as hist_err:
+            logger.debug(f"track-detail history lookup failed: {hist_err}")
+
+        detail = build_track_detail(task, history)
+        return jsonify({"success": True, "detail": detail})
+    except Exception as e:
+        logger.error(f"get_task_detail error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
 def get_task_candidates(task_id):
     """Returns the cached search candidates for a download task so the UI can show what was found."""
