@@ -4267,9 +4267,17 @@ class MusicDatabase:
     def _add_metadata_cache_tables(self, cursor):
         """Create metadata_cache_entities and metadata_cache_searches tables for universal API response caching"""
         try:
+            # Skip only when the marker is set AND the tables actually exist.
+            # A marker-only guard is fragile: if the `metadata` table survives a
+            # corruption-recovery but the (large) cache tables don't, the stale
+            # marker would permanently short-circuit creation and the metadata
+            # cache would silently never work again (nothing lands in the
+            # browser). Verifying the table presence makes this self-heal.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='metadata_cache_entities'")
+            tables_present = cursor.fetchone() is not None
             cursor.execute("SELECT value FROM metadata WHERE key = 'metadata_cache_v1' LIMIT 1")
-            if cursor.fetchone():
-                return  # Already migrated
+            if cursor.fetchone() and tables_present:
+                return  # Already migrated and tables present
 
             logger.info("Creating metadata cache tables...")
 
