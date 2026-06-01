@@ -275,6 +275,26 @@ def test_dispatch_plugin_exception_treated_as_failure() -> None:
     assert 'network down' in state.failed_with
 
 
+def test_dispatch_staging_oserror_falls_back_to_per_track():
+    """A filesystem/staging failure (e.g. #760's PermissionError creating the
+    staging dir) means the album downloaded but couldn't be staged locally —
+    fall back to the per-track flow rather than hard-failing the whole batch."""
+    state = _FakeState()
+    plugin = MagicMock()
+    plugin.download_album_to_staging.side_effect = PermissionError(
+        "[Errno 13] Permission denied: 'storage/album_bundle_staging'")
+    result = try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'Carnival'}, artist_context={'name': 'Some Artist'},
+        config_get=_config({'download_source.mode': 'soulseek'}),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert result is False                       # fell back; master continues per-track
+    assert state.failed_with == ''               # NOT hard-failed
+    assert state.fields['phase'] == 'analysis'
+    assert state.fields['album_bundle_state'] == 'fallback'
+
+
 def test_dispatch_strips_whitespace_from_names() -> None:
     """Trailing whitespace in batch context shouldn't fail the
     eligibility predicate AND should be cleaned before passing to
