@@ -38,7 +38,7 @@ def verifier():
         def is_available(self):
             return True, "available"
 
-        def fingerprint_and_lookup(self, path):
+        def lookup_with_status(self, path):
             return None  # tests inject via _stub_lookup below
 
     v.acoustid_client = _StubClient()
@@ -46,7 +46,7 @@ def verifier():
 
 
 def _stub_lookup(verifier, *, recordings, best_score=0.95):
-    verifier.acoustid_client.fingerprint_and_lookup = lambda path: {
+    verifier.acoustid_client.lookup_with_status = lambda path: {
         "recordings": recordings,
         "best_score": best_score,
         "recording_mbids": [r.get("id") for r in recordings if r.get("id")],

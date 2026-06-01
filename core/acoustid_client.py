@@ -282,8 +282,9 @@ class AcoustIDClient:
 
     def test_api_key(self) -> Tuple[bool, str]:
         """
-        Validate the API key by fingerprinting a real audio file and looking it up.
-        Falls back to a direct API call if no audio files are available.
+        Validate the API key with a direct AcoustID lookup call. An invalid key
+        is reported as invalid (error code 4); any other error means the key was
+        accepted.
 
         Returns:
             Tuple of (success, message)
@@ -294,24 +295,12 @@ class AcoustIDClient:
         import requests
 
         try:
-            # Try to find a real audio file to fingerprint for an end-to-end test
-            test_file = self._find_test_audio_file()
-
-            if test_file and CHROMAPRINT_AVAILABLE:
-                logger.info(f"Testing API key with real audio file: {test_file}")
-                try:
-                    result = self.fingerprint_and_lookup(test_file)
-                    # If we get here without exception, the API key is valid
-                    # (invalid keys raise or return error before results)
-                    return True, "AcoustID API key is valid"
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if 'invalid' in error_str and 'api' in error_str:
-                        return False, "Invalid AcoustID API key - get one from https://acoustid.org/new-application"
-                    # Fingerprint/lookup failed for non-key reasons, fall through to direct test
-                    logger.warning(f"Real file test failed ({e}), trying direct API call")
-
-            # Fallback: direct API call with minimal fingerprint
+            # Authoritative key check: a direct API lookup with a dummy
+            # fingerprint. AcoustID validates the client key first, so an
+            # invalid key returns error code 4 regardless of the fingerprint.
+            # (The previous real-file path trusted "no exception = valid", but
+            # fingerprint_and_lookup swallows the invalid-key error and returns
+            # None — so it reported broken keys as valid. #756-adjacent.)
             url = 'https://api.acoustid.org/v2/lookup'
             params = {
                 'client': self.api_key,
@@ -326,7 +315,6 @@ class AcoustIDClient:
             if data.get('status') == 'error':
                 error = data.get('error', {})
                 error_code = error.get('code', 0)
-                error_msg = error.get('message', 'Unknown error')
 
                 # Error code 4 is specifically "invalid API key"
                 if error_code == 4:
@@ -346,33 +334,33 @@ class AcoustIDClient:
             logger.error(f"Error testing AcoustID API key: {e}")
             return False, f"Error: {str(e)}"
 
-    def fingerprint_and_lookup(self, audio_file: str) -> Optional[Dict[str, Any]]:
-        """
-        Generate fingerprint and look up recording in AcoustID.
+    def lookup_with_status(self, audio_file: str) -> Dict[str, Any]:
+        """Fingerprint + AcoustID lookup returning a STRUCTURED result.
 
-        This is the main method - combines fingerprinting and lookup in one call.
+        Unlike fingerprint_and_lookup() (which collapses every outcome into
+        dict-or-None), this distinguishes a genuine no-match from an actual
+        error — an invalid API key, rate limit, missing chromaprint, or a
+        fingerprint failure. That distinction is what lets the UI show "AcoustID
+        Error" (something is broken — fix it) instead of a benign-looking
+        "Skipped" that silently hides a dead key.
 
-        Args:
-            audio_file: Path to the audio file
-
-        Returns:
-            Dict with:
-                'recordings': list of dicts with 'mbid', 'title', 'artist', 'score'
-                'best_score': float (highest score across all results)
-                'recording_mbids': list of unique MBIDs (for backward compat)
-            Or None on error.
+        Returns dict with:
+            'status':   'ok' | 'no_match' | 'error' | 'no_backend'
+                        | 'fingerprint_error' | 'unsupported' | 'unavailable'
+                        | 'not_found'
+            'recordings': list (meaningful only for 'ok')
+            'best_score': float
+            'recording_mbids': list
+            'error':    human-readable detail for any non-'ok' status
+            'invalid_key': bool (True when the API specifically rejected the key)
         """
         if not ACOUSTID_AVAILABLE:
-            logger.debug("Cannot lookup: pyacoustid not available")
-            return None
-
+            return {'status': 'unavailable', 'recordings': [], 'error': 'pyacoustid library not installed'}
         if not self.api_key:
-            logger.debug("Cannot lookup: no API key")
-            return None
-
+            return {'status': 'unavailable', 'recordings': [], 'error': 'No AcoustID API key configured'}
         if not os.path.isfile(audio_file):
             logger.warning(f"Cannot lookup: file not found: {audio_file}")
-            return None
+            return {'status': 'not_found', 'recordings': [], 'error': f'File not found: {audio_file}'}
 
         # Check channel count — chromaprint crashes (SIGABRT) on >2 channel files (e.g. 5.1 surround)
         try:
@@ -382,7 +370,8 @@ class AcoustIDClient:
                 channels = getattr(mf.info, 'channels', 2)
                 if channels and channels > 2:
                     logger.warning(f"Skipping AcoustID: file has {channels} channels (surround audio): {audio_file}")
-                    return None
+                    return {'status': 'unsupported', 'recordings': [],
+                            'error': f'{channels}-channel (surround) audio not supported by chromaprint'}
         except Exception as e:
             logger.debug(f"Could not check channel count, proceeding anyway: {e}")
 
@@ -392,17 +381,12 @@ class AcoustIDClient:
             api_key_preview = f"{self.api_key[:8]}..." if self.api_key and len(self.api_key) > 8 else "NOT SET"
             logger.info(f"Fingerprinting and looking up: {audio_file} (API key: {api_key_preview})")
 
-            # Use match() which handles fingerprinting + lookup + parsing
             logger.debug("Running acoustid.match()...")
             recordings = []
             seen_mbids = set()
             best_score = 0.0
 
-            for result in acoustid.match(
-                self.api_key,
-                audio_file,
-                parse=True
-            ):
+            for result in acoustid.match(self.api_key, audio_file, parse=True):
                 # match() with parse=True returns (score, recording_id, title, artist)
                 if not isinstance(result, tuple) or len(result) < 2:
                     logger.warning(f"Unexpected result format: {result}")
@@ -420,45 +404,57 @@ class AcoustIDClient:
 
                 if recording_id and recording_id not in seen_mbids:
                     seen_mbids.add(recording_id)
-                    recordings.append({
-                        'mbid': recording_id,
-                        'title': title,
-                        'artist': artist,
-                        'score': score,
-                    })
+                    recordings.append({'mbid': recording_id, 'title': title, 'artist': artist, 'score': score})
                     logger.debug(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score})")
 
             if not recordings:
                 logger.info(f"No AcoustID matches found for: {audio_file}")
-                return None
+                return {'status': 'no_match', 'recordings': [], 'best_score': best_score,
+                        'recording_mbids': [], 'error': 'Track not found in AcoustID database'}
 
             logger.info(f"AcoustID found {len(recordings)} recording(s) (best score: {best_score:.2f})")
-            return {
-                'recordings': recordings,
-                'best_score': best_score,
-                'recording_mbids': list(seen_mbids),
-            }
+            return {'status': 'ok', 'recordings': recordings, 'best_score': best_score,
+                    'recording_mbids': list(seen_mbids)}
 
         except acoustid.NoBackendError:
             logger.error("Chromaprint library not found and fpcalc not available")
-            return None
+            return {'status': 'no_backend', 'recordings': [],
+                    'error': 'Chromaprint/fpcalc not installed (install libchromaprint1)'}
         except acoustid.FingerprintGenerationError as e:
             logger.warning(f"Failed to fingerprint {audio_file}: {e}")
-            return None
+            return {'status': 'fingerprint_error', 'recordings': [], 'error': f'Could not fingerprint file: {e}'}
         except acoustid.WebServiceError as e:
-            # Log more details about the API error
             api_key_preview = f"{self.api_key[:8]}..." if self.api_key and len(self.api_key) > 8 else "???"
             logger.warning(f"AcoustID API error (key: {api_key_preview}): {e}")
-            # Check for common errors
             error_str = str(e).lower()
-            if 'invalid' in error_str or 'unknown' in error_str:
-                logger.error("API key appears to be invalid - check your AcoustID settings")
+            # Old pyacoustid reports an invalid key as the bare "status: error"
+            # (it drops the detail), so treat that as an invalid-key signal too.
+            invalid = ('invalid' in error_str or 'unknown' in error_str or 'status: error' in error_str)
+            if invalid:
+                logger.error("AcoustID API key appears to be invalid — check your AcoustID settings")
             elif 'rate' in error_str or 'limit' in error_str:
-                logger.warning("Rate limited by AcoustID - will retry later")
-            return None
+                logger.warning("Rate limited by AcoustID — will retry later")
+            return {'status': 'error', 'recordings': [], 'invalid_key': invalid,
+                    'error': f'AcoustID API error: {e}'}
         except Exception as e:
             logger.error(f"Unexpected error in AcoustID lookup: {e}", exc_info=True)
-            return None
+            return {'status': 'error', 'recordings': [], 'error': f'Unexpected error: {e}'}
+
+    def fingerprint_and_lookup(self, audio_file: str) -> Optional[Dict[str, Any]]:
+        """Legacy dict-or-None lookup. Returns the recordings dict on a confirmed
+        match, else None. Kept for callers that only need "did we identify it"
+        (library scanner, auto-import). Callers that must report WHY a lookup
+        didn't match (verification badge, key test) should use
+        ``lookup_with_status`` so an error isn't mistaken for a no-match.
+        """
+        res = self.lookup_with_status(audio_file)
+        if res.get('status') == 'ok':
+            return {
+                'recordings': res['recordings'],
+                'best_score': res.get('best_score', 0.0),
+                'recording_mbids': res.get('recording_mbids', []),
+            }
+        return None
 
     def refresh_config(self):
         """Refresh cached config values (call after settings change)."""
