@@ -49,6 +49,90 @@ class SyncDeps:
     sync_lock: Any  # threading.Lock
 
 
+async def _database_only_find_track(spotify_track, candidate_pool=None):
+    """Database-only track matcher used when no media server is connected.
+
+    Patched onto sync_service._find_track_in_media_server. Accepts
+    ``candidate_pool`` for interface parity with the real matcher (sync_service
+    calls it with candidate_pool=...); the DB path queries the library directly
+    via check_track_exists, so it doesn't need the per-artist candidate cache —
+    but it MUST accept the kwarg or sync raises "unexpected keyword argument
+    'candidate_pool'". Module-level (not a nested closure) so it's importable
+    and unit-tested.
+    """
+    logger.info(f"Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
+    try:
+        from database.music_database import MusicDatabase
+        from config.settings import config_manager
+
+        db = MusicDatabase()
+        active_server = config_manager.get_active_media_server()
+        original_title = spotify_track.name
+        spotify_id = getattr(spotify_track, 'id', '') or ''
+
+        # --- Sync match cache fast-path ---
+        if spotify_id:
+            try:
+                cached = db.read_sync_match_cache(spotify_id, active_server)
+                if cached:
+                    db_track_check = db.get_track_by_id(cached['server_track_id'])
+                    if db_track_check:
+                        class DatabaseTrackCached:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                        return DatabaseTrackCached(db_track_check), cached['confidence']
+                    logger.warning(f"Sync cache stale for '{original_title}' — track gone")
+            except Exception as e:
+                logger.debug("sync match cache fast-path failed: %s", e)
+        # --- End cache fast-path ---
+
+        # Try each artist
+        for artist in spotify_track.artists:
+            if isinstance(artist, str):
+                artist_name = artist
+            elif isinstance(artist, dict) and 'name' in artist:
+                artist_name = artist['name']
+            else:
+                artist_name = str(artist)
+
+            db_track, confidence = db.check_track_exists(
+                original_title, artist_name,
+                confidence_threshold=0.80,
+                server_source=active_server
+            )
+
+            if db_track and confidence >= 0.80:
+                logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                if spotify_id:
+                    try:
+                        from core.matching_engine import MusicMatchingEngine
+                        me = MusicMatchingEngine()
+                        db.save_sync_match_cache(
+                            spotify_id, me.clean_title(original_title), me.clean_artist(artist_name),
+                            active_server, db_track.id, db_track.title, confidence
+                        )
+                    except Exception as e:
+                        logger.debug("save sync match cache failed: %s", e)
+
+                class DatabaseTrackMock:
+                    def __init__(self, db_track):
+                        self.ratingKey = db_track.id
+                        self.title = db_track.title
+                        self.id = db_track.id
+
+                return DatabaseTrackMock(db_track), confidence
+
+        logger.warning(f"No database match found for: '{original_title}'")
+        return None, 0.0
+
+    except Exception as e:
+        logger.error(f"Database search error: {e}")
+        return None, 0.0
+
+
 def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', deps: SyncDeps = None, sync_mode: str = 'replace'):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
@@ -260,89 +344,9 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
         if media_client is None or not media_client.is_connected():
             logger.info("Media client not connected - patching sync service for database-only matching")
             
-            # Store original method
-            original_find_track = sync_service._find_track_in_media_server
-            
-            # Create database-only replacement method
-            async def database_only_find_track(spotify_track):
-                logger.info(f"Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
-                try:
-                    from database.music_database import MusicDatabase
-                    from config.settings import config_manager
-
-                    db = MusicDatabase()
-                    active_server = config_manager.get_active_media_server()
-                    original_title = spotify_track.name
-                    spotify_id = getattr(spotify_track, 'id', '') or ''
-
-                    # --- Sync match cache fast-path ---
-                    if spotify_id:
-                        try:
-                            cached = db.read_sync_match_cache(spotify_id, active_server)
-                            if cached:
-                                db_track_check = db.get_track_by_id(cached['server_track_id'])
-                                if db_track_check:
-                                    class DatabaseTrackCached:
-                                        def __init__(self, db_t):
-                                            self.ratingKey = db_t.id
-                                            self.title = db_t.title
-                                            self.id = db_t.id
-                                    logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
-                                    return DatabaseTrackCached(db_track_check), cached['confidence']
-                                logger.warning(f"Sync cache stale for '{original_title}' — track gone")
-                        except Exception as e:
-                            logger.debug("sync match cache fast-path failed: %s", e)
-                    # --- End cache fast-path ---
-
-                    # Try each artist (same logic as original)
-                    for artist in spotify_track.artists:
-                        # Extract artist name from both string and dict formats
-                        if isinstance(artist, str):
-                            artist_name = artist
-                        elif isinstance(artist, dict) and 'name' in artist:
-                            artist_name = artist['name']
-                        else:
-                            artist_name = str(artist)
-
-                        db_track, confidence = db.check_track_exists(
-                            original_title, artist_name,
-                            confidence_threshold=0.80,
-                            server_source=active_server
-                        )
-
-                        if db_track and confidence >= 0.80:
-                            logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
-
-                            # Save to sync match cache
-                            if spotify_id:
-                                try:
-                                    from core.matching_engine import MusicMatchingEngine
-                                    me = MusicMatchingEngine()
-                                    db.save_sync_match_cache(
-                                        spotify_id, me.clean_title(original_title), me.clean_artist(artist_name),
-                                        active_server, db_track.id, db_track.title, confidence
-                                    )
-                                except Exception as e:
-                                    logger.debug("save sync match cache failed: %s", e)
-
-                            # Create mock track object for playlist creation
-                            class DatabaseTrackMock:
-                                def __init__(self, db_track):
-                                    self.ratingKey = db_track.id
-                                    self.title = db_track.title
-                                    self.id = db_track.id
-
-                            return DatabaseTrackMock(db_track), confidence
-
-                    logger.warning(f"No database match found for: '{original_title}'")
-                    return None, 0.0
-
-                except Exception as e:
-                    logger.error(f"Database search error: {e}")
-                    return None, 0.0
-            
-            # Patch the method
-            sync_service._find_track_in_media_server = database_only_find_track
+            # Patch the matcher to the module-level database-only implementation
+            # (importable + unit-tested; accepts candidate_pool for parity).
+            sync_service._find_track_in_media_server = _database_only_find_track
             logger.info("Patched sync service to use database-only matching")
 
         sync_start_time = time.time()
