@@ -52,7 +52,7 @@ def verifier(monkeypatch):
         def is_available(self):
             return True, 'available'
 
-        def fingerprint_and_lookup(self, path):
+        def lookup_with_status(self, path):
             # Each test injects its own desired return value via
             # monkeypatch on this method; default is empty.
             return None
@@ -62,8 +62,8 @@ def verifier(monkeypatch):
 
 
 def _stub_lookup(verifier, *, recordings, best_score):
-    """Make `fingerprint_and_lookup` return a fabricated AcoustID result."""
-    verifier.acoustid_client.fingerprint_and_lookup = lambda path: {
+    """Make `lookup_with_status` return a fabricated AcoustID result."""
+    verifier.acoustid_client.lookup_with_status = lambda path: {
         'recordings': recordings,
         'best_score': best_score,
         'recording_mbids': [r.get('id') for r in recordings if r.get('id')],

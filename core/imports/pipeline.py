@@ -92,12 +92,22 @@ def _should_skip_quarantine_check(context: dict, check_name: str) -> bool:
 def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
     if not quarantine_path:
         return
+    entry_id = entry_id_from_quarantined_filename(quarantine_path)
+    # Always stash the entry id on the context. The verification wrapper
+    # (post_process_matched_download_with_verification) pops task_id/batch_id
+    # OUT of the context before running the inner pipeline, so when a quarantine
+    # happens inside that inner run context.get('task_id') is None here and the
+    # direct write below no-ops. The wrapper restores task_id afterward and
+    # applies this stashed id to the real task — without this, downloads that go
+    # through the wrapper (album-bundle / staging path) quarantined with no
+    # quarantine_entry_id, so the UI had no way to manage the file (#756-adjacent).
+    context['_quarantine_entry_id'] = entry_id
     task_id = context.get('task_id')
     if not task_id:
         return
     with tasks_lock:
         if task_id in download_tasks:
-            download_tasks[task_id]['quarantine_entry_id'] = entry_id_from_quarantined_filename(quarantine_path)
+            download_tasks[task_id]['quarantine_entry_id'] = entry_id
 
 
 def build_import_pipeline_runtime(
@@ -948,6 +958,9 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
                     download_tasks[task_id]['error_message'] = f"AcoustID verification failed: {failure_msg}"
+                    _eid = context.get('_quarantine_entry_id')
+                    if _eid:
+                        download_tasks[task_id]['quarantine_entry_id'] = _eid
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
@@ -1001,6 +1014,9 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     download_tasks[task_id]['error_message'] = (
                         f"File integrity check failed: {failure_msg}"
                     )
+                    _eid = context.get('_quarantine_entry_id')
+                    if _eid:
+                        download_tasks[task_id]['quarantine_entry_id'] = _eid
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]

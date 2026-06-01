@@ -589,7 +589,43 @@ def test_torrent_album_to_staging_ignores_candidates_without_download_url(tmp_pa
 
     assert outcome['success'] is False
     assert 'No torrent results' in outcome['error']
+    # Regression (Cezar): "no results" must be fallback-eligible so a
+    # torrent-first hybrid returns to the per-track flow (next source)
+    # instead of the dispatch marking the batch failed and freezing at
+    # "Torrent searching for release 0%".
+    assert outcome.get('fallback') is True
     fake_adapter.add_torrent.assert_not_called()
+
+
+def test_torrent_album_to_staging_no_results_flags_fallback(tmp_path: Path) -> None:
+    """Empty Prowlarr search → fallback-eligible failure, not terminal."""
+    plugin = TorrentDownloadPlugin()
+    fake_adapter = MagicMock()
+    fake_adapter.is_configured.return_value = True
+    with patch.object(plugin, 'is_configured', return_value=True), \
+         patch.object(plugin._prowlarr, 'search', new=AsyncMock(return_value=[])), \
+         patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=fake_adapter):
+        outcome = plugin.download_album_to_staging('GNX', 'Kendrick Lamar', str(tmp_path))
+    assert outcome['success'] is False
+    assert 'No torrent results' in outcome['error']
+    assert outcome.get('fallback') is True
+    fake_adapter.add_torrent.assert_not_called()
+
+
+def test_usenet_album_to_staging_no_results_flags_fallback(tmp_path: Path) -> None:
+    """Same contract for usenet: an empty search must fall back to the
+    per-track flow rather than hard-failing the album batch."""
+    plugin = UsenetDownloadPlugin()
+    fake_adapter = MagicMock()
+    fake_adapter.is_configured.return_value = True
+    with patch.object(plugin, 'is_configured', return_value=True), \
+         patch.object(plugin._prowlarr, 'search', new=AsyncMock(return_value=[])), \
+         patch('core.download_plugins.usenet.get_active_usenet_adapter', return_value=fake_adapter):
+        outcome = plugin.download_album_to_staging('GNX', 'Kendrick Lamar', str(tmp_path))
+    assert outcome['success'] is False
+    assert 'No usenet results' in outcome['error']
+    assert outcome.get('fallback') is True
+    fake_adapter.add_nzb.assert_not_called()
 
 
 def test_registry_includes_torrent_and_usenet() -> None:

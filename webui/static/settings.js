@@ -718,6 +718,116 @@ function getHybridOrder() {
     return _hybridSourceOrder.filter(s => _hybridSourceEnabled[s] !== false);
 }
 
+// ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
+const ART_SOURCES = [
+    { id: 'caa', name: 'Cover Art Archive', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png', emoji: '🎨' },
+    { id: 'deezer', name: 'Deezer', icon: 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610', emoji: '🎧' },
+    { id: 'itunes', name: 'iTunes', icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png', emoji: '🍎' },
+    { id: 'spotify', name: 'Spotify', icon: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png', emoji: '🟢' },
+    { id: 'audiodb', name: 'TheAudioDB', icon: null, emoji: '💿' },
+];
+let _artSourceEnabled = {};   // id -> bool
+let _artVisualOrder = [];      // available source ids, in display order
+let _artAvailable = [];        // ids the user is connected to
+
+function buildArtSourceList() {
+    const container = document.getElementById('art-source-list');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!_artVisualOrder.length) {
+        container.innerHTML = '<div style="padding:10px;color:var(--text-secondary,#888);font-size:13px;">No connected art sources available.</div>';
+        return;
+    }
+    const enabledOrder = getArtOrder();
+    _artVisualOrder.forEach((srcId) => {
+        const src = ART_SOURCES.find(s => s.id === srcId);
+        if (!src) return;
+        const enabled = _artSourceEnabled[srcId] === true;
+        const priorityNum = enabled ? enabledOrder.indexOf(srcId) + 1 : '';
+        const item = document.createElement('div');
+        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
+        item.dataset.sourceId = srcId;
+        item.innerHTML = `
+            <span class="hybrid-source-arrows">
+                <button class="hybrid-arrow-btn" onclick="moveArtSource('${srcId}', -1)" title="Move up">▲</button>
+                <button class="hybrid-arrow-btn" onclick="moveArtSource('${srcId}', 1)" title="Move down">▼</button>
+            </span>
+            ${src.icon
+                ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
+                : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
+            }
+            <span class="hybrid-source-name">${src.name}</span>
+            <span class="hybrid-source-priority">${priorityNum}</span>
+            <label class="hybrid-source-toggle">
+                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleArtSource('${srcId}', this.checked)">
+                <span class="toggle-track"></span>
+            </label>
+        `;
+        container.appendChild(item);
+    });
+}
+
+function moveArtSource(srcId, direction) {
+    const idx = _artVisualOrder.indexOf(srcId);
+    if (idx < 0) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= _artVisualOrder.length) return;
+    [_artVisualOrder[idx], _artVisualOrder[newIdx]] = [_artVisualOrder[newIdx], _artVisualOrder[idx]];
+    buildArtSourceList();
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+function toggleArtSource(srcId, enabled) {
+    _artSourceEnabled[srcId] = enabled;
+    buildArtSourceList();
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+// Saved value: enabled sources in their displayed order.
+function getArtOrder() {
+    return _artVisualOrder.filter(id => _artSourceEnabled[id] === true);
+}
+
+async function loadArtSourceOrder(settings) {
+    const valid = new Set(ART_SOURCES.map(s => s.id));
+    const saved = (settings && settings.metadata_enhancement
+                   && Array.isArray(settings.metadata_enhancement.album_art_order))
+        ? settings.metadata_enhancement.album_art_order : [];
+
+    // Populate the saved order SYNCHRONOUSLY, filtered to known art sources
+    // (NOT by availability). This guarantees a save that fires before the
+    // availability fetch resolves — or while a saved source is temporarily
+    // disconnected — can never wipe the user's saved order. The backend skips
+    // any unavailable source at resolution time, and it re-activates on
+    // reconnect, so keeping it in the list is safe and preserves intent.
+    _artSourceEnabled = {};
+    _artVisualOrder = [];
+    saved.forEach(id => {
+        if (valid.has(id) && !_artVisualOrder.includes(id)) {
+            _artVisualOrder.push(id);
+            _artSourceEnabled[id] = true;
+        }
+    });
+    buildArtSourceList();
+
+    // Then fetch which sources are actually connected and append any that
+    // aren't already listed (shown disabled, ready to enable).
+    try {
+        const resp = await fetch('/api/metadata/art-sources');
+        const data = await resp.json();
+        _artAvailable = (data.available || []).map(s => (s && s.id) ? s.id : s);
+    } catch (e) {
+        _artAvailable = [];
+    }
+    _artAvailable.forEach(id => {
+        if (valid.has(id) && !_artVisualOrder.includes(id)) {
+            _artVisualOrder.push(id);
+            _artSourceEnabled[id] = false;
+        }
+    });
+    buildArtSourceList();
+}
+
 function loadHybridSourceOrder(settings) {
     const order = settings.download_source?.hybrid_order;
     const sourceStatus = settings._source_status || {};
@@ -943,6 +1053,7 @@ async function loadSettingsData() {
         document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         loadHybridSourceOrder(settings);
+        loadArtSourceOrder(settings);
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
@@ -2778,6 +2889,7 @@ async function saveSettings(quiet = false) {
             embed_album_art: document.getElementById('embed-album-art').checked,
             cover_art_download: document.getElementById('cover-art-download').checked,
             prefer_caa_art: document.getElementById('prefer-caa-art').checked,
+            album_art_order: getArtOrder(),
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),

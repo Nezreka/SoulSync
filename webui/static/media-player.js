@@ -16,14 +16,21 @@ function initializeMediaPlayer() {
     if (audioPlayer) {
         // Set up audio event listeners
         audioPlayer.addEventListener('timeupdate', updateAudioProgress);
+        audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
+        audioPlayer.addEventListener('timeupdate', npThrottledPositionState);
+        audioPlayer.addEventListener('timeupdate', npMaybeLogPlay);
         audioPlayer.addEventListener('ended', onAudioEnded);
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
         audioPlayer.addEventListener('canplay', onAudioCanPlay);
 
-        // Set initial volume
-        audioPlayer.volume = 0.7; // 70%
-        if (volumeSlider) volumeSlider.value = 70;
+        // Set initial volume — restore the saved level (Spotify-style), else 70%.
+        const _savedVol = npLoadSavedVolume();
+        const _initialVol = _savedVol === null ? 70 : _savedVol;
+        audioPlayer.volume = _initialVol / 100;
+        if (volumeSlider) volumeSlider.value = _initialVol;
+        // Sync the modal slider/fill too once DOM is ready.
+        syncVolumeUI(_initialVol);
     }
 
     // Track title click handled by initExpandedPlayer's media-player click handler
@@ -54,6 +61,15 @@ function initializeMediaPlayer() {
     const miniNextBtn = document.getElementById('mini-next-btn');
     if (miniPrevBtn) miniPrevBtn.addEventListener('click', (e) => { e.stopPropagation(); playPreviousInQueue(); });
     if (miniNextBtn) miniNextBtn.addEventListener('click', (e) => { e.stopPropagation(); playNextInQueue(); });
+
+    // Mini shuffle / repeat — share the modal handlers (which now sync both UIs)
+    const miniShuffleBtn = document.getElementById('mini-shuffle-btn');
+    const miniRepeatBtn = document.getElementById('mini-repeat-btn');
+    if (miniShuffleBtn) miniShuffleBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpShuffle(); });
+    if (miniRepeatBtn) miniRepeatBtn.addEventListener('click', (e) => { e.stopPropagation(); handleNpRepeat(); });
+
+    // Restore a previously-saved queue (does not auto-play)
+    npRestoreQueue();
 }
 
 function toggleMediaPlayerExpansion() {
@@ -107,6 +123,7 @@ function _stripSourceIdPrefix(value) {
 
 function setTrackInfo(track) {
     currentTrack = track;
+    npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
 
     const trackTitleElement = document.getElementById('track-title');
     const trackTitle = _stripSourceIdPrefix(track.title) || 'Unknown Track';
@@ -161,6 +178,8 @@ function setTrackInfo(track) {
     updateNpTrackInfo();
     updateMediaSessionMetadata();
     updateMediaSessionPlaybackState();
+    // Reset the lock-screen scrubber when duration becomes known for the new track.
+    if (audioPlayer) audioPlayer.addEventListener('loadedmetadata', updateMediaSessionPositionState, { once: true });
 
     // Kick off lyrics fetch for the new track. The panel stays
     // collapsed by default — fetching in the background means the
@@ -205,6 +224,7 @@ function clearTrack() {
     // Clear track state
     currentTrack = null;
     isPlaying = false;
+    npSetPlayContext('');   // hide "Playing from" when nothing's playing
 
     const trackTitleElement = document.getElementById('track-title');
     trackTitleElement.innerHTML = '<span class="title-text">No track</span>';
@@ -296,6 +316,8 @@ async function handlePlayPause() {
 }
 
 async function handleStop() {
+    // Tear down any in-flight crossfade so its second audio doesn't keep playing.
+    npCancelCrossfade();
     // Use new streaming system stop function
     await stopStream();
     clearTrack();
@@ -304,6 +326,7 @@ async function handleStop() {
 function handleVolumeChange(event) {
     const volume = event.target.value;
     updateVolumeSliderAppearance();
+    npPersistVolume(volume);
 
     // Update HTML5 audio player volume
     if (audioPlayer) {
@@ -1034,8 +1057,21 @@ function _npLyricsRenderSynced(lines) {
     }
     content.innerHTML = lines.map((line, idx) => {
         const safe = (line.text || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) || '&nbsp;';
-        return `<div class="np-lyrics-line" data-idx="${idx}">${safe}</div>`;
+        return `<div class="np-lyrics-line" data-idx="${idx}" title="Jump to this line">${safe}</div>`;
     }).join('');
+
+    // Click a line → seek playback to its timestamp (synced lyrics only).
+    content.querySelectorAll('.np-lyrics-line').forEach(el => {
+        el.addEventListener('click', () => {
+            const idx = Number(el.dataset.idx);
+            const line = _npLyricsState.lines[idx];
+            if (!line || !audioPlayer || !isFinite(line.time)) return;
+            try {
+                audioPlayer.currentTime = line.time;
+                if (audioPlayer.paused) audioPlayer.play().catch(() => {});
+            } catch (_) {}
+        });
+    });
 }
 
 function _npLyricsRenderPlain(text) {
@@ -1185,6 +1221,11 @@ function onAudioEnded() {
     if (currentTimeElement) {
         currentTimeElement.textContent = '0:00';
     }
+
+    // If a crossfade is mid-flight it OWNS the advance to the next track —
+    // bail so we don't double-advance (crossfade's npFinishCrossfade →
+    // playQueueItem already handles it).
+    if (npXfadeActive) return;
 
     // Repeat-one is handled by audioPlayer.loop (set in handleNpRepeat)
     // Auto-advance to next track if queue has a next item (guard against race conditions)
@@ -1382,6 +1423,9 @@ let npAnalyser = null;
 let npMediaSource = null;
 let npVizAnimFrame = null;
 let npVizInitialized = false;
+let npCrossfadeOn = false;
+let npSleepMinutes = 0;       // 0 = off
+let npSleepTimerId = null;
 
 function npQueueHasNext() {
     if (npQueue.length === 0) return false;
@@ -1425,6 +1469,13 @@ function npSetRadioMode(enabled, options = {}) {
     if (toast) {
         showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
     }
+    // Context label: only set the generic "Radio" if a more specific one (e.g.
+    // "<Artist> Radio") wasn't already set by the caller.
+    if (npRadioMode) {
+        if (!npPlayContext || !/radio/i.test(npPlayContext)) npSetPlayContext('Radio');
+    } else if (/radio/i.test(npPlayContext)) {
+        npSetPlayContext('');
+    }
     if (npRadioMode && fetchIfNeeded && currentTrack && currentTrack.id && !npLoadingQueueItem && !npQueueHasNext()) {
         npEnsureCurrentTrackInQueue();
         npFetchRadioTracks();
@@ -1451,6 +1502,32 @@ function initExpandedPlayer() {
     // Control handlers
     playBtn.addEventListener('click', () => { togglePlayback(); });
     stopBtn.addEventListener('click', async () => { await handleStop(); closeNowPlayingModal(); });
+
+    // Click album art → toggle the music-synced visualizer takeover
+    const artContainer = document.getElementById('np-album-art-container');
+    if (artContainer) {
+        artContainer.addEventListener('click', () => {
+            const on = artContainer.classList.toggle('viz-on');
+            if (on) { npBuildArtViz(); npInitVisualizer(); npStartVisualizerLoop(); }
+        });
+    }
+
+    // Sleep timer — cycles off → 15 → 30 → 60 min → off
+    const sleepBtn = document.getElementById('np-sleep-btn');
+    if (sleepBtn) sleepBtn.addEventListener('click', npCycleSleepTimer);
+
+    // Crossfade toggle (real dual-audio crossfade for library tracks)
+    const xfadeBtn = document.getElementById('np-crossfade-btn');
+    if (xfadeBtn) {
+        try { npCrossfadeOn = localStorage.getItem('soulsync-crossfade') === '1'; } catch (e) {}
+        xfadeBtn.classList.toggle('active', npCrossfadeOn);
+        xfadeBtn.addEventListener('click', () => {
+            npCrossfadeOn = !npCrossfadeOn;
+            xfadeBtn.classList.toggle('active', npCrossfadeOn);
+            try { localStorage.setItem('soulsync-crossfade', npCrossfadeOn ? '1' : '0'); } catch (e) {}
+        });
+    }
+
     shuffleBtn.addEventListener('click', handleNpShuffle);
     repeatBtn.addEventListener('click', handleNpRepeat);
     muteBtn.addEventListener('click', handleNpMuteToggle);
@@ -1459,6 +1536,23 @@ function initExpandedPlayer() {
     npProgressBar.addEventListener('input', handleNpProgressBarChange);
     npProgressBar.addEventListener('mousedown', () => { npProgressBar.dataset.seeking = 'true'; });
     npProgressBar.addEventListener('mouseup', () => { delete npProgressBar.dataset.seeking; });
+
+    // Seek hover tooltip — shows the timestamp the cursor is over.
+    const npSeekTip = document.getElementById('np-seek-tip');
+    if (npSeekTip) {
+        npProgressBar.addEventListener('mousemove', (e) => {
+            if (!audioPlayer || !isFinite(audioPlayer.duration) || audioPlayer.duration <= 0) {
+                npSeekTip.classList.remove('visible');
+                return;
+            }
+            const rect = npProgressBar.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            npSeekTip.textContent = formatTime(frac * audioPlayer.duration);
+            npSeekTip.style.left = (frac * 100) + '%';
+            npSeekTip.classList.add('visible');
+        });
+        npProgressBar.addEventListener('mouseleave', () => npSeekTip.classList.remove('visible'));
+    }
 
     // Progress bar (touch)
     npProgressBar.addEventListener('touchstart', () => { npProgressBar.dataset.seeking = 'true'; }, { passive: true });
@@ -1588,6 +1682,10 @@ function syncExpandedPlayerUI() {
     const viz = document.getElementById('np-visualizer');
     if (viz) viz.classList.toggle('playing', isPlaying);
 
+    // Album-art scale-on-play (Phase A restyle — CSS keys off .np-modal.playing)
+    const npModalEl = document.querySelector('.np-modal');
+    if (npModalEl) npModalEl.classList.toggle('playing', isPlaying);
+
     // Queue
     renderNpQueue();
     updateNpPrevNextButtons();
@@ -1706,29 +1804,164 @@ function npExtractAmbientColor(imgEl) {
     try {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = 50;
-        canvas.height = 50;
-        ctx.drawImage(imgEl, 0, 0, 50, 50);
-        const data = ctx.getImageData(0, 0, 50, 50).data;
-        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+        canvas.width = 64;
+        canvas.height = 64;
+        ctx.drawImage(imgEl, 0, 0, 64, 64);
+        const data = ctx.getImageData(0, 0, 64, 64).data;
+
+        // Dominant VIBRANT color, not a flat average (averaging muddies to
+        // grey-brown). Bin colors into a coarse 4-bit-per-channel histogram,
+        // weight each bin by saturation² × pixel-count so a punchy accent in
+        // the cover wins over a large dull background. Apple-Music-style.
+        const bins = new Map();
         for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel
-            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+            if (a < 128) continue;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
             const brightness = (r + g + b) / 3;
-            if (brightness > 20 && brightness < 230) {
-                rSum += r; gSum += g; bSum += b; count++;
-            }
+            if (brightness < 24 || brightness > 240) continue; // skip near-black/white
+            const sat = max === 0 ? 0 : (max - min) / max; // 0..1
+            const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+            const weight = (0.15 + sat * sat) ; // floor so greys still count a little
+            const bin = bins.get(key);
+            if (bin) { bin.r += r; bin.g += g; bin.b += b; bin.n++; bin.w += weight; }
+            else bins.set(key, { r, g, b, n: 1, w: weight });
         }
-        if (count > 0) {
+        let best = null, bestScore = -1;
+        for (const bin of bins.values()) {
+            const score = bin.w; // saturation-weighted population
+            if (score > bestScore) { bestScore = score; best = bin; }
+        }
+        if (best) {
+            let r = Math.round(best.r / best.n);
+            let g = Math.round(best.g / best.n);
+            let b = Math.round(best.b / best.n);
+            // Nudge toward vivid: lift saturation/brightness a touch so the
+            // glow reads as a color, not a wash.
+            [r, g, b] = npPunchUpColor(r, g, b);
             const modal = document.querySelector('.np-modal');
             if (modal) {
-                modal.style.setProperty('--np-ambient-r', Math.round(rSum / count));
-                modal.style.setProperty('--np-ambient-g', Math.round(gSum / count));
-                modal.style.setProperty('--np-ambient-b', Math.round(bSum / count));
+                modal.style.setProperty('--np-ambient-r', r);
+                modal.style.setProperty('--np-ambient-g', g);
+                modal.style.setProperty('--np-ambient-b', b);
             }
         }
     } catch (e) {
         // Cross-origin or canvas error — ignore silently
     }
+}
+
+// Lift a color toward vividness for the ambient glow (boost saturation,
+// floor brightness) without fully desaturating dark/pastel covers.
+function npPunchUpColor(r, g, b) {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    if (max === min) return [r, g, b]; // grey — leave it
+    // Pull each channel away from the mid to boost perceived saturation ~1.3x.
+    const mid = (max + min) / 2;
+    const boost = 1.3;
+    let nr = Math.round(mid + (r - mid) * boost);
+    let ng = Math.round(mid + (g - mid) * boost);
+    let nb = Math.round(mid + (b - mid) * boost);
+    // Floor overall brightness so very dark covers still glow.
+    const bright = (nr + ng + nb) / 3;
+    if (bright < 70) { const lift = 70 / Math.max(bright, 1); nr *= lift; ng *= lift; nb *= lift; }
+    const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+    return [clamp(nr), clamp(ng), clamp(nb)];
+}
+
+// ── Crossfade engine (library tracks only) ──
+// EXPERIMENTAL. Real crossfade needs two tracks playing at once; /stream/audio
+// only serves the ONE current track (single global stream_state), so we use a
+// dedicated /stream/library-audio endpoint + a second <audio> to play the NEXT
+// library track and ramp volumes. Streamed (non-library) tracks can't crossfade
+// and fall back to the normal hard cut.
+const NP_CROSSFADE_SECONDS = 6;
+let npXfadeAudio = null;
+let npXfadeActive = false;
+let npXfadeTimer = null;
+let npXfadeMainVol = null;   // main-player volume to restore if a crossfade is aborted
+
+// Abort an in-flight crossfade (manual skip / stop during the fade). Restores
+// the main player's volume and tears down the second audio element. Safe to
+// call when no crossfade is active (no-op).
+function npCancelCrossfade() {
+    if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
+    if (npXfadeAudio) { try { npXfadeAudio.pause(); } catch (_) {} npXfadeAudio.src = ''; npXfadeAudio.volume = 0; npXfadeAudio = null; }
+    if (npXfadeActive && audioPlayer && npXfadeMainVol !== null) {
+        audioPlayer.volume = npXfadeMainVol; // undo any partial fade-down
+    }
+    npXfadeActive = false;
+    npXfadeMainVol = null;
+}
+
+function npCrossfadeTick() {
+    if (!npCrossfadeOn || npXfadeActive || npRepeatMode === 'one') return;
+    if (!audioPlayer || !audioPlayer.duration || !isFinite(audioPlayer.duration)) return;
+    const remaining = audioPlayer.duration - audioPlayer.currentTime;
+    if (remaining > NP_CROSSFADE_SECONDS || remaining <= 0.2) return;
+
+    // Determine the next track (respects shuffle/repeat-all the same way
+    // playNextInQueue does, but we only crossfade plain sequential next).
+    const nextIdx = npQueueIndex + 1;
+    const next = npQueue[nextIdx];
+    if (!next || !next.is_library || !next.file_path) return; // only library→library
+
+    npStartCrossfade(nextIdx, next);
+}
+
+function npStartCrossfade(nextIdx, next) {
+    npXfadeActive = true;
+    const xa = document.getElementById('audio-player-xfade');
+    if (!xa) { npXfadeActive = false; return; }
+    npXfadeAudio = xa;
+
+    const targetVol = audioPlayer.volume; // fade the new track up to current level
+    npXfadeMainVol = targetVol;            // remember to restore on abort
+    xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}&t=${Date.now()}`;
+    xa.volume = 0;
+    xa.play().then(() => {
+        const fadeMs = NP_CROSSFADE_SECONDS * 1000;
+        const step = 60; // ms between volume steps
+        const steps = Math.max(1, Math.floor(fadeMs / step));
+        let n = 0;
+        const startOutVol = audioPlayer.volume;
+        npXfadeTimer = setInterval(() => {
+            // A manual skip/stop may have cancelled us mid-fade.
+            if (!npXfadeActive) { clearInterval(npXfadeTimer); npXfadeTimer = null; return; }
+            n++;
+            const t = Math.min(1, n / steps);
+            audioPlayer.volume = Math.max(0, startOutVol * (1 - t));
+            xa.volume = Math.min(targetVol, targetVol * t);
+            if (t >= 1) {
+                clearInterval(npXfadeTimer);
+                npXfadeTimer = null;
+                npFinishCrossfade(nextIdx, targetVol);
+            }
+        }, step);
+    }).catch(() => {
+        // Couldn't preload (e.g. endpoint/file issue) — abort gracefully, let
+        // the normal 'ended' hard-cut advance handle it.
+        npXfadeActive = false;
+        npXfadeAudio = null;
+        npXfadeMainVol = null;
+    });
+}
+
+function npFinishCrossfade(nextIdx, restoreVol) {
+    // The crossfade audio has fully faded in; promote the queue index and let
+    // the normal play path take over so all the usual state (track info, art,
+    // visualizer, server stream_state) is set for the now-current track.
+    const xa = npXfadeAudio;
+    if (xa) { try { xa.pause(); } catch (_) {} xa.src = ''; xa.volume = 0; }
+    npXfadeAudio = null;
+    npXfadeActive = false;
+    npXfadeMainVol = null;
+    if (npXfadeTimer) { clearInterval(npXfadeTimer); npXfadeTimer = null; }
+    if (audioPlayer) audioPlayer.volume = restoreVol;
+    // playQueueItem re-points stream_state + reloads audioPlayer for the next
+    // track; there's a brief silent reload, but the perceived crossfade already
+    // happened. Honest trade-off of the single-stream-state design.
+    playQueueItem(nextIdx);
 }
 
 function npResetAmbientGlow() {
@@ -1791,6 +2024,7 @@ function handleNpProgressBarChange(event) {
 
     try {
         audioPlayer.currentTime = newTime;
+        updateMediaSessionPositionState();
 
         // Sync sidebar progress
         const sidebarBar = document.getElementById('progress-bar');
@@ -1815,6 +2049,7 @@ function handleNpProgressBarChange(event) {
 function handleNpVolumeChange(event) {
     const volume = parseInt(event.target.value);
     if (audioPlayer) audioPlayer.volume = volume / 100;
+    npPersistVolume(volume);
 
     // Sync sidebar volume slider
     const sidebarVol = document.getElementById('volume-slider');
@@ -1862,15 +2097,32 @@ function updateNpMuteIcon() {
     if (muteBtn) muteBtn.classList.toggle('muted', npMuted);
 }
 
+// Reflect shuffle/repeat state on BOTH the modal and mini-player buttons.
+function syncShuffleRepeatUI() {
+    const npShuffle = document.getElementById('np-shuffle-btn');
+    const miniShuffle = document.getElementById('mini-shuffle-btn');
+    if (npShuffle) npShuffle.classList.toggle('active', npShuffleOn);
+    if (miniShuffle) miniShuffle.classList.toggle('active', npShuffleOn);
+
+    const repeatOn = npRepeatMode !== 'off';
+    const repeatOne = npRepeatMode === 'one';
+    const npRepeat = document.getElementById('np-repeat-btn');
+    const miniRepeat = document.getElementById('mini-repeat-btn');
+    if (npRepeat) npRepeat.classList.toggle('active', repeatOn);
+    if (miniRepeat) miniRepeat.classList.toggle('active', repeatOn);
+    const npBadge = document.getElementById('np-repeat-one-badge');
+    const miniBadge = document.getElementById('mini-repeat-one-badge');
+    if (npBadge) npBadge.classList.toggle('hidden', !repeatOne);
+    if (miniBadge) miniBadge.style.display = repeatOne ? '' : 'none';
+}
+
 function handleNpShuffle() {
     npShuffleOn = !npShuffleOn;
-    const btn = document.getElementById('np-shuffle-btn');
-    if (btn) btn.classList.toggle('active', npShuffleOn);
+    syncShuffleRepeatUI();
     updateNpPrevNextButtons();
 }
 
 function handleNpRepeat() {
-    const badge = document.getElementById('np-repeat-one-badge');
     if (npRepeatMode === 'off') {
         npRepeatMode = 'all';
         if (audioPlayer) audioPlayer.loop = false;
@@ -1881,15 +2133,28 @@ function handleNpRepeat() {
         npRepeatMode = 'off';
         if (audioPlayer) audioPlayer.loop = false;
     }
-    const btn = document.getElementById('np-repeat-btn');
-    if (btn) btn.classList.toggle('active', npRepeatMode !== 'off');
-    if (badge) badge.classList.toggle('hidden', npRepeatMode !== 'one');
+    syncShuffleRepeatUI();
     updateNpPrevNextButtons();
 }
 
 // ===============================
 // QUEUE MANAGEMENT
 // ===============================
+
+// "Playing from" context shown above the track title (Spotify-style).
+let npPlayContext = '';
+function npSetPlayContext(text) {
+    npPlayContext = text || '';
+    const box = document.getElementById('np-play-context');
+    const nameEl = document.getElementById('np-play-context-name');
+    if (!box || !nameEl) return;
+    if (npPlayContext) {
+        nameEl.textContent = npPlayContext;
+        box.classList.remove('hidden');
+    } else {
+        box.classList.add('hidden');
+    }
+}
 
 function addToQueue(track) {
     npQueue.push(track);
@@ -1900,6 +2165,19 @@ function addToQueue(track) {
     if (!currentTrack) {
         playQueueItem(npQueue.length - 1);
     }
+}
+
+// Insert a track to play right after the current one (Spotify "Play next").
+function playNext(track) {
+    if (npQueue.length === 0 || npQueueIndex < 0) {
+        // Nothing queued / playing — same as add-to-queue (which auto-plays).
+        addToQueue(track);
+        return;
+    }
+    npQueue.splice(npQueueIndex + 1, 0, track);
+    showToast('Playing next', 'success');
+    renderNpQueue();
+    updateNpPrevNextButtons();
 }
 
 function removeFromQueue(index) {
@@ -1978,6 +2256,10 @@ function playPreviousInQueue() {
 async function playQueueItem(index) {
     if (index < 0 || index >= npQueue.length) return;
     if (npLoadingQueueItem) return; // Prevent race condition from double-advance
+    // Manual skip / row-click during a crossfade: tear down the stray fade so it
+    // can't fire npFinishCrossfade on top of this change. No-op for the
+    // legitimate handoff (npFinishCrossfade already cleared the flag first).
+    npCancelCrossfade();
     npLoadingQueueItem = true;
     npQueueIndex = index;
     const track = npQueue[index];
@@ -2074,6 +2356,26 @@ function renderNpQueue() {
         item.className = 'np-queue-item' + (i === npQueueIndex ? ' active' : '');
         item.onclick = () => playQueueItem(i);
 
+        // Drag-to-reorder
+        item.draggable = true;
+        item.dataset.qindex = i;
+        item.addEventListener('dragstart', npQueueDragStart);
+        item.addEventListener('dragover', npQueueDragOver);
+        item.addEventListener('drop', npQueueDrop);
+        item.addEventListener('dragend', npQueueDragEnd);
+
+        // Album thumbnail
+        const art = document.createElement('img');
+        art.className = 'np-queue-item-art';
+        art.alt = '';
+        if (track.image_url) {
+            art.src = track.image_url;
+            art.onerror = () => { art.style.visibility = 'hidden'; };
+        } else {
+            art.style.visibility = 'hidden';
+        }
+        item.appendChild(art);
+
         const info = document.createElement('div');
         info.className = 'np-queue-item-info';
 
@@ -2089,6 +2391,19 @@ function renderNpQueue() {
         info.appendChild(artist);
         item.appendChild(info);
 
+        // Active row → equalizer animation; others → duration
+        if (i === npQueueIndex) {
+            const eq = document.createElement('div');
+            eq.className = 'np-queue-item-eq';
+            eq.innerHTML = '<i></i><i></i><i></i>';
+            item.appendChild(eq);
+        } else if (track.duration) {
+            const dur = document.createElement('span');
+            dur.className = 'np-queue-item-duration';
+            dur.textContent = formatTime(track.duration);
+            item.appendChild(dur);
+        }
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'np-queue-item-remove';
         removeBtn.innerHTML = '&#10005;';
@@ -2101,6 +2416,130 @@ function renderNpQueue() {
 
         listEl.appendChild(item);
     });
+
+    npUpdateUpNext();
+    npPersistQueue();
+}
+
+// ── Queue persistence across page reloads (localStorage) ──
+const NP_QUEUE_STORAGE_KEY = 'soulsync-np-queue';
+
+function npPersistQueue() {
+    try {
+        if (!npQueue.length) { localStorage.removeItem(NP_QUEUE_STORAGE_KEY); return; }
+        localStorage.setItem(NP_QUEUE_STORAGE_KEY, JSON.stringify({
+            queue: npQueue,
+            index: npQueueIndex,
+            savedAt: Date.now(),
+        }));
+    } catch (e) { /* quota / disabled storage — non-fatal */ }
+}
+
+// Restore the saved queue into the panel WITHOUT auto-playing (the user
+// reloaded; resume playback is their choice via clicking a row).
+function npRestoreQueue() {
+    try {
+        const raw = localStorage.getItem(NP_QUEUE_STORAGE_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.queue) && data.queue.length) {
+            npQueue = data.queue;
+            // Don't claim a track is "playing" on a fresh load — nothing is.
+            npQueueIndex = -1;
+            renderNpQueue();
+            updateNpPrevNextButtons();
+        }
+    } catch (e) { /* corrupt entry — ignore */ }
+}
+
+// ── Queue drag-to-reorder ──
+let npDragFromIndex = null;
+
+function npQueueDragStart(e) {
+    npDragFromIndex = Number(e.currentTarget.dataset.qindex);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox requires data to be set for drag to fire.
+    try { e.dataTransfer.setData('text/plain', String(npDragFromIndex)); } catch (_) {}
+}
+
+function npQueueDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.currentTarget;
+    document.querySelectorAll('.np-queue-item.drag-over').forEach(r => r.classList.remove('drag-over'));
+    row.classList.add('drag-over');
+}
+
+function npQueueDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const to = Number(e.currentTarget.dataset.qindex);
+    npReorderQueue(npDragFromIndex, to);
+}
+
+function npQueueDragEnd() {
+    document.querySelectorAll('.np-queue-item').forEach(r => r.classList.remove('dragging', 'drag-over'));
+    npDragFromIndex = null;
+}
+
+// Move a queue item, keeping npQueueIndex pointed at the SAME playing track.
+function npReorderQueue(from, to) {
+    if (from === null || from === to || from < 0 || to < 0) return;
+    if (from >= npQueue.length || to >= npQueue.length) return;
+    const [moved] = npQueue.splice(from, 1);
+    npQueue.splice(to, 0, moved);
+
+    // Recompute which index now holds the currently-playing track.
+    if (npQueueIndex === from) {
+        npQueueIndex = to;
+    } else if (from < npQueueIndex && to >= npQueueIndex) {
+        npQueueIndex -= 1;
+    } else if (from > npQueueIndex && to <= npQueueIndex) {
+        npQueueIndex += 1;
+    }
+    renderNpQueue();
+    updateNpPrevNextButtons();
+}
+
+// Up-next peek: show the track that plays after the current one.
+function npUpdateUpNext() {
+    const box = document.getElementById('np-upnext');
+    if (!box) return;
+    const next = npQueue[npQueueIndex + 1];
+    if (!next) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const art = document.getElementById('np-upnext-art');
+    const title = document.getElementById('np-upnext-title');
+    const artist = document.getElementById('np-upnext-artist');
+    if (title) title.textContent = next.title || 'Unknown Track';
+    if (artist) artist.textContent = next.artist || 'Unknown Artist';
+    if (art) {
+        if (next.image_url) { art.src = next.image_url; art.style.visibility = ''; art.onerror = () => { art.style.visibility = 'hidden'; }; }
+        else { art.style.visibility = 'hidden'; }
+    }
+}
+
+// Sleep timer: cycle off → 15 → 30 → 60 → off; stops playback when it fires.
+function npCycleSleepTimer() {
+    const steps = [0, 15, 30, 60];
+    npSleepMinutes = steps[(steps.indexOf(npSleepMinutes) + 1) % steps.length];
+    const btn = document.getElementById('np-sleep-btn');
+    const label = document.getElementById('np-sleep-label');
+    if (npSleepTimerId) { clearTimeout(npSleepTimerId); npSleepTimerId = null; }
+    if (npSleepMinutes > 0) {
+        if (label) label.textContent = `Sleep ${npSleepMinutes}m`;
+        if (btn) btn.classList.add('active');
+        npSleepTimerId = setTimeout(() => {
+            handleStop();
+            npSleepMinutes = 0;
+            if (label) label.textContent = 'Sleep';
+            if (btn) btn.classList.remove('active');
+        }, npSleepMinutes * 60 * 1000);
+    } else {
+        if (label) label.textContent = 'Sleep';
+        if (btn) btn.classList.remove('active');
+    }
 }
 
 function updateNpPrevNextButtons() {
@@ -2163,7 +2602,18 @@ function handlePlayerKeyboardShortcuts(event) {
             break;
         case 'm':
         case 'M':
-            if (npModalOpen) handleNpMuteToggle();
+            event.preventDefault();
+            handleNpMuteToggle();   // works whether or not the modal is open
+            break;
+        case 'n':
+        case 'N':
+            event.preventDefault();
+            if (npQueue.length > 0) playNextInQueue();
+            break;
+        case 'p':
+        case 'P':
+            event.preventDefault();
+            playPreviousInQueue();
             break;
         case 'Escape':
             if (npModalOpen) closeNowPlayingModal();
@@ -2185,6 +2635,21 @@ function syncVolumeUI(volumePercent) {
     }
     if (npVol) npVol.value = volumePercent;
     if (npFill) npFill.style.width = volumePercent + '%';
+    npPersistVolume(volumePercent);
+}
+
+// Remember volume across reloads (Spotify-style). Stored 0..100.
+const NP_VOLUME_STORAGE_KEY = 'soulsync-volume';
+function npPersistVolume(percent) {
+    try { localStorage.setItem(NP_VOLUME_STORAGE_KEY, String(Math.round(percent))); } catch (e) {}
+}
+function npLoadSavedVolume() {
+    try {
+        const raw = localStorage.getItem(NP_VOLUME_STORAGE_KEY);
+        if (raw === null) return null;
+        const v = parseInt(raw, 10);
+        return (isFinite(v) && v >= 0 && v <= 100) ? v : null;
+    } catch (e) { return null; }
 }
 
 function getNpAlbumArtUrl() {
@@ -2220,6 +2685,19 @@ function npInitVisualizer() {
     }
 }
 
+// Number of bars in the big album-art visualizer takeover.
+const NP_ART_VIZ_BAR_COUNT = 28;
+
+function npBuildArtViz() {
+    const container = document.getElementById('np-art-viz');
+    if (!container || container.children.length > 0) return;
+    for (let i = 0; i < NP_ART_VIZ_BAR_COUNT; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'np-art-viz-bar';
+        container.appendChild(bar);
+    }
+}
+
 function npStartVisualizerLoop() {
     if (npVizAnimFrame) return; // Already running
     if (!npAnalyser) return; // No analyser — CSS fallback handles it
@@ -2229,7 +2707,6 @@ function npStartVisualizerLoop() {
     }
 
     const bars = document.querySelectorAll('.np-viz-bar');
-    if (bars.length === 0) return;
     const bufferLength = npAnalyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
@@ -2237,13 +2714,24 @@ function npStartVisualizerLoop() {
         npVizAnimFrame = requestAnimationFrame(draw);
         npAnalyser.getByteFrequencyData(dataArray);
 
-        // Map 7 bars to frequency bins (skip bin 0 which is DC offset)
-        const binCount = Math.min(bufferLength - 1, 7);
+        // Map 7 transport bars to frequency bins (skip bin 0 = DC offset)
         for (let i = 0; i < bars.length; i++) {
             const binIndex = Math.min(i + 1, bufferLength - 1);
             const value = dataArray[binIndex] / 255; // 0..1
             const scale = Math.max(0.08, value); // minimum visible height
             bars[i].style.transform = `scaleY(${scale})`;
+        }
+
+        // Big album-art visualizer (when toggled on) — same real analyser,
+        // spread across more bars for a fuller spectrum.
+        const artBars = document.querySelectorAll('.np-art-viz-bar');
+        if (artBars.length) {
+            const span = bufferLength - 1;
+            for (let i = 0; i < artBars.length; i++) {
+                const binIndex = 1 + Math.floor((i / artBars.length) * span);
+                const value = dataArray[Math.min(binIndex, bufferLength - 1)] / 255;
+                artBars[i].style.height = Math.max(6, value * 100) + '%';
+            }
         }
     }
     draw();
@@ -2652,6 +3140,65 @@ function initMediaSession() {
     navigator.mediaSession.setActionHandler('nexttrack', () => {
         if (npQueue.length > 0) playNextInQueue();
     });
+    // Scrub from the lock screen / notification scrubber.
+    try {
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+            if (!audioPlayer || !isFinite(audioPlayer.duration)) return;
+            if (details.fastSeek && 'fastSeek' in audioPlayer) {
+                audioPlayer.fastSeek(details.seekTime);
+            } else if (typeof details.seekTime === 'number') {
+                audioPlayer.currentTime = details.seekTime;
+            }
+            updateMediaSessionPositionState();
+        });
+    } catch (e) { /* some browsers don't support seekto — handlers above still work */ }
+}
+
+// Log a SoulSync play once a track has been heard ~10s (the standard "counts
+// as a play" threshold) — feeds 'recently played' + smart-radio recency.
+let npPlayLogged = false;
+function npMaybeLogPlay() {
+    if (npPlayLogged || !currentTrack || !audioPlayer) return;
+    if (!isFinite(audioPlayer.currentTime) || audioPlayer.currentTime < 10) return;
+    npPlayLogged = true;   // set first so a slow request can't double-fire
+    try {
+        fetch('/api/library/log-play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track: {
+                    id: currentTrack.id,
+                    title: currentTrack.title,
+                    artist: currentTrack.artist,
+                    album: currentTrack.album,
+                },
+                duration_ms: Math.round((audioPlayer.duration || 0) * 1000),
+            }),
+        }).catch(() => {});   // fire-and-forget; logging must never affect playback
+    } catch (e) { /* non-fatal */ }
+}
+
+// timeupdate fires ~4x/s; only push position to the OS ~1x/s.
+let _npPosStateLast = 0;
+function npThrottledPositionState() {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - _npPosStateLast < 950) return;
+    _npPosStateLast = now;
+    updateMediaSessionPositionState();
+}
+
+// Feeds the lock-screen scrubber its progress (elapsed / duration / rate).
+// Without this the OS shows a dead, position-less media control.
+function updateMediaSessionPositionState() {
+    if (!('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
+    if (!audioPlayer || !isFinite(audioPlayer.duration) || audioPlayer.duration <= 0) return;
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: audioPlayer.duration,
+            playbackRate: audioPlayer.playbackRate || 1,
+            position: Math.min(audioPlayer.currentTime, audioPlayer.duration),
+        });
+    } catch (e) { /* invalid state (e.g. mid-load) — skip this tick */ }
 }
 
 function updateMediaSessionMetadata() {

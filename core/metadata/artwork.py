@@ -8,7 +8,7 @@ import urllib.request
 from ipaddress import ip_address
 from urllib.parse import quote, urlparse
 
-from core.imports.context import get_import_context_album
+from core.imports.context import get_import_context_album, get_import_context_artist
 from core.metadata.common import (
     get_config_manager,
     get_image_dimensions,
@@ -330,6 +330,35 @@ def _fetch_art_bytes(art_url: str):
         return None, None
 
 
+def _min_size_art_validator(min_px):
+    """Build a ``(validate, cache)`` pair for the preferred-art resolver.
+
+    ``validate(source, url)`` fetches the candidate cover, caches its bytes (so
+    the winning source isn't fetched twice), and accepts it only when its
+    shortest side is at least ``min_px``. A too-small cover — e.g. a low-res
+    Cover Art Archive upload — is rejected so the resolver falls through to the
+    next source instead of letting it win on priority alone. Images whose
+    dimensions can't be read are accepted (don't over-reject; the fallback is
+    still today's art). ``min_px <= 0`` disables the size gate entirely.
+    """
+    cache = {}
+
+    def validate(_source, url):
+        res = _fetch_art_bytes(url)
+        cache[url] = res
+        data = res[0] if res else None
+        if not data:
+            return False
+        if not min_px or min_px <= 0:
+            return True
+        dims = get_image_dimensions(data)
+        if not dims:
+            return True
+        return min(dims[0] or 0, dims[1] or 0) >= min_px
+
+    return validate, cache
+
+
 def embed_album_art_metadata(audio_file, metadata: dict):
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
@@ -340,8 +369,31 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         image_data = None
         mime_type = None
 
+        # User-preferred cover-art source. When album_art_order is a non-empty
+        # list it is the SOLE authority for preferred art (put 'caa' in it to use
+        # Cover Art Archive), and the legacy prefer_caa_art toggle below is
+        # skipped. With no list this is a no-op and behavior is exactly as before.
+        album_art_order = cfg.get("metadata_enhancement.album_art_order")
+        art_list_active = isinstance(album_art_order, (list, tuple)) and len(album_art_order) > 0
+        try:
+            from core.metadata.art_lookup import select_preferred_art_url
+            _validate, _art_cache = _min_size_art_validator(
+                cfg.get("metadata_enhancement.min_art_size", 1000))
+            preferred_url = select_preferred_art_url(
+                metadata.get("album_artist") or metadata.get("artist"),
+                metadata.get("album"),
+                metadata,
+                album_art_order,
+                validate=_validate,
+            )
+            if preferred_url:
+                cached = _art_cache.get(preferred_url)
+                image_data, mime_type = cached if (cached and cached[0]) else _fetch_art_bytes(preferred_url)
+        except Exception as exc:
+            logger.debug("Preferred art-source selection failed: %s", exc)
+
         release_mbid = metadata.get("musicbrainz_release_id")
-        if release_mbid and cfg.get("metadata_enhancement.prefer_caa_art", False):
+        if not image_data and not art_list_active and release_mbid and cfg.get("metadata_enhancement.prefer_caa_art", False):
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
@@ -395,7 +447,12 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
         cover_path = os.path.join(target_dir, "cover.jpg")
         album_info = album_info or {}
         release_mbid = album_info.get("musicbrainz_release_id")
-        prefer_caa = cfg.get("metadata_enhancement.prefer_caa_art", False)
+        # When a preferred-art priority list is configured it is the sole
+        # authority, so the legacy CAA toggle is neutralized for this whole
+        # function (it gates the existing-file upgrade logic too).
+        _art_order = cfg.get("metadata_enhancement.album_art_order")
+        _art_list_active = isinstance(_art_order, (list, tuple)) and len(_art_order) > 0
+        prefer_caa = cfg.get("metadata_enhancement.prefer_caa_art", False) and not _art_list_active
 
         if os.path.exists(cover_path):
             if release_mbid and prefer_caa:
@@ -412,7 +469,31 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
             is_upgrade = False
 
         image_data = None
-        if release_mbid and prefer_caa:
+
+        # User-preferred cover-art source (no-op unless album_art_order is set).
+        # cover.jpg only supports the artist+album sources here (no MBID in
+        # album_info), which matches today's CAA-only special-casing.
+        try:
+            from core.metadata.art_lookup import select_preferred_art_url
+            artist_ctx = get_import_context_artist(context) if context else {}
+            _validate, _art_cache = _min_size_art_validator(
+                cfg.get("metadata_enhancement.min_art_size", 1000))
+            preferred_url = select_preferred_art_url(
+                (artist_ctx or {}).get("name"),
+                album_info.get("album_name"),
+                album_info,
+                cfg.get("metadata_enhancement.album_art_order"),
+                validate=_validate,
+            )
+            if preferred_url:
+                cached = _art_cache.get(preferred_url)
+                pref_data = cached[0] if (cached and cached[0]) else _fetch_art_bytes(preferred_url)[0]
+                if pref_data and len(pref_data) > 1000:
+                    image_data = pref_data
+        except Exception as exc:
+            logger.debug("Preferred art-source selection failed: %s", exc)
+
+        if not image_data and release_mbid and prefer_caa:
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"

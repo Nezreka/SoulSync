@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.4"
+_SOULSYNC_BASE_VERSION = "2.6.5"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -744,16 +744,51 @@ logger.info("Core service initialization complete.")
 # modules and handlers were still referencing names that never got created.
 
 # Global Streaming State Management
-stream_state = {
-    "status": "stopped",  # States: stopped, loading, queued, ready, error
-    "progress": 0,
-    "track_info": None,
-    "file_path": None,  # Path to the audio file in the Stream folder
-    "error_message": None,
-}
-stream_lock = threading.Lock()  # Prevent race conditions
-stream_background_task = None
-stream_executor = ThreadPoolExecutor(max_workers=1)  # Only one stream at a time
+# Stream playback state. Lifted into core.streaming.state.StreamStateStore —
+# a per-session registry that's unit-tested and is the foundation for
+# multi-listener playback (player-revamp Phase 3). Today we use only the
+# DEFAULT session, so behavior is identical to the old single global: the
+# whole server still shares one "currently playing". The store just makes the
+# eventual per-listener split a wiring change instead of a rewrite.
+#
+# ``stream_state`` is the default session — dict-compatible (s["k"], s.get,
+# s.update) so the ~20 existing call sites work unchanged. ``stream_lock`` is
+# that session's own lock, so ``with stream_lock:`` guards exactly what it did.
+from core.streaming.state import StreamStateStore as _StreamStateStore
+from core.streaming.state import DEFAULT_SESSION as _DEFAULT_STREAM_SESSION
+stream_state_store = _StreamStateStore()
+stream_state = stream_state_store.get()      # DEFAULT_SESSION (back-compat alias)
+stream_lock = stream_state.lock
+# Phase 3b — per-listener playback: each browser/device gets its own stream
+# session so two listeners no longer collide on one global. Background tasks are
+# tracked per session id. max_workers bumped so concurrent listeners don't queue
+# behind each other. Single-user behavior is unchanged (one cookie → one session).
+stream_background_task = None                # legacy alias (default session)
+stream_tasks = {}                            # session_id -> Future
+stream_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="StreamPrep")
+
+
+def _stream_session_id():
+    """Stable per-browser stream session id, from the Flask session cookie.
+
+    Falls back to the DEFAULT session when there's no request context or no
+    cookie yet (e.g. the 1s socket broadcast thread) — so single-user behavior
+    is identical to before. Each distinct browser/device gets its own id and
+    therefore its own independent playback + Stream/<id> staging dir.
+    """
+    try:
+        sid = session.get('stream_sid')
+        if not sid:
+            sid = uuid.uuid4().hex[:16]
+            session['stream_sid'] = sid
+        return sid
+    except Exception:
+        return _DEFAULT_STREAM_SESSION
+
+
+def _current_stream_state():
+    """The StreamSession for the calling browser (dict-compatible)."""
+    return stream_state_store.get(_stream_session_id())
 
 # Global OAuth State Management
 # Store PKCE values for Tidal OAuth flow
@@ -1776,20 +1811,36 @@ _EDITION_BARE_RE = _re.compile(
 from core.streaming import prepare as _streaming_prepare
 
 
-def _build_prepare_stream_deps():
-    """Build the PrepareStreamDeps bundle from web_server.py globals on each call."""
+def _build_prepare_stream_deps(sess, sid):
+    """Build the PrepareStreamDeps bundle for a specific stream session.
+
+    ``sess`` is the StreamSession (dict-compatible) for this listener; ``sid`` is
+    its id, used to give each session its own ``Stream/<sid>`` staging subdir so
+    concurrent listeners don't clear each other's files.
+    """
     def _get_stream_state():
-        return stream_state
+        return sess
 
     def _set_stream_state(value):
-        global stream_state
-        stream_state = value
+        # prepare.py only mutates in place (.update / [k]=) so this is
+        # effectively dead — but if anything reassigns, route it through the
+        # session's replace() so the store keeps the live object.
+        if value is sess:
+            return
+        sess.replace(dict(value))
+
+    base_root = os.path.dirname(os.path.abspath(__file__))
+    # prepare.py stages into <project_root>/Stream. Default session keeps the
+    # historical flat Stream/; a named session stages under Stream/<sid>/Stream so
+    # concurrent listeners never clear each other's files. (The served file_path
+    # is absolute, so staging location only affects isolation/cleanup.)
+    project_root = base_root if sid == _DEFAULT_STREAM_SESSION else os.path.join(base_root, 'Stream', sid)
 
     return _streaming_prepare.PrepareStreamDeps(
         config_manager=config_manager,
         download_orchestrator=download_orchestrator,
-        stream_lock=stream_lock,
-        project_root=os.path.dirname(os.path.abspath(__file__)),
+        stream_lock=sess.lock,
+        project_root=project_root,
         docker_resolve_path=docker_resolve_path,
         find_streaming_download_in_all_downloads=_find_streaming_download_in_all_downloads,
         find_downloaded_file=_find_downloaded_file,
@@ -1800,8 +1851,8 @@ def _build_prepare_stream_deps():
     )
 
 
-def _prepare_stream_task(track_data):
-    return _streaming_prepare.prepare_stream_task(track_data, _build_prepare_stream_deps())
+def _prepare_stream_task(track_data, sess, sid):
+    return _streaming_prepare.prepare_stream_task(track_data, _build_prepare_stream_deps(sess, sid))
 
 
 def _find_streaming_download_in_all_downloads(all_downloads, track_data):
@@ -2943,6 +2994,28 @@ def handle_settings():
             return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/metadata/art-sources', methods=['GET'])
+def get_art_sources():
+    """Cover-art sources the current user can actually use, in default order.
+
+    Free sources (CAA/Deezer/iTunes/AudioDB) are always available; account
+    sources (Spotify) only when connected. The settings UI uses this to offer
+    only sources the user is set up with ("not everybody has every source").
+    """
+    try:
+        from core.metadata.art_lookup import available_art_sources
+        labels = {
+            'caa': 'Cover Art Archive', 'deezer': 'Deezer', 'itunes': 'iTunes',
+            'spotify': 'Spotify', 'audiodb': 'TheAudioDB',
+        }
+        available = [{'id': s, 'name': labels.get(s, s.title())}
+                     for s in available_art_sources()]
+        return jsonify({'available': available})
+    except Exception as e:
+        logger.error(f"Error listing art sources: {e}")
+        return jsonify({'available': [], 'error': str(e)}), 500
 
 
 @app.route('/api/dev-mode', methods=['GET', 'POST'])
@@ -6661,6 +6734,48 @@ def _list_available_download_sources() -> tuple:
     return download_mode, sources
 
 
+def _norm_track_key(s: str) -> str:
+    """Loose normalization for matching a task to its library_history row."""
+    import re
+    return re.sub(r'[^a-z0-9]+', '', (s or '').lower())
+
+
+@app.route('/api/downloads/task/<task_id>/detail', methods=['GET'])
+def get_task_detail(task_id):
+    """Full per-track detail for the track-detail modal: live task state merged
+    with the durable library_history provenance (location, quality, AcoustID
+    verdict, source, expected-vs-downloaded). Thin glue over build_track_detail."""
+    try:
+        from core.downloads.track_detail import build_track_detail
+        with tasks_lock:
+            t = download_tasks.get(task_id)
+            task = dict(t) if isinstance(t, dict) else None
+        if task is None:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        task['task_id'] = task_id
+
+        # Enrich from the most recent download-history row matching this track.
+        history = None
+        try:
+            ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+            want_title = _norm_track_key(ti.get('name', ''))
+            if want_title:
+                db = get_database()
+                entries, _ = db.get_library_history(event_type='download', page=1, limit=100)
+                for e in entries:
+                    if _norm_track_key(e.get('title', '')) == want_title:
+                        history = e
+                        break
+        except Exception as hist_err:
+            logger.debug(f"track-detail history lookup failed: {hist_err}")
+
+        detail = build_track_detail(task, history)
+        return jsonify({"success": True, "detail": detail})
+    except Exception as e:
+        logger.error(f"get_task_detail error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
 def get_task_candidates(task_id):
     """Returns the cached search candidates for a download task so the UI can show what was found."""
@@ -7066,18 +7181,56 @@ def approve_quarantine_item(entry_id):
         # for this one restored pass so multi-reason failures do not loop.
         context['_skip_quarantine_check'] = 'all'
         context['_approved_quarantine_trigger'] = trigger
-        # Re-dispatch through the same pipeline. Run async so the HTTP
-        # request returns quickly — UI polls /list to see the entry vanish.
+        # If the caller (download-modal chooser) passed the originating task, run
+        # the re-import through the verification WRAPPER with that task_id so the
+        # task is marked completed on success — otherwise the modal row stays
+        # stuck on "Quarantined" even though the file imported. The sidecar
+        # context lost task_id/batch_id (the wrapper pops them before quarantine),
+        # so we re-supply them here. Manager-tab approvals (no task_id) keep the
+        # original inner-pipeline path.
+        _req = request.get_json(silent=True) or {}
+        _task_id = (_req.get('task_id') or '').strip() or None
+        _batch_id = None
+        if _task_id:
+            with tasks_lock:
+                _t = download_tasks.get(_task_id)
+                if isinstance(_t, dict):
+                    _batch_id = _t.get('batch_id')
+            context['task_id'] = _task_id
+            if _batch_id:
+                context['batch_id'] = _batch_id
         context_key = f"approve_{entry_id}_{int(time.time())}"
-        threading.Thread(
-            target=lambda: _post_process_matched_download(context_key, context, restored_path),
-            daemon=True,
-        ).start()
-        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all) → re-running pipeline")
+        if _task_id:
+            _reprocess = lambda: _post_process_matched_download_with_verification(
+                context_key, context, restored_path, _task_id, _batch_id,
+            )
+        else:
+            _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
+        threading.Thread(target=_reprocess, daemon=True).start()
+        logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/stream', methods=['GET'])
+def stream_quarantine_item(entry_id):
+    """Stream a quarantined audio file in-app (range-supported) so the user can
+    listen before deciding to approve, search again, or delete it. The file
+    lives in the quarantine dir with a `.quarantined` suffix, so the real audio
+    extension (and thus Content-Type) is recovered from the sidecar."""
+    try:
+        from core.imports.quarantine import get_quarantine_entry_stream_info
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        if info is None:
+            return jsonify({"error": "Quarantined file not found"}), 404
+        file_path, extension = info
+        mimetype = _AUDIO_MIME_TYPES.get(extension, 'audio/mpeg')
+        return _serve_audio_file_with_range(file_path, mimetype_override=mimetype)
+    except Exception as e:
+        logger.error(f"[Quarantine] Error streaming {entry_id}: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
@@ -10577,9 +10730,10 @@ def library_play_track():
 
         logger.info(f"Library play request: {os.path.basename(file_path)}")
 
-        # Set stream state to ready with the library file path directly
-        with stream_lock:
-            stream_state.update({
+        # Set THIS listener's stream state to ready with the library file path.
+        sess = _current_stream_state()
+        with sess.lock:
+            sess.update({
                 "status": "ready",
                 "progress": 100,
                 "track_info": {
@@ -10597,6 +10751,30 @@ def library_play_track():
     except Exception as e:
         logger.error(f"Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/log-play', methods=['POST'])
+def library_log_play():
+    """Record a SoulSync web-player play into listening_history + bump the
+    track's play_count/last_played (feeds 'recently played' and smart radio).
+
+    Fire-and-forget from the frontend ~10s into a track. Best-effort: a logging
+    failure never affects playback, so we always return 200-ish.
+    """
+    try:
+        from core.playback.play_log import build_play_event
+        data = request.get_json(silent=True) or {}
+        track = data.get('track') or data
+        played_at = datetime.now().isoformat()
+        duration_ms = data.get('duration_ms', 0)
+        event = build_play_event(track, played_at, duration_ms)
+        if not event:
+            return jsonify({"success": False, "skipped": True}), 200
+        get_database().record_web_player_play(event)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.debug(f"log-play failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
 
@@ -11734,23 +11912,25 @@ def library_radio():
 
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
-    """Start streaming a track in the background"""
+    """Start streaming a track in the background (per-listener session)."""
     global stream_background_task
-
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No track data provided"}), 400
-    
+
     logger.info(f"Web UI Stream request for: {data.get('filename')}")
-    
+
     try:
-        # Stop any existing streaming task
-        if stream_background_task and not stream_background_task.done():
-            stream_background_task.cancel()
-        
-        # Reset stream state
-        with stream_lock:
-            stream_state.update({
+        sid = _stream_session_id()
+        sess = stream_state_store.get(sid)
+
+        # Stop only THIS listener's existing task — others keep playing.
+        prev = stream_tasks.get(sid)
+        if prev and not prev.done():
+            prev.cancel()
+
+        with sess.lock:
+            sess.update({
                 "status": "stopped",
                 "progress": 0,
                 "track_info": None,
@@ -11758,27 +11938,30 @@ def stream_start():
                 "error_message": None,
                 "is_library": False
             })
-        
-        # Start new background streaming task
-        stream_background_task = stream_executor.submit(_prepare_stream_task, data)
-        
+
+        # Start new background streaming task for this session.
+        fut = stream_executor.submit(_prepare_stream_task, data, sess, sid)
+        stream_tasks[sid] = fut
+        if sid == _DEFAULT_STREAM_SESSION:
+            stream_background_task = fut  # keep legacy alias in sync
+
         return jsonify({"success": True, "message": "Streaming started"})
-        
+
     except Exception as e:
         logger.error(f"Error starting stream: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/stream/status')
 def stream_status():
-    """Get current streaming status and progress"""
+    """Get current streaming status and progress for THIS listener."""
     try:
-        with stream_lock:
-            # Return copy of current stream state
+        sess = _current_stream_state()
+        with sess.lock:
             return jsonify({
-                "status": stream_state["status"],
-                "progress": stream_state["progress"],
-                "track_info": stream_state["track_info"],
-                "error_message": stream_state["error_message"]
+                "status": sess["status"],
+                "progress": sess["progress"],
+                "track_info": sess["track_info"],
+                "error_message": sess["error_message"]
             })
     except Exception as e:
         logger.error(f"Error getting stream status: {e}")
@@ -11789,123 +11972,138 @@ def stream_status():
             "error_message": str(e)
         }), 500
 
+_AUDIO_MIME_TYPES = {
+    '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg',
+    '.aac': 'audio/aac', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
+    '.opus': 'audio/ogg', '.webm': 'audio/webm', '.wma': 'audio/x-ms-wma',
+}
+
+
+def _serve_audio_file_with_range(file_path, mimetype_override=None):
+    """Serve an on-disk audio file with HTTP range support (HTML5 seeking).
+
+    Shared by /stream/audio (current track) and /stream/library-audio (the
+    crossfade pre-loader, which plays the NEXT track on a second <audio>).
+
+    ``mimetype_override`` lets callers supply the Content-Type explicitly when
+    the on-disk extension isn't the audio extension — e.g. the quarantine
+    streamer, whose files end in ``.quarantined`` (real type recovered from the
+    sidecar). When None, the type is inferred from the file extension as before.
+    """
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Audio file not found"}), 404
+
+    file_ext = os.path.splitext(file_path)[1].lower()
+    mimetype = mimetype_override or _AUDIO_MIME_TYPES.get(file_ext, 'audio/mpeg')
+    file_size = os.path.getsize(file_path)
+
+    range_header = request.headers.get('Range', None)
+    if range_header:
+        byte_start = 0
+        byte_end = file_size - 1
+        try:
+            range_match = re.match(r'bytes=(\d*)-(\d*)', range_header)
+            if range_match:
+                start_str, end_str = range_match.groups()
+                if start_str:
+                    byte_start = int(start_str)
+                if end_str:
+                    byte_end = int(end_str)
+                else:
+                    byte_end = file_size - 1
+        except (ValueError, AttributeError):
+            pass
+
+        byte_start = max(0, byte_start)
+        byte_end = min(file_size - 1, byte_end)
+        content_length = byte_end - byte_start + 1
+
+        def generate():
+            with open(file_path, 'rb') as f:
+                f.seek(byte_start)
+                remaining = content_length
+                while remaining:
+                    chunk_size = min(8192, remaining)
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        response = Response(generate(), status=206, mimetype=mimetype, direct_passthrough=True)
+        response.headers.add('Content-Range', f'bytes {byte_start}-{byte_end}/{file_size}')
+        response.headers.add('Accept-Ranges', 'bytes')
+        response.headers.add('Content-Length', str(content_length))
+        response.headers.add('Cache-Control', 'no-cache')
+        return response
+    else:
+        response = send_file(file_path, as_attachment=False, mimetype=mimetype)
+        response.headers.add('Accept-Ranges', 'bytes')
+        response.headers.add('Content-Length', str(file_size))
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+
 @app.route('/stream/audio')
 def stream_audio():
-    """Serve the audio file from the Stream folder with range request support"""
+    """Serve THIS listener's current audio file with range request support."""
     try:
-        with stream_lock:
-            if stream_state["status"] != "ready" or not stream_state["file_path"]:
+        sess = _current_stream_state()
+        with sess.lock:
+            if sess["status"] != "ready" or not sess["file_path"]:
                 return jsonify({"error": "No audio file ready for streaming"}), 404
-            
-            file_path = stream_state["file_path"]
-        
-        if not os.path.exists(file_path):
-            return jsonify({"error": "Audio file not found"}), 404
-        
+            file_path = sess["file_path"]
+
         logger.info(f"Serving audio file: {os.path.basename(file_path)}")
-        
-        # Determine MIME type based on file extension
-        file_ext = os.path.splitext(file_path)[1].lower()
-        mime_types = {
-            '.mp3': 'audio/mpeg',
-            '.flac': 'audio/flac',
-            '.ogg': 'audio/ogg',
-            '.aac': 'audio/aac',
-            '.m4a': 'audio/mp4',
-            '.wav': 'audio/wav',
-            '.opus': 'audio/ogg',
-            '.webm': 'audio/webm',
-            '.wma': 'audio/x-ms-wma'
-        }
-        
-        mimetype = mime_types.get(file_ext, 'audio/mpeg')
-        
-        # Get file size
-        file_size = os.path.getsize(file_path)
-        
-        # Handle range requests (important for HTML5 audio seeking)
-        range_header = request.headers.get('Range', None)
-        if range_header:
-            byte_start = 0
-            byte_end = file_size - 1
-            
-            # Parse range header (format: "bytes=start-end")
-            try:
-                range_match = re.match(r'bytes=(\d*)-(\d*)', range_header)
-                if range_match:
-                    start_str, end_str = range_match.groups()
-                    if start_str:
-                        byte_start = int(start_str)
-                    if end_str:
-                        byte_end = int(end_str)
-                    else:
-                        # If no end specified, serve from start to end of file
-                        byte_end = file_size - 1
-            except (ValueError, AttributeError):
-                # Invalid range header, serve full file
-                pass
-            
-            # Ensure valid range
-            byte_start = max(0, byte_start)
-            byte_end = min(file_size - 1, byte_end)
-            content_length = byte_end - byte_start + 1
-            
-            # Create response with partial content
-            def generate():
-                with open(file_path, 'rb') as f:
-                    f.seek(byte_start)
-                    remaining = content_length
-                    while remaining:
-                        chunk_size = min(8192, remaining)  # 8KB chunks
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-            
-            response = Response(generate(), 
-                              status=206,  # Partial Content
-                              mimetype=mimetype,
-                              direct_passthrough=True)
-            
-            # Set range headers
-            response.headers.add('Content-Range', f'bytes {byte_start}-{byte_end}/{file_size}')
-            response.headers.add('Accept-Ranges', 'bytes')
-            response.headers.add('Content-Length', str(content_length))
-            response.headers.add('Cache-Control', 'no-cache')
-            
-            return response
-        else:
-            # No range request, serve entire file
-            response = send_file(file_path, as_attachment=False, mimetype=mimetype)
-            response.headers.add('Accept-Ranges', 'bytes')
-            response.headers.add('Content-Length', str(file_size))
-            # Override the default static-cache max-age — streaming media
-            # bypasses caching (range requests, mid-track seeks).
-            response.headers['Cache-Control'] = 'no-cache'
-            return response
-        
+        return _serve_audio_file_with_range(file_path)
     except Exception as e:
         logger.error(f"Error serving audio file: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/stream/library-audio')
+def stream_library_audio():
+    """Serve an arbitrary LIBRARY audio file by path, with range support.
+
+    Powers crossfade: the player preloads the NEXT queued track on a second
+    <audio> element and fades between them. Security: the path is resolved
+    through ``_resolve_library_file_path`` — the same validator /api/library/play
+    uses — which only resolves files within the configured transfer/download/
+    media-library directories, so this can't be used to read arbitrary disk.
+    """
+    try:
+        raw_path = request.args.get('path', '')
+        if not raw_path:
+            return jsonify({"error": "path is required"}), 400
+        resolved = _resolve_library_file_path(raw_path)
+        if not resolved or not os.path.exists(resolved):
+            return jsonify({"error": _get_file_not_found_error(raw_path)}), 404
+        return _serve_audio_file_with_range(resolved)
+    except Exception as e:
+        logger.error(f"Error serving library audio file: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/stream/stop', methods=['POST'])
 def stream_stop():
-    """Stop streaming and clean up"""
-    global stream_background_task
-
+    """Stop THIS listener's stream and clean up its staging dir."""
     try:
-        # Cancel background task
-        if stream_background_task and not stream_background_task.done():
-            stream_background_task.cancel()
+        sid = _stream_session_id()
+        sess = stream_state_store.get(sid)
 
-        # Only clear Stream folder if NOT playing a library file
-        with stream_lock:
-            is_library = stream_state.get("is_library", False)
+        # Cancel only this session's background task.
+        fut = stream_tasks.get(sid)
+        if fut and not fut.done():
+            fut.cancel()
+
+        # Only clear the (per-session) Stream folder if NOT a library file.
+        with sess.lock:
+            is_library = sess.get("is_library", False)
 
         if not is_library:
-            project_root = os.path.dirname(os.path.abspath(__file__))
-            stream_folder = os.path.join(project_root, 'Stream')
+            base_root = os.path.dirname(os.path.abspath(__file__))
+            stream_folder = (os.path.join(base_root, 'Stream')
+                             if sid == _DEFAULT_STREAM_SESSION
+                             else os.path.join(base_root, 'Stream', sid, 'Stream'))
 
             if os.path.exists(stream_folder):
                 for filename in os.listdir(stream_folder):
@@ -11916,9 +12114,9 @@ def stream_stop():
         else:
             logger.info("Library playback stopped - skipping file deletion")
 
-        # Reset stream state
-        with stream_lock:
-            stream_state.update({
+        # Reset this session's stream state
+        with sess.lock:
+            sess.update({
                 "status": "stopped",
                 "progress": 0,
                 "track_info": None,
@@ -18517,13 +18715,9 @@ def mlm_save():
         data = request.get_json(force=True) or {}
         source = data.get('source', '').strip()
         source_track_id = data.get('source_track_id', '').strip()
-        library_track_id = data.get('library_track_id')
+        library_track_id = mlm.normalize_library_track_id(data.get('library_track_id'))
         if not source or not source_track_id or not library_track_id:
             return jsonify({"success": False, "error": "source, source_track_id, library_track_id required"}), 400
-        try:
-            library_track_id = int(library_track_id)
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "Invalid library track id"}), 400
         db = get_database()
         profile_id = get_current_profile_id()
         # Validate library track exists before saving
@@ -32705,9 +32899,13 @@ try:
     amazon_db = MusicDatabase()
     amazon_worker = AmazonWorker(database=amazon_db)
     amazon_worker.start()
-    if config_manager.get('amazon_enrichment_paused', False):
+    # Opt-in by default: Amazon enrichment depends on an external public proxy
+    # (T2Tunes) that can be down, so it stays paused unless the user has
+    # explicitly enabled it (amazon_enrichment_paused=False). This stops an
+    # instance outage from grinding/log-flooding installs that never opted in.
+    if config_manager.get('amazon_enrichment_paused', True):
         amazon_worker.pause()
-        logger.info("Amazon enrichment worker initialized (paused — restored from config)")
+        logger.info("Amazon enrichment worker initialized (paused — enable it in Settings)")
     else:
         logger.info("Amazon enrichment worker initialized and started")
 except Exception as e:

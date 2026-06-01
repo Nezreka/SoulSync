@@ -140,7 +140,7 @@ class TestIssue442Regression:
         verifier, fake_service = stubbed_verifier
 
         # AcoustID returns the recording with kanji artist
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'YAMANAIAME', 'artist': '澤野弘之', 'mbid': 'rec-x'},
@@ -165,7 +165,7 @@ class TestIssue442Regression:
         """Reporter's case 2 — Sergey Lazarev / Сергей Лазарев."""
         verifier, fake_service = stubbed_verifier
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'On the Other Side', 'artist': 'Sergey Lazarev', 'mbid': 'rec-y'},
@@ -196,7 +196,7 @@ class TestBackwardCompat:
         verifier, fake_service = stubbed_verifier
 
         # Wrong artist entirely — Latin script both sides, sim ~0
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'Some Track', 'artist': 'Khalil Turk & Friends'},
@@ -214,7 +214,7 @@ class TestBackwardCompat:
         """Exact title + artist match → PASS regardless of aliases."""
         verifier, fake_service = stubbed_verifier
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'Dirty White Boy', 'artist': 'Foreigner'},
@@ -233,7 +233,7 @@ class TestBackwardCompat:
         verifier, fake_service = stubbed_verifier
         fake_service.lookup_artist_aliases.side_effect = Exception("MB down")
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'Dirty White Boy', 'artist': 'Foreigner'},
@@ -261,7 +261,7 @@ class TestAliasLookupCalledOncePerVerify:
         fire 60+ MB lookups (cached or not, that's wasteful)."""
         verifier, fake_service = stubbed_verifier
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'X', 'artist': '澤野弘之'},
@@ -295,7 +295,7 @@ class TestLazyAliasResolution:
         this PR."""
         verifier, fake_service = stubbed_verifier
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'Dirty White Boy', 'artist': 'Foreigner'},
@@ -317,7 +317,7 @@ class TestLazyAliasResolution:
         as expected."""
         verifier, fake_service = stubbed_verifier
 
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'YAMANAIAME', 'artist': '澤野弘之'},
@@ -343,7 +343,7 @@ class TestLazyAliasResolution:
         # Force a code path that hits multiple sites: title matches
         # several recordings but the best-match's artist sim is below
         # threshold (forces secondary scan path).
-        verifier.acoustid_client.fingerprint_and_lookup.return_value = {
+        verifier.acoustid_client.lookup_with_status.return_value = {
             'best_score': 0.95,
             'recordings': [
                 {'title': 'X', 'artist': 'Different Latin Artist'},  # 0 alias hit

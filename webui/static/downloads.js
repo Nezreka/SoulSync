@@ -2983,7 +2983,16 @@ function _ensureCandidatesClickListener(statusEl) {
         e.stopPropagation();
         _hideErrorTooltip();
         const taskId = this.dataset.taskId;
-        if (taskId) showCandidatesModal(taskId);
+        if (!taskId) return;
+        // Decide at click-time from dataset set each render: completed and
+        // quarantined rows open the rich track-detail modal (it carries the
+        // play/listen + Accept/Search actions); plain failed/not-found go
+        // straight to the search modal.
+        if (this.dataset.detailOpen && typeof openTrackDetail === 'function') {
+            openTrackDetail(taskId);
+        } else {
+            showCandidatesModal(taskId);
+        }
     });
 }
 
@@ -3344,6 +3353,7 @@ async function downloadCandidate(taskId, candidate, trackName) {
 
 async function approveQuarantineFromDownloadRow(button) {
     const entryId = button?.dataset?.entryId || '';
+    const taskId = button?.dataset?.taskId || '';
     if (!entryId) {
         showToast('Open Quarantine to approve this file.', 'warning');
         return;
@@ -3361,7 +3371,11 @@ async function approveQuarantineFromDownloadRow(button) {
     button.disabled = true;
     button.textContent = 'Approving...';
     try {
-        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const response = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: taskId }),
+        });
         const data = await response.json();
         if (data.success) {
             showToast('Approved quarantined file. Re-running post-processing.', 'success');
@@ -3376,6 +3390,10 @@ async function approveQuarantineFromDownloadRow(button) {
         button.textContent = originalText;
     }
 }
+
+// Quarantine actions (Listen / Accept & Import / Search) now live in the
+// track-detail modal (static/track-detail.js), which a quarantined row opens
+// via _ensureCandidatesClickListener + dataset.detailOpen.
 
 function closeCandidatesModal() {
     const overlay = document.getElementById('candidates-modal-overlay');
@@ -3641,6 +3659,15 @@ function processModalStatusUpdate(playlistId, data) {
                 statusEl.classList.remove('has-error-tooltip');
                 statusEl.removeAttribute('title');
                 statusEl.removeAttribute('data-error-msg');
+                // Clear clickable/quarantine state each render; the failure
+                // branch below re-adds it when still applicable. Without this a
+                // task that flips failed/quarantined -> completed (e.g. after
+                // Accept & Import) keeps a stale chooser on the cell.
+                statusEl.classList.remove('has-candidates');
+                delete statusEl.dataset.quarantineEntryId;
+                delete statusEl.dataset.quarantineReason;
+                delete statusEl.dataset.quarantineTrack;
+                delete statusEl.dataset.detailOpen;
                 statusEl.textContent = statusText;
 
                 if ((task.status === 'failed' || task.status === 'cancelled' || task.status === 'not_found') && task.error_message) {
@@ -3648,13 +3675,23 @@ function processModalStatusUpdate(playlistId, data) {
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
                 }
-                // Make not_found / failed / cancelled cells clickable to open
-                // the candidates modal. Always bind — even when no auto-search
-                // candidates were cached — because the modal carries the manual
-                // search bar, which is the user's recourse for empty results.
-                if (task.status === 'not_found' || task.status === 'failed' || task.status === 'cancelled') {
+                // Completed rows are clickable into the rich track-detail modal
+                // (play, location, AcoustID verdict, provenance).
+                if (task.status === 'completed') {
                     statusEl.classList.add('has-candidates');
                     statusEl.dataset.taskId = task.task_id;
+                    statusEl.dataset.detailOpen = '1';
+                    _ensureCandidatesClickListener(statusEl);
+                } else if (task.status === 'not_found' || task.status === 'failed' || task.status === 'cancelled') {
+                    // Clickable to recover: quarantined -> track-detail modal
+                    // (Listen / Accept / Search); plain failed/not-found ->
+                    // straight to the search modal. detailOpen is set/cleared
+                    // each render so a row that changes kind stays correct.
+                    statusEl.classList.add('has-candidates');
+                    statusEl.dataset.taskId = task.task_id;
+                    if (isQuarantinedTask && task.quarantine_entry_id) {
+                        statusEl.dataset.detailOpen = '1';
+                    }
                     _ensureCandidatesClickListener(statusEl);
                 }
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
@@ -3674,7 +3711,7 @@ function processModalStatusUpdate(playlistId, data) {
                 }
             } else if (actionsEl && task.status === 'failed' && isQuarantinedTask && task.quarantine_entry_id) {
                 const entryId = escapeHtml(task.quarantine_entry_id);
-                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" title="Approve quarantined file">Approve</button>`;
+                actionsEl.innerHTML = `<button class="approve-quarantine-inline-btn" data-entry-id="${entryId}" data-task-id="${escapeHtml(task.task_id)}" title="Approve quarantined file">Approve</button>`;
                 const approveBtn = actionsEl.querySelector('.approve-quarantine-inline-btn');
                 if (approveBtn) {
                     approveBtn.addEventListener('click', () => approveQuarantineFromDownloadRow(approveBtn));
@@ -5658,7 +5695,10 @@ let _gsController = null;
             if (clearBtn) clearBtn.style.display = q.length > 0 ? '' : 'none';
             if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
             if (q.length < 2) { _gsHideResults(); return; }
-            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 300);
+            // 600ms (was 300) — coalesce a name being typed into one search
+            // instead of one external-API search per letter (#751). Enter still
+            // fires immediately via the keydown handler.
+            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 600);
         });
 
         if (clearBtn) {

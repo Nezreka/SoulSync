@@ -518,10 +518,10 @@ function renderMirroredCard(p, container) {
                 ${phaseHtml}
             </div>
         </div>
-        ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
-        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escAttr(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
-        <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escAttr(p.name)}', '${_escAttr(p.source)}', '${_escAttr(sourceRef)}')" title="Edit original playlist link">🔗</button>
-        <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
+        ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escJs(p.name)}')" title="Clear discovery data">↺</button>` : ''}
+        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
+        <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
+        <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
         const st = youtubePlaylistStates[hash];
@@ -829,52 +829,74 @@ async function openMirroredPlaylistModal(playlistId) {
         const tracks = data.tracks || [];
         const source = data.source || 'unknown';
         const sourceRef = getMirroredSourceRef(data);
-        const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
+        const sourceIcons = { spotify: '🎵', spotify_public: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛', deezer: '🎧', qobuz: '♫' };
+        const sourceLabels = { spotify: 'Spotify', spotify_public: 'Spotify', tidal: 'Tidal', youtube: 'YouTube', beatport: 'Beatport', deezer: 'Deezer', qobuz: 'Qobuz' };
         const sourceIcon = sourceIcons[source] || '📋';
+        const srcLabel = sourceLabels[source] || source;
+
+        // Hero artwork: playlist cover → first track with art → gradient fallback.
+        const heroArt = data.image_url || (tracks.find(t => t.image_url) || {}).image_url || '';
+
+        // Total runtime for the meta line.
+        const totalMs = tracks.reduce((sum, t) => sum + (t.duration_ms || 0), 0);
+        const totalMin = Math.round(totalMs / 60000);
+        const totalLabel = totalMin >= 60 ? `${Math.floor(totalMin / 60)} hr ${totalMin % 60} min` : `${totalMin} min`;
 
         const trackRows = tracks.map(t => {
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            return `<div class="mirrored-track-row">
-                <span class="track-pos">${t.position}</span>
-                <span class="track-title">${_esc(t.track_name)}</span>
-                <span class="track-artist">${_esc(t.artist_name)}</span>
-                <span class="track-album">${_esc(t.album_name)}</span>
-                <span class="track-duration">${dur}</span>
+            const art = t.image_url
+                ? `<img class="mm-row-art" src="${_escAttr(t.image_url)}" loading="lazy" onerror="this.onerror=null;this.classList.add('mm-art-empty');this.removeAttribute('src');">`
+                : `<span class="mm-row-art mm-art-empty"></span>`;
+            return `<div class="mm-row">
+                <span class="mm-row-pos">${t.position}</span>
+                ${art}
+                <div class="mm-row-main">
+                    <span class="mm-row-title">${_esc(t.track_name)}</span>
+                    <span class="mm-row-artist">${_esc(t.artist_name)}</span>
+                </div>
+                <span class="mm-row-album">${_esc(t.album_name || '')}</span>
+                <span class="mm-row-dur">${dur}</span>
             </div>`;
         }).join('');
 
+        const heroCover = heroArt
+            ? `<div class="mm-cover" style="background-image:url('${_escAttr(heroArt)}')"></div>`
+            : `<div class="mm-cover mm-cover-empty ${_escAttr(source)}">${sourceIcon}</div>`;
+
         overlay.innerHTML = `
             <div class="mirrored-modal">
-                <div class="mirrored-modal-header">
-                    <div class="mirrored-modal-hero">
-                        <div class="mirrored-modal-hero-icon ${_escAttr(source)}">${sourceIcon}</div>
-                        <div class="mirrored-modal-hero-info">
-                            <h2 class="mirrored-modal-hero-title">${_esc(data.name)}</h2>
-                            <div class="mirrored-modal-hero-subtitle">
-                                <span class="mirrored-modal-hero-badge">${_esc(source)}</span>
-                                <span>${tracks.length} tracks</span>
-                                <span>&middot;</span>
-                                <span>Mirrored ${timeAgo(data.updated_at || data.mirrored_at)}</span>
+                <div class="mm-hero">
+                    ${heroArt ? `<div class="mm-hero-bg" style="background-image:url('${_escAttr(heroArt)}')"></div>` : ''}
+                    <div class="mm-hero-content">
+                        ${heroCover}
+                        <div class="mm-hero-info">
+                            <span class="mm-eyebrow">Mirrored Playlist</span>
+                            <h2 class="mm-title">${_esc(data.name)}</h2>
+                            <div class="mm-meta">
+                                <span class="mm-source-pill ${_escAttr(source)}">${_esc(srcLabel)}</span>
+                                ${data.owner ? `<span class="mm-meta-item">${_esc(data.owner)}</span><span class="mm-dot">&middot;</span>` : ''}
+                                <span class="mm-meta-item">${tracks.length} tracks</span>
+                                ${totalMs ? `<span class="mm-dot">&middot;</span><span class="mm-meta-item">${totalLabel}</span>` : ''}
+                                <span class="mm-dot">&middot;</span>
+                                <span class="mm-meta-item">Mirrored ${timeAgo(data.updated_at || data.mirrored_at)}</span>
                             </div>
                         </div>
                     </div>
-                    <span class="mirrored-modal-close" onclick="closeMirroredModal()">&times;</span>
+                    <button class="mm-close" onclick="closeMirroredModal()" aria-label="Close">&times;</button>
                 </div>
-                <div class="mirrored-modal-tracks">
-                    <div class="mirrored-track-header">
-                        <span>#</span><span>Track</span><span>Artist</span><span>Album</span><span style="text-align:right">Time</span>
+                <div class="mm-list">
+                    <div class="mm-list-head">
+                        <span>#</span><span></span><span>Title</span><span>Album</span><span class="mm-col-dur">Time</span>
                     </div>
-                    ${trackRows}
+                    ${trackRows || '<div class="mm-empty">No tracks in this mirror yet.</div>'}
                 </div>
-                <div class="mirrored-modal-footer">
-                    <div class="mirrored-modal-footer-left">
-                        <button class="mirrored-btn-delete" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escAttr(data.name)}')">Delete Mirror</button>
-                    </div>
-                    <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
-                        <button class="mirrored-btn-close" onclick="editMirroredSourceRef(${playlistId}, '${_escAttr(data.name)}', '${_escAttr(source)}', '${_escAttr(sourceRef)}')">Edit Source</button>
-                        <button class="mirrored-btn-pipeline" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escAttr(data.name)}')">Auto-Sync</button>
-                        <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
-                        <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
+                <div class="mm-actions">
+                    <button class="mm-btn mm-btn-danger" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escJs(data.name)}')">Delete Mirror</button>
+                    <div class="mm-actions-right">
+                        <button class="mm-btn mm-btn-ghost" onclick="editMirroredSourceRef(${playlistId}, '${_escJs(data.name)}', '${_escJs(source)}', '${_escJs(sourceRef)}')">Edit Source</button>
+                        <button class="mm-btn mm-btn-secondary" onclick="runMirroredPlaylistPipeline(${playlistId}, '${_escJs(data.name)}')">Auto-Sync</button>
+                        <button class="mm-btn mm-btn-ghost" onclick="closeMirroredModal()">Close</button>
+                        <button class="mm-btn mm-btn-primary" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
                     </div>
                 </div>
             </div>
@@ -1176,7 +1198,7 @@ function renderPoolList() {
                         <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
                     </div>
                 </div>
-                <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escAttr(t.track_name)}', '${_escAttr(t.artist_name)}')">Fix Match</button>
+                <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')">Fix Match</button>
             </div>
         `).join('');
     } else {
@@ -1218,7 +1240,7 @@ function renderPoolList() {
                     </div>
                     <span class="pool-confidence-badge ${confClass}">${conf}%</span>
                     <span class="pool-use-count">${e.use_count}&times;</span>
-                    <button class="pool-rematch-btn" onclick="rematchPoolCacheEntry(${e.id}, '${_escAttr(e.original_title)}', '${_escAttr(e.original_artist)}')" title="Rematch this track">Rematch</button>
+                    <button class="pool-rematch-btn" onclick="rematchPoolCacheEntry(${e.id}, '${_escJs(e.original_title)}', '${_escJs(e.original_artist)}')" title="Rematch this track">Rematch</button>
                     <button class="pool-remove-btn" onclick="removePoolCacheEntry(${e.id})" title="Remove cached match">&times;</button>
                 </div>
             `;
@@ -2141,13 +2163,13 @@ function _buildAutomationSection(id, label, automations, useGrid, options = {}) 
         const allEnabled = enabledCount === automations.length;
         actionsHtml = `
             <div class="section-actions" onclick="event.stopPropagation();">
-                <button class="section-action-btn" title="${allEnabled ? 'Disable all' : 'Enable all'}" onclick="_bulkToggleGroup('${_escAttr(groupName)}', ${allEnabled})">
+                <button class="section-action-btn" title="${allEnabled ? 'Disable all' : 'Enable all'}" onclick="_bulkToggleGroup('${_escJs(groupName)}', ${allEnabled})">
                     ${allEnabled ? '⏸' : '▶'}
                 </button>
-                <button class="section-action-btn" title="Rename group" onclick="_startRenameGroup('${_escAttr(groupName)}', this)">
+                <button class="section-action-btn" title="Rename group" onclick="_startRenameGroup('${_escJs(groupName)}', this)">
                     ✏️
                 </button>
-                <button class="section-action-btn section-action-danger" title="Delete group" onclick="_deleteGroup('${_escAttr(groupName)}')">
+                <button class="section-action-btn section-action-danger" title="Delete group" onclick="_deleteGroup('${_escJs(groupName)}')">
                     🗑️
                 </button>
             </div>
@@ -3108,7 +3130,7 @@ function _showGroupDropdown(event, autoId, currentGroup) {
     }
     allGroups.forEach(g => {
         const isActive = g === currentGroup;
-        html += `<div class="auto-group-option${isActive ? ' active' : ''}" onclick="_assignGroup(${autoId}, '${_escAttr(g)}')">${_esc(g)}</div>`;
+        html += `<div class="auto-group-option${isActive ? ' active' : ''}" onclick="_assignGroup(${autoId}, '${_escJs(g)}')">${_esc(g)}</div>`;
     });
     if (allGroups.size) html += '<div class="auto-group-divider"></div>';
     html += `<input class="auto-group-input" placeholder="New group name..." onkeydown="if(event.key==='Enter'){_assignGroup(${autoId}, this.value.trim()); event.preventDefault();}">`;
@@ -3204,15 +3226,15 @@ function renderAutomationCard(a) {
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('<span class="auto-next-run" data-next="' + _escAttr(a.next_run) + '">Next: ' + _autoTimeUntil(a.next_run) + '</span>');
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
-    if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\', \'' + _escAttr(a.action_type || '') + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
+    if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escJs(a.name) + '\', \'' + _escJs(a.action_type || '') + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
 
     const dupeBtn = a.is_system ? '' :
         `<button class="automation-dupe-btn" title="Duplicate" onclick="event.stopPropagation(); duplicateAutomation(${a.id})">&#128203;</button>`;
     const groupBtn = a.is_system ? '' :
-        `<button class="automation-group-btn${a.group_name ? ' grouped' : ''}" data-group="${_escAttr(a.group_name || '')}" title="${a.group_name ? 'Group: ' + _escAttr(a.group_name) : 'Assign group'}" onclick="event.stopPropagation(); _showGroupDropdown(event, ${a.id}, ${a.group_name ? "'" + _escAttr(a.group_name) + "'" : 'null'})">&#128193;</button>`;
+        `<button class="automation-group-btn${a.group_name ? ' grouped' : ''}" data-group="${_escAttr(a.group_name || '')}" title="${a.group_name ? 'Group: ' + _escAttr(a.group_name) : 'Assign group'}" onclick="event.stopPropagation(); _showGroupDropdown(event, ${a.id}, ${a.group_name ? "'" + _escJs(a.group_name) + "'" : 'null'})">&#128193;</button>`;
     const deleteBtn = a.is_system ? '' :
-        `<button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escAttr(a.name)}')">&#128465;</button>`;
+        `<button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escJs(a.name)}')">&#128465;</button>`;
 
     card.innerHTML = `
         <div class="automation-status ${a.enabled ? 'enabled' : 'disabled'}"></div>
@@ -4660,6 +4682,29 @@ function _escAttr(str) {
     return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Escape a string for use INSIDE a single-quoted JS string literal that itself
+// sits inside a double-quoted HTML attribute, e.g. onclick="fn('<value>')".
+// Such a value is decoded twice: first the HTML attribute parser resolves
+// entities, then the JS parser reads the string. _escAttr only HTML-escapes, so
+// an apostrophe becomes &#39; which the attribute parser turns back into a bare
+// ' — terminating the JS string and throwing a SyntaxError that silently kills
+// the whole handler (this is the "Road trip-The Rolfe's" delete-button bug).
+// Fix: backslash-escape the JS metacharacters (\ and ') FIRST so they survive
+// HTML decoding intact, then HTML-escape the characters that would otherwise
+// break the surrounding attribute. Order matters — & is escaped before the
+// later replacements insert their own entities.
+function _escJs(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, ' ')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // ===== ENHANCE QUALITY MODAL =====
 
 let _enhanceQualityData = null;
@@ -4740,9 +4785,12 @@ async function playArtistRadio() {
             audioPlayer.pause();
         }
 
-        // Play the track first, then enable radio mode after a short delay
-        // so currentTrack is set and the radio queue fill triggers
-        playLibraryTrack({
+        // Play the track and WAIT for it to resolve (playLibraryTrack is async
+        // and fetches the canonical DB row before setting currentTrack) — so
+        // currentTrack.id is reliably set before we fetch the radio queue. A
+        // fixed setTimeout raced this and often fired before the id existed,
+        // leaving the queue empty until the song ended.
+        await playLibraryTrack({
             id: random.track.id,
             title: random.track.title,
             file_path: random.track.file_path,
@@ -4751,12 +4799,17 @@ async function playArtistRadio() {
             album_id: random.album.id,
         }, random.album.title || '', artistName);
 
-        // Enable radio mode after track starts loading
-        setTimeout(() => {
+        // Enable radio mode + immediately seed the queue with similar tracks —
+        // same path the modal's Radio button uses (fetchIfNeeded also adds the
+        // current track to the queue first).
+        if (typeof npSetPlayContext === 'function') {
+            npSetPlayContext(`${artistName || 'Artist'} Radio`);
+        }
+        if (typeof npSetRadioMode === 'function') {
+            npSetRadioMode(true, { toast: false, fetchIfNeeded: true });
+        } else {
             npRadioMode = true;
-            const radioBtn = document.querySelector('.np-radio-btn');
-            if (radioBtn) radioBtn.classList.add('active');
-        }, 1000);
+        }
 
         showToast(`Playing ${artistName} radio — similar tracks will auto-queue`, 'success');
     } catch (e) {

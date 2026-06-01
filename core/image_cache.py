@@ -172,11 +172,14 @@ class ImageCache:
                 raise ImageCacheError(f"Upstream response is not an image: {mime_type}")
 
             declared_size = response.headers.get("Content-Length")
+            expected_bytes = None
             try:
-                if declared_size and int(declared_size) > self.max_download_bytes:
-                    raise ImageCacheError("Image exceeds configured size limit")
+                if declared_size:
+                    expected_bytes = int(declared_size)
+                    if expected_bytes > self.max_download_bytes:
+                        raise ImageCacheError("Image exceeds configured size limit")
             except ValueError:
-                pass
+                expected_bytes = None
 
             ext = mimetypes.guess_extension(mime_type) or ".img"
             if ext == ".jpe":
@@ -204,6 +207,22 @@ class ImageCache:
 
             if total <= 0:
                 raise ImageCacheError("Image response was empty")
+
+            # Truncation guard (#750): a dropped/short connection makes
+            # iter_content end early WITHOUT raising, so a partial image would
+            # otherwise be committed as status='ok' and cached permanently —
+            # rendering as a half-decoded cover (top strip, rest grey). If the
+            # server declared a Content-Length and we got fewer bytes, treat it
+            # as a failed download: discard the tmp file and don't cache it, so
+            # the next request retries fresh instead of serving a broken file.
+            if expected_bytes is not None and total < expected_bytes:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    logger.debug("image_cache tmp cleanup failed: %s", cleanup_exc)
+                raise ImageCacheError(
+                    f"Truncated image download: got {total} of {expected_bytes} bytes"
+                )
 
             os.replace(tmp_path, path)
             expires_at = now + self.ttl_seconds
