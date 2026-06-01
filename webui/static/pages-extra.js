@@ -2193,6 +2193,85 @@ function _getBatchColor(batchId) {
     return _batchColorMap[batchId];
 }
 
+// Per-batch progress samples for a client-side ETA (no backend timing needed
+// for Phase A). batch_id -> [{t: ms, done: int}], capped to the recent window.
+const _adlRateSamples = {};
+const _ADL_RATE_WINDOW = 8;
+
+function _adlSampleRate(batchId, done) {
+    const arr = _adlRateSamples[batchId] || (_adlRateSamples[batchId] = []);
+    const now = Date.now();
+    const last = arr[arr.length - 1];
+    if (!last || last.done !== done) arr.push({ t: now, done });
+    while (arr.length > _ADL_RATE_WINDOW) arr.shift();
+    // tracks/sec over the sampled window
+    if (arr.length < 2) return 0;
+    const first = arr[0];
+    const dt = (arr[arr.length - 1].t - first.t) / 1000;
+    const dd = arr[arr.length - 1].done - first.done;
+    return dt > 0 && dd > 0 ? dd / dt : 0;
+}
+
+function _adlFmtDuration(sec) {
+    if (!sec || sec < 0 || !isFinite(sec)) return '';
+    if (sec < 60) return `${Math.round(sec)}s`;
+    if (sec < 3600) return `${Math.round(sec / 60)}m`;
+    return `${Math.floor(sec / 3600)}h ${Math.round((sec % 3600) / 60)}m`;
+}
+
+// ETA string for a batch's stat line. Album bundles use the downloader's own
+// speed/size; track batches use the client-side completion rate.
+function _adlBatchEta(batch) {
+    if (batch.phase === 'album_downloading') {
+        const ab = batch.album_bundle || {};
+        const bits = [];
+        if (ab.speed) bits.push(ab.speed);
+        if (ab.downloaded && ab.size) bits.push(`${ab.downloaded} / ${ab.size}`);
+        return bits.join(' · ');
+    }
+    if (batch.phase !== 'downloading') return '';
+    const total = batch.total || 0;
+    const done = (batch.completed || 0) + (batch.failed || 0);
+    const remaining = total - done;
+    if (remaining <= 0) return '';
+    const rate = _adlSampleRate(batch.batch_id, done);  // tracks/sec
+    if (rate <= 0) return '';
+    return `~${_adlFmtDuration(remaining / rate)} left`;
+}
+
+// Glanceable aggregate strip atop the panel: batches · downloading · queued ·
+// speed · ETA. Hidden when nothing is active.
+function _adlRenderBatchSummary(activeBatches) {
+    const el = document.getElementById('adl-batch-summary');
+    if (!el) return;
+    if (!activeBatches.length) { el.style.display = 'none'; return; }
+
+    let downloading = 0, queued = 0, remaining = 0, rate = 0, bundleSpeed = '';
+    for (const b of activeBatches) {
+        downloading += (b.active || 0);
+        queued += (b.queued || 0);
+        if (b.phase === 'downloading') {
+            const done = (b.completed || 0) + (b.failed || 0);
+            remaining += Math.max(0, (b.total || 0) - done);
+            rate += _adlSampleRate(b.batch_id, done);
+        }
+        if (b.phase === 'album_downloading' && b.album_bundle && b.album_bundle.speed && !bundleSpeed) {
+            bundleSpeed = b.album_bundle.speed;
+        }
+    }
+
+    const parts = [`${activeBatches.length} batch${activeBatches.length === 1 ? '' : 'es'}`];
+    if (downloading) parts.push(`${downloading} downloading`);
+    if (queued) parts.push(`${queued} queued`);
+    if (bundleSpeed) parts.push(_adlEsc(bundleSpeed));
+    const etaStr = (rate > 0 && remaining > 0) ? `~${_adlFmtDuration(remaining / rate)} left` : '';
+
+    el.style.display = '';
+    el.innerHTML =
+        `<span class="adl-batch-summary-main">${parts.join(' · ')}</span>` +
+        (etaStr ? `<span class="adl-batch-summary-eta">${etaStr}</span>` : '');
+}
+
 function loadActiveDownloadsPage() {
     _adlFetch();
     _adlFetchBatchHistory();
@@ -2553,17 +2632,27 @@ function _adlRenderBatchPanel() {
         return elapsed < _BATCH_FADE_SECONDS;
     });
 
+    const activeBatches = visibleBatches.filter(b => b.phase !== 'complete' && b.phase !== 'cancelled' && b.phase !== 'error');
+
     // Update header with count
     if (headerTitle) {
-        const activeCount = visibleBatches.filter(b => b.phase !== 'complete' && b.phase !== 'cancelled' && b.phase !== 'error').length;
-        headerTitle.textContent = activeCount > 0 ? `Batches (${activeCount})` : 'Batches';
+        headerTitle.textContent = activeBatches.length > 0 ? `Batches (${activeBatches.length})` : 'Batches';
     }
+
+    _adlRenderBatchSummary(activeBatches);
 
     if (visibleBatches.length === 0) {
         container.innerHTML = `<div class="adl-batch-empty">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" style="opacity:0.25;margin-bottom:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            <div>No active batches</div>
-            <div style="font-size:0.7rem;margin-top:2px;opacity:0.5">Start a download from Search, Sync, or Wishlist</div>
+            <div class="adl-batch-empty-icon">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <div class="adl-batch-empty-title">Nothing downloading</div>
+            <div class="adl-batch-empty-sub">Batches show up here as they run.</div>
+            <div class="adl-batch-empty-links">
+                <a href="#" onclick="event.preventDefault(); navigateToPage('search')">Search</a>
+                <a href="#" onclick="event.preventDefault(); navigateToPage('sync')">Sync</a>
+                <a href="#" onclick="event.preventDefault(); navigateToPage('wishlist')">Wishlist</a>
+            </div>
         </div>`;
         return;
     }
@@ -2687,12 +2776,42 @@ function _adlRenderBatchPanel() {
             }
         }
 
-        const cardClasses = ['adl-batch-card'];
+        const cardClasses = ['adl-batch-card', `phase-${batch.phase}`];
         if (isExpanded) cardClasses.push('expanded');
         if (isActive) cardClasses.push('active-glow');
         if (isFiltered) cardClasses.push('filtered');
 
         const playlistId = _adlEsc(batch.playlist_id || '');
+
+        // Segmented progress: done (green) / failed (red) / active (accent) of
+        // total; the remaining width is the dim bar background (queued).
+        let segDone = 0, segFail = 0, segActive = 0;
+        if (batch.phase === 'album_downloading') {
+            segActive = bundleProgress;  // one release downloading
+        } else {
+            segDone = Math.max(0, Math.min(100, (batch.completed / total) * 100));
+            segFail = Math.max(0, Math.min(100 - segDone, (batch.failed / total) * 100));
+            segActive = Math.max(0, Math.min(100 - segDone - segFail, ((batch.active || 0) / total) * 100));
+        }
+
+        // "Now downloading" — the live track on active batches.
+        const nowTrack = isActive
+            ? (batchTracks.find(t => t.status === 'downloading') || batchTracks.find(t => t.status === 'searching'))
+            : null;
+        const nowHtml = (nowTrack && nowTrack.title)
+            ? `<div class="adl-batch-card-now"><span class="adl-batch-now-icon">↓</span> ${_adlEsc(nowTrack.title)}</div>`
+            : '';
+
+        // Stat chips + ETA line.
+        const chips = [];
+        if (batch.completed) chips.push(`<span class="adl-chip adl-chip-done">✓ ${batch.completed}</span>`);
+        if (batch.failed) chips.push(`<span class="adl-chip adl-chip-fail">✗ ${batch.failed}</span>`);
+        if (batch.active) chips.push(`<span class="adl-chip adl-chip-active">↓ ${batch.active}</span>`);
+        if (batch.queued) chips.push(`<span class="adl-chip adl-chip-queued">${batch.queued} queued</span>`);
+        const etaText = _adlBatchEta(batch);
+        const statLine = (chips.length || etaText)
+            ? `<div class="adl-batch-statline"><div class="adl-batch-chips">${chips.join('')}</div>${etaText ? `<span class="adl-batch-eta">${_adlEsc(etaText)}</span>` : ''}</div>`
+            : '';
 
         html += `<div class="${cardClasses.join(' ')}" style="${colorStyle}${fadeStyle}" data-batch-id="${batch.batch_id}" onclick="_adlToggleBatch('${batch.batch_id}')">
             <div class="adl-batch-card-top">
@@ -2700,6 +2819,7 @@ function _adlRenderBatchPanel() {
                 <div class="adl-batch-card-info">
                     <div class="adl-batch-card-name adl-batch-card-link" onclick="event.stopPropagation(); _adlOpenBatchModal('${batch.batch_id}', '${playlistId}', '${_adlEsc(batch.batch_name || 'Download')}')" title="Open download modal">${_adlEsc(batch.batch_name || 'Download')}</div>
                     <div class="adl-batch-card-meta">${phaseIcon}${phaseText}</div>
+                    ${nowHtml}
                 </div>
                 ${sourceBadge}
                 <div class="adl-batch-card-actions">
@@ -2709,11 +2829,17 @@ function _adlRenderBatchPanel() {
                     ${!isTerminal ? `<button class="adl-batch-card-cancel" onclick="event.stopPropagation(); _adlCancelBatch('${batch.batch_id}')" title="Cancel batch">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>` : ''}
+                    <span class="adl-batch-card-chevron" aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </span>
                 </div>
             </div>
-            <div class="adl-batch-progress">
-                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${pct}%"></div>
+            <div class="adl-batch-segbar">
+                <div class="adl-batch-seg seg-done" style="width:${segDone}%"></div>
+                <div class="adl-batch-seg seg-fail" style="width:${segFail}%"></div>
+                <div class="adl-batch-seg seg-active${isActive ? ' shimmer' : ''}" style="width:${segActive}%"></div>
             </div>
+            ${statLine}
             <div class="adl-batch-tracks">${tracksHtml}</div>
         </div>`;
     }

@@ -59147,6 +59147,85 @@ body.reduce-effects *::after {
     background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.7), #ef4444);
 }
 
+/* ── Batches panel: Phase-A upgrade ─────────────────────────────────────── */
+
+/* Glanceable aggregate strip */
+.adl-batch-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 11px; margin: 0 0 8px;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    border-radius: 9px;
+    font-size: 0.72rem;
+}
+.adl-batch-summary-main { color: rgba(255, 255, 255, 0.85); font-weight: 600; letter-spacing: 0.01em; }
+.adl-batch-summary-eta { color: rgb(var(--accent-rgb)); font-weight: 700; white-space: nowrap; }
+
+/* Segmented progress bar */
+.adl-batch-segbar {
+    display: flex; height: 4px; margin-top: 9px; border-radius: 3px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.07);
+}
+.adl-batch-seg { height: 100%; transition: width 0.4s ease; }
+.adl-batch-seg.seg-done { background: #22c55e; }
+.adl-batch-seg.seg-fail { background: #ef4444; }
+.adl-batch-seg.seg-active { background: rgba(var(--accent-rgb), 0.85); }
+.adl-batch-seg.seg-active.shimmer {
+    background-image: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.55) 0%, rgba(var(--accent-rgb), 1) 50%, rgba(var(--accent-rgb), 0.55) 100%);
+    background-size: 200% 100%;
+    animation: adlSegShimmer 1.4s linear infinite;
+}
+@keyframes adlSegShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Stat chips + ETA */
+.adl-batch-statline {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px;
+}
+.adl-batch-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.adl-chip {
+    font-size: 0.64rem; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid currentColor; line-height: 1.5; white-space: nowrap;
+}
+.adl-chip-done { color: #22c55e; }
+.adl-chip-fail { color: #ef4444; }
+.adl-chip-active { color: rgb(var(--accent-rgb)); }
+.adl-chip-queued { color: rgba(255, 255, 255, 0.4); }
+.adl-batch-eta { font-size: 0.66rem; color: rgba(255, 255, 255, 0.55); white-space: nowrap; }
+
+/* "Now downloading" line */
+.adl-batch-card-now {
+    display: flex; align-items: center; gap: 4px; margin-top: 3px;
+    font-size: 0.68rem; color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.adl-batch-now-icon { color: rgb(var(--accent-rgb)); font-weight: 700; }
+
+/* Expand chevron affordance */
+.adl-batch-card-chevron {
+    display: inline-flex; align-items: center; color: rgba(255, 255, 255, 0.3);
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+.adl-batch-card:hover .adl-batch-card-chevron { color: rgba(255, 255, 255, 0.55); }
+.adl-batch-card.expanded .adl-batch-card-chevron { transform: rotate(180deg); }
+
+/* Phase tints — subtle whole-card cue */
+.adl-batch-card.phase-complete { opacity: 0.82; }
+.adl-batch-card.phase-error,
+.adl-batch-card.phase-cancelled { opacity: 0.7; }
+
+/* Polished empty state */
+.adl-batch-empty-icon { color: rgb(var(--accent-rgb)); opacity: 0.4; margin-bottom: 8px; }
+.adl-batch-empty-title { font-size: 0.82rem; font-weight: 600; color: rgba(255, 255, 255, 0.7); }
+.adl-batch-empty-sub { font-size: 0.7rem; margin-top: 3px; color: rgba(255, 255, 255, 0.4); }
+.adl-batch-empty-links { display: flex; gap: 12px; justify-content: center; margin-top: 12px; }
+.adl-batch-empty-links a {
+    font-size: 0.72rem; font-weight: 600; color: rgb(var(--accent-rgb)); text-decoration: none;
+    padding: 4px 10px; border: 1px solid rgba(var(--accent-rgb), 0.3); border-radius: 8px;
+    transition: background 0.15s ease;
+}
+.adl-batch-empty-links a:hover { background: rgba(var(--accent-rgb), 0.12); }
+
 /* Expanded tracks list */
 .adl-batch-tracks {
     display: none;
