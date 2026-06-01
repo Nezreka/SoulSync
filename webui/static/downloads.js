@@ -3449,7 +3449,7 @@ function showQuarantineChooser({ entryId, taskId, reason, trackName }) {
     requestAnimationFrame(() => overlay.classList.add('visible'));
 
     const acceptBtn = overlay.querySelector('#qc-accept-btn');
-    if (acceptBtn) acceptBtn.addEventListener('click', () => acceptQuarantineFromChooser(acceptBtn, entryId));
+    if (acceptBtn) acceptBtn.addEventListener('click', () => acceptQuarantineFromChooser(acceptBtn, entryId, taskId));
     const searchBtn = overlay.querySelector('#qc-search-btn');
     if (searchBtn) searchBtn.addEventListener('click', () => {
         closeQuarantineChooser();
@@ -3457,7 +3457,7 @@ function showQuarantineChooser({ entryId, taskId, reason, trackName }) {
     });
 }
 
-async function acceptQuarantineFromChooser(button, entryId) {
+async function acceptQuarantineFromChooser(button, entryId, taskId) {
     if (!entryId) { showToast('Cannot accept — missing quarantine id.', 'error'); return; }
     const confirmed = await showConfirmDialog({
         title: 'Accept Quarantined File',
@@ -3473,7 +3473,11 @@ async function acceptQuarantineFromChooser(button, entryId) {
     // Release the preview stream first so the file isn't locked during the move.
     await _qcReleaseAudio();
     try {
-        const resp = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const resp = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: taskId || '' }),
+        });
         const data = await resp.json();
         if (data.success) {
             showToast('Accepted. Re-running post-processing.', 'success');
@@ -3770,6 +3774,14 @@ function processModalStatusUpdate(playlistId, data) {
                 statusEl.classList.remove('has-error-tooltip');
                 statusEl.removeAttribute('title');
                 statusEl.removeAttribute('data-error-msg');
+                // Clear clickable/quarantine state each render; the failure
+                // branch below re-adds it when still applicable. Without this a
+                // task that flips failed/quarantined -> completed (e.g. after
+                // Accept & Import) keeps a stale chooser on the cell.
+                statusEl.classList.remove('has-candidates');
+                delete statusEl.dataset.quarantineEntryId;
+                delete statusEl.dataset.quarantineReason;
+                delete statusEl.dataset.quarantineTrack;
                 statusEl.textContent = statusText;
 
                 if ((task.status === 'failed' || task.status === 'cancelled' || task.status === 'not_found') && task.error_message) {
