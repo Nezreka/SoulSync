@@ -123,6 +123,18 @@ def test_itunes_art_returns_first_matching_album_image(monkeypatch):
     assert art_lookup._itunes_art("A", "B", {}) == "http://it/600.jpg"
 
 
+def test_itunes_art_upgrades_to_max_resolution(monkeypatch):
+    import core.metadata.registry as registry
+    client = MagicMock()
+    client.search_albums.return_value = [
+        SimpleNamespace(name="GNX", artists=["Kendrick Lamar"],
+                        image_url="https://is1.mzstatic.com/image/source/600x600bb.jpg")]
+    monkeypatch.setattr(registry, "get_itunes_client", lambda *a, **k: client)
+    # The 600x600 default is bumped to the max so iTunes contributes big art.
+    assert art_lookup._itunes_art("Kendrick Lamar", "GNX", {}) == \
+        "https://is1.mzstatic.com/image/source/3000x3000bb.jpg"
+
+
 def test_audiodb_art_extracts_thumb(monkeypatch):
     import core.audiodb_client as adb
     fake = MagicMock()

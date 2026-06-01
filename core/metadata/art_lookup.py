@@ -188,7 +188,9 @@ def _itunes_art(artist: str, album: str, metadata: dict) -> Optional[str]:
             continue
         got_album, got_artist = _result_album_artist(alb)
         if _album_matches(artist, album, got_artist, got_album):
-            return url
+            # iTunes serves any size via the WxH segment — request the max so
+            # iTunes contributes high-res art, not the 600px default.
+            return re.sub(r"/\d+x\d+bb\.", "/3000x3000bb.", url)
     return None
 
 
@@ -232,6 +234,7 @@ def select_preferred_art_url(
     album: Optional[str],
     metadata: Optional[dict],
     configured_order,
+    validate: Optional[Callable[[str, str], bool]] = None,
 ) -> Optional[str]:
     """Pick a cover-art URL from the user's configured source order, or None.
 
@@ -240,6 +243,12 @@ def select_preferred_art_url(
     the cover you'd get today. This is the single entry point the art pipeline
     calls; it's a no-op (returns ``None`` immediately) unless ``album_art_order``
     is an explicit non-empty list, which keeps every existing install untouched.
+
+    ``validate(source, url)`` is an optional gate forwarded to the resolver — the
+    art pipeline passes one that fetches the candidate and rejects images below a
+    minimum resolution, so a too-small cover (e.g. a low-res Cover Art Archive
+    upload) is skipped and the next source is tried instead of winning by
+    priority alone.
     """
     if not isinstance(configured_order, (list, tuple)) or not configured_order:
         return None
@@ -248,7 +257,7 @@ def select_preferred_art_url(
     if not order:
         return None
     lookup = build_art_lookup(artist or "", album or "", metadata or {})
-    url, _src = resolve_cover_art(order, lookup)
+    url, _src = resolve_cover_art(order, lookup, validate=validate)
     return url
 
 
