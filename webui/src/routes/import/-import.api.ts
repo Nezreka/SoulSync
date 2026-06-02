@@ -18,6 +18,15 @@ import type {
 
 export const IMPORT_QUERY_KEY = ['import'] as const;
 
+// Per-track import does heavy synchronous enrichment server-side (metadata
+// lookups, art, lyrics) and can legitimately take 60-90s/track — much longer
+// when external sources are degraded. ky's default 10s timeout aborts those
+// requests client-side even though the server completes the import (200),
+// which left the progress bar stuck at 0 and showing "Failed" while files
+// imported fine (#772). Give the import-process calls a generous bound so the
+// responses actually arrive and the bar advances. Scoped to import only.
+const IMPORT_REQUEST_TIMEOUT_MS = 300_000;  // 5 min/track
+
 export async function fetchImportStagingFiles(): Promise<ImportStagingFilesPayload> {
   return readJson<ImportStagingFilesPayload>(apiClient.get('import/staging/files'));
 }
@@ -71,6 +80,7 @@ export async function processImportAlbumTrack(input: {
         album: input.album,
         matches: [input.match],
       },
+      timeout: IMPORT_REQUEST_TIMEOUT_MS,
     }),
   );
 }
@@ -92,6 +102,7 @@ export async function processImportSingleFile(file: unknown): Promise<ImportProc
       json: {
         files: [file],
       },
+      timeout: IMPORT_REQUEST_TIMEOUT_MS,
     }),
   );
 }
