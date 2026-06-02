@@ -6,6 +6,10 @@ import os
 from types import SimpleNamespace
 from typing import Any
 
+from core.metadata.art_preservation import (
+    restore_embedded_art,
+    snapshot_embedded_art,
+)
 from core.metadata.artwork import embed_album_art_metadata
 from core.metadata.common import (
     get_config_manager,
@@ -76,12 +80,21 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
     file_lock = get_file_lock(file_path)
     with file_lock:
         logger.info("Enhancing metadata for: %s", os.path.basename(file_path))
+        art_snapshot = []  # defined up front so the except handler can restore
+        audio_file = None
         try:
             strip_all_non_audio_tags(file_path)
             audio_file = symbols.File(file_path)
             if audio_file is None:
                 logger.error("Could not load audio file with Mutagen: %s", file_path)
                 return False
+
+            # Capture any embedded cover art BEFORE we clear it. The rewrite
+            # below clears pictures/tags up front, but new art isn't fetched
+            # until much later (and may fail / be unavailable / be disabled).
+            # Without this snapshot, every such failure saves the file with
+            # the art destroyed and nothing put back — issue #764.
+            art_snapshot = snapshot_embedded_art(audio_file, symbols)
 
             if hasattr(audio_file, "clear_pictures"):
                 audio_file.clear_pictures()
@@ -99,6 +112,9 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             metadata = extract_source_metadata(context, artist, album_info)
             if not metadata:
                 logger.error("Could not extract source metadata, saving with cleared tags.")
+                # Don't destroy the original art just because we couldn't
+                # enrich the tags — put it back before saving.
+                restore_embedded_art(audio_file, symbols, art_snapshot)
                 save_audio_file(audio_file, symbols)
                 return True
 
@@ -202,6 +218,13 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 elif isinstance(audio_file, symbols.MP4):
                     audio_file["----:com.apple.iTunes:QUALITY"] = [symbols.MP4FreeForm(quality.encode("utf-8"))]
 
+            # If art embedding was skipped/disabled or produced nothing (no
+            # URL, download failed, rejected by the min-resolution guard),
+            # the file still has the pictures we cleared above. Restore the
+            # original so import never strips existing art (#764). No-op when
+            # new art was embedded — that path is unchanged.
+            restore_embedded_art(audio_file, symbols, art_snapshot)
+
             save_audio_file(audio_file, symbols)
 
             verified = verify_metadata_written(file_path)
@@ -219,4 +242,18 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             logger.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
             logger.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
             logger.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
+            # We cleared the file's art early; if the rewrite then crashed
+            # before re-embedding, the on-disk file (already saved cleared at
+            # the start) would be left art-less. Best-effort: put the original
+            # art back and persist it so a mid-enrichment crash never destroys
+            # the cover (#764). Guarded so a failure here can't mask the
+            # original error.
+            try:
+                if audio_file is not None and art_snapshot and restore_embedded_art(
+                    audio_file, symbols, art_snapshot
+                ):
+                    save_audio_file(audio_file, symbols)
+                    logger.info("Restored original cover art after enrichment error.")
+            except Exception as restore_exc:
+                logger.debug("Art restore after error failed: %s", restore_exc)
             return False
