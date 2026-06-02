@@ -100,6 +100,9 @@ class RepairJob(ABC):
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}
+    # Optional {setting_key: [allowed values]} — the UI renders a dropdown for
+    # these instead of a free-text box. Keys not listed render by value type.
+    setting_options: Dict[str, list] = {}
     auto_fix: bool = False
 
     @abstractmethod

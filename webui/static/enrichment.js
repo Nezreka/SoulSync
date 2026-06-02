@@ -1705,6 +1705,18 @@ async function loadRepairJobs() {
                         return `<div class="repair-setting-section">${val}</div>`;
                     }
                     const label = _prettifyRepairSettingKey(key);
+                    // Dropdown when the job declares allowed values for this key.
+                    const opts = job.setting_options && job.setting_options[key];
+                    if (Array.isArray(opts) && opts.length) {
+                        const optionsHtml = opts.map(o =>
+                            `<option value="${o}"${o === val ? ' selected' : ''}>${_prettifyRepairSettingKey(String(o))}</option>`
+                        ).join('');
+                        return `<div class="repair-setting-row">
+                            <label>${label}</label>
+                            <select class="repair-setting-input"
+                                    data-job="${job.job_id}" data-key="${key}">${optionsHtml}</select>
+                        </div>`;
+                    }
                     const inputType = typeof val === 'boolean' ? 'checkbox' :
                         typeof val === 'number' ? 'number' : 'text';
                     const inputVal = inputType === 'checkbox' ?
