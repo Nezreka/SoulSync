@@ -956,6 +956,21 @@ class MusicDatabase:
             if album_cols and 'api_track_count' not in album_cols:
                 cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
                 logger.info("Repaired missing api_track_count column on albums table")
+
+            # Canonical album version (#765 / #767-Bug2). Additive + nullable:
+            # a NULL canonical means "unresolved" and every tool falls back to
+            # today's behavior, so this is safe to ship dormant. Columns are
+            # populated/consumed in later stages.
+            _canonical_cols = {
+                'canonical_source': 'TEXT DEFAULT NULL',
+                'canonical_album_id': 'TEXT DEFAULT NULL',
+                'canonical_score': 'REAL DEFAULT NULL',
+                'canonical_resolved_at': 'TIMESTAMP DEFAULT NULL',
+            }
+            for _col, _typedef in _canonical_cols.items():
+                if album_cols and _col not in album_cols:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
+                    logger.info("Added %s column to albums table (canonical version)", _col)
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
 
