@@ -571,6 +571,7 @@ class MusicDatabase:
 
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
+            self._add_mirrored_playlist_organize_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -969,6 +970,19 @@ class MusicDatabase:
                 logger.info("Added explored_at column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding explored_at column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_organize_column(self, cursor):
+        """Add organize_by_playlist preference for playlist-folder downloads."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'organize_by_playlist' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN organize_by_playlist INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added organize_by_playlist column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -12171,7 +12185,11 @@ class MusicDatabase:
                     WHERE profile_id = ?
                     ORDER BY updated_at DESC
                 """, (profile_id,))
-                return [dict(row) for row in cursor.fetchall()]
+                return [
+                    self._normalize_mirrored_playlist_row(row)
+                    for row in cursor.fetchall()
+                    if row
+                ]
         except Exception as e:
             logger.error(f"Error getting mirrored playlists: {e}")
             return []
@@ -12198,10 +12216,79 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM mirrored_playlists WHERE id = ?", (playlist_id,))
                 row = cursor.fetchone()
-                return dict(row) if row else None
+                return self._normalize_mirrored_playlist_row(row)
         except Exception as e:
             logger.error(f"Error getting mirrored playlist: {e}")
             return None
+
+    @staticmethod
+    def _normalize_mirrored_playlist_row(row) -> Optional[Dict]:
+        if not row:
+            return None
+        pl = dict(row)
+        pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        return pl
+
+    def get_mirrored_playlist_by_source(
+        self,
+        source: str,
+        source_playlist_id: str,
+        profile_id: int = 1,
+    ) -> Optional[Dict]:
+        """Return a mirrored playlist by upstream source id."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM mirrored_playlists
+                    WHERE source = ? AND source_playlist_id = ? AND profile_id = ?
+                    """,
+                    (source, str(source_playlist_id), profile_id),
+                )
+                row = cursor.fetchone()
+                return self._normalize_mirrored_playlist_row(row)
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlist by source: {e}")
+            return None
+
+    def resolve_mirrored_playlist(
+        self,
+        playlist_ref: Any,
+        profile_id: int = 1,
+        *,
+        default_source: str = 'spotify',
+    ) -> Optional[Dict]:
+        """Resolve a mirrored playlist from numeric id or upstream source id."""
+        if playlist_ref is None or playlist_ref == '':
+            return None
+        ref = str(playlist_ref).strip()
+        if ref.isdigit():
+            return self.get_mirrored_playlist(int(ref))
+        return self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
+
+    def set_mirrored_playlist_organize_by_playlist(
+        self,
+        playlist_id: int,
+        enabled: bool,
+    ) -> bool:
+        """Persist whether downloads for this playlist use playlist-folder layout."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE mirrored_playlists
+                    SET organize_by_playlist = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (1 if enabled else 0, playlist_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:
         """Return all tracks for a mirrored playlist ordered by position."""

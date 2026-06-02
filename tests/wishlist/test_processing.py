@@ -177,6 +177,22 @@ def test_build_wishlist_source_context_minimal_batch_skips_album_provenance():
     assert "artist_context" not in context
 
 
+def test_build_wishlist_source_context_uses_source_playlist_ref_for_organize_batches():
+    batch = {
+        "playlist_name": "Summer Mix",
+        "playlist_id": "42",
+        "source_playlist_ref": "spotifyPlaylistId123",
+        "mirrored_playlist_id": 42,
+        "organize_by_playlist": True,
+    }
+
+    context = processing.build_wishlist_source_context(batch)
+
+    assert context["playlist_id"] == "spotifyPlaylistId123"
+    assert context["mirrored_playlist_id"] == 42
+    assert context["organize_by_playlist"] is True
+
+
 def test_build_wishlist_source_context_preserves_album_context_for_album_batches():
     """Album batches must carry album_context/artist_context through to the
     wishlist row so a later requeue has authoritative routing data instead

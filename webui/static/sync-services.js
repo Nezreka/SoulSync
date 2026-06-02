@@ -2438,6 +2438,11 @@ async function loadDeezerArlPlaylists() {
             throw new Error(error.error || 'Failed to fetch Deezer playlists');
         }
         deezerArlPlaylists = await response.json();
+        if (typeof invalidatePlaylistTrackCache === 'function') {
+            invalidatePlaylistTrackCache();
+        } else {
+            playlistTrackCache = {};
+        }
         renderDeezerArlPlaylists();
         deezerArlPlaylistsLoaded = true;
 
@@ -2525,25 +2530,25 @@ async function openDeezerArlPlaylistDetailsModal(event, playlistId) {
     showLoadingOverlay(`Loading playlist: ${playlist.name}...`);
 
     try {
-        if (playlistTrackCache[arlPlaylistId]) {
+        const playlistMeta = { ...playlist, track_count: playlist.track_count ?? playlist.tracks?.length };
+        const cacheStale = typeof playlistTrackCacheIsStale === 'function'
+            && playlistTrackCacheIsStale(arlPlaylistId, playlistMeta);
+        if (playlistTrackCache[arlPlaylistId] && !cacheStale) {
             const fullPlaylist = { ...playlist, id: arlPlaylistId, tracks: playlistTrackCache[arlPlaylistId] };
             showDeezerArlPlaylistDetailsModal(fullPlaylist, playlistId);
         } else {
-            const response = await fetch(`/api/deezer/arl-playlist/${playlistId}`);
-            const fullPlaylist = await response.json();
-            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
-
-            playlistTrackCache[arlPlaylistId] = fullPlaylist.tracks;
-
-            // Auto-mirror
-            mirrorPlaylist('deezer', playlistId, fullPlaylist.name, fullPlaylist.tracks.map(t => ({
-                track_name: t.name,
-                artist_name: (t.artists && t.artists[0]) ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0]) : '',
-                album_name: t.album ? (typeof t.album === 'object' ? t.album.name : t.album) : '',
-                duration_ms: t.duration_ms || 0,
-                source_track_id: t.id || ''
-            })), { description: fullPlaylist.description, owner: fullPlaylist.owner, image_url: fullPlaylist.image_url });
-
+            if (cacheStale && typeof invalidatePlaylistTrackCache === 'function') {
+                invalidatePlaylistTrackCache(arlPlaylistId);
+            }
+            const fullPlaylist = typeof fetchAndCacheDeezerArlPlaylistTracks === 'function'
+                ? await fetchAndCacheDeezerArlPlaylistTracks(arlPlaylistId, playlistId)
+                : await (async () => {
+                    const response = await fetch(`/api/deezer/arl-playlist/${playlistId}`);
+                    const data = await response.json();
+                    if (data.error) throw new Error(data.error);
+                    playlistTrackCache[arlPlaylistId] = data.tracks;
+                    return data;
+                })();
             showDeezerArlPlaylistDetailsModal({ ...fullPlaylist, id: arlPlaylistId }, playlistId);
         }
     } catch (error) {
@@ -2608,15 +2613,20 @@ function showDeezerArlPlaylistDetailsModal(playlist, originalDeezerPlaylistId) {
             </div>
 
             <div class="playlist-modal-footer">
-                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeDeezerArlPlaylistDetailsModal()">Close</button>
-                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')">
-                    ${hasCompletedProcess ? '📊 View Download Results' : '📥 Download Missing Tracks'}
-                </button>
-                <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)" ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>
-                    <option value="replace" selected>Replace</option>
-                    <option value="append">Append only</option>
-                </select>
-                <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''} ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
+                <div class="playlist-modal-footer-left">
+                    ${typeof playlistOrganizeToggleHtml === 'function' ? playlistOrganizeToggleHtml(playlistId, 'deezer') : ''}
+                </div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeDeezerArlPlaylistDetailsModal()">Close</button>
+                    ${typeof playlistModalDownloadSyncFooterHtml === 'function'
+                        ? playlistModalDownloadSyncFooterHtml(playlistId, {
+                            hasCompletedProcess,
+                            isSyncing,
+                            source: 'deezer',
+                            closeBeforeDownload: true,
+                        })
+                        : `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')">📥 Download Missing Tracks</button>`}
+                </div>
             </div>
         </div>
     `;
@@ -2633,6 +2643,9 @@ function showDeezerArlPlaylistDetailsModal(playlist, originalDeezerPlaylistId) {
     }
 
     modal.style.display = 'flex';
+    if (typeof loadPlaylistOrganizePreferenceIntoModal === 'function') {
+        void loadPlaylistOrganizePreferenceIntoModal(playlistId, 'deezer');
+    }
 }
 
 function closeDeezerArlPlaylistDetailsModal() {

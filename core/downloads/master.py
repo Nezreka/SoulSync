@@ -343,6 +343,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         batch_is_album = False
         batch_profile_id = 1
         batch_source = 'spotify'
+        batch_playlist_folder_mode = False
+        batch_playlist_name = 'Unknown Playlist'
+        batch_playlist_id = playlist_id
+        batch_source_playlist_ref = ''
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
@@ -352,6 +356,29 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 batch_artist_context = download_batches[batch_id].get('artist_context')
                 batch_profile_id = download_batches[batch_id].get('profile_id', 1) or 1
                 batch_source = download_batches[batch_id].get('batch_source', 'spotify') or 'spotify'
+                batch_playlist_folder_mode = download_batches[batch_id].get('playlist_folder_mode', False)
+                batch_playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
+                batch_playlist_id = download_batches[batch_id].get('playlist_id', playlist_id)
+                batch_source_playlist_ref = (
+                    download_batches[batch_id].get('source_playlist_ref') or ''
+                ).strip()
+
+        from core.downloads.playlist_folder import (
+            resolve_playlist_folder_mode_for_batch,
+            track_exists_in_playlist_folder_from_track_data,
+        )
+        effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
+            db,
+            playlist_id=str(batch_playlist_id),
+            playlist_name=batch_playlist_name,
+            batch_playlist_folder_mode=batch_playlist_folder_mode,
+            profile_id=batch_profile_id,
+        )
+        if effective_playlist_folder_mode and not batch_playlist_folder_mode:
+            with tasks_lock:
+                if batch_id in download_batches:
+                    download_batches[batch_id]['playlist_folder_mode'] = True
+                    download_batches[batch_id]['playlist_name'] = effective_playlist_name
 
         if force_download_all:
             logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
@@ -444,6 +471,27 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     'match_reason': 'manual_library_match',
                 })
                 continue
+
+            if effective_playlist_folder_mode and not force_download_all:
+                if track_exists_in_playlist_folder_from_track_data(
+                    effective_playlist_name,
+                    track_data,
+                ):
+                    logger.info(
+                        f"[Playlist Folder] '{track_name}' already on disk in playlist folder — skipping download"
+                    )
+                    try:
+                        deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
+                    except Exception as _wl_err:
+                        logger.debug(f"[Playlist Folder] Wishlist removal attempt failed: {_wl_err}")
+                    analysis_results.append({
+                        'track_index': track_index,
+                        'track': track_data,
+                        'found': True,
+                        'confidence': 1.0,
+                        'match_reason': 'playlist_folder_file',
+                    })
+                    continue
 
             # Skip database check if force download is enabled
             if force_download_all:
@@ -982,13 +1030,45 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         logger.info(f"[Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
 
 
-                # Add playlist folder mode flag for sync page playlists
-                if batch_playlist_folder_mode:
+                # Add playlist folder mode flag for sync page playlists and wishlist
+                # tracks tied to a mirrored playlist with organize_by_playlist enabled.
+                task_pl_folder_mode = batch_playlist_folder_mode
+                task_pl_name = batch_playlist_name
+                if not task_pl_folder_mode and playlist_id == 'wishlist':
+                    wl_source = track_info.get('source_info') or {}
+                    if isinstance(wl_source, str):
+                        try:
+                            wl_source = json.loads(wl_source)
+                        except (json.JSONDecodeError, TypeError):
+                            wl_source = {}
+                    wl_pl_ref = wl_source.get('playlist_id')
+                    wl_pl_name = wl_source.get('playlist_name')
+                    if wl_pl_ref and hasattr(db, 'resolve_mirrored_playlist'):
+                        wl_mirrored = db.resolve_mirrored_playlist(
+                            wl_pl_ref,
+                            profile_id=batch_profile_id,
+                        )
+                        if wl_mirrored and wl_mirrored.get('organize_by_playlist'):
+                            task_pl_folder_mode = True
+                            task_pl_name = wl_pl_name or wl_mirrored.get('name') or batch_playlist_name
+                if task_pl_folder_mode:
                     track_info['_playlist_folder_mode'] = True
-                    track_info['_playlist_name'] = batch_playlist_name
-                    logger.info(f"[Task Creation] Added playlist folder mode for: {track_info.get('name')} → {batch_playlist_name}")
+                    track_info['_playlist_name'] = task_pl_name
+                    if batch_source_playlist_ref:
+                        track_info['source_info'] = {
+                            'playlist_id': batch_source_playlist_ref,
+                            'playlist_name': task_pl_name,
+                            'source': batch_source,
+                        }
+                    logger.info(
+                        f"[Task Creation] Added playlist folder mode for: "
+                        f"{track_info.get('name')} → {task_pl_name}"
+                    )
                 else:
-                    logger.debug(f"[Debug] Task Creation - playlist folder mode NOT enabled for: {track_info.get('name')}")
+                    logger.debug(
+                        f"[Debug] Task Creation - playlist folder mode NOT enabled for: "
+                        f"{track_info.get('name')}"
+                    )
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,

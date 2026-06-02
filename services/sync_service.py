@@ -357,8 +357,11 @@ class PlaylistSyncService:
 
             # Auto-add unmatched tracks to wishlist (skip in Wing It mode)
             wishlist_added_count = 0
-            if unmatched_tracks and getattr(self, '_skip_wishlist', False):
-                logger.info(f"[Wing It] Skipping wishlist for {len(unmatched_tracks)} unmatched tracks")
+            if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
+                logger.info(
+                    "Skipping sync-time wishlist for %s unmatched tracks (wing-it or organize-by-playlist)",
+                    len(unmatched_tracks),
+                )
                 unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
                 try:

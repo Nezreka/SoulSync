@@ -12088,6 +12088,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1.3;
 }
 
+.auto-sync-organize-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    user-select: none;
+}
+
+.auto-sync-organize-toggle input {
+    margin: 0;
+}
+
 .auto-sync-scheduled-timing {
     display: flex;
     flex-wrap: wrap;
@@ -18728,6 +18743,24 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .playlist-modal-footer-right {
     display: flex;
     gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.playlist-modal-organize-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    user-select: none;
+    max-width: 100%;
+}
+
+.playlist-modal-organize-toggle input {
+    margin: 0;
+    flex-shrink: 0;
 }
 
 .playlist-modal-btn {
