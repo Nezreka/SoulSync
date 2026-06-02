@@ -22,6 +22,32 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.canonical_version")
 
 
+def _pct(v) -> str:
+    return f"{round(v * 100)}%" if isinstance(v, (int, float)) else "n/a"
+
+
+def _describe_pin(resolved: dict) -> str:
+    """Human-readable, judge-able explanation of WHY this release was chosen."""
+    lines = [
+        f"Pin {resolved['source']} release {resolved['album_id']} "
+        f"(confidence {_pct(resolved.get('score'))}).",
+        f"Fit to your library: {resolved.get('file_track_count', '?')} files vs "
+        f"{resolved.get('release_track_count', '?')} tracks on this release — "
+        f"track count {_pct(resolved.get('count_fit'))}, "
+        f"durations {_pct(resolved.get('duration_fit'))}, "
+        f"titles {_pct(resolved.get('title_fit'))}.",
+    ]
+    others = [c for c in resolved.get('candidates', []) if c.get('source') != resolved.get('source')]
+    if others:
+        comp = ", ".join(
+            f"{c['source']} {_pct(c['score'])} ({c['track_count']} tk)" for c in others
+        )
+        lines.append(f"Beat: {comp}.")
+    elif len(resolved.get('candidates', [])) == 1:
+        lines.append("Only this source had a release linked for this album.")
+    return "\n".join(lines)
+
+
 @register_job
 class CanonicalVersionResolveJob(RepairJob):
     job_id = 'canonical_version_resolve'
@@ -133,6 +159,8 @@ class CanonicalVersionResolveJob(RepairJob):
             result.scanned += 1
             if resolved:
                 if dry_run and context.create_finding:
+                    artist = resolved.get('artist_name') or ''
+                    label = f"{artist} — {album_title}" if artist else (album_title or str(album_id))
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='canonical_version',
@@ -140,11 +168,8 @@ class CanonicalVersionResolveJob(RepairJob):
                         entity_type='album',
                         entity_id=str(album_id),
                         file_path=None,
-                        title=f'Would pin canonical: {album_title or album_id}',
-                        description=(
-                            f"Best-fit release: {resolved['source']} "
-                            f"({resolved['album_id']}), score {resolved['score']}"
-                        ),
+                        title=f'Pin {resolved["source"]} as canonical: {label}',
+                        description=_describe_pin(resolved),
                         details={'album_id': str(album_id), **resolved},
                     )
                     if inserted:

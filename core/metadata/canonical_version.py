@@ -145,6 +145,34 @@ def score_release_against_files(
     return _combine([(count, _W_COUNT), (dur, _W_DURATION), (title, _W_TITLE)])
 
 
+def score_release_detail(
+    file_tracks: List[Dict[str, Any]],
+    release_tracks: List[Dict[str, Any]],
+    *,
+    duration_tolerance_ms: int = _DEFAULT_DURATION_TOLERANCE_MS,
+) -> Dict[str, Any]:
+    """Like ``score_release_against_files`` but returns the per-signal breakdown
+    so a UI can show WHY a release scored the way it did. ``duration_fit`` /
+    ``title_fit`` are ``None`` when that signal was absent."""
+    if not file_tracks or not release_tracks:
+        return {
+            'score': 0.0, 'count_fit': 0.0, 'duration_fit': None, 'title_fit': None,
+            'release_track_count': len(release_tracks), 'file_track_count': len(file_tracks),
+        }
+    count = _count_fit(len(file_tracks), len(release_tracks))
+    dur = _duration_fit(file_tracks, release_tracks, duration_tolerance_ms)
+    title = _title_fit(file_tracks, release_tracks)
+    score = _combine([(count, _W_COUNT), (dur, _W_DURATION), (title, _W_TITLE)])
+    return {
+        'score': round(score, 4),
+        'count_fit': round(count, 3),
+        'duration_fit': round(dur, 3) if dur is not None else None,
+        'title_fit': round(title, 3) if title is not None else None,
+        'release_track_count': len(release_tracks),
+        'file_track_count': len(file_tracks),
+    }
+
+
 def pick_canonical_release(
     file_tracks: List[Dict[str, Any]],
     candidates: List[Dict[str, Any]],
