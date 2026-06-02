@@ -17,10 +17,10 @@ def _fetcher(table):
     return fetch
 
 
-def test_picks_source_whose_release_fits_the_files():
+def test_best_fit_mode_picks_best_regardless_of_priority():
     files = list(STD)  # user owns the 11-track standard
     table = {
-        ("spotify", "sp_deluxe"): DLX,     # spotify linked to deluxe (17)
+        ("spotify", "sp_deluxe"): DLX,     # spotify (primary) linked to deluxe (17)
         ("musicbrainz", "mb_std"): STD,    # musicbrainz has standard (11)
     }
     out = resolve_canonical_for_album(
@@ -28,10 +28,79 @@ def test_picks_source_whose_release_fits_the_files():
         file_tracks=files,
         fetch_tracklist=_fetcher(table),
         source_priority=PRIORITY,
+        mode="best_fit",
     )
-    # Best FIT wins over priority — standard matches the files, deluxe doesn't.
-    assert out == {"source": "musicbrainz", "album_id": "mb_std", "score": out["score"]}
+    # best_fit: standard matches the files, deluxe doesn't — fit beats priority.
+    assert out["source"] == "musicbrainz" and out["album_id"] == "mb_std"
     assert out["score"] > 0.9
+
+
+# ── source-selection modes ────────────────────────────────────────────────
+
+def test_active_preferred_uses_primary_when_it_fits():
+    files = list(STD)
+    table = {("spotify", "sp1"): STD, ("musicbrainz", "mb1"): STD}  # both fit
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp1", "musicbrainz": "mb1"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=PRIORITY,  # primary = spotify
+    )  # default mode = active_preferred
+    assert out["source"] == "spotify"
+
+
+def test_active_preferred_falls_back_when_primary_clearly_misfits():
+    files = list(STD)  # 11 tracks
+    table = {
+        ("spotify", "sp_bad"): [{"duration_ms": 60_000, "title": "X"}] * 3,  # 3-track, <floor
+        ("musicbrainz", "mb_std"): STD,
+    }
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_bad", "musicbrainz": "mb_std"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=PRIORITY, mode="active_preferred",
+    )
+    # primary spotify scores below floor -> fall back to the fitting source.
+    assert out["source"] == "musicbrainz"
+
+
+def test_active_preferred_keeps_primary_even_if_another_fits_better():
+    files = list(STD)
+    # primary spotify is a deluxe (decent fit, above floor); musicbrainz is exact.
+    table = {("spotify", "sp_dlx"): DLX, ("musicbrainz", "mb_std"): STD}
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_dlx", "musicbrainz": "mb_std"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=PRIORITY, mode="active_preferred",
+    )
+    # active_preferred respects the active source as long as it clears the floor,
+    # even though musicbrainz would fit better (use best_fit for that).
+    assert out["source"] == "spotify"
+
+
+def test_active_only_pins_primary_and_never_falls_back():
+    files = list(STD)
+    # primary spotify is below floor; a perfect musicbrainz exists but is ignored.
+    table = {
+        ("spotify", "sp_bad"): [{"duration_ms": 60_000, "title": "X"}] * 3,
+        ("musicbrainz", "mb_std"): STD,
+    }
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_bad", "musicbrainz": "mb_std"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=PRIORITY, mode="active_only",
+    )
+    assert out is None  # primary didn't fit, and active_only won't consider others
+
+
+def test_active_only_pins_primary_when_it_fits():
+    files = list(STD)
+    table = {("spotify", "sp1"): STD, ("musicbrainz", "mb1"): STD}
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp1", "musicbrainz": "mb1"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=PRIORITY, mode="active_only",
+    )
+    assert out["source"] == "spotify"
 
 
 def test_priority_breaks_tie_between_equal_fits():

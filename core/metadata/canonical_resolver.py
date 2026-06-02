@@ -17,7 +17,16 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from core.metadata.canonical_version import pick_canonical_release
+from core.metadata.canonical_version import (
+    pick_canonical_release,
+    score_release_against_files,
+)
+
+# Source-selection modes (a per-job setting). See resolve_canonical_for_album.
+MODE_ACTIVE_PREFERRED = "active_preferred"  # default: use the active source if it fits, else best-fit
+MODE_ACTIVE_ONLY = "active_only"            # only ever the active source
+MODE_BEST_FIT = "best_fit"                  # whichever source fits the files best
+VALID_MODES = (MODE_ACTIVE_PREFERRED, MODE_ACTIVE_ONLY, MODE_BEST_FIT)
 
 
 def resolve_canonical_for_album(
@@ -27,38 +36,68 @@ def resolve_canonical_for_album(
     fetch_tracklist: Callable[[str, str], Optional[List[Dict[str, Any]]]],
     source_priority: List[str],
     min_score: float = 0.5,
+    mode: str = MODE_ACTIVE_PREFERRED,
+    primary_source: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Pick the canonical release for one album.
+    """Pick the canonical release for one album, honoring the source-selection mode.
 
     ``album_source_ids``: ``{source: album_id}`` the album is linked to.
     ``file_tracks``: on-disk track metadata (``{duration_ms, title}``).
     ``fetch_tracklist(source, album_id)``: returns that release's tracklist (or
     None/[] on miss); injected so callers supply ``get_album_tracks_for_source``
     while tests supply a fake.
-    ``source_priority``: order to build candidates in — ties break toward the
-    earlier (higher-priority) source, keeping the choice deterministic.
+    ``source_priority``: source order; ties break toward the earlier source.
+    ``primary_source``: the user's active metadata source (defaults to the first
+    of ``source_priority``).
 
-    Returns ``{'source', 'album_id', 'score'}`` for the best fit, or ``None``
-    when there are no files, no resolvable candidates, or nothing clears
-    ``min_score`` (caller leaves the album unresolved → tools fall back)."""
+    Modes:
+      - ``active_preferred`` (default): use the active source's release when the
+        album has an ID for it AND it clears ``min_score``; otherwise fall back
+        to the best-fit among the remaining sources. So it normally respects the
+        user's configured source but self-heals when that link is clearly wrong.
+      - ``active_only``: only ever the active source (pinned if it clears the
+        floor; never considers other sources).
+      - ``best_fit``: whichever source's release best matches the files.
+
+    Returns ``{'source', 'album_id', 'score'}`` or ``None`` when there are no
+    files, no resolvable candidates, or nothing clears ``min_score``."""
     if not file_tracks:
         return None
+    primary = primary_source or (source_priority[0] if source_priority else None)
 
-    candidates: List[Dict[str, Any]] = []
-    for source in source_priority:
+    def _candidate(source: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not source:
+            return None
         album_id = album_source_ids.get(source)
         if not album_id:
-            continue
+            return None
         try:
             tracks = fetch_tracklist(source, str(album_id))
         except Exception:
             tracks = None
-        if tracks:
-            candidates.append({
-                'source': source,
-                'album_id': str(album_id),
-                'tracks': tracks,
-            })
+        if not tracks:
+            return None
+        return {'source': source, 'album_id': str(album_id), 'tracks': tracks}
+
+    # Active-source modes: try the primary first.
+    if mode in (MODE_ACTIVE_ONLY, MODE_ACTIVE_PREFERRED):
+        cand = _candidate(primary)
+        if cand:
+            score = score_release_against_files(file_tracks, cand['tracks'])
+            if score >= min_score:
+                return {'source': cand['source'], 'album_id': cand['album_id'], 'score': round(score, 4)}
+        if mode == MODE_ACTIVE_ONLY:
+            return None  # never fall back to other sources
+
+    # best_fit (and active_preferred's fallback): score the candidate sources
+    # (skipping the primary we already tried in active_preferred) and pick best.
+    candidates: List[Dict[str, Any]] = []
+    for source in source_priority:
+        if mode == MODE_ACTIVE_PREFERRED and source == primary:
+            continue
+        cand = _candidate(source)
+        if cand:
+            candidates.append(cand)
 
     if not candidates:
         return None
@@ -111,6 +150,7 @@ def resolve_and_store_canonical_for_album(
     source_priority: Optional[List[str]] = None,
     min_score: float = 0.5,
     store: bool = True,
+    mode: str = MODE_ACTIVE_PREFERRED,
 ) -> Optional[Dict[str, Any]]:
     """Gather an album's source IDs + its tracks' (duration, title) from the DB,
     resolve the best-fit canonical release, and (when ``store``) persist it.
@@ -138,10 +178,12 @@ def resolve_and_store_canonical_for_album(
 
     if fetch_tracklist is None:
         fetch_tracklist = default_fetch_tracklist
+    primary_source = None
     if source_priority is None:
         try:
             from core.metadata_service import get_primary_source, get_source_priority
-            source_priority = get_source_priority(get_primary_source())
+            primary_source = get_primary_source()
+            source_priority = get_source_priority(primary_source)
         except Exception:
             source_priority = list(source_ids.keys())
 
@@ -151,6 +193,8 @@ def resolve_and_store_canonical_for_album(
         fetch_tracklist=fetch_tracklist,
         source_priority=source_priority,
         min_score=min_score,
+        mode=mode,
+        primary_source=primary_source,
     )
     if result and store:
         db.set_album_canonical(album_id, result['source'], result['album_id'], result['score'])
