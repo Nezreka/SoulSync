@@ -162,6 +162,28 @@ def default_fetch_tracklist(source: str, album_id: str) -> Optional[List[Dict[st
     return out or None
 
 
+def _lookup_artist_thumb(db, artist_id) -> Optional[str]:
+    """Best-effort artist thumb URL by id. Returns None on missing column / any
+    error (the artists table doesn't have thumb_url in every schema)."""
+    if not artist_id:
+        return None
+    conn = None
+    try:
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(artists)")
+        if 'thumb_url' not in {r[1] for r in cursor.fetchall()}:
+            return None
+        cursor.execute("SELECT thumb_url FROM artists WHERE id = ?", (str(artist_id),))
+        row = cursor.fetchone()
+        return (row[0] or None) if row else None
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
 def resolve_and_store_canonical_for_album(
     db,
     album_id,
@@ -223,6 +245,12 @@ def resolve_and_store_canonical_for_album(
         result['artist_name'] = album_data.get('artist_name') or ''
         if album_data.get('thumb_url'):
             result['album_thumb_url'] = album_data['thumb_url']
+        # Artist thumb via a guarded lookup (not the shared album loader — some
+        # schemas have no artists.thumb_url column). Only runs for resolved
+        # albums, so no cost on the no-source-id short-circuit majority.
+        artist_thumb = _lookup_artist_thumb(db, album_data.get('artist_id'))
+        if artist_thumb:
+            result['artist_thumb_url'] = artist_thumb
         if store:
             db.set_album_canonical(album_id, result['source'], result['album_id'], result['score'])
     return result

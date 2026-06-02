@@ -70,6 +70,32 @@ def test_default_mode_prefers_active_source(tmp_path):
     assert out["source"] == "spotify"  # active source preferred
 
 
+def test_result_includes_artist_and_album_context(tmp_path):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('art1', 'Imagine Dragons', 'http://artist.jpg')")
+    cur.execute(
+        "INSERT INTO albums (id, title, artist_id, thumb_url, spotify_album_id) "
+        "VALUES ('alb1', 'Evolve', 'art1', 'http://album.jpg', 'sp1')"
+    )
+    for i in range(11):
+        cur.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration) "
+            "VALUES (?, 'alb1', 'art1', ?, ?, ?)",
+            (f"t{i}", f"Song {i+1}", i + 1, 180_000 + i * 10_000),
+        )
+    conn.commit()
+    conn.close()
+
+    out = resolve_and_store_canonical_for_album(
+        db, "alb1", fetch_tracklist=lambda s, a: STD, source_priority=["spotify"],
+    )
+    assert out["artist_name"] == "Imagine Dragons"
+    assert out["album_thumb_url"] == "http://album.jpg"
+    assert out["artist_thumb_url"] == "http://artist.jpg"
+
+
 def test_resolve_returns_none_when_album_has_no_source_ids(tmp_path):
     db = MusicDatabase(str(tmp_path / "m.db"))
     album_id = _seed(db, spotify=None, deezer=None)
