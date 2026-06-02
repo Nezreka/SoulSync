@@ -4133,6 +4133,33 @@ def select_jellyfin_music_library():
         logger.error(f"Error setting Jellyfin music library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/navidrome/cover/<cover_id>', methods=['GET'])
+def navidrome_cover(cover_id):
+    """Proxy a Navidrome (Subsonic) cover-art image to the browser.
+
+    The sync editor and other modals reference /api/navidrome/cover/<id>,
+    but no route served it — so every Navidrome cover came back blank (#766).
+    We build the authenticated getCoverArt URL server-side (keeping Subsonic
+    credentials off the client) and stream it through the shared image cache.
+    """
+    try:
+        client = media_server_engine.client('navidrome')
+        if not client:
+            return '', 404
+        url = client.build_cover_art_url(cover_id)
+        if not url:
+            return '', 404
+        from core.image_cache import get_image_cache
+        cached = get_image_cache().get_url(url)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        return response
+    except Exception as exc:
+        logger.debug("navidrome cover proxy failed for %s: %s", cover_id, exc)
+        return '', 502
+
+
 @app.route('/api/navidrome/music-folders', methods=['GET'])
 def get_navidrome_music_folders():
     """Get list of available music folders from Navidrome"""
