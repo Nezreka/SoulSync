@@ -974,6 +974,53 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
 
+    def set_album_canonical(self, album_id, source: str, canonical_album_id: str, score: float) -> bool:
+        """Persist the resolved canonical (source, album_id, score) for an album
+        (#765 Stage 2). Returns True if a row was updated."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
+                "canonical_score = ?, canonical_resolved_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (source, str(canonical_album_id), float(score), album_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting album canonical for %s: %s", album_id, e)
+            return False
+        finally:
+            conn.close()
+
+    def get_album_canonical(self, album_id) -> Optional[dict]:
+        """Return ``{'source','album_id','score','resolved_at'}`` for an album's
+        pinned canonical release, or ``None`` when unresolved (#765 Stage 2).
+        Consumers treat ``None`` as 'fall back to today's behavior'."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT canonical_source, canonical_album_id, canonical_score, "
+                "canonical_resolved_at FROM albums WHERE id = ?",
+                (album_id,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0] or not row[1]:
+                return None
+            return {
+                'source': row[0],
+                'album_id': row[1],
+                'score': row[2],
+                'resolved_at': row[3],
+            }
+        except Exception as e:
+            logger.error("Error reading album canonical for %s: %s", album_id, e)
+            return None
+        finally:
+            conn.close()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
