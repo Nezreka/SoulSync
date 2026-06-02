@@ -275,6 +275,22 @@ class TrackNumberRepairJob(RepairJob):
         primary_source = get_primary_source()
         source_priority = get_source_priority(primary_source)
 
+        # Fallback -1 (#765): a pinned canonical release wins over the whole
+        # cascade below — so Track Number Repair resolves the SAME release the
+        # Reorganizer does (Stage 3) and the two stop contradicting each other.
+        # Gated on the album carrying a canonical; everything below is untouched
+        # for albums without one (preserving the all-01-album rescue this job
+        # exists for — the regression we refused to take in a reactive fix).
+        canonical = _lookup_canonical_from_db(file_track_data, context)
+        if canonical:
+            c_source, c_id = canonical
+            if _is_valid_album_id(c_id):
+                tracks = _get_album_tracklist(c_source, c_id, cache)
+                if tracks:
+                    logger.info("[Repair] %s — resolved via canonical %s album ID: %s",
+                                folder_name, c_source, c_id)
+                    return tracks
+
         # Fallback 0: Check DB first. If any tracked file already has source IDs,
         # prefer the configured source order and use the first available album ID.
         source_album_ids = _lookup_album_ids_from_db(file_track_data, context)
@@ -804,6 +820,46 @@ def _update_db_file_path(db, old_path: str, new_path: str):
     finally:
         if conn:
             conn.close()
+
+
+def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any]],
+                              context: JobContext) -> Optional[Tuple[str, str]]:
+    """Return the album's pinned canonical ``(source, album_id)`` or None.
+
+    #765: when the album this folder's files belong to has a canonical release
+    pinned (best-fit to the files), Track Number Repair uses it first so it
+    agrees with the Reorganizer. Resolves by matching a file path to its DB
+    track row. None when no DB, no match, columns absent, or unresolved."""
+    if not context.db:
+        return None
+    conn = None
+    try:
+        conn = context.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(albums)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if 'canonical_source' not in cols or 'canonical_album_id' not in cols:
+            return None
+        for fpath, _, _ in file_track_data:
+            cursor.execute(
+                """
+                SELECT al.canonical_source, al.canonical_album_id
+                FROM tracks t
+                JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path = ?
+                LIMIT 1
+                """,
+                (fpath,),
+            )
+            row = cursor.fetchone()
+            if row and row[0] and row[1]:
+                return (str(row[0]), str(row[1]))
+    except Exception as e:
+        logger.debug("Error looking up canonical from DB: %s", e)
+    finally:
+        if conn:
+            conn.close()
+    return None
 
 
 def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
