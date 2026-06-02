@@ -586,17 +586,35 @@ class PlaylistSyncService:
 
                 artist_name = _artist_name(artist)
 
+                # YouTube/streaming sources arrive video-shaped: title
+                # "Artist - Song", artist "Official Artist"/"Artist - Topic"/
+                # "ArtistVEVO". Try the raw (title, artist) first, then a
+                # canonicalized variant so those still match the clean library
+                # metadata instead of being reported missing (#768).
+                from core.text.source_title import canonical_source_track
+                _attempts = [(original_title, artist_name)]
+                _canon_title, _canon_artist = canonical_source_track(original_title, artist_name)
+                if (_canon_title, _canon_artist) != (original_title, artist_name):
+                    _attempts.append((_canon_title, _canon_artist))
+
                 # Use the improved database check_track_exists method with server awareness
                 try:
                     db = MusicDatabase()
-                    artist_candidates = self._get_or_fetch_artist_candidates(
-                        candidate_pool, db, artist_name, active_server,
-                    )
-                    db_track, confidence = db.check_track_exists(
-                        original_title, artist_name,
-                        confidence_threshold=0.7, server_source=active_server,
-                        candidate_tracks=artist_candidates,
-                    )
+                    # Try every candidate form and keep the BEST — don't stop at
+                    # the first that clears the threshold, or a marginal raw
+                    # match could mask a stronger (correct) canonical one.
+                    db_track, confidence = None, 0.0
+                    for _try_title, _try_artist in _attempts:
+                        artist_candidates = self._get_or_fetch_artist_candidates(
+                            candidate_pool, db, _try_artist, active_server,
+                        )
+                        _cand_track, _cand_conf = db.check_track_exists(
+                            _try_title, _try_artist,
+                            confidence_threshold=0.7, server_source=active_server,
+                            candidate_tracks=artist_candidates,
+                        )
+                        if _cand_conf > confidence:
+                            db_track, confidence = _cand_track, _cand_conf
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
