@@ -110,6 +110,33 @@ def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
             download_tasks[task_id]['quarantine_entry_id'] = entry_id
 
 
+def import_rejection_reason(context: dict) -> str | None:
+    """Human-readable reason if post-processing terminally rejected the file
+    (quarantine or race-guard), else ``None`` for a clean import.
+
+    ``post_process_matched_download`` signals these outcomes by setting context
+    flags and returning normally — it only raises on unexpected errors. The
+    download path reads those flags in
+    ``post_process_matched_download_with_verification`` and marks the task
+    failed, but the MANUAL-import routes call ``post_process_matched_download``
+    directly with no task_id, so without this check a quarantined file (now in
+    ss_quarantine, not the library) is counted as a successful import and the
+    UI shows a green "Done" (#764). Pure + testable: it only inspects the
+    context dict the inner pipeline populated."""
+    if context.get('_integrity_failure_msg'):
+        return f"integrity check failed: {context['_integrity_failure_msg']}"
+    if context.get('_acoustid_quarantined'):
+        return (
+            "AcoustID verification failed: "
+            f"{context.get('_acoustid_failure_msg', 'fingerprint mismatch')}"
+        )
+    if context.get('_bitdepth_rejected'):
+        return "rejected by bit-depth filter"
+    if context.get('_race_guard_failed'):
+        return "source file disappeared before import completed"
+    return None
+
+
 def build_import_pipeline_runtime(
     *,
     automation_engine: Any | None = None,
