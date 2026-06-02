@@ -180,6 +180,17 @@ def reconcile_playlist(
                 'confidence': 0.0,
             })
 
+    # #766: a source row with no art of its own (e.g. a YouTube source, which
+    # provides none) borrows its MATCHED server track's cover so both sides of
+    # the editor show an image. Keyed off the actual pairing — works for
+    # "Artist - Title" rows that a fuzzy title lookup would miss. Source rows
+    # that already have their own art (Spotify CDN, etc.) keep it.
+    for entry in combined:
+        st = entry.get('source_track')
+        sv = entry.get('server_track')
+        if st and sv and not st.get('image_url') and sv.get('thumb'):
+            st['image_url'] = sv['thumb']
+
     return combined
 
 

@@ -116,6 +116,46 @@ def test_duplicate_server_tracks_one_matched_one_extra():
     assert sorted(c["match_status"] for c in combined) == ["extra", "matched"]
 
 
+# ── #766: source borrows the matched server cover ─────────────────────────
+
+def _svr_art(title, artist, tid, thumb):
+    return {"title": title, "artist": artist, "id": tid, "ratingKey": tid, "thumb": thumb}
+
+
+def test_artless_source_borrows_matched_server_cover():
+    # YouTube-style source row, no art of its own, matched to a server track
+    # that has a cover -> source side borrows it.
+    source = [_src("Arctic Monkeys - Do I Wanna Know?", "Official Arctic Monkeys", "s1")]
+    server = [_svr_art("Do I Wanna Know?", "Arctic Monkeys", "nv1", "/api/navidrome/cover/al42")]
+    combined = reconcile_playlist(source, server)
+    assert combined[0]["match_status"] == "matched"
+    assert combined[0]["source_track"]["image_url"] == "/api/navidrome/cover/al42"
+
+
+def test_source_keeps_its_own_art_when_present():
+    # A Spotify-style source row with its own CDN art must NOT be overwritten.
+    source = [_src("Do I Wanna Know?", "Arctic Monkeys", "s1", image_url="https://cdn/spotify.jpg")]
+    server = [_svr_art("Do I Wanna Know?", "Arctic Monkeys", "nv1", "/api/navidrome/cover/al42")]
+    combined = reconcile_playlist(source, server)
+    assert combined[0]["source_track"]["image_url"] == "https://cdn/spotify.jpg"
+
+
+def test_unmatched_source_has_no_cover_to_borrow():
+    source = [_src("Totally Absent Song", "Ghost", "s1")]
+    server = [_svr_art("Something Else", "Nobody", "nv1", "/api/navidrome/cover/al99")]
+    combined = reconcile_playlist(source, server)
+    missing = [c for c in combined if c["match_status"] == "missing"]
+    assert missing and not missing[0]["source_track"]["image_url"]
+
+
+def test_borrow_skipped_when_server_track_has_no_thumb():
+    source = [_src("Do I Wanna Know?", "Arctic Monkeys", "s1")]
+    server = [_svr("Do I Wanna Know?", "Arctic Monkeys", "nv1")]  # no thumb
+    combined = reconcile_playlist(source, server)
+    assert combined[0]["match_status"] == "matched"
+    assert not combined[0]["source_track"]["image_url"]
+
+
 def test_norm_title_helper_parity():
     assert norm_title("Stay (feat. X)") == "stay"
     assert norm_title("Song (2019 Remaster)") == "song"
