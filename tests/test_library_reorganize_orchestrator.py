@@ -1163,9 +1163,10 @@ def test_keeps_album_sidecars_when_a_track_failed_to_move(monkeypatch, tmpdirs):
 
 # --- preview function (shared planning with the orchestrator) -----------
 
-def _fake_path_builder(context, spotify_artist, _album_info, file_ext):
+def _fake_path_builder(context, spotify_artist, _album_info, file_ext, **_kw):
     """Stand-in for `_build_final_path_for_track`. Inserts Disc N/ when
-    total_discs > 1 — same convention the real builder uses."""
+    total_discs > 1 — same convention the real builder uses. Accepts
+    **_kw so the preview's create_dirs=False kwarg (#767) passes through."""
     album = context['spotify_album']['name']
     artist = spotify_artist['name']
     track_info = context['track_info']
@@ -1180,7 +1181,7 @@ def _fake_path_builder(context, spotify_artist, _album_info, file_ext):
     return '/'.join(parts), True
 
 
-def _path_builder_album_vs_single(context, spotify_artist, album_info, file_ext):
+def _path_builder_album_vs_single(context, spotify_artist, album_info, file_ext, **_kw):
     """Stand-in that emulates the real `_build_final_path_for_track`
     branch on `album_info.get('is_album')`. ALBUM mode produces an
     album folder with disc subfolder + numbered file; SINGLE mode

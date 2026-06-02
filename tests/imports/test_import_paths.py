@@ -17,6 +17,84 @@ def test_sanitize_filename_replaces_illegal_characters():
     assert import_paths.sanitize_filename("AUX.txt").startswith("_")
 
 
+# ── #767: dry-run path build must not create folders ──────────────────────
+
+def _album_path_config(tmp_path):
+    return _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/$albumartist - $album/$track - $title",
+            "single_path": "$artist/$artist - $title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+
+
+def _album_context():
+    return {
+        "artist": {"name": "Lenka"},
+        "album": {"name": "Lenka", "id": "album-1", "release_date": "2008-01-01",
+                  "total_tracks": 12, "album_type": "album", "artists": [{"name": "Lenka"}]},
+        "track_info": {"name": "The Show", "id": "t1", "track_number": 1,
+                       "disc_number": 1, "artists": [{"name": "Lenka"}]},
+        "original_search_result": {"title": "The Show", "clean_title": "The Show",
+                                   "clean_album": "Lenka", "clean_artist": "Lenka",
+                                   "artists": [{"name": "Lenka"}]},
+        "source": "deezer", "is_album_download": False,
+    }
+
+
+def test_create_dirs_false_does_not_create_folders(monkeypatch, tmp_path):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    # Path is still computed correctly...
+    assert created is True
+    assert final_path == str(tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac")
+    # ...but NOTHING was written to disk — not even the Transfer root.
+    assert not (tmp_path / "Transfer").exists()
+
+
+def test_create_dirs_true_still_creates_folders(monkeypatch, tmp_path):
+    # The download/import flow must keep working (default behavior unchanged).
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac",  # create_dirs defaults True
+    )
+
+    assert created is True
+    assert (tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka").is_dir()
+
+
+def test_create_dirs_false_and_true_yield_identical_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    dry, _ = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+    live, _ = import_paths.build_final_path_for_track(
+        _album_context(), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=True,
+    )
+    assert dry == live
+
+
 def test_build_simple_download_destination_uses_album_folder(monkeypatch, tmp_path):
     config = _Config({"soulseek.transfer_path": str(tmp_path / "Transfer")})
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)

@@ -989,7 +989,12 @@ def preview_album_reorganize(
         album_info = _build_album_info(context)
         try:
             spotify_artist = context['spotify_artist']
-            new_full, _ok = build_final_path_fn(context, spotify_artist, album_info, file_ext)
+            # Dry run: compute the destination path WITHOUT creating the folder.
+            # Previously this physically created the album dir during preview,
+            # leaving empty folders all over the library (#767).
+            new_full, _ok = build_final_path_fn(
+                context, spotify_artist, album_info, file_ext, create_dirs=False
+            )
             item['new_path'] = (
                 os.path.relpath(new_full, transfer_dir)
                 if transfer_dir and new_full and new_full.startswith(transfer_dir)
