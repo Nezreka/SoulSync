@@ -47,6 +47,11 @@ class CanonicalVersionResolveJob(RepairJob):
     default_settings = {
         'dry_run': True,
         'min_score': 0.5,
+        # Which source's release to pin: 'active_preferred' (default — use your
+        # active metadata source when it fits, else best-fit fallback),
+        # 'active_only' (only ever the active source), or 'best_fit' (whichever
+        # source matches the files best, regardless of which it is).
+        'source_selection': 'active_preferred',
     }
     auto_fix = True
 
@@ -81,6 +86,7 @@ class CanonicalVersionResolveJob(RepairJob):
         settings = self._get_settings(context)
         dry_run = settings.get('dry_run', True)
         min_score = settings.get('min_score', 0.5)
+        mode = settings.get('source_selection', 'active_preferred')
 
         active_server = None
         if context.config_manager:
@@ -115,7 +121,7 @@ class CanonicalVersionResolveJob(RepairJob):
 
             try:
                 resolved = resolve_and_store_canonical_for_album(
-                    context.db, album_id, min_score=min_score, store=not dry_run,
+                    context.db, album_id, min_score=min_score, store=not dry_run, mode=mode,
                 )
             except Exception as e:
                 logger.warning("Canonical resolve failed for album %s ('%s'): %s",

@@ -47,12 +47,27 @@ def test_resolve_and_store_picks_best_fit_and_persists(tmp_path):
         db, album_id,
         fetch_tracklist=lambda s, a: table.get((s, a)),
         source_priority=["spotify", "deezer"],
+        mode="best_fit",
     )
-    # Deezer's standard matches the 11 files better than Spotify's deluxe.
+    # best_fit: Deezer's standard matches the 11 files better than Spotify's deluxe.
     assert out["source"] == "deezer" and out["album_id"] == "dz_std"
     # ...and it was persisted.
     stored = db.get_album_canonical(album_id)
     assert stored["source"] == "deezer" and stored["album_id"] == "dz_std"
+
+
+def test_default_mode_prefers_active_source(tmp_path):
+    # Same setup, but default (active_preferred) mode: primary = spotify, whose
+    # deluxe still clears the floor -> pinned, even though deezer fits better.
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="sp_deluxe", deezer="dz_std")
+    table = {("spotify", "sp_deluxe"): DLX, ("deezer", "dz_std"): STD}
+    out = resolve_and_store_canonical_for_album(
+        db, album_id,
+        fetch_tracklist=lambda s, a: table.get((s, a)),
+        source_priority=["spotify", "deezer"],  # default mode
+    )
+    assert out["source"] == "spotify"  # active source preferred
 
 
 def test_resolve_returns_none_when_album_has_no_source_ids(tmp_path):

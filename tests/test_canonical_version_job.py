@@ -33,7 +33,7 @@ def _seed_two_albums(db):
 
 
 def _fake_resolver(monkeypatch):
-    def fake(db, album_id, *, min_score=0.5, store=True):
+    def fake(db, album_id, *, min_score=0.5, store=True, mode="active_preferred"):
         res = {"source": "spotify", "album_id": f"sp_{album_id}", "score": 0.9}
         if store:
             db.set_album_canonical(album_id, res["source"], res["album_id"], res["score"])
@@ -50,6 +50,10 @@ def test_job_is_registered():
 def test_job_is_opt_in_and_dry_run_by_default():
     assert CanonicalVersionResolveJob.default_enabled is False
     assert CanonicalVersionResolveJob.default_settings["dry_run"] is True
+
+
+def test_source_selection_defaults_to_active_preferred():
+    assert CanonicalVersionResolveJob.default_settings["source_selection"] == "active_preferred"
 
 
 def test_live_resolves_and_stores(tmp_path, monkeypatch):
