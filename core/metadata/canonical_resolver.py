@@ -18,8 +18,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata.canonical_version import (
-    pick_canonical_release,
     score_release_against_files,
+    score_release_detail,
 )
 
 # Source-selection modes (a per-job setting). See resolve_canonical_for_album.
@@ -59,15 +59,20 @@ def resolve_canonical_for_album(
         floor; never considers other sources).
       - ``best_fit``: whichever source's release best matches the files.
 
-    Returns ``{'source', 'album_id', 'score'}`` or ``None`` when there are no
-    files, no resolvable candidates, or nothing clears ``min_score``."""
+    Returns an enriched dict for the chosen release — ``source``, ``album_id``,
+    ``score``, the per-signal breakdown (``count_fit``/``duration_fit``/
+    ``title_fit``), ``file_track_count`` vs ``release_track_count``, and a
+    ``candidates`` list of everything it scored (so a finding can show WHY the
+    pick won and what it beat). ``None`` when there are no files, no resolvable
+    candidates, or nothing clears ``min_score``."""
     if not file_tracks:
         return None
     primary = primary_source or (source_priority[0] if source_priority else None)
+    scored: List[Dict[str, Any]] = []  # every source we actually scored
 
-    def _candidate(source: Optional[str]) -> Optional[Dict[str, Any]]:
-        if not source:
-            return None
+    def _score(source: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not source or any(e['source'] == source for e in scored):
+            return next((e for e in scored if e['source'] == source), None)
         album_id = album_source_ids.get(source)
         if not album_id:
             return None
@@ -77,38 +82,53 @@ def resolve_canonical_for_album(
             tracks = None
         if not tracks:
             return None
-        return {'source': source, 'album_id': str(album_id), 'tracks': tracks}
+        entry = {
+            'source': source, 'album_id': str(album_id),
+            'track_count': len(tracks), 'score': round(score_release_against_files(file_tracks, tracks), 4),
+            '_tracks': tracks,
+        }
+        scored.append(entry)
+        return entry
+
+    winner: Optional[Dict[str, Any]] = None
 
     # Active-source modes: try the primary first.
     if mode in (MODE_ACTIVE_ONLY, MODE_ACTIVE_PREFERRED):
-        cand = _candidate(primary)
-        if cand:
-            score = score_release_against_files(file_tracks, cand['tracks'])
-            if score >= min_score:
-                return {'source': cand['source'], 'album_id': cand['album_id'], 'score': round(score, 4)}
-        if mode == MODE_ACTIVE_ONLY:
-            return None  # never fall back to other sources
+        p = _score(primary)
+        if p and p['score'] >= min_score:
+            winner = p
+        elif mode == MODE_ACTIVE_ONLY:
+            return None  # never consider other sources
 
-    # best_fit (and active_preferred's fallback): score the candidate sources
-    # (skipping the primary we already tried in active_preferred) and pick best.
-    candidates: List[Dict[str, Any]] = []
-    for source in source_priority:
-        if mode == MODE_ACTIVE_PREFERRED and source == primary:
-            continue
-        cand = _candidate(source)
-        if cand:
-            candidates.append(cand)
+    # best_fit, or active_preferred fallback: score the rest and pick the best.
+    if winner is None:
+        for source in source_priority:
+            _score(source)
+        best = None
+        for e in scored:  # source_priority order -> strictly-greater = priority tiebreak
+            if best is None or e['score'] > best['score'] + 1e-9:
+                best = e
+        if best and best['score'] >= min_score:
+            winner = best
 
-    if not candidates:
+    if winner is None:
         return None
 
-    best, score = pick_canonical_release(file_tracks, candidates, min_score=min_score)
-    if not best:
-        return None
+    detail = score_release_detail(file_tracks, winner['_tracks'])
     return {
-        'source': best['source'],
-        'album_id': best['album_id'],
-        'score': round(score, 4),
+        'source': winner['source'],
+        'album_id': winner['album_id'],
+        'score': winner['score'],
+        'file_track_count': detail['file_track_count'],
+        'release_track_count': detail['release_track_count'],
+        'count_fit': detail['count_fit'],
+        'duration_fit': detail['duration_fit'],
+        'title_fit': detail['title_fit'],
+        'candidates': [
+            {'source': e['source'], 'album_id': e['album_id'],
+             'track_count': e['track_count'], 'score': e['score']}
+            for e in scored
+        ],
     }
 
 
@@ -196,8 +216,15 @@ def resolve_and_store_canonical_for_album(
         mode=mode,
         primary_source=primary_source,
     )
-    if result and store:
-        db.set_album_canonical(album_id, result['source'], result['album_id'], result['score'])
+    if result:
+        # Album/artist/art context for richer findings (read from the row we
+        # already loaded — no extra query). Storage only uses source/id/score.
+        result['album_title'] = album_data.get('title') or ''
+        result['artist_name'] = album_data.get('artist_name') or ''
+        if album_data.get('thumb_url'):
+            result['album_thumb_url'] = album_data['thumb_url']
+        if store:
+            db.set_album_canonical(album_id, result['source'], result['album_id'], result['score'])
     return result
 
 

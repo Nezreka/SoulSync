@@ -92,6 +92,24 @@ def test_active_only_pins_primary_and_never_falls_back():
     assert out is None  # primary didn't fit, and active_only won't consider others
 
 
+def test_result_includes_breakdown_and_candidate_comparison():
+    files = list(STD)
+    table = {("spotify", "sp1"): DLX, ("deezer", "dz1"): STD}
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp1", "deezer": "dz1"},
+        file_tracks=files, fetch_tracklist=_fetcher(table),
+        source_priority=["spotify", "deezer", "itunes", "musicbrainz"],
+        mode="best_fit",
+    )
+    assert out["source"] == "deezer"
+    assert out["file_track_count"] == 11
+    assert out["release_track_count"] == 11
+    assert out["count_fit"] == 1.0 and out["duration_fit"] == 1.0 and out["title_fit"] == 1.0
+    by_src = {c["source"]: c for c in out["candidates"]}
+    assert by_src["deezer"]["track_count"] == 11 and by_src["deezer"]["score"] > 0.9
+    assert by_src["spotify"]["track_count"] == 17 and by_src["spotify"]["score"] < 0.8
+
+
 def test_active_only_pins_primary_when_it_fits():
     files = list(STD)
     table = {("spotify", "sp1"): STD, ("musicbrainz", "mb1"): STD}

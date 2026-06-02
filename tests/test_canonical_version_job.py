@@ -6,7 +6,10 @@ import types
 
 import core.repair_jobs.canonical_version_resolve as cvr
 from core.repair_jobs import get_all_jobs
-from core.repair_jobs.canonical_version_resolve import CanonicalVersionResolveJob
+from core.repair_jobs.canonical_version_resolve import (
+    CanonicalVersionResolveJob,
+    _describe_pin,
+)
 from database.music_database import MusicDatabase
 
 
@@ -54,6 +57,33 @@ def test_job_is_opt_in_and_dry_run_by_default():
 
 def test_source_selection_defaults_to_active_preferred():
     assert CanonicalVersionResolveJob.default_settings["source_selection"] == "active_preferred"
+
+
+def test_describe_pin_is_judgeable():
+    desc = _describe_pin({
+        "source": "deezer", "album_id": "665666731", "score": 1.0,
+        "file_track_count": 11, "release_track_count": 11,
+        "count_fit": 1.0, "duration_fit": 1.0, "title_fit": 1.0,
+        "candidates": [
+            {"source": "deezer", "album_id": "665666731", "track_count": 11, "score": 1.0},
+            {"source": "spotify", "album_id": "sp", "track_count": 17, "score": 0.65},
+        ],
+    })
+    assert "deezer" in desc and "665666731" in desc
+    assert "11 files vs 11 tracks" in desc           # your library vs the release
+    assert "durations 100%" in desc and "titles 100%" in desc  # the WHY
+    assert "Beat:" in desc and "spotify 65% (17 tk)" in desc    # what it beat
+
+
+def test_describe_pin_single_source():
+    desc = _describe_pin({
+        "source": "spotify", "album_id": "x", "score": 0.9,
+        "file_track_count": 10, "release_track_count": 10,
+        "count_fit": 1.0, "duration_fit": None, "title_fit": 0.9,
+        "candidates": [{"source": "spotify", "album_id": "x", "track_count": 10, "score": 0.9}],
+    })
+    assert "Only this source" in desc
+    assert "durations n/a" in desc  # missing signal shown honestly
 
 
 def test_live_resolves_and_stores(tmp_path, monkeypatch):
