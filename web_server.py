@@ -18185,23 +18185,11 @@ def get_server_playlist_tracks(playlist_id):
                                 pass
                     break
 
-        # Build combined view with two-pass matching (exact then fuzzy)
-        import re as _re
-        from difflib import SequenceMatcher
-
-        def _norm_title(t):
-            """Strip feat./ft., remaster, and edition qualifiers for comparison only."""
-            # feat./ft. — e.g. (feat. Artist), [ft. Artist]
-            t = _re.sub(r'\s*[\(\[](?:feat|ft)\.?[^\)\]]*[\)\]]', '', t, flags=_re.IGNORECASE)
-            # Remaster/Remastered — e.g. (2019 Remaster), (Remastered), (2019 Remastered Version)
-            t = _re.sub(r'\s*[\(\[](?:\d{4}\s+)?remaster(?:ed)?(?:\s+version)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
-            # Edition qualifiers — e.g. (Deluxe Edition), (Special Edition), [Anniversary Edition]
-            t = _re.sub(r'\s*[\(\[](?:deluxe|special|anniversary|legacy|expanded|limited)(?:\s+edition)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
-            return t.lower().strip()
-
-        combined = []
-        used_server_indices = set()
-        unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
+        # Reconcile source vs server playlist. Three-pass matcher lifted to
+        # core.sync.playlist_reconcile (pure + tested) — fixes #768 (YouTube
+        # "Artist - Title" sources now match, and source_track_id is echoed
+        # back so manual "Find & add" overrides persist).
+        from core.sync.playlist_reconcile import reconcile_playlist
 
         # Pass 0: User-confirmed match overrides from sync_match_cache.
         # When a user previously picked a local file via "Find & Add",
@@ -18218,92 +18206,7 @@ def get_server_playlist_tracks(playlist_id):
             lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
         )
 
-        # Pass 1: Exact title match (normalized — strips feat./ft. qualifiers)
-        for i, src in enumerate(source_tracks):
-            src_name = src.get('name', '')
-            src_artist = src.get('artist', '')
-            if not src_artist and src.get('artists'):
-                a = src['artists'][0] if src['artists'] else ''
-                src_artist = a.get('name', a) if isinstance(a, dict) else str(a)
-
-            src_entry = {
-                'name': src_name, 'artist': src_artist,
-                'album': src.get('album', ''), 'image_url': src.get('image_url', ''),
-                'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
-            }
-
-            # Override hit — paired by user, skip exact/fuzzy matching.
-            if i in _override_pairs:
-                j_override = _override_pairs[i]
-                used_server_indices.add(j_override)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': server_tracks[j_override],
-                    'match_status': 'matched',
-                    'confidence': 1.0,
-                    'override': True,
-                })
-                continue
-
-            src_norm = _norm_title(src_name)
-            best_idx = -1
-            for j, svr in enumerate(server_tracks):
-                if j in used_server_indices:
-                    continue
-                if _norm_title(svr['title']) == src_norm:
-                    best_idx = j
-                    break
-
-            if best_idx >= 0:
-                used_server_indices.add(best_idx)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': server_tracks[best_idx],
-                    'match_status': 'matched',
-                    'confidence': 1.0,
-                })
-            else:
-                idx = len(combined)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': None,
-                    'match_status': 'missing',
-                    'confidence': 0.0,
-                })
-                unmatched_source.append((idx, src_entry))
-
-        # Pass 2: Fuzzy match on remaining unmatched source tracks (normalized keys)
-        for combo_idx, src_entry in unmatched_source:
-            src_key = f"{src_entry['artist']} {_norm_title(src_entry['name'])}".strip()
-            best_score = 0.0
-            best_j = -1
-            for j, svr in enumerate(server_tracks):
-                if j in used_server_indices:
-                    continue
-                svr_key = f"{svr['artist']} {_norm_title(svr['title'])}".strip().lower()
-                score = SequenceMatcher(None, src_key.lower(), svr_key).ratio()
-                if score > best_score and score >= 0.75:
-                    best_score = score
-                    best_j = j
-
-            if best_j >= 0:
-                used_server_indices.add(best_j)
-                combined[combo_idx] = {
-                    'source_track': src_entry,
-                    'server_track': server_tracks[best_j],
-                    'match_status': 'matched',
-                    'confidence': round(best_score, 3),
-                }
-
-        # Add server tracks that aren't in the source (extra tracks on server)
-        for j, svr in enumerate(server_tracks):
-            if j not in used_server_indices:
-                combined.append({
-                    'source_track': None,
-                    'server_track': svr,
-                    'match_status': 'extra',
-                    'confidence': 0.0,
-                })
+        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
         return jsonify({
             "success": True,
@@ -18490,6 +18393,18 @@ def server_playlist_add_track(playlist_id):
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
+            # Link, don't duplicate: matching an unmatched source to a track
+            # already in the playlist should only record the override, never
+            # append a second copy (#768).
+            if source_track_id:
+                try:
+                    _existing = {str(it.ratingKey) for it in raw_playlist.items()}
+                except Exception:
+                    _existing = set()
+                if str(track_id) in _existing:
+                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+                    return jsonify({"success": True, "message": "Track linked"})
+
             logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
 
             raw_playlist.addItems([new_item])
@@ -18515,24 +18430,30 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            from core.sync.playlist_edit import plan_playlist_add
             current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
-            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
-            track_ids.insert(pos, track_id)
-            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+            # Matching an unmatched source to a track already in the playlist
+            # is a LINK, not a second copy — don't duplicate it (#768).
+            plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
+            if plan['should_insert']:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
+                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
-            return jsonify({"success": True, "message": "Track added"})
+            return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            from core.sync.playlist_edit import plan_playlist_add
             current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
-            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
-            track_ids.insert(pos, track_id)
-            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            # Matching an unmatched source to a track already in the playlist
+            # is a LINK, not a second copy — don't duplicate it (#768).
+            plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
+            if plan['should_insert']:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
+                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
-            return jsonify({"success": True, "message": "Track added"})
+            return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
     except Exception as e:
@@ -18573,10 +18494,17 @@ def server_playlist_remove_track(playlist_id):
                 logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
 
-            # Rebuild without the target track
+            # Rebuild without ONE copy of the target track — deleting one
+            # duplicate must not wipe every copy (#768).
             current_items = list(raw_playlist.items())
-            new_items = [item for item in current_items if str(item.ratingKey) != str(remove_track_id)]
-            if len(new_items) == len(current_items):
+            new_items = list(current_items)
+            _removed = False
+            for _i, _it in enumerate(new_items):
+                if str(_it.ratingKey) == str(remove_track_id):
+                    del new_items[_i]
+                    _removed = True
+                    break
+            if not _removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             raw_playlist.delete()
             if new_items:
@@ -18586,18 +18514,25 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            from core.sync.playlist_edit import remove_one_occurrence
             current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
-            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
-            if len(new_ids) == len(current_tracks):
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            # Remove ONE occurrence, not every copy — duplicates are the same
+            # track, so deleting one must not wipe them all (#768).
+            new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
+            if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
             media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track removed"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            from core.sync.playlist_edit import remove_one_occurrence
             current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
-            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
-            if len(new_ids) == len(current_tracks):
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            # Remove ONE occurrence, not every copy (#768).
+            new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
+            if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
             media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
