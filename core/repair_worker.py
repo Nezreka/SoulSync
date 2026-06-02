@@ -371,6 +371,9 @@ class RepairWorker:
                 'interval_hours': config['interval_hours'],
                 'settings': config['settings'],
                 'default_settings': job.default_settings.copy(),
+                # Per-setting choice lists so the UI can render a dropdown
+                # instead of a free-text box (e.g. canonical source_selection).
+                'setting_options': dict(getattr(job, 'setting_options', {}) or {}),
                 'last_run': last_run,
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,

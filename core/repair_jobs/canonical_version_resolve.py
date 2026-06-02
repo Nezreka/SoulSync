@@ -101,6 +101,10 @@ class CanonicalVersionResolveJob(RepairJob):
         # source matches the files best, regardless of which it is).
         'source_selection': 'active_preferred',
     }
+    # Render source_selection as a dropdown (not a text box) in the settings UI.
+    setting_options = {
+        'source_selection': ['active_preferred', 'active_only', 'best_fit'],
+    }
     auto_fix = True
 
     def _get_settings(self, context: JobContext) -> dict:

@@ -59,6 +59,14 @@ def test_source_selection_defaults_to_active_preferred():
     assert CanonicalVersionResolveJob.default_settings["source_selection"] == "active_preferred"
 
 
+def test_source_selection_exposes_dropdown_options():
+    # The UI renders a <select> for keys listed in setting_options.
+    opts = CanonicalVersionResolveJob.setting_options.get("source_selection")
+    assert opts == ["active_preferred", "active_only", "best_fit"]
+    # default must be one of the offered options
+    assert CanonicalVersionResolveJob.default_settings["source_selection"] in opts
+
+
 def test_describe_pin_is_judgeable():
     desc = _describe_pin({
         "source": "deezer", "album_id": "665666731", "score": 1.0,
