@@ -28,7 +28,14 @@ def _pct(v) -> str:
 
 def _describe_pin(resolved: dict) -> str:
     """Human-readable, judge-able explanation of WHY this release was chosen."""
+    artist = resolved.get('artist_name') or ''
+    album = resolved.get('album_title') or ''
+    head = f"{artist} — {album}".strip(" —") or resolved.get('album_id', '')
+    year = resolved.get('year')
+    if year:
+        head += f" ({year})"
     lines = [
+        f"{head}" if head else "",
         f"Pin {resolved['source']} release {resolved['album_id']} "
         f"(confidence {_pct(resolved.get('score'))}).",
         f"Fit to your library: {resolved.get('file_track_count', '?')} files vs "
@@ -37,6 +44,13 @@ def _describe_pin(resolved: dict) -> str:
         f"durations {_pct(resolved.get('duration_fit'))}, "
         f"titles {_pct(resolved.get('title_fit'))}.",
     ]
+
+    # What the album is currently linked to vs what we'd pin.
+    linked = resolved.get('linked_sources') or {}
+    if linked:
+        linked_str = ", ".join(f"{s}={i}" for s, i in linked.items())
+        lines.append(f"Currently linked: {linked_str} → pinning {resolved['source']}.")
+
     others = [c for c in resolved.get('candidates', []) if c.get('source') != resolved.get('source')]
     if others:
         comp = ", ".join(
@@ -45,7 +59,15 @@ def _describe_pin(resolved: dict) -> str:
         lines.append(f"Beat: {comp}.")
     elif len(resolved.get('candidates', [])) == 1:
         lines.append("Only this source had a release linked for this album.")
-    return "\n".join(lines)
+
+    # Track listing of the pinned release (so you can eyeball the actual songs).
+    titles = resolved.get('release_track_titles') or []
+    if titles:
+        shown = "; ".join(f"{i+1}. {t}" for i, t in enumerate(titles[:25]))
+        more = f" (+{len(titles) - 25} more)" if len(titles) > 25 else ""
+        lines.append(f"Release tracks: {shown}{more}")
+
+    return "\n".join(l for l in lines if l)
 
 
 @register_job

@@ -75,6 +75,21 @@ def test_describe_pin_is_judgeable():
     assert "Beat:" in desc and "spotify 65% (17 tk)" in desc    # what it beat
 
 
+def test_describe_pin_includes_year_linked_and_tracklist():
+    desc = _describe_pin({
+        "source": "deezer", "album_id": "dz1", "score": 1.0,
+        "artist_name": "Lenka", "album_title": "Souls of Serenity", "year": 2017,
+        "file_track_count": 3, "release_track_count": 3,
+        "count_fit": 1.0, "duration_fit": 1.0, "title_fit": 1.0,
+        "linked_sources": {"spotify": "sp1", "deezer": "dz1"},
+        "release_track_titles": ["The Show", "Trouble Is a Friend", "Everything at Once"],
+        "candidates": [{"source": "deezer", "album_id": "dz1", "track_count": 3, "score": 1.0}],
+    })
+    assert "Lenka — Souls of Serenity (2017)" in desc
+    assert "Currently linked: spotify=sp1, deezer=dz1 → pinning deezer" in desc
+    assert "Release tracks: 1. The Show; 2. Trouble Is a Friend; 3. Everything at Once" in desc
+
+
 def test_describe_pin_single_source():
     desc = _describe_pin({
         "source": "spotify", "album_id": "x", "score": 0.9,
