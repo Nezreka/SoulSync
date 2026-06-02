@@ -7248,6 +7248,22 @@ class MusicDatabase:
                     # Titles differ in length by more than 30% — penalize heavily
                     best_title_similarity *= len_ratio
 
+            # Word-level guard: SequenceMatcher's char ratio over-credits
+            # different songs that share a long substring or only a stopword
+            # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
+            # vs "Around the World" = 0.62). Since a same-artist comparison
+            # always scores artist = 1.0, the title is the only discriminator,
+            # so a bad-but-moderate title score gets carried over the threshold
+            # (#769). Reject pairs that aren't near-identical AND share no
+            # significant word — the real track is then reported missing.
+            from core.text.title_match import titles_plausibly_same
+            if not titles_plausibly_same(
+                clean_search_title or search_title_norm,
+                clean_db_title or db_title_norm,
+                best_title_similarity,
+            ):
+                return best_title_similarity * 0.5  # below any threshold
+
             # Require minimum title similarity to prevent a perfect artist match from
             # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
             if best_title_similarity < 0.6:
