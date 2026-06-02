@@ -3,6 +3,7 @@ import hashlib
 import secrets
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from urllib.parse import urlencode
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
@@ -315,6 +316,42 @@ class NavidromeClient(MediaServerClient):
             'c': 'SoulSync',  # Client name
             'f': 'json'  # Response format
         }
+
+    # Fixed salt for cover-art URLs ONLY. Subsonic token auth (t=md5(password
+    # +salt), s=salt) does not require a unique salt per request, and a stable
+    # one makes the cover URL deterministic — so the image cache and the
+    # browser cache actually HIT. The rotating salt from _generate_auth_params
+    # would make every request a unique URL → cache miss every time + a dead,
+    # never-reused cache row per fetch (#766 review). The password is never
+    # exposed either way (only its salted md5).
+    _COVER_ART_SALT = 'soulsync-cover'
+
+    def build_cover_art_url(self, cover_id, size=None) -> Optional[str]:
+        """Absolute, Subsonic-authenticated getCoverArt URL for ``cover_id``.
+
+        Deterministic for a given (server, password, cover_id) so it caches.
+        The web layer proxies this to the browser (sync editor + modals).
+        Returns ``None`` when not connected or no id was supplied. #766: the
+        ``/api/navidrome/cover/<id>`` route had no working URL behind it, so
+        every Navidrome cover came back blank."""
+        if not self.base_url or not cover_id:
+            return None
+        if not self.username or not self.password:
+            return None
+        salt = self._COVER_ART_SALT
+        token = hashlib.md5((self.password + salt).encode()).hexdigest()
+        params = {
+            'u': self.username,
+            't': token,
+            's': salt,
+            'v': '1.16.1',
+            'c': 'SoulSync',
+            'f': 'json',  # harmless for getCoverArt — it returns image binary
+            'id': str(cover_id),
+        }
+        if size:
+            params['size'] = str(size)
+        return f"{self.base_url}/rest/getCoverArt?{urlencode(params)}"
 
     # Subsonic endpoints that modify data — use POST to avoid URL length limits
     _WRITE_ENDPOINTS = frozenset({
