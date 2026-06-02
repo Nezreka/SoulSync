@@ -46,6 +46,8 @@ def _build_deps(**overrides) -> AutomationDeps:
         get_watchlist_scan_state=lambda: {},
         run_playlist_discovery_worker=lambda *a, **k: None,
         run_sync_task=lambda *a, **k: None,
+        run_playlist_organize_download=lambda **k: {'status': 'skipped'},
+        missing_download_executor=None,
         load_sync_status_file=lambda: {},
         get_deezer_client=lambda: None,
         parse_youtube_playlist=lambda url: None,

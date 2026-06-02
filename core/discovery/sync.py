@@ -133,7 +133,17 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         return None, 0.0
 
 
-def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', deps: SyncDeps = None, sync_mode: str = 'replace'):
+def run_sync_task(
+    playlist_id,
+    playlist_name,
+    tracks_json,
+    automation_id=None,
+    profile_id=1,
+    playlist_image_url='',
+    deps: SyncDeps = None,
+    sync_mode: str = 'replace',
+    skip_wishlist_add: bool = False,
+):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
     sync_lock = deps.sync_lock
@@ -360,7 +370,14 @@ def run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, p
         # Wing It mode — skip wishlist for unmatched tracks
         with sync_lock:
             is_wing_it = sync_states.get(playlist_id, {}).get('wing_it', False)
+        sync_service._skip_unmatched_wishlist = is_wing_it or skip_wishlist_add
         sync_service._skip_wishlist = is_wing_it
+        if skip_wishlist_add:
+            logger.info(
+                "[Organize by Playlist] Skipping sync-time wishlist for '%s' — "
+                "organize download + batch failure handling cover missing tracks",
+                playlist_name,
+            )
 
         # Run the sync (this is a blocking call within this thread)
         result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode))

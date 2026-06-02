@@ -180,9 +180,11 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         log_line=f'Starting sync: {len(tracks_json)} tracks',
         log_type='success',
     )
+    skip_wishlist_add = bool(pl.get('organize_by_playlist'))
     threading.Thread(
         target=deps.run_sync_task,
         args=(sync_id, pl['name'], tracks_json, auto_id, 1, pl.get('image_url', '')),
+        kwargs={'skip_wishlist_add': skip_wishlist_add},
         daemon=True,
         name=f'auto-sync-{playlist_id}',
     ).start()
