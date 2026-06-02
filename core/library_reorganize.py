@@ -227,6 +227,25 @@ def _resolve_source(album_data: dict, primary_source: str, strict_source: bool =
     """
     source_ids = _extract_source_ids(album_data)
 
+    # #765: if a canonical release was pinned for this album (best-fit to the
+    # user's actual files), prefer it — so reorganize agrees with Track Number
+    # Repair and stops mislabelling standard albums as deluxe (#767-Bug2). Gated
+    # on the album row carrying a canonical, and skipped when the user explicitly
+    # picked a source in the modal (strict_source) — their choice wins. Falls
+    # through to the priority walk if the canonical fetch fails.
+    if not strict_source:
+        c_source = album_data.get('canonical_source')
+        c_id = album_data.get('canonical_album_id')
+        if c_source and c_id:
+            try:
+                api_album = get_album_for_source(c_source, c_id)
+                api_tracks = get_album_tracks_for_source(c_source, c_id)
+                items = _normalize_album_tracks(api_tracks)
+                if items and api_album:
+                    return c_source, api_album, items
+            except Exception as e:
+                logger.warning(f"[Reorganize] canonical {c_source} lookup raised: {e}")
+
     if strict_source:
         sources_to_try = [primary_source] if primary_source else []
     else:
