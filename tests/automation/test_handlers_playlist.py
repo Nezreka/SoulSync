@@ -108,6 +108,8 @@ def _build_deps(**overrides) -> AutomationDeps:
         get_watchlist_scan_state=lambda: {},
         run_playlist_discovery_worker=lambda *a, **k: None,
         run_sync_task=lambda *a, **k: None,
+        run_playlist_organize_download=lambda **k: {'status': 'skipped'},
+        missing_download_executor=None,
         load_sync_status_file=lambda: {},
         get_deezer_client=lambda: None,
         parse_youtube_playlist=lambda url: None,
@@ -736,6 +738,35 @@ class TestSyncPlaylist:
             import time
             time.sleep(0.01)
         assert len(sync_calls) == 1
+
+    def test_organize_by_playlist_passes_skip_wishlist_add(self):
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P', 'organize_by_playlist': True}],
+            playlist_tracks={1: [discovered_track]},
+        )
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+        auto_sync_playlist({'playlist_id': '1'}, deps)
+        for _ in range(50):
+            if sync_calls:
+                break
+            import time
+            time.sleep(0.01)
+        assert sync_calls
+        assert sync_calls[0][1].get('skip_wishlist_add') is True
 
     def test_unchanged_since_last_sync_returns_skipped(self):
         discovered_track = {

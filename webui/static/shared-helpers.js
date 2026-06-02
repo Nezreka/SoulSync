@@ -961,6 +961,322 @@ function setAlbumDownloadingStatus(albumId, downloaded = 0, total = 0) {
 // in artists.js but used broadly across the app.
 // ----------------------------------------------------------------------------
 
+function playlistDetailsOrganizeCheckboxId(playlistRef) {
+    return `playlist-organize-${playlistRef}`;
+}
+
+/** Map UI playlist ids (e.g. deezer_arl_123) to mirrored-playlist resolve refs. */
+function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
+    const ref = String(playlistRef || '').trim();
+    if (source === 'deezer' && ref.startsWith('deezer_arl_')) {
+        return ref.slice('deezer_arl_'.length);
+    }
+    return ref;
+}
+
+function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
+    const safeRef = String(playlistRef).replace(/'/g, "\\'");
+    const safeSource = String(source).replace(/'/g, "\\'");
+    return `
+        <label class="playlist-modal-organize-toggle" title="Download into a playlist-named folder (Artist - Track) under your transfer path">
+            <input type="checkbox" id="${playlistDetailsOrganizeCheckboxId(playlistRef)}"
+                onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
+            <span>Organize by playlist</span>
+        </label>
+    `;
+}
+
+function syncPlaylistOrganizeCheckboxes(playlistRef, enabled) {
+    const detailsCb = document.getElementById(playlistDetailsOrganizeCheckboxId(playlistRef));
+    const downloadMissingCb = document.getElementById(`playlist-folder-mode-${playlistRef}`);
+    if (detailsCb) detailsCb.checked = !!enabled;
+    if (downloadMissingCb) downloadMissingCb.checked = !!enabled;
+}
+
+function isPlaylistOrganizeEnabled(playlistRef) {
+    const detailsCb = document.getElementById(playlistDetailsOrganizeCheckboxId(playlistRef));
+    if (detailsCb) return detailsCb.checked;
+    const downloadMissingCb = document.getElementById(`playlist-folder-mode-${playlistRef}`);
+    return downloadMissingCb ? downloadMissingCb.checked : false;
+}
+
+async function fetchMirroredOrganizePreference(playlistRef, source = 'spotify') {
+    try {
+        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, source);
+        const res = await fetch(
+            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(source)}`
+        );
+        const data = await res.json();
+        return !!(data.found && data.playlist?.organize_by_playlist);
+    } catch (err) {
+        console.debug('Could not load organize-by-playlist preference:', err);
+        return false;
+    }
+}
+
+async function setMirroredOrganizePreference(playlistRef, enabled, source = 'spotify') {
+    try {
+        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, source);
+        const res = await fetch(
+            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(source)}`
+        );
+        const data = await res.json();
+        if (!data.found || !data.playlist?.id) {
+            return false;
+        }
+        const patchRes = await fetch(`/api/mirrored-playlists/${data.playlist.id}/preferences`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organize_by_playlist: !!enabled }),
+        });
+        const patchData = await patchRes.json();
+        if (!patchRes.ok || patchData.error) {
+            return false;
+        }
+        syncPlaylistOrganizeCheckboxes(playlistRef, !!enabled);
+        return true;
+    } catch (err) {
+        console.debug('Could not save organize-by-playlist preference:', err);
+        return false;
+    }
+}
+
+async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = 'spotify') {
+    const enabled = await fetchMirroredOrganizePreference(playlistRef, source);
+    syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+}
+
+async function onPlaylistOrganizePreferenceChange(playlistRef, enabled, source = 'spotify') {
+    syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+    const ok = await setMirroredOrganizePreference(playlistRef, enabled, source);
+    if (!ok) {
+        showToast('Could not save playlist folder preference (mirror this playlist first)', 'warning');
+    }
+}
+
+async function applyMirroredOrganizePreference(playlistRef, source = 'spotify') {
+    await loadPlaylistOrganizePreferenceIntoModal(playlistRef, source);
+}
+
+function playlistTrackCacheIsStale(playlistId, playlist) {
+    const cached = playlistTrackCache[playlistId];
+    if (!cached) {
+        return false;
+    }
+    const expected = playlist?.track_count;
+    if (expected != null && Number(expected) !== cached.length) {
+        return true;
+    }
+    return false;
+}
+
+function clearPlaylistDownloadProcess(playlistId) {
+    const proc = activeDownloadProcesses?.[playlistId];
+    if (!proc) {
+        return;
+    }
+    if (proc.poller) {
+        clearInterval(proc.poller);
+        proc.poller = null;
+    }
+    if (proc.modalElement) {
+        proc.modalElement.remove();
+    }
+    delete activeDownloadProcesses[playlistId];
+}
+
+/** True when Spotify list or track cache changed since the last Download Missing run. */
+function isPlaylistDownloadProcessStale(playlistId, playlistMeta) {
+    if (typeof playlistTrackCacheIsStale === 'function'
+        && playlistTrackCacheIsStale(playlistId, playlistMeta)) {
+        return true;
+    }
+    const proc = activeDownloadProcesses?.[playlistId];
+    if (!proc) {
+        return false;
+    }
+    const expected = playlistMeta?.track_count;
+    if (expected != null && Array.isArray(proc.tracks)
+        && Number(expected) !== proc.tracks.length) {
+        return true;
+    }
+    // Refresh clears the track cache but can leave a completed modal from the old run.
+    if (!playlistTrackCache[playlistId] && proc.status === 'complete') {
+        return true;
+    }
+    return false;
+}
+
+function invalidatePlaylistTrackCache(playlistId = null) {
+    if (playlistId) {
+        delete playlistTrackCache[playlistId];
+        if (currentModalPlaylistId === playlistId) {
+            currentPlaylistTracks = [];
+        }
+        clearPlaylistDownloadProcess(playlistId);
+        return;
+    }
+    playlistTrackCache = {};
+    currentPlaylistTracks = [];
+    const ids = new Set();
+    if (typeof spotifyPlaylists !== 'undefined' && Array.isArray(spotifyPlaylists)) {
+        for (const p of spotifyPlaylists) {
+            if (p?.id) {
+                ids.add(p.id);
+            }
+        }
+    }
+    if (typeof deezerArlPlaylists !== 'undefined' && Array.isArray(deezerArlPlaylists)) {
+        for (const p of deezerArlPlaylists) {
+            const arlId = String(p.id || '').startsWith('deezer_arl_')
+                ? p.id
+                : `deezer_arl_${p.id}`;
+            ids.add(arlId);
+        }
+    }
+    for (const id of ids) {
+        clearPlaylistDownloadProcess(id);
+    }
+}
+
+function mirrorPlaylistTracksForSource(source, sourcePlaylistId, fullPlaylist) {
+    if (typeof mirrorPlaylist !== 'function' || !fullPlaylist?.tracks) {
+        return;
+    }
+    mirrorPlaylist(source, sourcePlaylistId, fullPlaylist.name, fullPlaylist.tracks.map(t => ({
+        track_name: t.name,
+        artist_name: (t.artists && t.artists[0])
+            ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0])
+            : '',
+        album_name: t.album ? (typeof t.album === 'object' ? t.album.name : t.album) : '',
+        duration_ms: t.duration_ms || 0,
+        image_url: t.album && typeof t.album === 'object' && t.album.images && t.album.images[0]
+            ? t.album.images[0].url
+            : null,
+        source_track_id: t.id || t.spotify_track_id || '',
+    })), {
+        description: fullPlaylist.description,
+        owner: fullPlaylist.owner,
+        image_url: fullPlaylist.image_url,
+    });
+}
+
+/** @deprecated Use mirrorPlaylistTracksForSource */
+function mirrorSpotifyPlaylistTracks(playlistId, fullPlaylist) {
+    mirrorPlaylistTracksForSource('spotify', playlistId, fullPlaylist);
+}
+
+async function fetchAndCachePlaylistTracks(cacheKey, fetchUrl, mirrorSource, mirrorSourceId) {
+    const response = await fetch(fetchUrl);
+    const fullPlaylist = await response.json();
+    if (fullPlaylist.error) {
+        throw new Error(fullPlaylist.error);
+    }
+    playlistTrackCache[cacheKey] = fullPlaylist.tracks;
+    mirrorPlaylistTracksForSource(mirrorSource, mirrorSourceId, fullPlaylist);
+    return fullPlaylist;
+}
+
+async function fetchAndCacheSpotifyPlaylistTracks(playlistId) {
+    return fetchAndCachePlaylistTracks(
+        playlistId,
+        `/api/spotify/playlist/${playlistId}`,
+        'spotify',
+        playlistId,
+    );
+}
+
+async function fetchAndCacheDeezerArlPlaylistTracks(arlPlaylistId, deezerPlaylistId) {
+    return fetchAndCachePlaylistTracks(
+        arlPlaylistId,
+        `/api/deezer/arl-playlist/${deezerPlaylistId}`,
+        'deezer',
+        deezerPlaylistId,
+    );
+}
+
+/**
+ * Footer actions for Spotify/Deezer playlist details modals.
+ * Standalone SoulSync has no media-server playlist sync — show Mirrored + re-analysis instead.
+ */
+function playlistModalDownloadSyncFooterHtml(playlistId, options = {}) {
+    const {
+        hasCompletedProcess = false,
+        isSyncing = false,
+        source = 'spotify',
+        closeBeforeDownload = false,
+    } = options;
+    const openDm = closeBeforeDownload
+        ? `closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')`
+        : `openDownloadMissingModal('${playlistId}')`;
+    const downloadBtns = hasCompletedProcess
+        ? `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="${openDm}">📊 View Last Results</button>
+           <button class="playlist-modal-btn playlist-modal-btn-tertiary soulsync-standalone-action" onclick="restartPlaylistDownloadMissing('${playlistId}')">🔄 Download Missing (New)</button>`
+        : `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="${openDm}">📥 Download Missing Tracks</button>`;
+
+    if (_isSoulsyncStandalone) {
+        return `${downloadBtns}
+            <button class="playlist-modal-btn playlist-modal-btn-secondary soulsync-standalone-action" onclick="navigateToMirroredPlaylist('${playlistId}', '${source}')">📂 Open in Mirrored</button>`;
+    }
+
+    return `${downloadBtns}
+        <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)">
+            <option value="replace" selected>Replace</option>
+            <option value="append">Append only</option>
+        </select>
+        <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>`;
+}
+
+async function restartPlaylistDownloadMissing(playlistId) {
+    const proc = activeDownloadProcesses[playlistId];
+    if (proc?.poller) {
+        clearInterval(proc.poller);
+    }
+    if (proc?.modalElement) {
+        proc.modalElement.remove();
+    }
+    delete activeDownloadProcesses[playlistId];
+    if (typeof closePlaylistDetailsModal === 'function') {
+        closePlaylistDetailsModal();
+    }
+    if (typeof closeDeezerArlPlaylistDetailsModal === 'function') {
+        closeDeezerArlPlaylistDetailsModal();
+    }
+    await openDownloadMissingModal(playlistId);
+}
+
+async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
+    if (typeof navigateToPage === 'function') {
+        navigateToPage('sync');
+    }
+    const mirroredBtn = document.querySelector('.sync-tab-button[data-tab="mirrored"]');
+    if (mirroredBtn) {
+        mirroredBtn.click();
+    }
+    try {
+        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, source);
+        const res = await fetch(
+            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(source)}`
+        );
+        const data = await res.json();
+        if (!data.found || !data.playlist?.id) {
+            if (typeof loadMirroredPlaylists === 'function') {
+                await loadMirroredPlaylists();
+            }
+            showToast('Playlist not mirrored yet — open it once from Sync to create the mirror.', 'warning');
+            return;
+        }
+        if (typeof loadMirroredPlaylists === 'function') {
+            await loadMirroredPlaylists();
+        }
+        if (typeof openMirroredPlaylistModal === 'function') {
+            await openMirroredPlaylistModal(data.playlist.id);
+        }
+    } catch (err) {
+        showToast(`Could not open mirrored playlist: ${err.message}`, 'error');
+    }
+}
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
@@ -3200,6 +3516,7 @@ async function fetchAndUpdateServiceStatus() {
         _isSoulsyncStandalone = isSoulsyncStandalone2;
         document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
             if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
+            if (btn.classList.contains('soulsync-standalone-action')) return;
             if (isSoulsyncStandalone2) {
                 btn.dataset.hiddenByStandalone = '1';
                 btn.style.display = 'none';

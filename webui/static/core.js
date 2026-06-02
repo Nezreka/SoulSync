@@ -521,6 +521,7 @@ function handleServiceStatusUpdate(data) {
     _isSoulsyncStandalone = isSoulsyncStandalone;
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
         if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
+        if (btn.classList.contains('soulsync-standalone-action')) return;
         if (isSoulsyncStandalone) {
             btn.dataset.hiddenByStandalone = '1';
             btn.style.display = 'none';
