@@ -168,7 +168,7 @@ class CanonicalVersionResolveJob(RepairJob):
                     result.skipped += 1
                     result.scanned += 1
                     continue
-            except Exception:
+            except Exception:  # noqa: S110 — best-effort skip check; on read error just resolve it
                 pass
 
             try:
@@ -216,6 +216,6 @@ class CanonicalVersionResolveJob(RepairJob):
         if context.config_manager:
             try:
                 active_server = context.config_manager.get_active_media_server()
-            except Exception:
+            except Exception:  # noqa: S110 — best-effort; fall back to no server filter
                 pass
         return len(self._load_album_ids(context.db, active_server))

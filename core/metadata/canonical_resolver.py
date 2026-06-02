@@ -138,6 +138,11 @@ def resolve_canonical_for_album(
     }
 
 
+def _item_get(item: Any, key: str, default: Any = None) -> Any:
+    """Read ``key`` from a track item that may be a dict or an object."""
+    return item.get(key, default) if isinstance(item, dict) else getattr(item, key, default)
+
+
 def default_fetch_tracklist(source: str, album_id: str) -> Optional[List[Dict[str, Any]]]:
     """Production ``fetch_tracklist``: pull a release's tracklist from a metadata
     source and normalise to ``{title, track_number, duration_ms}``. Duration is
@@ -155,14 +160,13 @@ def default_fetch_tracklist(source: str, album_id: str) -> Optional[List[Dict[st
         items = items.get('items') or []
     out: List[Dict[str, Any]] = []
     for it in items:
-        get = it.get if isinstance(it, dict) else (lambda k, d=None: getattr(it, k, d))
-        dur = get('duration_ms')
+        dur = _item_get(it, 'duration_ms')
         if dur is None:
-            secs = get('duration')  # some sources give seconds
+            secs = _item_get(it, 'duration')  # some sources give seconds
             dur = int(secs * 1000) if isinstance(secs, (int, float)) and secs else None
         out.append({
-            'title': get('name') or get('title') or '',
-            'track_number': get('track_number'),
+            'title': _item_get(it, 'name') or _item_get(it, 'title') or '',
+            'track_number': _item_get(it, 'track_number'),
             'duration_ms': dur,
         })
     return out or None
