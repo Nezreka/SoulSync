@@ -110,10 +110,12 @@ def resolve_and_store_canonical_for_album(
     fetch_tracklist: Optional[Callable[[str, str], Any]] = None,
     source_priority: Optional[List[str]] = None,
     min_score: float = 0.5,
+    store: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """Gather an album's source IDs + its tracks' (duration, title) from the DB,
-    resolve the best-fit canonical release, and persist it. Returns the stored
-    ``{source, album_id, score}`` or None when unresolved.
+    resolve the best-fit canonical release, and (when ``store``) persist it.
+    Returns the resolved ``{source, album_id, score}`` or None when unresolved.
+    ``store=False`` resolves without writing — used by the backfill job's dry run.
 
     Uses the SAME album/source-id loader the Reorganizer uses
     (``load_album_and_tracks`` + ``_extract_source_ids``) so the canonical is
@@ -150,7 +152,7 @@ def resolve_and_store_canonical_for_album(
         source_priority=source_priority,
         min_score=min_score,
     )
-    if result:
+    if result and store:
         db.set_album_canonical(album_id, result['source'], result['album_id'], result['score'])
     return result
 
