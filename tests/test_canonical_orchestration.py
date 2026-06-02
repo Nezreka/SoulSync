@@ -94,6 +94,11 @@ def test_result_includes_artist_and_album_context(tmp_path):
     assert out["artist_name"] == "Imagine Dragons"
     assert out["album_thumb_url"] == "http://album.jpg"
     assert out["artist_thumb_url"] == "http://artist.jpg"
+    # free context: db track count, linked sources, and both title lists
+    assert out["db_track_count"] == 11
+    assert out["linked_sources"] == {"spotify": "sp1"}
+    assert out["file_track_titles"][0] == "Song 1" and len(out["file_track_titles"]) == 11
+    assert "Song 1" in out["release_track_titles"]
 
 
 def test_resolve_returns_none_when_album_has_no_source_ids(tmp_path):

@@ -115,6 +115,11 @@ def resolve_canonical_for_album(
         return None
 
     detail = score_release_detail(file_tracks, winner['_tracks'])
+    # Pinned-release track titles — already fetched, so free. Capped so a giant
+    # box set can't bloat the finding's details_json.
+    release_titles = [
+        (t.get('title') or t.get('name') or '') for t in winner['_tracks']
+    ][:60]
     return {
         'source': winner['source'],
         'album_id': winner['album_id'],
@@ -124,6 +129,7 @@ def resolve_canonical_for_album(
         'count_fit': detail['count_fit'],
         'duration_fit': detail['duration_fit'],
         'title_fit': detail['title_fit'],
+        'release_track_titles': release_titles,
         'candidates': [
             {'source': e['source'], 'album_id': e['album_id'],
              'track_count': e['track_count'], 'score': e['score']}
@@ -243,6 +249,14 @@ def resolve_and_store_canonical_for_album(
         # already loaded — no extra query). Storage only uses source/id/score.
         result['album_title'] = album_data.get('title') or ''
         result['artist_name'] = album_data.get('artist_name') or ''
+        # Free context off the album row + the data we already gathered.
+        if album_data.get('year'):
+            result['year'] = album_data['year']
+        result['db_track_count'] = album_data.get('track_count') or len(file_tracks)
+        if album_data.get('duration'):
+            result['db_duration_ms'] = album_data['duration']
+        result['linked_sources'] = source_ids  # {source: album_id} the album points at now
+        result['file_track_titles'] = [ft.get('title') or '' for ft in file_tracks][:60]
         if album_data.get('thumb_url'):
             result['album_thumb_url'] = album_data['thumb_url']
         # Artist thumb via a guarded lookup (not the shared album loader — some
