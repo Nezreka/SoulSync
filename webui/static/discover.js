@@ -7009,8 +7009,11 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
     const queue = imgNodes.filter(n => n.image_url).slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
     let idx = 0, inFlight = 0, redrawPending = false;
 
-    // Fallback full-rebuild path, used only if the buffer isn't ready yet
-    // (e.g. images returned before the first paint built the offscreen buffer).
+    // Throttled FULL rebuild as images arrive. The per-map buffer is now small
+    // (one focused island / a small explore map), so a full rebuild is cheap and
+    // — unlike the per-node composite — is guaranteed to pick up every cached
+    // image. This is what makes streamed art appear on its own instead of only
+    // after a manual zoom forced a rebuild.
     const scheduleRedraw = () => {
         if (redrawPending || token !== _artMap._loadToken) return;
         redrawPending = true;
@@ -7019,7 +7022,8 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
             if (token !== _artMap._loadToken) return;
             _artMap.dirty = true;
             _artMapRender();
-        }, 280);
+            _artMapEnsureAmbient();
+        }, 200);
     };
 
     function pump() {
@@ -7034,13 +7038,11 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
                         _artMap.images[n.id] = bmp;
                         // Hidden bubbles (other islands in one-island mode): just
                         // cache the image for when you navigate there — don't
-                        // redraw/rebuild for something off-screen.
+                        // redraw for something off-screen.
                         if ((n.opacity || 0) < 0.01) return;
-                        // Composite just this node into the existing buffer (cheap)
-                        // and blit. Only fall back to a full rebuild if the buffer
-                        // isn't built yet. Keeps pan/hover at blit-speed while images stream.
-                        if (_artMapCompositeNode(n)) _artMapRender();
-                        else scheduleRedraw();
+                        // Throttled full rebuild — reliably bakes newly-arrived art
+                        // into the (small) buffer. No manual zoom needed.
+                        scheduleRedraw();
                     }
                 })
                 .finally(() => { inFlight--; pump(); });
