@@ -5215,6 +5215,98 @@ function _artMapFitToContent(marginPx = 120) {
     _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
 }
 
+// ── One-island-at-a-time view (genre + watchlist) ─────────────────────────
+// Big maps spread thousands of artists thin; fitting them all makes every cover
+// tiny. Instead we frame ONE island filling the view (big crisp covers, live
+// layer + bob viable on ~hundreds of bubbles) and navigate between them. Only
+// the focused island is visible, so the buffer covers a small region at high
+// res and the whole-world-buffer "small version" problem disappears.
+
+function _artMapFocusIsland(idx, opts = {}) {
+    const islands = _artMap._islands || [];
+    if (!islands.length) return;
+    idx = Math.max(0, Math.min(islands.length - 1, idx));
+    _artMap._focusIdx = idx;
+    const isl = islands[idx];
+
+    // Show only this island's bubbles + its title; hide everything else so the
+    // buffer/zoom frame just this island.
+    for (const n of _artMap.placed) {
+        const mine = n._isLabel ? (n.name === isl.name) : (n._island === isl.name);
+        n.opacity = mine ? 1 : 0;
+    }
+
+    // Frame the island in ~80% of the viewport.
+    const span = (isl.r * 2.3) + 120;
+    const z = Math.min(_artMap.width / span, _artMap.height / span, 1.2);
+    _artMap.zoom = z;
+    _artMap.offsetX = _artMap.width / 2 - isl.cx * z;
+    _artMap.offsetY = _artMap.height / 2 - isl.cy * z;
+
+    _artMapUpdateIslandNav();
+
+    if (opts.bloom !== false) {
+        _artMapBloomIsland(isl);
+    } else {
+        _artMap.dirty = true;
+        _artMapRender();
+    }
+}
+
+// Bloom one island's bubbles (drop-in-water) + a ripple. Reuses the reveal loop.
+function _artMapBloomIsland(isl) {
+    const t0 = performance.now();
+    _artMap._revealing = true;
+    _artMap._ambient = true;
+    for (const n of _artMap.placed) {
+        if ((n.opacity || 0) < 0.01) continue;
+        n.aScale = 0; n.aAlpha = 0;
+        let radial = 0;
+        if (isl.r > 0) radial = Math.min(1, Math.hypot(n.x - isl.cx, n.y - isl.cy) / isl.r);
+        n._revealAt = t0 + (n._isLabel ? 60 : radial * 360);
+        n._revealDur = 430;
+    }
+    _artMap._ripples = [{ cx: isl.cx, cy: isl.cy, hue: isl.hue, maxR: isl.r * 1.4, t0, dur: 1000 }];
+    _artMapStartLoop();
+}
+
+// Step to the prev/next island (wraps).
+function _artMapIslandNav(dir) {
+    const islands = _artMap._islands || [];
+    if (islands.length < 2) return;
+    let idx = (_artMap._focusIdx || 0) + dir;
+    if (idx < 0) idx = islands.length - 1;
+    if (idx >= islands.length) idx = 0;
+    _artMapFocusIsland(idx, { bloom: true });
+}
+
+// Build/update the bottom nav bar (prev / genre name + i/N / next). Inline-styled
+// so it doesn't depend on CSS that might not exist.
+function _artMapUpdateIslandNav() {
+    const islands = _artMap._islands || [];
+    let nav = document.getElementById('artmap-island-nav');
+    if (!_artMap._oneIsland || islands.length < 1) { if (nav) nav.remove(); return; }
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+    if (!nav) {
+        nav = document.createElement('div');
+        nav.id = 'artmap-island-nav';
+        nav.style.cssText = 'position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;padding:8px 14px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:999px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;';
+        container.appendChild(nav);
+    }
+    const idx = _artMap._focusIdx || 0;
+    const isl = islands[idx];
+    const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+    nav.innerHTML = `
+        <button style="${btn}" onclick="_artMapIslandNav(-1)" title="Previous genre (←)">&#9664;</button>
+        <div style="text-align:center;min-width:120px;">
+            <div style="font-weight:700;font-size:13px;letter-spacing:0.04em;color:hsl(${isl.hue},80%,80%);">${escapeHtml((isl.name || '').toUpperCase())}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:1px;">${isl.count} artists &middot; ${idx + 1} / ${islands.length}</div>
+        </div>
+        <button style="${btn}" onclick="_artMapIslandNav(1)" title="Next genre (→)">&#9654;</button>
+    `;
+}
+
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (!container) return;
@@ -5269,7 +5361,7 @@ async function openArtistMap() {
         const groups = _artMapGroupByGenre(rawNodes);
         _artMapLayoutIslands(groups);
         _artMap.edges = _artMapRemapEdges(data.edges);
-        _artMapFitToContent();
+        _artMap._oneIsland = true; // focus one genre island at a time
 
         // Setup interaction
         _artMapSetupInteraction(canvas);
@@ -5299,7 +5391,7 @@ async function openArtistMap() {
             const le = document.getElementById('artist-map-loading');
             if (le) le.remove();
 
-            _artMapBeginReveal();
+            _artMapFocusIsland(0, { bloom: true }); // frame + bloom the first genre island
             _artMapStreamImages(_artMap.placed);
         }, 50);
 
@@ -5372,6 +5464,9 @@ function closeArtistMap() {
     _artMap._ambient = false;
     _artMap._anim.running = false;
     if (_artMap._anim.raf) { cancelAnimationFrame(_artMap._anim.raf); _artMap._anim.raf = null; }
+    _artMap._oneIsland = false;
+    const navEl = document.getElementById('artmap-island-nav');
+    if (navEl) navEl.remove();
     if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
     _artMapHideContextMenu();
 
@@ -5426,7 +5521,10 @@ function _artMapRebuildBuffer() {
     const bz = _artMap.zoom;
     let liveN = 0;
     for (const n of visible) { if (!n._isLabel && (n.radius || 0) * bz >= _artMap.LIVE_PX) liveN++; }
-    _artMap._liveOverflow = liveN > 450;
+    // A single focused island (≤ maxPerIsland 500) should render via the crisp
+    // live layer; only fall back to baking-everything when there are clearly more
+    // bubbles than the live layer can draw.
+    _artMap._liveOverflow = liveN > 650;
 
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
@@ -6129,23 +6227,51 @@ function _artMapDrawPerf(ctx, t0) {
     ctx.restore();
 }
 
+// Toolbar search: query the metadata source for ANY artist (like the discover
+// page) and launch an exploration on click — not just filter the current map.
 function artMapSearch(query) {
     const results = document.getElementById('artist-map-search-results');
     if (!results) return;
-    if (!query || query.length < 2) { results.style.display = 'none'; return; }
+    const q = (query || '').trim();
+    if (q.length < 2) { results.style.display = 'none'; results.innerHTML = ''; return; }
 
-    const q = query.toLowerCase();
-    const matches = _artMap.placed.filter(n => (n.opacity || 0) > 0.5 && n.name.toLowerCase().includes(q)).slice(0, 8);
+    clearTimeout(_artMap._searchTimer);
+    _artMap._searchTimer = setTimeout(async () => {
+        const myToken = (_artMap._searchToken = (_artMap._searchToken || 0) + 1);
+        results.style.display = 'block';
+        results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">Searching…</div>';
+        try {
+            const resp = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(q)}`);
+            const data = await resp.json();
+            if (myToken !== _artMap._searchToken) return; // superseded by a newer keystroke
+            const artists = (data && data.success && Array.isArray(data.artists)) ? data.artists : [];
+            if (!artists.length) {
+                results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">No artists found</div>';
+                return;
+            }
+            results.innerHTML = artists.slice(0, 8).map(a =>
+                `<div class="artist-map-search-item" onclick="artMapExploreArtist('${escapeForInlineJs(a.name)}')">
+                    <span class="artist-map-search-type similar">○</span>
+                    ${escapeHtml(a.name)}
+                    <span class="artist-map-search-go">Explore &rarr;</span>
+                </div>`
+            ).join('');
+        } catch (e) {
+            if (myToken === _artMap._searchToken) {
+                results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">Search failed — try again</div>';
+            }
+        }
+    }, 300);
+}
 
-    if (!matches.length) { results.style.display = 'none'; return; }
-
-    results.style.display = 'block';
-    results.innerHTML = matches.map(n =>
-        `<div class="artist-map-search-item" onclick="artMapZoomToNode(${n.id})">
-            <span class="artist-map-search-type ${n.type}">${n.type === 'watchlist' ? '★' : '○'}</span>
-            ${escapeHtml(n.name)}
-        </div>`
-    ).join('');
+// Launch the explorer for a searched artist (closes the dropdown first).
+function artMapExploreArtist(name) {
+    const results = document.getElementById('artist-map-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const input = document.getElementById('artist-map-search');
+    if (input) input.value = '';
+    _artMap._skipSectionToggle = true;
+    _openArtistMapExplorerWithName(name);
 }
 
 function artMapZoomToNode(nodeId) {
@@ -6461,7 +6587,7 @@ async function _openGenreMapWithSelection(selectedGenre) {
         }));
         _artMapLayoutIslands(groups);
         _artMap.edges = [];
-        _artMapFitToContent();
+        _artMap._oneIsland = true; // focus one genre island at a time
         const placedCount = _artMap.placed.filter(n => !n._isLabel).length;
 
         _artMapSetupInteraction(canvas);
@@ -6472,8 +6598,7 @@ async function _openGenreMapWithSelection(selectedGenre) {
         const le = document.getElementById('artist-map-loading');
         if (le) le.remove();
 
-        _artMap.dirty = true;
-        _artMapBeginReveal();
+        _artMapFocusIsland(0, { bloom: true }); // frame + bloom the selected genre island
 
         // Stream images in throttled waves — interactive immediately, sharpens in place.
         _artMapStreamImages(_artMap.placed.filter(n => !n._isLabel));
@@ -6570,6 +6695,8 @@ async function _openArtistMapExplorerWithName(name) {
         const groups = _artMapGroupByGenre(rawNodes);
         _artMapLayoutIslands(groups);
         _artMap.edges = _artMapRemapEdges(data.edges);
+        _artMap._oneIsland = false; // explore stays multi-island (it's small)
+        _artMapUpdateIslandNav(); // tear down any leftover nav from a prior map
         _artMapFitToContent();
 
         _artMapSetupInteraction(canvas);
@@ -6813,10 +6940,13 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
                 .then(bmp => {
                     if (bmp && token === _artMap._loadToken) {
                         _artMap.images[n.id] = bmp;
+                        // Hidden bubbles (other islands in one-island mode): just
+                        // cache the image for when you navigate there — don't
+                        // redraw/rebuild for something off-screen.
+                        if ((n.opacity || 0) < 0.01) return;
                         // Composite just this node into the existing buffer (cheap)
                         // and blit. Only fall back to a full rebuild if the buffer
-                        // isn't built yet. This keeps pan/hover at blit-speed the
-                        // whole time images are streaming in — the lag fix.
+                        // isn't built yet. Keeps pan/hover at blit-speed while images stream.
                         if (_artMapCompositeNode(n)) _artMapRender();
                         else scheduleRedraw();
                     }
@@ -6885,6 +7015,8 @@ function _artMapSetupInteraction(canvas) {
             _artMap.dirty = true;
             _artMapRender();
         }
+        else if (_artMap._oneIsland && e.key === 'ArrowLeft') { _artMapIslandNav(-1); e.preventDefault(); }
+        else if (_artMap._oneIsland && e.key === 'ArrowRight') { _artMapIslandNav(1); e.preventDefault(); }
     }
     window.addEventListener('keydown', _artMapKeyHandler);
     _artMap._keyHandler = _artMapKeyHandler;
