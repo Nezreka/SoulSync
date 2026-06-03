@@ -28284,6 +28284,19 @@ def get_artist_map_explore():
     return _artists_map_get_artist_map_explore()
 
 
+@app.route('/api/discover/artist-map/perf', methods=['POST'])
+def log_artist_map_perf():
+    """Debug sink: the artist-map frontend POSTs its render timings here (toggled
+    with 'd' on the map) so they land in app.log — the on-canvas overlay text
+    can't be copied. Used to find the real drag/zoom bottleneck."""
+    try:
+        data = request.get_json(silent=True) or {}
+        logger.info("[ARTMAP-PERF] %s", json.dumps(data, ensure_ascii=False))
+    except Exception:
+        pass
+    return ('', 204)
+
+
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
 def search_artists_for_playlist():
     """Search for artists to use as seeds for custom playlist building"""
