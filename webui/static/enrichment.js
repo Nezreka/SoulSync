@@ -1376,20 +1376,25 @@ async function toggleSimilarArtistsEnrichment() {
     }
 }
 
-(function _wireSimilarArtistsBubble() {
-    // Click is the inline onclick on the button (like Amazon) — we only need to
-    // kick off + poll the status here.
-    const wire = () => {
-        if (document.getElementById('similar-artists-enrich-button')) {
+// Initialize Similar Artists UI on page load — identical pattern to AudioDB/Deezer
+// (addEventListener for the click; no inline onclick on the button).
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('similar-artists-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleSimilarArtistsEnrichment);
             updateSimilarArtistsEnrichmentStatus();
             setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
         }
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
-    else wire();
-})();
-
-window.toggleSimilarArtistsEnrichment = toggleSimilarArtistsEnrichment; // ensure inline onclick can resolve it
+    });
+} else {
+    const button = document.getElementById('similar-artists-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleSimilarArtistsEnrichment);
+        updateSimilarArtistsEnrichmentStatus();
+        setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+    }
+}
 
 // ===================================================================
 // HYDRABASE P2P MIRROR WORKER
