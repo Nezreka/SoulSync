@@ -5011,6 +5011,20 @@ const _artMap = {
     // under the LOD dot threshold). Only binds on large worlds — small maps
     // stay crisp via the z*2 / 1.0 caps. Tunable.
     MAX_BUFFER_PX: 4096,
+
+    // ── v2 live-animation engine ──────────────────────────────────────────
+    // Two-layer render: the offscreen buffer holds the STATIC far field (small
+    // bubbles, drawn once); a LIVE overlay redraws only the bubbles big enough
+    // to read on screen, every frame, so they can scale/bob/ripple. A node is
+    // "live" when its on-screen radius (radius*zoom) clears LIVE_PX; everything
+    // smaller stays baked in the buffer. This bounds per-frame work to what you
+    // can actually see, not the full 2000-node world.
+    LIVE_PX: 12,
+    // The rAF loop runs ONLY while something is animating (reveal/ripple) and
+    // idles otherwise, falling back to on-demand blits. _anim tracks it.
+    _anim: { running: false, raf: null, last: 0 },
+    _fieldAlpha: 1,   // global fade for the static far-field buffer (reveal)
+    _revealT0: 0,     // performance.now() when the current reveal began
 };
 
 async function openArtistMap() {
@@ -5215,16 +5229,15 @@ async function openArtistMap() {
             _artMap.placed.forEach(n => { n.opacity = 1; });
 
             // Paint NOW — the map is fully interactive (pan/zoom/hover/click)
-            // with placeholder circles before a single image is fetched. Images
-            // then stream in throttled waves and sharpen the map in place. This
-            // is the "click-click-click" win: no blocking on N image fetches
-            // before the first frame.
+            // before a single image is fetched. The reveal animation blooms the
+            // bubbles in (far field fades, near bubbles pop outward); images then
+            // stream in behind it and sharpen in place. No blocking on N fetches.
             _artMap.dirty = true;
-            _artMapRender();
 
             const le = document.getElementById('artist-map-loading');
             if (le) le.remove();
 
+            _artMapBeginReveal();
             _artMapStreamImages(_artMap.placed);
         }, 50);
 
@@ -5335,6 +5348,8 @@ function _artMapRebuildBuffer() {
     _artMap._bufferScale = scale;
     _artMap._bufferMinX = minX;
     _artMap._bufferMinY = minY;
+    // Freeze the live/buffer partition to this build's zoom (see _artMapIsLiveSize).
+    _artMap._liveBuildZoom = _artMap.zoom;
 
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
@@ -5370,6 +5385,7 @@ function _artMapRebuildBuffer() {
             else if (pass === 2 && !n._isLabel && (n.type === 'watchlist' || n.type === 'center' || n.ring === 1)) { /* draw */ }
             else continue;
             if (hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
+            if (_artMapIsLiveSize(n)) continue; // big enough to read → drawn live on the overlay
             _artMapDrawNodeToBuffer(octx, n, scale);
         }
     }
@@ -5499,6 +5515,10 @@ function _artMapCompositeNode(n) {
     if (!oc || scale == null) return false;
     if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) return false;
     if ((n.opacity || 0) < 0.01) return false;
+    // Live-layer bubbles aren't in the buffer — they read their image fresh each
+    // frame, so just signal "blit" and let the overlay pick it up. Compositing
+    // them here would double-draw (buffer copy + live copy).
+    if (_artMapIsLiveSize(n)) return true;
     const octx = oc.getContext('2d');
     octx.save();
     octx.scale(scale, scale);
@@ -5507,6 +5527,151 @@ function _artMapCompositeNode(n) {
     octx.restore();
     octx.globalAlpha = 1;
     return true;
+}
+
+// A node renders on the live overlay when it's big enough on screen to read.
+// Labels stay baked in the static buffer (no per-frame motion needed in v2).
+// IMPORTANT: this uses the zoom the BUFFER WAS BUILT AT (_liveBuildZoom), not
+// the live zoom. The buffer only rebuilds ~300ms after zooming stops, so the
+// live/buffer split must stay frozen to whatever the (possibly stale) buffer
+// excluded — otherwise a bubble could fall out of both during an active zoom
+// and flicker. Both the buffer-exclude and the live-draw read this same value,
+// so the two sets are always exact complements.
+function _artMapIsLiveSize(n) {
+    if (n._isLabel) return false;
+    const z = _artMap._liveBuildZoom || _artMap.zoom;
+    return (n.radius || 0) * z >= _artMap.LIVE_PX;
+}
+
+// Draw the live overlay: every big/near bubble, in world space, honouring its
+// per-node animation transform (aScale for reveal/pop, opacity for fade). Kept
+// cheap by viewport culling + a hard cap; the static far field is already on
+// screen via the buffer blit.
+function _artMapDrawLiveLayer(ctx) {
+    const placed = _artMap.placed;
+    if (!placed || !placed.length) return;
+    const z = _artMap.zoom;
+    const ox = _artMap.offsetX, oy = _artMap.offsetY;
+    const w = _artMap.width, h = _artMap.height;
+    const margin = 80;
+
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(z, z);
+
+    let drawn = 0;
+    const CAP = 600;
+    for (const n of placed) {
+        if (!_artMapIsLiveSize(n)) continue;
+        if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
+        // Viewport cull (screen space)
+        const sx = ox + n.x * z, sy = oy + n.y * z;
+        const rPx = (n.radius || 0) * z;
+        if (sx + rPx < -margin || sx - rPx > w + margin || sy + rPx < -margin || sy - rPx > h + margin) continue;
+        _artMapDrawLiveNode(ctx, n);
+        if (++drawn >= CAP) break;
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+}
+
+// Draw one live bubble with its animation transform. aScale scales about the
+// node centre; opacity fades it. Reuses the shared node painter so the live
+// bubble is pixel-identical to its baked form once settled.
+function _artMapDrawLiveNode(ctx, n) {
+    const sc = n.aScale == null ? 1 : n.aScale;
+    if (sc <= 0.001) return;
+    if (sc !== 1) {
+        ctx.save();
+        ctx.translate(n.x, n.y);
+        ctx.scale(sc, sc);
+        ctx.translate(-n.x, -n.y);
+        _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
+        ctx.restore();
+    } else {
+        _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────
+// Runs only while something is animating; idles otherwise. Each tick advances
+// the active animations (reveal field-fade + per-node pop), draws one frame,
+// and re-arms itself only if work remains — so a still map costs nothing.
+function _artMapStartLoop() {
+    const a = _artMap._anim;
+    if (a.running) return;
+    a.running = true;
+    a.last = performance.now();
+    const tick = (t) => {
+        if (!a.running) return;
+        const more = _artMapStepAnimations(t);
+        _artMapDraw();
+        if (more) {
+            a.raf = requestAnimationFrame(tick);
+        } else {
+            a.running = false;
+            a.raf = null;
+        }
+    };
+    a.raf = requestAnimationFrame(tick);
+}
+
+// Advance every active animation by absolute time t (ms). Returns true while
+// anything is still moving. Phase A: global field fade-in + staggered per-node
+// reveal pop (ease-out-back) for the live bubbles.
+function _artMapStepAnimations(t) {
+    let active = false;
+
+    // Global far-field fade-in over the reveal window.
+    if (_artMap._fieldAlpha < 1) {
+        const FIELD_MS = 700;
+        const p = Math.min(1, (t - _artMap._revealT0) / FIELD_MS);
+        _artMap._fieldAlpha = p;
+        if (p < 1) active = true;
+    }
+
+    // Per-node reveal pop: each node eases its aScale 0→1 once past its
+    // staggered start time. Ease-out-back gives a subtle overshoot ("bloom").
+    const placed = _artMap.placed;
+    if (placed) {
+        for (const n of placed) {
+            if (n.aScale == null || n.aScale >= 1) continue;
+            const start = n._revealAt || _artMap._revealT0;
+            if (t < start) { active = true; continue; }
+            const DUR = 520;
+            const p = Math.min(1, (t - start) / DUR);
+            // ease-out-back
+            const c1 = 1.70158, c3 = c1 + 1;
+            const e = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+            n.aScale = p >= 1 ? 1 : e;
+            if (p < 1) active = true;
+        }
+    }
+
+    return active;
+}
+
+// Kick off the reveal: fade the far field in, and stagger each live bubble's
+// pop by its distance from the camera centre so islands bloom outward.
+function _artMapBeginReveal() {
+    const t0 = performance.now();
+    _artMap._revealT0 = t0;
+    _artMap._fieldAlpha = 0;
+    const cx = (_artMap.width / 2 - _artMap.offsetX) / _artMap.zoom;
+    const cy = (_artMap.height / 2 - _artMap.offsetY) / _artMap.zoom;
+    let maxD = 1;
+    for (const n of _artMap.placed) {
+        n._d2 = (n.x - cx) * (n.x - cx) + (n.y - cy) * (n.y - cy);
+        if (n._d2 > maxD) maxD = n._d2;
+    }
+    const maxD2 = Math.sqrt(maxD) || 1;
+    for (const n of _artMap.placed) {
+        n.aScale = 0;
+        const d = Math.sqrt(n._d2);
+        n._revealAt = t0 + (d / maxD2) * 520; // farther = later → outward bloom
+    }
+    _artMapStartLoop();
 }
 
 function _artMapRender() {
@@ -5560,12 +5725,20 @@ function _artMapDraw() {
     // Screen position of world (wx,wy) = offsetX + wx*zoom, offsetY + wy*zoom
     // Therefore buffer origin on screen = offsetX + minX*zoom, offsetY + minY*zoom
     // And buffer is drawn at size (bufferWidth * zoom/s, bufferHeight * zoom/s)
+    const fieldAlpha = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
+    if (fieldAlpha < 0.999) ctx.globalAlpha = fieldAlpha;
     ctx.drawImage(oc,
         _artMap.offsetX + mx * z,
         _artMap.offsetY + my * z,
         oc.width * z / s,
         oc.height * z / s
     );
+    ctx.globalAlpha = 1;
+
+    // ── Live overlay layer: redraw the big/near bubbles every frame so they can
+    // scale (reveal/pop), bob and ripple. These are excluded from the static
+    // buffer above, so there's no double-draw. Viewport-culled + capped. ──
+    _artMapDrawLiveLayer(ctx);
 
     // ── Interactive overlay (drawn on main canvas, not buffer) ──
     const cFade = _artMap._constellationFade || 0;
@@ -6253,7 +6426,7 @@ async function _openGenreMapWithSelection(selectedGenre) {
         if (le) le.remove();
 
         _artMap.dirty = true;
-        _artMapRender();
+        _artMapBeginReveal();
 
         // Stream images in throttled waves — interactive immediately, sharpens in place.
         _artMapStreamImages(_artMap.placed.filter(n => !n._isLabel));
@@ -6463,7 +6636,7 @@ async function _openArtistMapExplorerWithName(name) {
         if (le) le.remove();
 
         _artMap.dirty = true;
-        _artMapRender();
+        _artMapBeginReveal();
 
         // Stream images in throttled waves — interactive immediately, sharpens in place.
         _artMapStreamImages(_artMap.placed);
