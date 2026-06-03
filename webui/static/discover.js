@@ -6431,14 +6431,22 @@ async function _openArtistMapExplorerWithName(name) {
 }
 
 function _showArtistMapSearchPrompt() {
+    // Search the metadata source and make the user PICK a real artist, rather
+    // than exploring whatever loose text they typed. Resolves with the chosen
+    // artist's resolved name (which the explorer hands to /artist-map/explore),
+    // or null if cancelled.
     return new Promise(resolve => {
         const existing = document.getElementById('artmap-search-prompt');
         if (existing) existing.remove();
 
-        const overlay = document.createElement('div');
+        let done = false;
+        let overlay;
+        const finish = (val) => { if (done) return; done = true; if (overlay) overlay.remove(); resolve(val); };
+
+        overlay = document.createElement('div');
         overlay.id = 'artmap-search-prompt';
         overlay.className = 'modal-overlay';
-        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+        overlay.onclick = (e) => { if (e.target === overlay) finish(null); };
 
         overlay.innerHTML = `
             <div class="artmap-search-prompt-modal">
@@ -6449,32 +6457,79 @@ function _showArtistMapSearchPrompt() {
                     </svg>
                     <div>
                         <h3>Artist Explorer</h3>
-                        <p>Enter an artist to explore their connections</p>
+                        <p>Search and pick an artist to explore</p>
                     </div>
                 </div>
-                <input type="text" id="artmap-explore-input" class="artmap-explore-input" placeholder="Artist name..." autofocus>
+                <div class="artmap-explore-search-wrap">
+                    <input type="text" id="artmap-explore-input" class="artmap-explore-input"
+                           placeholder="Search artists…" autocomplete="off" autofocus>
+                    <div class="artmap-explore-spinner" id="artmap-explore-spinner" style="display:none">
+                        <div class="watch-all-loading-spinner"></div>
+                    </div>
+                </div>
+                <div class="artmap-explore-results" id="artmap-explore-results"></div>
                 <div class="artmap-search-prompt-actions">
-                    <button class="btn btn--sm btn--secondary ya-header-btn" onclick="document.getElementById('artmap-search-prompt').remove()">Cancel</button>
-                    <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" id="artmap-explore-go">
-                        <span>Explore</span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-                    </button>
+                    <button class="btn btn--sm btn--secondary ya-header-btn" id="artmap-explore-cancel">Cancel</button>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
 
         const input = overlay.querySelector('#artmap-explore-input');
-        const goBtn = overlay.querySelector('#artmap-explore-go');
+        const results = overlay.querySelector('#artmap-explore-results');
+        const spinner = overlay.querySelector('#artmap-explore-spinner');
+        overlay.querySelector('#artmap-explore-cancel').onclick = () => finish(null);
 
-        const submit = () => {
-            const val = input.value.trim();
-            overlay.remove();
-            resolve(val || null);
+        const renderResults = (artists) => {
+            results.innerHTML = '';
+            if (!artists.length) {
+                results.innerHTML = '<div class="artmap-explore-empty">No artists found</div>';
+                return;
+            }
+            artists.forEach(a => {
+                const img = a.image_url || '/static/placeholder-album.png';
+                const row = document.createElement('div');
+                row.className = 'artmap-explore-result';
+                row.innerHTML = `
+                    <img src="${escapeHtml(img)}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
+                    <span class="artmap-explore-result-name">${escapeHtml(a.name)}</span>
+                    <span class="artmap-explore-result-go">Explore &rarr;</span>`;
+                row.onclick = () => finish(a.name);   // pick the resolved artist, not raw text
+                results.appendChild(row);
+            });
         };
 
-        goBtn.onclick = submit;
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+        let timer = null;
+        let token = 0;
+        const doSearch = () => {
+            const q = input.value.trim();
+            if (!q) { results.innerHTML = ''; spinner.style.display = 'none'; clearTimeout(timer); return; }
+            clearTimeout(timer);
+            timer = setTimeout(async () => {
+                const myToken = ++token;
+                spinner.style.display = 'flex';
+                try {
+                    const resp = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(q)}`);
+                    const data = await resp.json();
+                    if (myToken !== token) return;  // a newer keystroke superseded this
+                    renderResults((data && data.success && Array.isArray(data.artists)) ? data.artists : []);
+                } catch (e) {
+                    if (myToken === token) results.innerHTML = '<div class="artmap-explore-empty">Search failed — try again</div>';
+                } finally {
+                    if (myToken === token) spinner.style.display = 'none';
+                }
+            }, 350);
+        };
+
+        input.addEventListener('input', doSearch);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const first = results.querySelector('.artmap-explore-result');
+                if (first) first.click();        // Enter = pick top match, never raw text
+            } else if (e.key === 'Escape') {
+                finish(null);
+            }
+        });
         setTimeout(() => input.focus(), 50);
     });
 }
