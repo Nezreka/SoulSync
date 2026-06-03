@@ -5504,6 +5504,16 @@ function _artMapRebuildBuffer() {
 }
 
 function _artMapRender() {
+    // v2 perf: coalesce every render request into a single rAF, so a burst of
+    // mousemove/pan/animation calls never draws more than once per frame.
+    if (_artMap._rafPending) return;
+    _artMap._rafPending = requestAnimationFrame(() => {
+        _artMap._rafPending = null;
+        _artMapDraw();
+    });
+}
+
+function _artMapDraw() {
     /**Blit offscreen buffer to screen canvas with pan/zoom. Near-zero cost.**/
     const ctx = _artMap.ctx;
     const w = _artMap.width;
@@ -5581,20 +5591,18 @@ function _artMapRender() {
                 ctx.globalAlpha = 1;
                 ctx.restore();
 
-                // Draw glowing connection lines
+                // Draw connection lines — ONE path, ONE solid stroke. The old
+                // code built a fresh linear-gradient object per line every frame,
+                // which is the main cause of the hover-lag on dense maps.
+                ctx.strokeStyle = `rgba(138,43,226,${0.42 * cFade})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
                 for (const cn of highlightNodes) {
                     if (cn === n) continue;
-                    ctx.beginPath();
                     ctx.moveTo(n.x, n.y);
                     ctx.lineTo(cn.x, cn.y);
-                    // Gradient line
-                    const lineGrad = ctx.createLinearGradient(n.x, n.y, cn.x, cn.y);
-                    lineGrad.addColorStop(0, `rgba(138,43,226,${0.5 * cFade})`);
-                    lineGrad.addColorStop(1, `rgba(138,43,226,${0.15 * cFade})`);
-                    ctx.strokeStyle = lineGrad;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
                 }
+                ctx.stroke();
 
                 // Redraw highlighted nodes on top
                 ctx.globalAlpha = cFade;
@@ -5736,26 +5744,30 @@ function artMapZoomToNode(nodeId) {
 function _artMapShowTooltip(e, node) {
     const tip = document.getElementById('artist-map-tooltip');
     if (!tip) return;
-    if (!node) { tip.style.display = 'none'; return; }
+    if (!node) { tip.style.display = 'none'; _artMap._tipNodeId = null; return; }
 
-    const img = node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>';
-    const genres = (node.genres || []).slice(0, 3);
-    const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
-    const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
-
-    tip.innerHTML = `
-        <div class="artmap-tip-row">
-            ${img}
-            <div class="artmap-tip-info">
-                <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
-                ${typeLabel}
-                ${genreHTML}
+    // v2 perf: only rebuild the tooltip's innerHTML (and reload its image) when
+    // the hovered artist actually changes — a plain mousemove just repositions.
+    if (_artMap._tipNodeId !== node.id) {
+        _artMap._tipNodeId = node.id;
+        const img = node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>';
+        const genres = (node.genres || []).slice(0, 3);
+        const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
+        const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
+        tip.innerHTML = `
+            <div class="artmap-tip-row">
+                ${img}
+                <div class="artmap-tip-info">
+                    <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
+                    ${typeLabel}
+                    ${genreHTML}
+                </div>
             </div>
-        </div>
-    `;
-    tip.style.display = 'block';
+        `;
+        tip.style.display = 'block';
+    }
 
-    // Position — keep on screen
+    // Position — keep on screen (cheap; runs every move)
     const x = Math.min(e.clientX + 16, window.innerWidth - tip.offsetWidth - 10);
     const y = Math.min(e.clientY - 10, window.innerHeight - tip.offsetHeight - 10);
     tip.style.left = x + 'px';
@@ -6731,17 +6743,48 @@ function _artMapScreenToWorld(e, canvas) {
     };
 }
 
-function _artMapHitTest(wx, wy) {
-    // Check watchlist first (drawn on top), then similar
-    const sorted = [..._artMap.placed].sort((a, b) =>
-        (b.type === 'watchlist' ? 1 : 0) - (a.type === 'watchlist' ? 1 : 0));
-    for (const n of sorted) {
-        if ((n.opacity || 0) < 0.3) continue;
-        const dx = wx - n.x;
-        const dy = wy - n.y;
-        if (dx * dx + dy * dy <= n.radius * n.radius) return n;
+function _artMapBuildHitGrid() {
+    // v2 perf: bucket nodes into a coarse world-space grid so hit-testing checks
+    // only the cell under the cursor instead of sorting+scanning every node each
+    // mousemove. A node is inserted into every cell its bounding box overlaps,
+    // so a single-cell lookup at the cursor is exhaustive.
+    const placed = _artMap.placed || [];
+    const cell = 400;
+    const grid = new Map();
+    for (const n of placed) {
+        const mincx = Math.floor((n.x - n.radius) / cell);
+        const maxcx = Math.floor((n.x + n.radius) / cell);
+        const mincy = Math.floor((n.y - n.radius) / cell);
+        const maxcy = Math.floor((n.y + n.radius) / cell);
+        for (let cx = mincx; cx <= maxcx; cx++) {
+            for (let cy = mincy; cy <= maxcy; cy++) {
+                const k = cx + ',' + cy;
+                let arr = grid.get(k);
+                if (!arr) { arr = []; grid.set(k, arr); }
+                arr.push(n);
+            }
+        }
     }
-    return null;
+    _artMap._grid = { cell, grid };
+    _artMap._gridFor = placed;   // identity guard — loaders assign a fresh array
+}
+
+function _artMapHitTest(wx, wy) {
+    if (!_artMap._grid || _artMap._gridFor !== _artMap.placed) _artMapBuildHitGrid();
+    const { cell, grid } = _artMap._grid;
+    const candidates = grid.get(Math.floor(wx / cell) + ',' + Math.floor(wy / cell));
+    if (!candidates) return null;
+    // Watchlist nodes draw on top, so they win ties.
+    let similarHit = null;
+    for (const n of candidates) {
+        if ((n.opacity || 0) < 0.3) continue;
+        const dx = wx - n.x, dy = wy - n.y;
+        if (dx * dx + dy * dy <= n.radius * n.radius) {
+            if (n.type === 'watchlist') return n;
+            if (!similarHit) similarHit = n;
+        }
+    }
+    return similarHit;
 }
 
 async function openYourArtistInfoModal_direct(node) {
