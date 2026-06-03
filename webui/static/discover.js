@@ -5585,13 +5585,16 @@ function _artMapDrawLiveLayer(ctx) {
     ctx.save();
     ctx.translate(ox, oy);
     ctx.scale(z, z);
-    // The live layer fades in together with the far field during the reveal.
-    _artMap._drawAlphaMul = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
+    _artMap._drawAlphaMul = 1;
 
+    // During the reveal the buffer is bypassed, so the live layer draws EVERY
+    // bubble (and the genre titles) so they can all bloom. Otherwise it draws
+    // only the big/near ones; the rest live in the static buffer.
+    const revealing = _artMap._revealing;
     let drawn = 0;
-    const CAP = 600;
+    const CAP = revealing ? 2200 : 600;
     for (const n of placed) {
-        if (!_artMapIsLiveSize(n)) continue;
+        if (!revealing && !_artMapIsLiveSize(n)) continue;
         if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
         // Viewport cull (screen space)
         const sx = ox + n.x * z, sy = oy + n.y * z;
@@ -5606,11 +5609,14 @@ function _artMapDrawLiveLayer(ctx) {
 }
 
 // Draw one live bubble with its animation transform. aScale scales about the
-// node centre; opacity fades it. Reuses the shared node painter so the live
-// bubble is pixel-identical to its baked form once settled.
+// node centre; aAlpha fades it (folded into the global draw-alpha multiplier).
+// Reuses the shared node painter so the bubble is identical to its baked form
+// once settled.
 function _artMapDrawLiveNode(ctx, n) {
     const sc = n.aScale == null ? 1 : n.aScale;
     if (sc <= 0.001) return;
+    const baseMul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
+    _artMap._drawAlphaMul = baseMul * (n.aAlpha == null ? 1 : n.aAlpha);
     if (sc !== 1) {
         ctx.save();
         ctx.translate(n.x, n.y);
@@ -5621,6 +5627,7 @@ function _artMapDrawLiveNode(ctx, n) {
     } else {
         _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
     }
+    _artMap._drawAlphaMul = baseMul;
     ctx.globalAlpha = 1;
 }
 
@@ -5648,27 +5655,97 @@ function _artMapStartLoop() {
 }
 
 // Advance every active animation by absolute time t (ms). Returns true while
-// anything is still moving. Phase A: a clean global fade-in (ease-out-cubic).
-// The bubbly per-island ripple bloom is layered on in Phase C.
+// anything is still moving. Phase C: each bubble scales+fades in (ease-out)
+// once past its staggered start, and a water ripple expands from each island.
 function _artMapStepAnimations(t) {
     let active = false;
 
-    if (_artMap._fieldAlpha < 1) {
-        const FIELD_MS = 600;
-        const p = Math.min(1, (t - _artMap._revealT0) / FIELD_MS);
-        _artMap._fieldAlpha = 1 - Math.pow(1 - p, 3); // ease-out-cubic
-        if (p < 1) active = true;
+    const placed = _artMap.placed;
+    if (placed) {
+        for (const n of placed) {
+            if (n.aScale == null || n.aScale >= 1) continue;
+            if (t < n._revealAt) { active = true; continue; }
+            const p = Math.min(1, (t - n._revealAt) / (n._revealDur || 480));
+            const e = 1 - Math.pow(1 - p, 3); // ease-out-cubic
+            if (p >= 1) { n.aScale = 1; n.aAlpha = 1; }
+            else { n.aScale = 0.55 + 0.45 * e; n.aAlpha = e; active = true; }
+        }
     }
 
+    const rip = _artMap._ripples;
+    if (rip && rip.length) {
+        let anyAlive = false;
+        for (const r of rip) if (t < r.t0 + r.dur) anyAlive = true;
+        if (anyAlive) active = true; else _artMap._ripples = [];
+    }
+
+    // When the bloom finishes, leave reveal mode and bake everything into the
+    // static buffer (one rebuild) so steady-state goes back to the cheap path.
+    if (!active && _artMap._revealing) {
+        _artMap._revealing = false;
+        _artMap.dirty = true;
+        return true; // one more frame to do the rebuild + final blit
+    }
     return active;
 }
 
-// Kick off the reveal: a clean fade-in of the whole map (far field via the
-// buffer-blit alpha, live bubbles via _drawAlphaMul — they ramp together).
+// Kick off the ripple-bloom reveal. Each island blooms in turn (staggered by
+// island order); within an island, bubbles fade+scale outward from the centre
+// like a drop hitting water, and a ripple ring expands from each island centre.
+// During the reveal the whole map renders on the live layer (the static buffer
+// is bypassed) so every bubble can animate; it bakes into the buffer at the end.
 function _artMapBeginReveal() {
-    _artMap._revealT0 = performance.now();
-    _artMap._fieldAlpha = 0;
+    const t0 = performance.now();
+    _artMap._revealT0 = t0;
+    _artMap._revealing = true;
+    _artMap._fieldAlpha = 1; // buffer is bypassed while revealing; live layer draws all
+
+    const islands = _artMap._islands || [];
+    const islByName = {};
+    islands.forEach((isl, i) => { isl._order = i; islByName[isl.name] = isl; });
+
+    const ISL_STAGGER = 145, RADIAL_MS = 430, NODE_DUR = 470;
+    for (const n of _artMap.placed) {
+        n.aScale = 0; n.aAlpha = 0;
+        const isl = islByName[n._island] || (n._isLabel ? islByName[n.name] : null);
+        const order = isl ? isl._order : 0;
+        let radial = 0;
+        if (isl && isl.r > 0) radial = Math.min(1, Math.hypot(n.x - isl.cx, n.y - isl.cy) / isl.r);
+        n._revealAt = t0 + order * ISL_STAGGER + radial * RADIAL_MS + (n._isLabel ? 90 : 0);
+        n._revealDur = NODE_DUR;
+    }
+
+    _artMap._ripples = islands.map(isl => ({
+        cx: isl.cx, cy: isl.cy, hue: isl.hue,
+        maxR: isl.r * 1.45, t0: t0 + isl._order * ISL_STAGGER, dur: 1150,
+    }));
+
     _artMapStartLoop();
+}
+
+// Draw the expanding water-ripple rings (reveal + click). Cheap stroked arcs,
+// hue-tinted, fading as they grow. Drawn in world space with a screen-constant
+// line width.
+function _artMapDrawRipples(ctx) {
+    const rip = _artMap._ripples;
+    if (!rip || !rip.length) return;
+    const t = performance.now();
+    const z = _artMap.zoom;
+    ctx.save();
+    ctx.translate(_artMap.offsetX, _artMap.offsetY);
+    ctx.scale(z, z);
+    for (const r of rip) {
+        const p = (t - r.t0) / r.dur;
+        if (p < 0 || p > 1) continue;
+        const radius = r.maxR * (0.08 + 0.92 * (1 - Math.pow(1 - p, 2)));
+        const alpha = (1 - p) * 0.55;
+        ctx.beginPath();
+        ctx.arc(r.cx, r.cy, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${r.hue},85%,72%,${alpha})`;
+        ctx.lineWidth = (1.5 + 6 * (1 - p)) / z; // ~constant on screen
+        ctx.stroke();
+    }
+    ctx.restore();
 }
 
 function _artMapRender() {
@@ -5704,38 +5781,39 @@ function _artMapDraw() {
     ctx.fillStyle = _artMap._bgGrad;
     ctx.fillRect(0, 0, w, h);
 
-    if (_artMap.dirty || !_artMap.offscreen) {
-        const _rt = _artMap._perf ? performance.now() : 0;
-        _artMapRebuildBuffer();
-        if (_artMap._perf) _artMap._rebuildMs = performance.now() - _rt;
-    }
-    if (!_artMap.offscreen) { if (_artMap._perf) _artMapDrawPerf(ctx, _t0); return; }
-
-    const oc = _artMap.offscreen;
-    const s = _artMap._bufferScale;
-    const mx = _artMap._bufferMinX;
-    const my = _artMap._bufferMinY;
     const z = _artMap.zoom;
 
-    // Blit offscreen buffer: the buffer was drawn with scale(s) + translate(-minX,-minY)
-    // So buffer pixel (bx,by) corresponds to world (bx/s + minX, by/s + minY)
-    // Screen position of world (wx,wy) = offsetX + wx*zoom, offsetY + wy*zoom
-    // Therefore buffer origin on screen = offsetX + minX*zoom, offsetY + minY*zoom
-    // And buffer is drawn at size (bufferWidth * zoom/s, bufferHeight * zoom/s)
-    const fieldAlpha = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
-    if (fieldAlpha < 0.999) ctx.globalAlpha = fieldAlpha;
-    ctx.drawImage(oc,
-        _artMap.offsetX + mx * z,
-        _artMap.offsetY + my * z,
-        oc.width * z / s,
-        oc.height * z / s
-    );
-    ctx.globalAlpha = 1;
+    // While the ripple-bloom reveal is running, bypass the static buffer
+    // entirely and let the live layer draw every bubble (so each can animate).
+    // The buffer is (re)built once when the reveal ends.
+    if (!_artMap._revealing) {
+        if (_artMap.dirty || !_artMap.offscreen) {
+            const _rt = _artMap._perf ? performance.now() : 0;
+            _artMapRebuildBuffer();
+            if (_artMap._perf) _artMap._rebuildMs = performance.now() - _rt;
+        }
+        if (_artMap.offscreen) {
+            const oc = _artMap.offscreen;
+            const s = _artMap._bufferScale;
+            const mx = _artMap._bufferMinX;
+            const my = _artMap._bufferMinY;
+            // Blit offscreen buffer (built with scale(s) + translate(-minX,-minY)).
+            const fieldAlpha = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
+            if (fieldAlpha < 0.999) ctx.globalAlpha = fieldAlpha;
+            ctx.drawImage(oc,
+                _artMap.offsetX + mx * z,
+                _artMap.offsetY + my * z,
+                oc.width * z / s,
+                oc.height * z / s
+            );
+            ctx.globalAlpha = 1;
+        }
+    }
 
-    // ── Live overlay layer: redraw the big/near bubbles every frame so they can
-    // scale (reveal/pop), bob and ripple. These are excluded from the static
-    // buffer above, so there's no double-draw. Viewport-culled + capped. ──
+    // ── Live overlay layer: big/near bubbles every frame (during the reveal,
+    // ALL bubbles) so they can scale/bob/ripple. Viewport-culled + capped. ──
     _artMapDrawLiveLayer(ctx);
+    _artMapDrawRipples(ctx);
 
     // ── Interactive overlay (drawn on main canvas, not buffer) ──
     const cFade = _artMap._constellationFade || 0;
