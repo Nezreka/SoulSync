@@ -5394,6 +5394,73 @@ function _artMapConnCount(n) {
     return c;
 }
 
+// ── Watchlist state for the panel card ──
+function _artMapIsWatched(n) {
+    if (!n) return false;
+    if (n.type === 'watchlist') return true;
+    const best = _artMapNodeBest(n);
+    return !!(best.id && _artMap._watchSet && _artMap._watchSet.has(best.id));
+}
+
+// The watchlist button's markup, reflecting current state (filled star + "On
+// watchlist" when watched, outline + "Watchlist" when not).
+function _artMapWatchBtnHtml(n) {
+    const watched = _artMapIsWatched(n);
+    const idArg = typeof n.id === 'number' ? n.id : `'${n.id}'`;
+    return `<button id="artmap-card-watch" onclick="_artMapToggleWatch(${idArg})"
+        style="flex:1;background:${watched ? 'rgba(192,132,252,0.3)' : 'rgba(192,132,252,0.12)'};border:1px solid rgba(192,132,252,${watched ? '0.55' : '0.35'});color:#e9d5ff;border-radius:10px;padding:9px;font-size:12px;font-weight:600;cursor:pointer;">${watched ? '&#9733; On watchlist' : '&#9734; Watchlist'}</button>`;
+}
+
+function _artMapRenderWatchBtn(n) {
+    const b = document.getElementById('artmap-card-watch');
+    if (b) b.outerHTML = _artMapWatchBtnHtml(n); // inline onclick survives outerHTML swap
+}
+
+// Toggle watchlist membership for a node, updating the cache + button in place.
+async function _artMapToggleWatch(id) {
+    const n = (_artMap._nodeById || {})[id];
+    if (!n) return;
+    const best = _artMapNodeBest(n);
+    if (!best.id) { showToast('No source id for this artist', 'error'); return; }
+    _artMap._watchSet = _artMap._watchSet || new Set();
+    const watched = _artMapIsWatched(n);
+    try {
+        const resp = await fetch(watched ? '/api/watchlist/remove' : '/api/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(watched ? { artist_id: best.id } : { artist_id: best.id, artist_name: n.name, source: best.source }),
+        });
+        if (!resp.ok) { showToast('Failed to update watchlist', 'error'); return; }
+        if (watched) {
+            _artMap._watchSet.delete(best.id);
+            if (n.type === 'watchlist') n.type = 'similar';
+        } else {
+            _artMap._watchSet.add(best.id);
+        }
+        showToast(watched ? `Removed ${n.name} from watchlist` : `Added ${n.name} to watchlist`, watched ? 'info' : 'success');
+        _artMapRenderWatchBtn(n);
+    } catch (e) {
+        showToast('Failed to update watchlist', 'error');
+    }
+}
+
+// Lazily confirm watchlist membership from the server, then refresh the button.
+function _artMapCheckWatched(n) {
+    const best = _artMapNodeBest(n);
+    _artMap._watchSet = _artMap._watchSet || new Set();
+    _artMap._watchChecked = _artMap._watchChecked || new Set();
+    if (!best.id || _artMap._watchChecked.has(best.id)) return;
+    fetch('/api/watchlist/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist_id: best.id }),
+    }).then(r => r.json()).then(d => {
+        _artMap._watchChecked.add(best.id);
+        if (d && d.success) {
+            if (d.is_watching) _artMap._watchSet.add(best.id); else _artMap._watchSet.delete(best.id);
+            if (_artMap._panelArtistId === n.id) _artMapRenderWatchBtn(n);
+        }
+    }).catch(() => { });
+}
+
 function _artMapEnsurePanel() {
     const container = document.getElementById('artist-map-container');
     if (!container) return null;
@@ -5401,14 +5468,18 @@ function _artMapEnsurePanel() {
     if (!p) {
         p = document.createElement('div');
         p.id = 'artmap-info-panel';
-        p.style.cssText = `position:absolute;top:0;right:0;width:${_artMap._panelW}px;height:100%;`
-            + `background:linear-gradient(180deg,rgba(20,15,34,0.92),rgba(11,8,20,0.96));backdrop-filter:blur(16px);`
-            + `border-left:1px solid rgba(168,85,247,0.18);z-index:26;display:flex;flex-direction:column;`
-            + `color:#fff;overflow:hidden;box-shadow:-10px 0 36px rgba(0,0,0,0.45);font-size:13px;`;
         p.innerHTML = `<div id="artmap-panel-head" style="padding:16px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);"></div>`
             + `<div id="artmap-panel-body" style="flex:1;overflow-y:auto;padding:12px 14px;"></div>`;
         container.appendChild(p);
     }
+    // Start below the toolbar so it never covers the navbar (measured each call
+    // in case the toolbar height changes).
+    const tb = container.querySelector('.artist-map-toolbar');
+    const top = tb ? tb.offsetHeight : 56;
+    p.style.cssText = `position:absolute;top:${top}px;right:0;width:${_artMap._panelW}px;height:calc(100% - ${top}px);`
+        + `background:linear-gradient(180deg,rgba(20,15,34,0.92),rgba(11,8,20,0.96));backdrop-filter:blur(16px);`
+        + `border-left:1px solid rgba(168,85,247,0.18);z-index:20;display:flex;flex-direction:column;`
+        + `color:#fff;overflow:hidden;box-shadow:-10px 0 36px rgba(0,0,0,0.45);font-size:13px;`;
     return p;
 }
 
@@ -5524,7 +5595,7 @@ function _artMapPanelArtist(node) {
             <button onclick="artMapExploreArtist('${escapeForInlineJs(node.name)}')" style="background:linear-gradient(90deg,hsl(${hue},70%,52%),hsl(${(hue + 30) % 360},70%,54%));border:none;color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">Explore from here &rarr;</button>
             <div style="display:flex;gap:8px;">
                 <button onclick="openYourArtistInfoModal_direct(_artMap._nodeById[${typeof node.id === 'number' ? node.id : `'${node.id}'`}])" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;cursor:pointer;">Details</button>
-                <button onclick="toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(best.id)}','${best.source}',this)" style="flex:1;background:rgba(192,132,252,0.14);border:1px solid rgba(192,132,252,0.35);color:#e9d5ff;border-radius:10px;padding:9px;font-size:12px;cursor:pointer;">&#9733; Watchlist</button>
+                ${_artMapWatchBtnHtml(node)}
             </div>
             ${best.id ? `<a href="${buildArtistDetailPath(best.id, best.source)}" style="text-align:center;color:rgba(255,255,255,0.55);font-size:11.5px;text-decoration:none;padding:4px;">Open artist page</a>` : ''}
         </div>`;
@@ -5533,6 +5604,10 @@ function _artMapPanelArtist(node) {
         const c = document.getElementById('artmap-card-canvas');
         if (c) { try { c.getContext('2d').drawImage(bmp, 0, 0, 120, 120); } catch (e) { /* ignore */ } }
     }
+
+    // Confirm watchlist membership from the server (refreshes the button if it
+    // differs from the optimistic guess).
+    _artMapCheckWatched(node);
 }
 
 // Top-list / external entry: show a node's card by id (also ripples it on the map).
@@ -7369,7 +7444,18 @@ function _artMapSetupInteraction(canvas) {
             _artMap.hoveredNode = _artMapHitTest(nx, ny);
             canvas.style.cursor = _artMap.hoveredNode ? 'pointer' : 'grab';
             _artMapShowTooltip(e, _artMap.hoveredNode);
-            if (_artMap.hoveredNode) _artMapPanelArtist(_artMap.hoveredNode); // rich card in side panel
+            if (prev !== _artMap.hoveredNode) {
+                // Debounce the side-panel card: only swap to a bubble you've
+                // settled on for ~0.8s, so sweeping toward the panel doesn't keep
+                // changing the card on bubbles you pass over en route.
+                clearTimeout(_artMap._panelTimer);
+                if (_artMap.hoveredNode) {
+                    const target = _artMap.hoveredNode;
+                    _artMap._panelTimer = setTimeout(() => {
+                        if (_artMap.hoveredNode === target) _artMapPanelArtist(target);
+                    }, 800);
+                }
+            }
             if (prev !== _artMap.hoveredNode) {
                 // Reset constellation highlight timer
                 clearTimeout(_artMap._constellationTimer);
@@ -7400,13 +7486,15 @@ function _artMapSetupInteraction(canvas) {
         isPanning = false;
 
         if (!wasDrag && clickStart) {
-            // It was a click — emit a water ripple (shoves nearby bubbles) and,
-            // if it landed on an artist, open it after the ripple kicks off.
+            // A click is a deliberate select — ripple it and pin its card in the
+            // side panel immediately (bypassing the hover debounce). The card's
+            // Details button opens the full modal; click no longer auto-opens it.
             const { nx, ny } = _artMapScreenToWorld(e, canvas);
             const node = _artMapHitTest(nx, ny);
             _artMapEmitRipple(node ? node.x : nx, node ? node.y : ny, node ? node._hue : null);
-            if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
-                setTimeout(() => openYourArtistInfoModal_direct(node), 200);
+            if (node) {
+                clearTimeout(_artMap._panelTimer);
+                _artMapPanelArtist(node);
             }
         }
 
