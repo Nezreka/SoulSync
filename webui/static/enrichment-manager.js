@@ -264,6 +264,16 @@ function _emOverallPct(status) {
     return total ? Math.round((matched / total) * 100) : 0;
 }
 
+// Rail sub-line: while running, show the group it's on ("Running · albums");
+// otherwise the status + overall coverage %.
+function _emRailSubText(status) {
+    const info = _emStatusInfo(status);
+    const phase = _emCurrentPhase(status);
+    if (info.cls === 'running' && phase) return `${info.label} · ${_emEntityLabel(phase, true).toLowerCase()}`;
+    const pct = _emOverallPct(status);
+    return `${info.label}${pct == null ? '' : ` · ${pct}%`}`;
+}
+
 function renderEnrichmentRail() {
     const rail = document.getElementById('em-rail');
     if (!rail) return;
@@ -279,7 +289,7 @@ function renderEnrichmentRail() {
                 ${_emIconHtml(w.id)}
                 <span class="em-worker-meta">
                     <span class="em-worker-name">${_emEscape(w.name)}</span>
-                    <span class="em-worker-sub">${info.label}${pct == null ? '' : ` · ${pct}%`}</span>
+                    <span class="em-worker-sub">${_emRailSubText(status)}</span>
                     ${cov}
                 </span>
                 <span class="em-dot em-dot--${info.cls}" title="${info.label}"></span>
@@ -304,7 +314,7 @@ function _emUpdateRailRow(id) {
     const dot = row.querySelector('.em-dot');
     if (dot) { dot.className = `em-dot em-dot--${info.cls}`; dot.title = info.label; }
     const sub = row.querySelector('.em-worker-sub');
-    if (sub) sub.textContent = `${info.label}${pct == null ? '' : ` · ${pct}%`}`;
+    if (sub) sub.textContent = _emRailSubText(status);
     const cov = row.querySelector('.em-rail-cov-fill');
     if (cov && pct != null) cov.style.width = `${pct}%`;
 }
@@ -465,6 +475,7 @@ function _emRenderChain() {
 
 async function setEnrichmentPriority(entity) {
     const id = enrichmentManagerState.selected;
+    const name = _emWorkerById[id].name;
     try {
         const res = await fetch(`/api/enrichment/${id}/priority`, {
             method: 'POST',
@@ -472,15 +483,44 @@ async function setEnrichmentPriority(entity) {
             body: JSON.stringify({ entity: entity || 'none' }),
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.success) {
-            enrichmentManagerState.priority = data.priority || '';
-            showToast(enrichmentManagerState.priority
-                ? `${_emWorkerById[id].name} will process ${_emEntityLabel(enrichmentManagerState.priority, true).toLowerCase()} first`
-                : `${_emWorkerById[id].name} back to automatic order`, 'success');
-            _emRenderChain();
-        } else {
+        if (!res.ok || !data.success) {
             showToast(data.error || 'Could not set processing order', 'error');
+            return;
         }
+        enrichmentManagerState.priority = data.priority || '';
+
+        if (!enrichmentManagerState.priority) {
+            showToast(`${name} back to automatic order`, 'success');
+            _emRenderChain();
+            return;
+        }
+
+        // Pin means "process the whole group". Re-queue this group's
+        // previously-failed items (not_found -> pending) so the worker sweeps
+        // ALL unmatched, not just never-tried ones. Safe: each is attempted
+        // once; still-unmatched become not_found again and the pending-only
+        // pin won't re-pick them, so no loop.
+        let reset = 0;
+        try {
+            const rr = await fetch(`/api/enrichment/${id}/retry`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_type: entity, scope: 'failed' }),
+            });
+            const rd = await rr.json().catch(() => ({}));
+            if (rr.ok) reset = rd.reset || 0;
+        } catch (_e) { /* priority still set; failed sweep is best-effort */ }
+
+        const label = _emEntityLabel(entity, true).toLowerCase();
+        showToast(reset
+            ? `${name} will process all ${label} first · re-queued ${reset.toLocaleString()} previously-failed`
+            : `${name} will process ${label} first`, 'success');
+
+        // Counts changed (failed -> pending) — refresh stats, chain and list.
+        await Promise.all([_emLoadBreakdown(id), _emLoadUnmatched()]);
+        _emRenderStats();
+        _emRenderChain();
+        _emRenderUnmatchedControls();
+        _emRenderUnmatchedList();
     } catch (_e) {
         showToast('Error setting processing order', 'error');
     }
