@@ -5322,10 +5322,13 @@ function _artMapUpdateIslandNav() {
         nav.id = 'artmap-island-nav';
         container.appendChild(nav);
     }
-    // Position top-left, clearing the genre sidebar (when shown) and the toolbar.
+    // Position top-left, clearing the genre sidebar (when shown) and the toolbar
+    // (measured — the toolbar wraps taller on mobile).
     const sb = document.getElementById('artmap-genre-sidebar');
     const sbW = (sb && sb.style.display !== 'none') ? (sb.offsetWidth || 0) : 0;
-    nav.style.cssText = `position:absolute;top:64px;left:${sbW + 16}px;display:flex;align-items:center;gap:12px;padding:7px 12px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:14px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;`;
+    const tb = document.querySelector('.artist-map-toolbar');
+    const top = (tb ? tb.offsetHeight : 56) + 10;
+    nav.style.cssText = `position:absolute;top:${top}px;left:${sbW + 16}px;display:flex;align-items:center;gap:12px;padding:7px 12px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:14px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;max-width:calc(100vw - ${sbW + 32}px);`;
     const idx = _artMap._focusIdx || 0;
     const isl = islands[idx];
     const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;';
@@ -5697,7 +5700,8 @@ async function openArtistMap() {
     _artMap.canvas = canvas;
     _artMap.ctx = canvas.getContext('2d');
     _artMap.width = container.clientWidth;
-    _artMap.height = container.clientHeight - 50;
+    const _wtb = container.querySelector('.artist-map-toolbar');
+    _artMap.height = container.clientHeight - (_wtb ? _wtb.offsetHeight : 50);
     canvas.width = _artMap.width * window.devicePixelRatio;
     canvas.height = _artMap.height * window.devicePixelRatio;
     canvas.style.width = _artMap.width + 'px';
@@ -7067,7 +7071,8 @@ async function _openArtistMapExplorerWithName(name) {
     _artMap.canvas = canvas;
     _artMap.ctx = canvas.getContext('2d');
     _artMap.width = container.clientWidth;
-    _artMap.height = container.clientHeight - 50;
+    const _wtb = container.querySelector('.artist-map-toolbar');
+    _artMap.height = container.clientHeight - (_wtb ? _wtb.offsetHeight : 50);
     canvas.width = _artMap.width * window.devicePixelRatio;
     canvas.height = _artMap.height * window.devicePixelRatio;
     canvas.style.width = _artMap.width + 'px';
