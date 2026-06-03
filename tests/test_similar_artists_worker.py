@@ -115,6 +115,22 @@ def test_process_artist_error_when_fetch_raises_carries_detail():
     assert status == 'error' and count == 0 and 'musicmap down' in detail
 
 
+def test_process_artist_skips_similars_without_a_storable_source_id():
+    # Every stored similar MUST carry a metadata source id (spotify/itunes/deezer/
+    # musicbrainz) — otherwise it's not actionable. A match on a source with no id
+    # column (e.g. discogs) is skipped, never stored name-only.
+    store, calls = _capture_store()
+    payload = {'success': True, 'similar_artists': [
+        {'name': 'KeepMe', 'id': 'sp1', 'source': 'spotify'},
+        {'name': 'DropMe', 'id': 'dg1', 'source': 'discogs'},   # no id column → must skip
+        {'name': 'NoId', 'source': 'spotify'},                  # no id at all → must skip
+    ]}
+    status, count, _ = w.process_artist('S', 'A', lambda n, l: payload, store)
+    assert count == 1 and len(calls) == 1
+    assert calls[0]['similar_artist_name'] == 'KeepMe'
+    assert calls[0]['similar_artist_spotify_id'] == 'sp1'
+
+
 def test_process_artist_skips_unstorable_but_counts_real():
     # A store() that fails for one row shouldn't abort the rest.
     calls = []

@@ -108,6 +108,13 @@ def process_artist(
         if not name:
             continue
         kwargs = map_payload_to_store_kwargs(s)
+        if not kwargs:
+            # The match resolved to a source with no id column in similar_artists
+            # (e.g. discogs). Storing it name-only would be useless — you can't
+            # navigate/explore/download it. Enforce the standard: every stored
+            # similar carries a metadata source id, or we skip it.
+            logger.debug("Skipping similar '%s' (matched %s — no storable source id)", name, s.get('source'))
+            continue
         try:
             ok = store_similar(
                 source_artist_id=source_artist_id,
