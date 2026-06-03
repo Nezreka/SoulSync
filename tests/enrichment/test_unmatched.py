@@ -150,6 +150,16 @@ def test_track_unmatched_borrows_album_artwork(db):
     assert res['items'][0]['image_url'] == 'http://img/evolve.jpg'
 
 
+def test_unmatched_includes_parent_context(db):
+    # album's parent is its artist; track's parent is its album
+    album = db.get_enrichment_unmatched('spotify', 'album', status='not_found')['items'][0]
+    assert album['parent'] == 'Failed Dragons'
+    track = db.get_enrichment_unmatched('spotify', 'track', status='not_found')['items'][0]
+    assert track['parent'] == 'Evolve'
+    artist = db.get_enrichment_unmatched('spotify', 'artist', status='not_found')['items'][0]
+    assert artist['parent'] is None
+
+
 def test_db_raises_on_bad_input(db):
     with pytest.raises(UnmatchedQueryError):
         db.get_enrichment_unmatched('spotify', 'artist', status='bogus')
