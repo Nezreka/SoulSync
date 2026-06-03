@@ -5025,6 +5025,7 @@ const _artMap = {
     _anim: { running: false, raf: null, last: 0 },
     _fieldAlpha: 1,   // global fade for the static far-field buffer (reveal)
     _revealT0: 0,     // performance.now() when the current reveal began
+    _panelW: 320,     // right-side info panel width (reserved when framing islands)
 };
 
 // ── Genre-island layout (shared by watchlist / genre / explore) ───────────
@@ -5229,9 +5230,10 @@ function _artMapFitToContent(marginPx = 120) {
         minY = Math.min(minY, n.y - n.radius); maxY = Math.max(maxY, n.y + n.radius);
     }
     if (!isFinite(minX)) return;
+    const usableW = Math.max(200, _artMap.width - _artMap._panelW);
     const mapW = maxX - minX + marginPx * 2, mapH = maxY - minY + marginPx * 2;
-    _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-    _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+    _artMap.zoom = Math.min(usableW / mapW, _artMap.height / mapH, 1);
+    _artMap.offsetX = usableW / 2 - ((minX + maxX) / 2) * _artMap.zoom;
     _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
 }
 
@@ -5256,14 +5258,16 @@ function _artMapFocusIsland(idx, opts = {}) {
         n.opacity = (!n._isLabel && n._island === isl.name) ? 1 : 0;
     }
 
-    // Frame the island in ~80% of the viewport.
+    // Frame the island in the space LEFT of the info panel (~80% of it).
+    const usableW = Math.max(200, _artMap.width - _artMap._panelW);
     const span = (isl.r * 2.3) + 120;
-    const z = Math.min(_artMap.width / span, _artMap.height / span, 1.2);
+    const z = Math.min(usableW / span, _artMap.height / span, 1.2);
     _artMap.zoom = z;
-    _artMap.offsetX = _artMap.width / 2 - isl.cx * z;
+    _artMap.offsetX = usableW / 2 - isl.cx * z;
     _artMap.offsetY = _artMap.height / 2 - isl.cy * z;
 
     _artMapUpdateIslandNav();
+    _artMapRefreshPanel();
 
     if (opts.bloom !== false) {
         _artMapBloomIsland(isl);
@@ -5373,6 +5377,172 @@ function _artMapJumpIsland(i) {
     _artMapFocusIsland(i, { bloom: true });
 }
 
+// ── Right-side info panel ──────────────────────────────────────────────────
+// A polished detail panel: a discovery dashboard + current-view coverage at the
+// top, a clickable top-artists list, and a rich artist card when you hover/click
+// a bubble. Lives on the right so it never collides with the genre sidebar.
+
+function _artMapNodeBest(n) {
+    const map = [['spotify_id', 'spotify'], ['itunes_id', 'itunes'], ['deezer_id', 'deezer'], ['discogs_id', 'discogs'], ['musicbrainz_id', 'musicbrainz']];
+    for (const [k, s] of map) if (n && n[k]) return { id: n[k], source: s };
+    return { id: '', source: '' };
+}
+
+function _artMapConnCount(n) {
+    let c = 0;
+    for (const e of (_artMap.edges || [])) if (e.source === n.id || e.target === n.id) c++;
+    return c;
+}
+
+function _artMapEnsurePanel() {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return null;
+    let p = document.getElementById('artmap-info-panel');
+    if (!p) {
+        p = document.createElement('div');
+        p.id = 'artmap-info-panel';
+        p.style.cssText = `position:absolute;top:0;right:0;width:${_artMap._panelW}px;height:100%;`
+            + `background:linear-gradient(180deg,rgba(20,15,34,0.92),rgba(11,8,20,0.96));backdrop-filter:blur(16px);`
+            + `border-left:1px solid rgba(168,85,247,0.18);z-index:26;display:flex;flex-direction:column;`
+            + `color:#fff;overflow:hidden;box-shadow:-10px 0 36px rgba(0,0,0,0.45);font-size:13px;`;
+        p.innerHTML = `<div id="artmap-panel-head" style="padding:16px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);"></div>`
+            + `<div id="artmap-panel-body" style="flex:1;overflow-y:auto;padding:12px 14px;"></div>`;
+        container.appendChild(p);
+    }
+    return p;
+}
+
+function _artMapClosePanel() {
+    const p = document.getElementById('artmap-info-panel');
+    if (p) p.remove();
+    _artMap._panelArtistId = null;
+}
+
+// Stat tile helper
+function _miniStat(label, value, hue) {
+    return `<div style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 6px;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:${hue != null ? `hsl(${hue},80%,80%)` : '#fff'};line-height:1;">${value}</div>
+        <div style="font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin-top:4px;">${label}</div>
+    </div>`;
+}
+
+// Build the panel header (dashboard) + body (top-artists list) for the view.
+function _artMapRefreshPanel() {
+    const p = _artMapEnsurePanel();
+    if (!p) return;
+    const head = document.getElementById('artmap-panel-head');
+    const body = document.getElementById('artmap-panel-body');
+    if (!head || !body) return;
+
+    const nodes = (_artMap.placed || []).filter(n => !n._isLabel);
+    const total = nodes.length;
+    const watch = nodes.filter(n => n.type === 'watchlist' || n.type === 'center').length;
+    const islands = _artMap._islands || [];
+    const oneIsland = _artMap._oneIsland;
+    const isl = oneIsland && islands.length ? islands[_artMap._focusIdx || 0] : null;
+
+    // Scope (current island vs whole map)
+    const scope = isl ? nodes.filter(n => n._island === isl.name) : nodes;
+    const scopeTotal = isl ? isl.count : total;
+    const scopeWatch = scope.filter(n => n.type === 'watchlist' || n.type === 'center').length;
+    const cov = scopeTotal ? Math.round((scopeWatch / scopeTotal) * 100) : 0;
+    const hue = isl ? isl.hue : 270;
+
+    const title = _artMap._mapTitle || 'Artist Map';
+    head.innerHTML = `
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">${title}</div>
+        ${isl ? `<div style="font-size:19px;font-weight:800;color:hsl(${hue},82%,80%);margin-top:2px;">${escapeHtml(isl.name)}</div>` : `<div style="font-size:19px;font-weight:800;margin-top:2px;">Overview</div>`}
+        <div style="display:flex;gap:8px;margin-top:12px;">
+            ${_miniStat('Artists', scopeTotal, hue)}
+            ${_miniStat('Watchlist', scopeWatch)}
+            ${_miniStat(isl ? 'Genre' : 'Genres', isl ? '1' : (islands.length || 1))}
+        </div>
+        <div style="margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:4px;">
+                <span>On your watchlist</span><span>${scopeWatch}/${scopeTotal}</span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+                <div style="height:100%;width:${cov}%;background:linear-gradient(90deg,hsl(${hue},80%,60%),hsl(${(hue + 40) % 360},80%,62%));border-radius:3px;"></div>
+            </div>
+        </div>`;
+
+    // Body: top artists (by popularity) in the current scope.
+    _artMap._panelArtistId = null;
+    const top = scope.slice().sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 14);
+    body.innerHTML = `
+        <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:2px 2px 8px;">Top artists</div>
+        ${top.map((n, i) => `
+            <div onclick="_artMapPanelArtistById(${typeof n.id === 'number' ? n.id : `'${n.id}'`})"
+                 style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:9px;cursor:pointer;"
+                 onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+                <span style="width:18px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);">${i + 1}</span>
+                <span style="width:30px;height:30px;border-radius:50%;flex:none;overflow:hidden;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;">
+                    ${n.image_url ? `<img src="${escapeHtml(n.image_url)}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.style.display='none'">` : '&#9835;'}
+                </span>
+                <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(n.name)}</span>
+                ${n.type === 'watchlist' ? '<span style="color:#c084fc;font-size:11px;">&#9733;</span>' : ''}
+            </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
+}
+
+// Show a rich artist card in the body (hover/click); pass null to restore the list.
+function _artMapPanelArtist(node) {
+    const body = document.getElementById('artmap-panel-body');
+    if (!body) return;
+    if (!node) { if (_artMap._panelArtistId != null) _artMapRefreshPanel(); return; }
+    if (_artMap._panelArtistId === node.id) return; // already showing
+    _artMap._panelArtistId = node.id;
+
+    const hue = node._hue == null ? 270 : node._hue;
+    const conn = _artMapConnCount(node);
+    const pop = Math.max(0, Math.min(100, Math.round(node.popularity || 0)));
+    const genres = (node.genres || []).slice(0, 5);
+    const best = _artMapNodeBest(node);
+    const typeLabel = (node.type === 'watchlist' || node.type === 'center') ? 'On watchlist' : 'Discovered';
+    const bmp = _artMap.images[node.id];
+
+    body.innerHTML = `
+        <button onclick="_artMapPanelArtist(null)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:12px;">&#8592; Top artists</button>
+        <div style="text-align:center;">
+            <div style="width:120px;height:120px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid hsl(${hue},80%,65%);box-shadow:0 8px 28px hsla(${hue},80%,40%,0.4);background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${bmp ? `<canvas id="artmap-card-canvas" width="120" height="120" style="width:120px;height:120px;"></canvas>`
+                    : (node.image_url ? `<img src="${escapeHtml(node.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '<span style="font-size:36px;opacity:0.5;">&#9835;</span>')}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(node.name)}</div>
+            <div style="font-size:11px;color:hsl(${hue},70%,72%);margin-top:3px;">${typeLabel}</div>
+        </div>
+        ${genres.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;">
+            ${genres.map(g => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:hsla(${hue},60%,55%,0.16);border:1px solid hsla(${hue},60%,60%,0.3);color:hsl(${hue},70%,82%);">${escapeHtml(g)}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            ${_miniStat('Popularity', pop, hue)}
+            ${_miniStat('Connections', conn)}
+        </div>
+        <div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pop}%;background:linear-gradient(90deg,hsl(${hue},80%,60%),hsl(${(hue + 40) % 360},80%,62%));"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            <button onclick="artMapExploreArtist('${escapeForInlineJs(node.name)}')" style="background:linear-gradient(90deg,hsl(${hue},70%,52%),hsl(${(hue + 30) % 360},70%,54%));border:none;color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">Explore from here &rarr;</button>
+            <div style="display:flex;gap:8px;">
+                <button onclick="openYourArtistInfoModal_direct(_artMap._nodeById[${typeof node.id === 'number' ? node.id : `'${node.id}'`}])" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;cursor:pointer;">Details</button>
+                <button onclick="toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(best.id)}','${best.source}',this)" style="flex:1;background:rgba(192,132,252,0.14);border:1px solid rgba(192,132,252,0.35);color:#e9d5ff;border-radius:10px;padding:9px;font-size:12px;cursor:pointer;">&#9733; Watchlist</button>
+            </div>
+            ${best.id ? `<a href="${buildArtistDetailPath(best.id, best.source)}" style="text-align:center;color:rgba(255,255,255,0.55);font-size:11.5px;text-decoration:none;padding:4px;">Open artist page</a>` : ''}
+        </div>`;
+
+    if (bmp) {
+        const c = document.getElementById('artmap-card-canvas');
+        if (c) { try { c.getContext('2d').drawImage(bmp, 0, 0, 120, 120); } catch (e) { /* ignore */ } }
+    }
+}
+
+// Top-list / external entry: show a node's card by id (also ripples it on the map).
+function _artMapPanelArtistById(id) {
+    const n = (_artMap._nodeById || {})[id];
+    if (!n) return;
+    _artMapPanelArtist(n);
+    _artMapEmitRipple(n.x, n.y, n._hue);
+}
+
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (!container) return;
@@ -5428,6 +5598,7 @@ async function openArtistMap() {
         _artMapLayoutIslands(groups);
         _artMap.edges = _artMapRemapEdges(data.edges);
         _artMap._oneIsland = true; // focus one genre island at a time
+        _artMap._mapTitle = 'Watchlist Map';
 
         // Setup interaction
         _artMapSetupInteraction(canvas);
@@ -5533,6 +5704,7 @@ function closeArtistMap() {
     _artMap._oneIsland = false;
     const navEl = document.getElementById('artmap-island-nav');
     if (navEl) navEl.remove();
+    _artMapClosePanel();
     if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
     _artMapHideContextMenu();
 
@@ -6697,6 +6869,7 @@ async function _openGenreMapWithSelection(selectedGenre) {
         _artMapLayoutIslands(groups);
         _artMap.edges = [];
         _artMap._oneIsland = true; // focus one genre island at a time
+        _artMap._mapTitle = 'Genre Map';
         const placedCount = _artMap.placed.filter(n => !n._isLabel).length;
 
         _artMapSetupInteraction(canvas);
@@ -6805,8 +6978,10 @@ async function _openArtistMapExplorerWithName(name) {
         _artMapLayoutIslands(groups);
         _artMap.edges = _artMapRemapEdges(data.edges);
         _artMap._oneIsland = false; // explore stays multi-island (it's small)
+        _artMap._mapTitle = 'Explore: ' + (data.center || name);
         _artMapUpdateIslandNav(); // tear down any leftover nav from a prior map
         _artMapFitToContent();
+        _artMapRefreshPanel();
 
         _artMapSetupInteraction(canvas);
 
@@ -7194,6 +7369,7 @@ function _artMapSetupInteraction(canvas) {
             _artMap.hoveredNode = _artMapHitTest(nx, ny);
             canvas.style.cursor = _artMap.hoveredNode ? 'pointer' : 'grab';
             _artMapShowTooltip(e, _artMap.hoveredNode);
+            if (_artMap.hoveredNode) _artMapPanelArtist(_artMap.hoveredNode); // rich card in side panel
             if (prev !== _artMap.hoveredNode) {
                 // Reset constellation highlight timer
                 clearTimeout(_artMap._constellationTimer);
