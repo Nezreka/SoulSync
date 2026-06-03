@@ -32,6 +32,12 @@ const ENRICHMENT_WORKERS = [
     { id: 'tidal',       name: 'Tidal',        color: '#00cfe6', logoSel: '.tidal-enrich-logo', imgFilter: 'invert(1) brightness(1.8)', imgRound: true },
     { id: 'qobuz',       name: 'Qobuz',        color: '#0070ef', logoSel: '.qobuz-enrich-logo', imgFilter: 'invert(1)', imgRound: true },
     { id: 'amazon',      name: 'Amazon Music', color: '#ff9900', logoSel: '.amazon-enrich-logo', imgFilter: 'brightness(0) invert(1)' },
+    // Relationship worker (MusicMap → similar artists), not a metadata source.
+    // No dashboard logo element, so it uses a direct MusicMap logo URL.
+    // relationship:true tells the detail panel to drop the (inapplicable)
+    // manual-match affordance.
+    { id: 'similar_artists', name: 'Similar Artists', color: '#a855f7', relationship: true,
+      logoUrl: 'https://www.music-map.com/elements/objects/og_logo.png', imgRound: true },
 ];
 
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));
@@ -48,7 +54,9 @@ function _emHexToRgb(hex) {
 // Resolve a worker's logo URL from the live dashboard bubble (null if absent).
 function _emLogoSrc(workerId) {
     const w = _emWorkerById[workerId];
-    if (!w || !w.logoSel) return null;
+    if (!w) return null;
+    if (w.logoUrl) return w.logoUrl;            // direct URL (workers w/o a dashboard logo)
+    if (!w.logoSel) return null;
     const img = document.querySelector(w.logoSel);
     return img && img.src ? img.src : null;
 }
@@ -825,7 +833,8 @@ function _emRenderUnmatchedList() {
                         <div class="em-row-meta">${statusBadge} ${last}</div>
                     </div>
                     <div class="em-row-actions">
-                        <button class="em-btn em-btn--sm" onclick="openEnrichmentMatch('${id}','${entity}','${safeId}', this)">Match</button>
+                        ${(_emWorkerById[id] && _emWorkerById[id].relationship) ? ''
+                            : `<button class="em-btn em-btn--sm" onclick="openEnrichmentMatch('${id}','${entity}','${safeId}', this)">Match</button>`}
                         <button class="em-btn em-btn--sm em-btn--ghost" title="Re-queue for the worker to try again"
                                 onclick="retryEnrichmentItem('${id}','${entity}','${safeId}', this)">Retry</button>
                     </div>

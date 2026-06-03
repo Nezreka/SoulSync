@@ -879,15 +879,6 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
     const bulkBar = document.getElementById('enhanced-bulk-bar');
     if (bulkBar) bulkBar.classList.remove('visible');
 
-    // Restore persisted view preference. Non-admins can't see / toggle the
-    // Enhanced control so only honour the saved choice for admins; default
-    // is still Standard. Wrapped in try/catch because localStorage can be
-    // disabled in private-browsing modes.
-    let _preferEnhanced = false;
-    try {
-        _preferEnhanced = localStorage.getItem(_libraryViewModeKey()) === 'enhanced';
-    } catch (_) { /* localStorage unavailable */ }
-
     // Navigate to artist detail page
     navigateToPage('artist-detail', {
         artistId,
@@ -902,15 +893,11 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null, opt
 
     _updateArtistDetailBackButtonLabel();
 
-    // Load artist data
+    // Load artist data. The persisted Enhanced-view preference is applied INSIDE
+    // loadArtistDetailData, once we know whether this artist is in the library —
+    // source-only artists have no Enhanced view, so forcing it there left the
+    // Enhanced pane empty and hid the discography.
     loadArtistDetailData(artistId, artistName);
-
-    // Apply persisted Enhanced view after the standard data load is kicked off.
-    // toggleEnhancedView() triggers its own loadEnhancedViewData() in parallel;
-    // the brief Standard render is hidden as soon as the toggle flips.
-    if (_preferEnhanced && isEnhancedAdmin()) {
-        toggleEnhancedView(true);
-    }
 }
 
 function _updateArtistDetailBackButtonLabel() {
@@ -1093,6 +1080,18 @@ async function loadArtistDetailData(artistId, artistName) {
         // and /api/library/artist/<id>/quality-analysis only works on library PKs.
         if (!isSourceOnlyArtist) {
             checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
+        }
+
+        // Apply the persisted Enhanced/Standard preference now that we know the
+        // artist's status. Only LIBRARY artists have an Enhanced view — forcing
+        // it on a source-only artist (no DB record) showed an empty Enhanced pane
+        // and hid the discography. Source-only artists always stay on Standard.
+        if (!isSourceOnlyArtist && isEnhancedAdmin()) {
+            let _preferEnhanced = false;
+            try {
+                _preferEnhanced = localStorage.getItem(_libraryViewModeKey()) === 'enhanced';
+            } catch (_) { /* localStorage unavailable */ }
+            if (_preferEnhanced) toggleEnhancedView(true);
         }
 
     } catch (error) {
