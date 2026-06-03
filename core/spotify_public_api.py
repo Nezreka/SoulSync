@@ -77,7 +77,9 @@ def fetch_public_playlist_full(
 
     meta: Dict[str, Any] = {}
     try:
-        meta = client.playlist(spotify_id) or {}
+        # limit=1: we only want name/owner here — tracks come from the paginated
+        # playlist_items call below, so don't pull the whole list twice.
+        meta = client.playlist(spotify_id, limit=1) or {}
     except Exception as e:  # metadata is nice-to-have; tracks are the point
         logger.debug("playlist metadata fetch failed (%s); continuing", e)
     name = meta.get('name', 'Unknown')

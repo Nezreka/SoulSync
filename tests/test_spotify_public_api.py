@@ -43,7 +43,7 @@ class _FakeClient:
     def __init__(self, total, *, fail_items=False):
         self.total, self.fail_items = total, fail_items
 
-    def playlist(self, pid):
+    def playlist(self, pid, limit=-1, offset=0, *args, **kwargs):
         return {'name': 'My Playlist', 'owner': {'display_name': 'Owner'}}
 
     def _page(self, offset):
