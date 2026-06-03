@@ -19151,11 +19151,12 @@ def get_playlist_tracks(playlist_id):
                     time.sleep(0.5)
         if results is None:
             # Both attempts failed (often a 403 on followed playlists) — fall back
-            # to the public embed scraper as a last resort (capped at ~100 tracks).
-            logger.warning(f"Playlist items unavailable after retry ({items_err}), trying public embed scraper")
+            # to the no-auth public path (full track list via anonymous token,
+            # embed scraper if that fails).
+            logger.warning(f"Playlist items unavailable after retry ({items_err}), trying public fetch")
             try:
-                from core.spotify_public_scraper import scrape_spotify_embed
-                embed_data = scrape_spotify_embed('playlist', playlist_id)
+                from core.spotify_public_scraper import fetch_spotify_public
+                embed_data = fetch_spotify_public('playlist', playlist_id)
                 if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
                     for t in embed_data['tracks']:
                         artists = t.get('artists', [])
@@ -22270,15 +22271,15 @@ def parse_spotify_public_endpoint():
         if not url:
             return jsonify({"error": "Spotify URL is required"}), 400
 
-        from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
+        from core.spotify_public_scraper import parse_spotify_url, fetch_spotify_public
 
         parsed = parse_spotify_url(url)
         if not parsed:
             return jsonify({"error": "Invalid Spotify URL. Please use a playlist or album link from open.spotify.com"}), 400
 
-        logger.info(f"Scraping public Spotify {parsed['type']}: {parsed['id']}")
+        logger.info(f"Fetching public Spotify {parsed['type']}: {parsed['id']}")
 
-        result = scrape_spotify_embed(parsed['type'], parsed['id'])
+        result = fetch_spotify_public(parsed['type'], parsed['id'])
 
         if 'error' in result:
             return jsonify(result), 400
