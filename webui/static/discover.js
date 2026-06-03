@@ -5754,12 +5754,18 @@ function _artMapShowTooltip(e, node) {
         const genres = (node.genres || []).slice(0, 3);
         const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
         const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
+        // Real connection count from the map's edges (cheap; only on hover change).
+        let conn = 0;
+        const edges = _artMap.edges || [];
+        for (const ed of edges) { if (ed.source === node.id || ed.target === node.id) conn++; }
+        const connHTML = conn ? `<div class="artmap-tip-conn">${conn} connection${conn === 1 ? '' : 's'}</div>` : '';
         tip.innerHTML = `
             <div class="artmap-tip-row">
                 ${img}
                 <div class="artmap-tip-info">
                     <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
                     ${typeLabel}
+                    ${connHTML}
                     ${genreHTML}
                 </div>
             </div>

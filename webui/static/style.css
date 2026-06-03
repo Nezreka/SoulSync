@@ -34299,6 +34299,7 @@ div.artist-hero-badge {
 .artmap-tip-info { min-width: 0; }
 .artmap-tip-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .artmap-tip-badge { display: inline-block; font-size: 9px; font-weight: 700; color: #fbbf24; margin-top: 2px; }
+.artmap-tip-conn { font-size: 10px; font-weight: 600; color: rgba(138,43,226,0.85); margin-top: 3px; }
 .artmap-tip-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 .artmap-tip-genres span {
     font-size: 9px; padding: 2px 6px; border-radius: 4px;
