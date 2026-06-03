@@ -1021,6 +1021,82 @@ class MusicDatabase:
         finally:
             conn.close()
 
+    def get_enrichment_unmatched(
+        self,
+        service: str,
+        entity_type: str,
+        status: str = 'not_found',
+        query: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """List items a given enrichment source hasn't matched, paginated.
+
+        Powers the "Manage Enrichment Workers" modal's unmatched browser.
+        Returns ``{'total': int, 'items': [{id, name, image_url, status,
+        last_attempted}]}``. Raises ``UnmatchedQueryError`` for an unknown
+        service / unsupported entity type / bad status (the caller maps that to
+        an HTTP 400)."""
+        from core.enrichment.unmatched import (
+            build_count_query,
+            build_unmatched_query,
+        )
+
+        sql, params = build_unmatched_query(
+            service, entity_type, status, query, limit, offset
+        )
+        count_sql, count_params = build_count_query(service, entity_type, status, query)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            total = cursor.execute(count_sql, count_params).fetchone()[0]
+            rows = cursor.execute(sql, params).fetchall()
+            items = [dict(row) for row in rows]
+            return {'total': total or 0, 'items': items}
+        finally:
+            conn.close()
+
+    def get_enrichment_breakdown(self, service: str, entity_type: str) -> dict:
+        """Return ``{matched, not_found, pending, total}`` for a source/entity.
+
+        The per-worker ``get_stats().progress`` lumps matched + not_found into a
+        single 'processed' count; this splits them so the modal can show the
+        real match rate. Raises ``UnmatchedQueryError`` on bad input."""
+        from core.enrichment.unmatched import build_breakdown_query
+
+        sql, params = build_breakdown_query(service, entity_type)
+        conn = self._get_connection()
+        try:
+            row = conn.cursor().execute(sql, params).fetchone()
+            if not row:
+                return {'matched': 0, 'not_found': 0, 'pending': 0, 'total': 0}
+            return {
+                'matched': row[0] or 0,
+                'not_found': row[1] or 0,
+                'pending': row[2] or 0,
+                'total': row[3] or 0,
+            }
+        finally:
+            conn.close()
+
+    def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
+        """Re-queue item(s) for a source by clearing match_status back to NULL.
+
+        scope='item' resets one row (entity_id); scope='failed' resets every
+        'not_found' row for that entity type. Returns the number of rows reset.
+        Raises ``UnmatchedQueryError`` on bad input."""
+        from core.enrichment.unmatched import build_reset_query
+
+        sql, params = build_reset_query(service, entity_type, scope, entity_id)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount or 0
+        finally:
+            conn.close()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:

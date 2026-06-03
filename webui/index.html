@@ -625,6 +625,13 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Manage Enrichment Workers — opens the full management modal -->
+                            <button class="em-manage-btn" id="manage-enrichment-btn"
+                                    title="Manage enrichment workers — stats, unmatched items, manual matching"
+                                    onclick="openEnrichmentManager()">
+                                <span class="em-manage-btn-icon">🧬</span>
+                                <span class="em-manage-btn-label">Manage Workers</span>
+                            </button>
                         </div>
                         <!-- Watchlist / Wishlist quick-nav (top-right corner) -->
                         <div class="header-quick-nav">
@@ -8032,6 +8039,7 @@
     <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='enrichment-manager.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>

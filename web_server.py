@@ -34643,8 +34643,10 @@ _register_enrichment_services([
 
 _configure_enrichment_api(
     config_set=lambda key, value: config_manager.set(key, value),
+    config_get=lambda key, default=None: config_manager.get(key, default),
     auto_paused_discard=lambda token: _download_auto_paused.discard(token),
     yield_override_add=lambda token: _download_yield_override.add(token),
+    db_getter=get_database,
 )
 
 app.register_blueprint(_create_enrichment_blueprint())
