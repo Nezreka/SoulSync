@@ -34761,6 +34761,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'amazon-enrichment': lambda: amazon_worker,
+        'similar_artists': lambda: similar_artists_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,
         'listening-stats': lambda: listening_stats_worker,
