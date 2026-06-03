@@ -5720,6 +5720,26 @@ function _artMapDrawPerf(ctx, t0) {
     _artMap._lastPerfTs = now;
     const fps = dt > 0 ? Math.round(1000 / dt) : 0;
     const oc = _artMap.offscreen;
+
+    // Ship the numbers to app.log (~1.5/s) so they can be read server-side —
+    // the on-canvas text below can't be copied, especially mid-lag.
+    if (!_artMap._perfPostTs || now - _artMap._perfPostTs > 700) {
+        _artMap._perfPostTs = now;
+        try {
+            fetch('/api/discover/artist-map/perf', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nodes: _artMap.placed.length, edges: (_artMap.edges || []).length,
+                    buffer: oc ? oc.width + 'x' + oc.height : '-',
+                    scale: +(_artMap._bufferScale || 0).toFixed(3),
+                    zoom: +_artMap.zoom.toFixed(3),
+                    rebuildMs: +(_artMap._rebuildMs || 0).toFixed(1),
+                    drawMs: +drawMs.toFixed(1), fps,
+                }),
+            }).catch(() => { });
+        } catch (e) { /* ignore */ }
+    }
+
     const lines = [
         `nodes ${_artMap.placed.length}   edges ${(_artMap.edges || []).length}`,
         `buffer ${oc ? oc.width + '×' + oc.height : '—'}   scale ${(_artMap._bufferScale || 0).toFixed(3)}`,
