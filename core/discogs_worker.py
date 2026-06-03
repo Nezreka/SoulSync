@@ -174,6 +174,16 @@ class DiscogsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
+            # Pinned-group override (Manage Enrichment Workers): process one
+            # entity type first, then fall through to the normal chain. Discogs
+            # has no track endpoint, so only artist/album are honored.
+            from core.worker_utils import read_enrichment_priority, priority_pending_item
+            _prio = read_enrichment_priority('discogs')
+            if _prio in ('artist', 'album'):
+                _pi = priority_pending_item(cursor, 'discogs', _prio)
+                if _pi:
+                    return _pi
+
             # Priority 1: Unattempted artists
             cursor.execute("""
                 SELECT id, name FROM artists

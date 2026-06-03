@@ -76,6 +76,7 @@ const enrichmentManagerState = {
     selected: null,
     statuses: {},       // id -> last /status payload
     breakdown: null,    // selected worker's breakdown
+    priority: '',       // pinned 'process first' entity for selected worker ('' = auto)
     entityTab: 'artist',
     statusFilter: 'unmatched',
     search: '',
@@ -229,6 +230,7 @@ async function _emPollSelected() {
             enrichmentManagerState.statuses[id] = await res.json();
             _emUpdateHeaderLive();   // in-place — no logo reflow/flicker
             _emUpdateRailRow(id);
+            _emRenderChain();        // current-phase highlight tracks live
         }
     } catch (_e) { /* transient — keep last */ }
 }
@@ -307,6 +309,7 @@ async function selectEnrichmentWorker(id) {
     enrichmentManagerState.selected = id;
     enrichmentManagerState.breakdown = null;
     enrichmentManagerState.unmatched = null;
+    enrichmentManagerState.priority = '';
     enrichmentManagerState.search = '';
     enrichmentManagerState.page = 0;
     enrichmentManagerState.statusFilter = 'unmatched';
@@ -316,8 +319,27 @@ async function selectEnrichmentWorker(id) {
     // unmatched call returns entity_types; default to artist meanwhile).
     enrichmentManagerState.entityTab = 'artist';
     renderEnrichmentPanel();
-    await Promise.all([_emLoadBreakdown(id), _emLoadUnmatched()]);
+    await Promise.all([_emLoadBreakdown(id), _emLoadUnmatched(), _emLoadPriority(id)]);
     renderEnrichmentPanel();
+}
+
+async function _emLoadPriority(id) {
+    try {
+        const res = await fetch(`/api/enrichment/${id}/priority`);
+        enrichmentManagerState.priority = res.ok ? ((await res.json()).priority || '') : '';
+    } catch (_e) {
+        enrichmentManagerState.priority = '';
+    }
+}
+
+// Which phase the worker is on right now, from current_item.type.
+function _emCurrentPhase(status) {
+    const t = status && status.current_item && status.current_item.type;
+    if (!t) return '';
+    if (t.indexOf('artist') === 0) return 'artist';
+    if (t.indexOf('album') === 0) return 'album';
+    if (t.indexOf('track') === 0) return 'track';
+    return '';
 }
 
 async function _emLoadBreakdown(id) {
@@ -367,7 +389,11 @@ function renderEnrichmentPanel() {
 
     panel.innerHTML = `
         <div class="em-panel-header" id="em-panel-header"></div>
-        <div class="em-section-label">Enrichment coverage</div>
+        <div class="em-chain" id="em-chain"></div>
+        <div class="em-section-label em-section-label--row">
+            <span>Enrichment coverage</span>
+            <span class="em-coverage-overall" id="em-coverage-overall"></span>
+        </div>
         <div class="em-stats" id="em-stats"></div>
         <div class="em-unmatched">
             <div class="em-unmatched-controls" id="em-unmatched-controls"></div>
@@ -375,9 +401,79 @@ function renderEnrichmentPanel() {
             <div class="em-pager" id="em-pager"></div>
         </div>`;
     _emRenderPanelHeader();
+    _emRenderChain();
     _emRenderStats();
     _emRenderUnmatchedControls();
     _emRenderUnmatchedList();
+}
+
+// Processing-order strip: shows the artist→album→track chain, where the worker
+// currently is, and lets the user pin one group to run first.
+function _emRenderChain() {
+    const host = document.getElementById('em-chain');
+    if (!host) return;
+    const id = enrichmentManagerState.selected;
+    const supported = (enrichmentManagerState.unmatched && enrichmentManagerState.unmatched.entity_types)
+        || (enrichmentManagerState.breakdown && Object.keys(enrichmentManagerState.breakdown))
+        || ['artist'];
+    const status = enrichmentManagerState.statuses[id];
+    const phase = _emCurrentPhase(status);
+    const pinned = enrichmentManagerState.priority;
+    const bd = enrichmentManagerState.breakdown || {};
+    const glyphs = { artist: '🎤', album: '💿', track: '🎵' };
+
+    const steps = supported.map((e, i) => {
+        const d = bd[e] || {};
+        const pending = (d.pending || 0) + (d.not_found || 0);
+        const isCurrent = phase === e;
+        const isPinned = pinned === e;
+        const isDone = bd[e] && pending === 0;
+        const cls = ['em-step',
+            isPinned ? 'em-step--pinned' : '',
+            isCurrent ? 'em-step--current' : '',
+            isDone ? 'em-step--done' : ''].filter(Boolean).join(' ');
+        const note = isPinned ? 'first' : (isCurrent ? 'now' : (isDone ? 'done' : `${pending.toLocaleString()} left`));
+        const arrow = i < supported.length - 1 ? '<span class="em-step-arrow">→</span>' : '';
+        return `
+            <button class="${cls}" title="Process ${_emEntityLabel(e, true).toLowerCase()} first"
+                    onclick="setEnrichmentPriority('${isPinned ? '' : e}')">
+                <span class="em-step-glyph">${glyphs[e] || '•'}</span>
+                <span class="em-step-name">${_emEntityLabel(e, true)}</span>
+                <span class="em-step-note">${note}</span>
+            </button>${arrow}`;
+    }).join('');
+
+    host.innerHTML = `
+        <div class="em-chain-head">
+            <span class="em-section-label">Processing order</span>
+            <span class="em-chain-hint">${pinned
+                ? `Pinned <strong>${_emEntityLabel(pinned, true)}</strong> first · click again for auto`
+                : 'Click a group to process it first'}</span>
+        </div>
+        <div class="em-chain-flow">${steps}</div>`;
+}
+
+async function setEnrichmentPriority(entity) {
+    const id = enrichmentManagerState.selected;
+    try {
+        const res = await fetch(`/api/enrichment/${id}/priority`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity: entity || 'none' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            enrichmentManagerState.priority = data.priority || '';
+            showToast(enrichmentManagerState.priority
+                ? `${_emWorkerById[id].name} will process ${_emEntityLabel(enrichmentManagerState.priority, true).toLowerCase()} first`
+                : `${_emWorkerById[id].name} back to automatic order`, 'success');
+            _emRenderChain();
+        } else {
+            showToast(data.error || 'Could not set processing order', 'error');
+        }
+    } catch (_e) {
+        showToast('Error setting processing order', 'error');
+    }
 }
 
 function _emRenderPanelHeader() {
@@ -393,14 +489,15 @@ function _emRenderPanelHeader() {
             <div class="em-hero-glow"></div>
             ${_emIconHtml(id, 'lg')}
             <div class="em-ph-titles">
-                <div class="em-ph-name">${_emEscape(worker.name)} <span class="em-ph-name-sub">enrichment</span></div>
+                <div class="em-ph-nameline">
+                    <span class="em-ph-name">${_emEscape(worker.name)} <span class="em-ph-name-sub">enrichment</span></span>
+                    <span class="em-pill" id="em-ph-pill"></span>
+                </div>
                 <div class="em-ph-sub" id="em-ph-current"></div>
             </div>
-            <div class="em-hero-metric" id="em-ph-metric"></div>
             <div class="em-ph-actions">
-                <span class="em-pill" id="em-ph-pill"></span>
-                <span id="em-ph-budget"></span>
                 <span id="em-ph-errors"></span>
+                <span id="em-ph-budget"></span>
                 <button class="em-btn" id="em-ph-toggle" onclick="toggleEnrichmentWorker('${id}')"></button>
             </div>
         </div>`;
@@ -415,14 +512,8 @@ function _emUpdateHeaderLive() {
     const pill = document.getElementById('em-ph-pill');
     if (pill) { pill.className = `em-pill em-pill--${info.cls}`; pill.textContent = info.label; }
 
-    const metric = document.getElementById('em-ph-metric');
-    if (metric) {
-        const pct = _emOverallPct(status);
-        metric.innerHTML = pct == null
-            ? ''
-            : `<span class="em-hero-pct">${pct}<span class="em-hero-pct-sym">%</span></span>
-               <span class="em-hero-pct-label">enriched</span>`;
-    }
+    const hero = document.querySelector('#em-panel-header .em-hero');
+    if (hero) hero.classList.toggle('em-hero--live', info.cls === 'running');
 
     const cur = document.getElementById('em-ph-current');
     if (cur) {
@@ -496,6 +587,18 @@ function _emRenderStats() {
                 </div>
             </div>`;
     }).join('');
+
+    // Overall matched coverage across every entity type (relocated here from
+    // the hero per the refined-banner header).
+    const overall = document.getElementById('em-coverage-overall');
+    if (overall) {
+        let m = 0, t = 0;
+        Object.values(bd).forEach(d => { m += d.matched || 0; t += d.total || 0; });
+        const pct = t ? Math.round((m / t) * 100) : 0;
+        overall.innerHTML = t
+            ? `<strong>${pct}%</strong> matched · ${m.toLocaleString()} of ${t.toLocaleString()}`
+            : '';
+    }
 
     // Animate the segments in from 0 on the next frame (CSS transition does the rest).
     requestAnimationFrame(() => {
@@ -746,11 +849,11 @@ function openEnrichmentMatch(service, entityType, entityId, anchorBtn) {
 
     const overlay = document.createElement('div');
     overlay.id = 'enrichment-match-overlay';
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay em-overlay';
     overlay.style.zIndex = '10010'; // above the manager modal
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     overlay.innerHTML = `
-        <div class="enhanced-manual-match-modal">
+        <div class="enhanced-manual-match-modal em-in">
             <div class="enhanced-bulk-modal-header">
                 <h3>Match ${_emEntityLabel(entityType)} on ${_emEscape(_emWorkerById[service]?.name || service)}</h3>
                 <button class="enhanced-bulk-modal-close">&times;</button>
@@ -855,6 +958,7 @@ window.setEnrichmentStatusFilter = setEnrichmentStatusFilter;
 window.onEnrichmentSearchInput = onEnrichmentSearchInput;
 window.changeEnrichmentPage = changeEnrichmentPage;
 window.toggleEnrichmentWorker = toggleEnrichmentWorker;
+window.setEnrichmentPriority = setEnrichmentPriority;
 window.retryEnrichmentItem = retryEnrichmentItem;
 window.retryAllFailedEnrichment = retryAllFailedEnrichment;
 window.openEnrichmentMatch = openEnrichmentMatch;

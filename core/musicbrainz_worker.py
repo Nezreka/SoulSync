@@ -166,6 +166,16 @@ class MusicBrainzWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
+            # Pinned-group override (Manage Enrichment Workers): process one
+            # entity type first, then fall through to the normal chain. Unset or
+            # exhausted ⇒ default artist→album→track order, unchanged.
+            from core.worker_utils import read_enrichment_priority, priority_pending_item
+            _prio = read_enrichment_priority('musicbrainz')
+            if _prio:
+                _pi = priority_pending_item(cursor, 'musicbrainz', _prio)
+                if _pi:
+                    return _pi
+
             # Priority 1: Unattempted artists
             cursor.execute("""
                 SELECT id, name
