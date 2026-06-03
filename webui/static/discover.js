@@ -5418,6 +5418,16 @@ function _artMapRebuildBuffer() {
     _artMap._liveBuildZoom = _artMap.zoom;
     _artMap._drawAlphaMul = 1; // buffer bakes at full alpha; the blit applies the reveal fade
 
+    // If more bubbles would be "live" than the live layer can draw, bake them ALL
+    // into the buffer (set the overflow flag BEFORE the draw loop so the live-size
+    // check below returns false and nothing is skipped). This is what prevents the
+    // genre-overview "small/sparse" render: the live layer caps out, so let the
+    // buffer own the whole crowd; live + bob only kick in once zoomed in.
+    const bz = _artMap.zoom;
+    let liveN = 0;
+    for (const n of visible) { if (!n._isLabel && (n.radius || 0) * bz >= _artMap.LIVE_PX) liveN++; }
+    _artMap._liveOverflow = liveN > 450;
+
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
 
@@ -5606,6 +5616,12 @@ function _artMapCompositeNode(n) {
 // so the two sets are always exact complements.
 function _artMapIsLiveSize(n) {
     if (n._isLabel) return false;
+    // When too many bubbles would be "live" at once (e.g. the genre overview),
+    // the live layer's cap can't draw them all and the buffer would exclude them
+    // → a sparse/half-rendered map. In that case treat NOTHING as live so the
+    // buffer bakes everything (full, correct render); the live layer + bob only
+    // take over once you've zoomed in to where few bubbles are big.
+    if (_artMap._liveOverflow) return false;
     const z = _artMap._liveBuildZoom || _artMap.zoom;
     return (n.radius || 0) * z >= _artMap.LIVE_PX;
 }
@@ -5695,11 +5711,12 @@ function _artMapStartLoop() {
         if (!a.running) return;
         _artMap._now = t;
         const more = _artMapStepAnimations(t);
-        // Reveal/ripple → full 60fps. Idle buoyancy → ~30fps (the gentle bob
-        // doesn't need 60, and halving the redraws keeps dense zoomed-in maps
-        // smooth + cool).
-        const ambientOnly = !more && _artMap._ambient;
-        if (!ambientOnly || (t - (a._lastDraw || 0)) >= 32) {
+        // Cap the whole animation loop at ~30fps. The reveal bloom, ripples and
+        // ambient bob all read fine at 30, and halving the redraws keeps the
+        // 1800-bubble genre map smooth instead of churning every frame. Always
+        // honour a pending buffer rebuild (dirty) so the throttle can't skip the
+        // frame that bakes the map after the reveal ends.
+        if (_artMap.dirty || (t - (a._lastDraw || 0)) >= 31) {
             _artMapDraw(); // sets _artMap._liveCount
             a._lastDraw = t;
         }
@@ -6840,9 +6857,10 @@ function _artMapSetupInteraction(canvas) {
         _artMap.zoom = newZoom;
         _artMapRender(); // fast blit
         _artMapEnsureAmbient(); // resume buoyancy if we zoomed bubbles into view
-        // Debounce hi-res rebuild after zoom settles
+        // Debounce hi-res rebuild after zoom settles; then resume buoyancy (the
+        // rebuild may have flipped the live/overflow partition).
         clearTimeout(_artMap._zoomRebuild);
-        _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); }, 300);
+        _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); _artMapEnsureAmbient(); }, 300);
     }, { passive: false });
 
     let clickStart = null;
