@@ -26,6 +26,7 @@
         { container: '.hydrabase-button-container',        color: [200, 200, 200] },
         { container: '.soulid-button-container',          color: [29, 185, 84], rainbow: true },
         { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true },
+        { container: '.em-manage-btn',                     color: [168, 85, 247] },
     ];
 
     const ORB_RADIUS = 7;
