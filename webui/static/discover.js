@@ -5515,6 +5515,7 @@ function _artMapRender() {
 
 function _artMapDraw() {
     /**Blit offscreen buffer to screen canvas with pan/zoom. Near-zero cost.**/
+    const _t0 = _artMap._perf ? performance.now() : 0;
     const ctx = _artMap.ctx;
     const w = _artMap.width;
     const h = _artMap.height;
@@ -5522,8 +5523,12 @@ function _artMapDraw() {
     ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, w, h);
 
-    if (_artMap.dirty || !_artMap.offscreen) _artMapRebuildBuffer();
-    if (!_artMap.offscreen) return;
+    if (_artMap.dirty || !_artMap.offscreen) {
+        const _rt = _artMap._perf ? performance.now() : 0;
+        _artMapRebuildBuffer();
+        if (_artMap._perf) _artMap._rebuildMs = performance.now() - _rt;
+    }
+    if (!_artMap.offscreen) { if (_artMap._perf) _artMapDrawPerf(ctx, _t0); return; }
 
     const oc = _artMap.offscreen;
     const s = _artMap._bufferScale;
@@ -5702,6 +5707,37 @@ function _artMapDraw() {
             _artMap._ripple = null;
         }
     }
+
+    if (_artMap._perf) _artMapDrawPerf(ctx, _t0);
+}
+
+// Toggle with 'd' on the map. Shows where frame time goes so we optimise the
+// real bottleneck (buffer rebuild on zoom vs. blit on pan) instead of guessing.
+function _artMapDrawPerf(ctx, t0) {
+    const drawMs = performance.now() - t0;
+    const now = performance.now();
+    const dt = _artMap._lastPerfTs ? now - _artMap._lastPerfTs : 0;
+    _artMap._lastPerfTs = now;
+    const fps = dt > 0 ? Math.round(1000 / dt) : 0;
+    const oc = _artMap.offscreen;
+    const lines = [
+        `nodes ${_artMap.placed.length}   edges ${(_artMap.edges || []).length}`,
+        `buffer ${oc ? oc.width + '×' + oc.height : '—'}   scale ${(_artMap._bufferScale || 0).toFixed(3)}`,
+        `zoom ${_artMap.zoom.toFixed(3)}`,
+        `rebuild ${(_artMap._rebuildMs || 0).toFixed(1)}ms   draw ${drawMs.toFixed(1)}ms`,
+        `~${fps} fps (while interacting)`,
+    ];
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // device pixels, ignore dpr scale
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const pad = 8, lh = 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(10, 10, 270, lines.length * lh + pad * 2);
+    ctx.fillStyle = '#7CFC00';
+    lines.forEach((l, i) => ctx.fillText(l, 10 + pad, 10 + pad + i * lh));
+    ctx.restore();
 }
 
 function artMapSearch(query) {
@@ -6597,6 +6633,7 @@ function _artMapSetupInteraction(canvas) {
         else if (e.key === '-') { artMapZoom(0.7); e.preventDefault(); }
         else if (e.key === '0') { artMapFitToView(); e.preventDefault(); }
         else if (e.key === 'f' || e.key === 'F') { artMapFitToView(); e.preventDefault(); }
+        else if (e.key === 'd' || e.key === 'D') { _artMap._perf = !_artMap._perf; _artMapRender(); e.preventDefault(); }
         else if (e.key === 's' || e.key === 'S') {
             const input = document.getElementById('artist-map-search');
             if (input) { input.focus(); e.preventDefault(); }
@@ -6804,40 +6841,14 @@ function _artMapScreenToWorld(e, canvas) {
     };
 }
 
-function _artMapBuildHitGrid() {
-    // v2 perf: bucket nodes into a coarse world-space grid so hit-testing checks
-    // only the cell under the cursor instead of sorting+scanning every node each
-    // mousemove. A node is inserted into every cell its bounding box overlaps,
-    // so a single-cell lookup at the cursor is exhaustive.
-    const placed = _artMap.placed || [];
-    const cell = 400;
-    const grid = new Map();
-    for (const n of placed) {
-        const mincx = Math.floor((n.x - n.radius) / cell);
-        const maxcx = Math.floor((n.x + n.radius) / cell);
-        const mincy = Math.floor((n.y - n.radius) / cell);
-        const maxcy = Math.floor((n.y + n.radius) / cell);
-        for (let cx = mincx; cx <= maxcx; cx++) {
-            for (let cy = mincy; cy <= maxcy; cy++) {
-                const k = cx + ',' + cy;
-                let arr = grid.get(k);
-                if (!arr) { arr = []; grid.set(k, arr); }
-                arr.push(n);
-            }
-        }
-    }
-    _artMap._grid = { cell, grid };
-    _artMap._gridFor = placed;   // identity guard — loaders assign a fresh array
-}
-
 function _artMapHitTest(wx, wy) {
-    if (!_artMap._grid || _artMap._gridFor !== _artMap.placed) _artMapBuildHitGrid();
-    const { cell, grid } = _artMap._grid;
-    const candidates = grid.get(Math.floor(wx / cell) + ',' + Math.floor(wy / cell));
-    if (!candidates) return null;
-    // Watchlist nodes draw on top, so they win ties.
+    // Single O(N) pass, no per-move sort, no allocation. Watchlist nodes draw on
+    // top so they win ties; otherwise the first node whose circle contains the
+    // point wins. (A spatial grid was tried and reverted — it exploded building
+    // cells for large-radius genre cluster nodes. A flat scan of even thousands
+    // of nodes is sub-millisecond and can't lock up.)
     let similarHit = null;
-    for (const n of candidates) {
+    for (const n of _artMap.placed) {
         if ((n.opacity || 0) < 0.3) continue;
         const dx = wx - n.x, dy = wy - n.y;
         if (dx * dx + dy * dy <= n.radius * n.radius) {
