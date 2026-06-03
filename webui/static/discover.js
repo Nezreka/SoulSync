@@ -5122,7 +5122,7 @@ function _artMapLayoutIslands(groups, opts = {}) {
     _artMap._islands = [];
     const nodeR = opts.nodeR || (_artMap.WATCHLIST_R * 0.22);
     const gap = opts.gap || (_artMap.BUFFER * 2.2);
-    const cap = opts.maxPerIsland || 500;
+    const cap = opts.maxPerIsland || 300;
     let pid = 0;
 
     const islands = groups.map(g => {
@@ -5291,9 +5291,12 @@ function _artMapUpdateIslandNav() {
     if (!nav) {
         nav = document.createElement('div');
         nav.id = 'artmap-island-nav';
-        nav.style.cssText = 'position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;padding:8px 14px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:999px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;';
         container.appendChild(nav);
     }
+    // Position top-left, clearing the genre sidebar (when shown) and the toolbar.
+    const sb = document.getElementById('artmap-genre-sidebar');
+    const sbW = (sb && sb.style.display !== 'none') ? (sb.offsetWidth || 0) : 0;
+    nav.style.cssText = `position:absolute;top:64px;left:${sbW + 16}px;display:flex;align-items:center;gap:12px;padding:7px 12px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:14px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;`;
     const idx = _artMap._focusIdx || 0;
     const isl = islands[idx];
     const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
@@ -5521,10 +5524,12 @@ function _artMapRebuildBuffer() {
     const bz = _artMap.zoom;
     let liveN = 0;
     for (const n of visible) { if (!n._isLabel && (n.radius || 0) * bz >= _artMap.LIVE_PX) liveN++; }
-    // A single focused island (≤ maxPerIsland 500) should render via the crisp
-    // live layer; only fall back to baking-everything when there are clearly more
-    // bubbles than the live layer can draw.
-    _artMap._liveOverflow = liveN > 650;
+    // In one-island mode the buffer already covers just the focused island at
+    // high resolution, so let the BUFFER own any non-trivial crowd (one cheap
+    // crisp blit, no per-frame redraw → no lag). The live layer + bob/shove only
+    // take over for small views (zoomed-in subsets, explore) where redrawing a
+    // handful of bubbles each frame is cheap.
+    _artMap._liveOverflow = liveN > 140;
 
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
