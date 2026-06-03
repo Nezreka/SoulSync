@@ -145,13 +145,36 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     tracks_hash = hashlib.md5(track_ids_str.encode()).hexdigest()
 
     sync_id_key = f"auto_mirror_{playlist_id}"
+    # Full mirror identity (every source_track_id on the playlist). tracks_hash
+    # only covers tracks_json — if a new mirror row is skipped (no discovery /
+    # no source id), tracks_hash stays identical to the pre-add sync and we
+    # used to no-op with "unchanged" while the new song never hit wishlist.
+    mirror_ids_str = ','.join(
+        sorted(t.get('source_track_id', '') or '' for t in tracks if t.get('source_track_id'))
+    )
+    mirror_tracks_hash = hashlib.md5(mirror_ids_str.encode()).hexdigest() if mirror_ids_str else ''
+
+    event_data = config.get('_event_data') or {}
+    try:
+        tracks_added = int(event_data.get('added') or 0)
+    except (TypeError, ValueError):
+        tracks_added = 0
+    force_sync = tracks_added > 0 or skipped_count > 0
+
     try:
         sync_statuses = deps.load_sync_status_file()
         last_status = sync_statuses.get(sync_id_key, {})
         last_hash = last_status.get('tracks_hash', '')
+        last_mirror_hash = last_status.get('mirror_tracks_hash', '')
         last_matched = last_status.get('matched_tracks', -1)
 
-        if last_hash == tracks_hash and last_matched >= len(tracks_json):
+        mirror_changed = bool(mirror_tracks_hash) and mirror_tracks_hash != last_mirror_hash
+        if (
+            not force_sync
+            and not mirror_changed
+            and last_hash == tracks_hash
+            and last_matched >= len(tracks_json)
+        ):
             # Exact same tracks, all matched last time — nothing to do.
             deps.update_progress(
                 auto_id,
@@ -162,6 +185,21 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 'status': 'skipped',
                 'reason': f'All {len(tracks_json)} tracks unchanged since last sync',
             }
+        if force_sync and last_hash == tracks_hash and last_matched >= len(tracks_json):
+            deps.update_progress(
+                auto_id,
+                log_line=(
+                    f'Forcing sync: playlist changed ({tracks_added} added) or '
+                    f'{skipped_count} track(s) need discovery'
+                ),
+                log_type='info',
+            )
+        elif mirror_changed:
+            deps.update_progress(
+                auto_id,
+                log_line='Mirror track list changed — running sync',
+                log_type='info',
+            )
     except Exception as e:
         deps.logger.debug("mirror sync last-status read: %s", e)
 

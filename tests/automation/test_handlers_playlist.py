@@ -770,6 +770,7 @@ class TestSyncPlaylist:
 
     def test_unchanged_since_last_sync_returns_skipped(self):
         discovered_track = {
+            'source_track_id': 'spot-1',
             'extra_data': json.dumps({
                 'discovered': True,
                 'matched_data': {
@@ -789,7 +790,11 @@ class TestSyncPlaylist:
         import hashlib
         expected_hash = hashlib.md5('spot-1'.encode()).hexdigest()
         sync_statuses = {
-            'auto_mirror_1': {'tracks_hash': expected_hash, 'matched_tracks': 1}
+            'auto_mirror_1': {
+                'tracks_hash': expected_hash,
+                'mirror_tracks_hash': expected_hash,
+                'matched_tracks': 1,
+            }
         }
 
         deps = _build_deps(
@@ -799,6 +804,96 @@ class TestSyncPlaylist:
         result = auto_sync_playlist({'playlist_id': '1'}, deps)
         assert result['status'] == 'skipped'
         assert 'unchanged' in result['reason']
+
+    def test_playlist_changed_event_bypasses_unchanged_skip(self):
+        discovered_track = {
+            'source_track_id': 'spot-1',
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'T', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'A'}, 'duration_ms': 0,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P'}],
+            playlist_tracks={1: [discovered_track]},
+        )
+        import hashlib
+        expected_hash = hashlib.md5('spot-1'.encode()).hexdigest()
+        sync_statuses = {
+            'auto_mirror_1': {
+                'tracks_hash': expected_hash,
+                'mirror_tracks_hash': expected_hash,
+                'matched_tracks': 1,
+            }
+        }
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            load_sync_status_file=lambda: sync_statuses,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+        result = auto_sync_playlist(
+            {'playlist_id': '1', '_event_data': {'added': '1', 'playlist_id': '1'}},
+            deps,
+        )
+        assert result['status'] == 'started'
+        import time
+        for _ in range(50):
+            if sync_calls:
+                break
+            time.sleep(0.01)
+        assert len(sync_calls) == 1
+
+    def test_new_mirror_row_with_skipped_track_bypasses_unchanged_skip(self):
+        """New playlist row without discovery must not reuse the old tracks_hash skip."""
+        discovered_track = {
+            'source_track_id': 'spot-1',
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'T', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'A'}, 'duration_ms': 0,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(
+            playlists=[{'id': 1, 'name': 'P'}],
+            playlist_tracks={1: [discovered_track, {}]},  # second row not syncable
+        )
+        import hashlib
+        old_hash = hashlib.md5('spot-1'.encode()).hexdigest()
+        new_mirror_hash = hashlib.md5('spot-1,spot-new'.encode()).hexdigest()
+        sync_statuses = {
+            'auto_mirror_1': {
+                'tracks_hash': old_hash,
+                'mirror_tracks_hash': old_hash,
+                'matched_tracks': 1,
+            }
+        }
+        # Give the new mirror row a source id so mirror hash changes.
+        db.playlist_tracks[1][1]['source_track_id'] = 'spot-new'
+
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            load_sync_status_file=lambda: sync_statuses,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+        result = auto_sync_playlist({'playlist_id': '1'}, deps)
+        assert result['status'] == 'started'
+        assert result['skipped_tracks'] == '1'
+        import time
+        for _ in range(50):
+            if sync_calls:
+                break
+            time.sleep(0.01)
+        assert len(sync_calls) == 1
+        assert new_mirror_hash != old_hash
 
 
 # ─── playlist_pipeline ───────────────────────────────────────────────

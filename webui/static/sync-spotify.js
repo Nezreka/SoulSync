@@ -2210,6 +2210,9 @@ async function openDownloadMissingModal(playlistId) {
             }
             process.modalElement.style.display = 'flex';
         }
+        if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+            await refreshOrganizePreferenceForDownloadModal(playlistId);
+        }
         hideLoadingOverlay();
         return;
     }
@@ -2375,7 +2378,9 @@ async function openDownloadMissingModal(playlistId) {
                             <input type="checkbox" id="force-download-all-${playlistId}">
                             <span>Force Download All</span>
                         </label>
-                        <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync" hidden>
+                        ${typeof downloadMissingModalOrganizeCheckboxHtml === 'function'
+                            ? downloadMissingModalOrganizeCheckboxHtml(playlistId)
+                            : `<input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync">`}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
                         Begin Analysis
@@ -2398,7 +2403,7 @@ async function openDownloadMissingModal(playlistId) {
     `;
 
     applyProgressiveTrackRendering(playlistId, tracks.length);
-    await applyMirroredOrganizePreference(playlistId, 'spotify');
+    await applyMirroredOrganizePreference(playlistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }

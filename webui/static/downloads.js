@@ -429,6 +429,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             }
             process.modalElement.style.display = 'flex';
         }
+        if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+            await refreshOrganizePreferenceForDownloadModal(virtualPlaylistId);
+        }
         hideLoadingOverlay(); // Hide overlay when reopening existing modal
         return;
     }

@@ -47,6 +47,90 @@ class SyncDeps:
     update_and_save_sync_status: Callable
     sync_states: dict
     sync_lock: Any  # threading.Lock
+    # Optional: post-sync download follow-up for mirrored-playlist automations.
+    process_wishlist_automatically: Callable[..., Any] | None = None
+    run_playlist_organize_download: Callable[..., Any] | None = None
+    is_wishlist_actually_processing: Callable[[], bool] | None = None
+
+
+def _post_sync_automation_followup(
+    deps: SyncDeps,
+    *,
+    automation_id: str,
+    playlist_id: str,
+    skip_wishlist_add: bool,
+    result: Any,
+) -> None:
+    """Queue downloads after an automation sync finishes.
+
+    Sync Playlist runs in a background thread and returns immediately, so a
+    separate scheduled "Process Wishlist" action often runs on an empty wishlist.
+    Organize-by-playlist skips sync-time wishlist adds and expects a folder
+    download batch instead — that only ran in Playlist Pipeline before this hook.
+    """
+    if not automation_id or not str(playlist_id).startswith('auto_mirror_'):
+        return
+    try:
+        mirrored_id = int(str(playlist_id).replace('auto_mirror_', '', 1))
+    except ValueError:
+        return
+
+    failed = int(getattr(result, 'failed_tracks', 0) or 0)
+    wishlist_added = int(getattr(result, 'wishlist_added_count', 0) or 0)
+
+    if skip_wishlist_add:
+        org_fn = deps.run_playlist_organize_download
+        if failed <= 0:
+            return
+        if not org_fn:
+            logger.warning(
+                "Organize-by-playlist sync left %s missing tracks but organize download is unavailable",
+                failed,
+            )
+            deps.update_automation_progress(
+                automation_id,
+                log_line=f'{failed} missing — enable Playlist Pipeline or disable Organize by Playlist',
+                log_type='warning',
+            )
+            return
+        org_result = org_fn(mirrored_playlist_id=mirrored_id, automation_id=automation_id)
+        status = org_result.get('status', 'unknown') if isinstance(org_result, dict) else 'unknown'
+        reason = org_result.get('reason', '') if isinstance(org_result, dict) else ''
+        log_type = 'success' if status == 'started' else 'warning'
+        detail = f' ({reason})' if reason and status != 'started' else ''
+        deps.update_automation_progress(
+            automation_id,
+            log_line=f'Organize download {status} for {failed} missing track(s){detail}',
+            log_type=log_type,
+        )
+        return
+
+    if wishlist_added <= 0:
+        if failed > 0:
+            deps.update_automation_progress(
+                automation_id,
+                log_line=f'{failed} missing but none added to wishlist — check logs',
+                log_type='warning',
+            )
+        return
+
+    proc_fn = deps.process_wishlist_automatically
+    if not proc_fn:
+        return
+    is_busy = deps.is_wishlist_actually_processing
+    if is_busy and is_busy():
+        deps.update_automation_progress(
+            automation_id,
+            log_line=f'Added {wishlist_added} to wishlist; download worker already running',
+            log_type='info',
+        )
+        return
+    proc_fn(automation_id=automation_id)
+    deps.update_automation_progress(
+        automation_id,
+        log_line=f'Started wishlist download for {wishlist_added} track(s)',
+        log_type='success',
+    )
 
 
 async def _database_only_find_track(spotify_track, candidate_pool=None):
@@ -476,9 +560,21 @@ def run_sync_task(
             matched = getattr(result, 'matched_tracks', 0)
             total = getattr(result, 'total_tracks', 0)
             failed = getattr(result, 'failed_tracks', 0)
+            wishlist_added = getattr(result, 'wishlist_added_count', 0) or 0
             deps.update_automation_progress(automation_id, status='finished', progress=100,
                 phase='Sync complete',
-                log_line=f'Done: {matched}/{total} matched, {failed} failed', log_type='success')
+                log_line=(
+                    f'Done: {matched}/{total} in library, {failed} missing'
+                    + (f', {wishlist_added} added to wishlist' if wishlist_added else '')
+                ),
+                log_type='success')
+            _post_sync_automation_followup(
+                deps,
+                automation_id=automation_id,
+                playlist_id=playlist_id,
+                skip_wishlist_add=skip_wishlist_add,
+                result=result,
+            )
 
         # Emit playlist_synced event for automation engine
         try:
@@ -497,12 +593,28 @@ def run_sync_task(
         import hashlib as _hl
         _track_ids_str = ','.join(sorted(t.get('id', '') for t in tracks_json))
         _tracks_hash = _hl.md5(_track_ids_str.encode()).hexdigest()
+        _mirror_tracks_hash = None
+        if str(playlist_id).startswith('auto_mirror_'):
+            try:
+                _mp_id = int(str(playlist_id).replace('auto_mirror_', '', 1))
+                from database.music_database import MusicDatabase
+                _mtracks = MusicDatabase().get_mirrored_playlist_tracks(_mp_id)
+                _mids = ','.join(
+                    sorted(t.get('source_track_id', '') or '' for t in _mtracks if t.get('source_track_id'))
+                )
+                _mirror_tracks_hash = _hl.md5(_mids.encode()).hexdigest() if _mids else ''
+            except Exception as e:
+                logger.debug("mirror_tracks_hash for sync status: %s", e)
         snapshot_id = getattr(playlist, 'snapshot_id', None)
-        deps.update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id,
+        _status_kwargs = dict(
             matched_tracks=getattr(result, 'matched_tracks', 0),
             total_tracks=getattr(result, 'total_tracks', 0),
             discovered_tracks=len(tracks_json),
-            tracks_hash=_tracks_hash)
+            tracks_hash=_tracks_hash,
+        )
+        if _mirror_tracks_hash is not None:
+            _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash
+        deps.update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id, **_status_kwargs)
 
     except Exception as e:
         logger.error(f"SYNC FAILED for {playlist_id}: {e}")

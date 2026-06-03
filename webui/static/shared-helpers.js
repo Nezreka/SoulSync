@@ -965,13 +965,39 @@ function playlistDetailsOrganizeCheckboxId(playlistRef) {
     return `playlist-organize-${playlistRef}`;
 }
 
+/** Infer mirrored-playlist API source from a UI playlist / virtual id. */
+function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
+    if (explicitSource) {
+        return explicitSource;
+    }
+    const ref = String(playlistRef || '');
+    if (ref.startsWith('spotify_public_')) {
+        return 'spotify_public';
+    }
+    if (ref.startsWith('deezer_arl_')) {
+        return 'deezer';
+    }
+    return 'spotify';
+}
+
 /** Map UI playlist ids (e.g. deezer_arl_123) to mirrored-playlist resolve refs. */
 function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
     const ref = String(playlistRef || '').trim();
     if (source === 'deezer' && ref.startsWith('deezer_arl_')) {
         return ref.slice('deezer_arl_'.length);
     }
+    if (source === 'spotify_public' && ref.startsWith('spotify_public_')) {
+        return ref.slice('spotify_public_'.length);
+    }
     return ref;
+}
+
+function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
+    return `
+        <label class="force-download-toggle">
+            <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync">
+            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
+        </label>`;
 }
 
 function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
@@ -1000,11 +1026,12 @@ function isPlaylistOrganizeEnabled(playlistRef) {
     return downloadMissingCb ? downloadMissingCb.checked : false;
 }
 
-async function fetchMirroredOrganizePreference(playlistRef, source = 'spotify') {
+async function fetchMirroredOrganizePreference(playlistRef, source = null) {
     try {
-        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, source);
+        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
         const res = await fetch(
-            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(source)}`
+            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
         );
         const data = await res.json();
         return !!(data.found && data.playlist?.organize_by_playlist);
@@ -1014,11 +1041,12 @@ async function fetchMirroredOrganizePreference(playlistRef, source = 'spotify') 
     }
 }
 
-async function setMirroredOrganizePreference(playlistRef, enabled, source = 'spotify') {
+async function setMirroredOrganizePreference(playlistRef, enabled, source = null) {
     try {
-        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, source);
+        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
         const res = await fetch(
-            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(source)}`
+            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
         );
         const data = await res.json();
         if (!data.found || !data.playlist?.id) {
@@ -1041,8 +1069,9 @@ async function setMirroredOrganizePreference(playlistRef, enabled, source = 'spo
     }
 }
 
-async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = 'spotify') {
-    const enabled = await fetchMirroredOrganizePreference(playlistRef, source);
+async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = null) {
+    const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+    const enabled = await fetchMirroredOrganizePreference(playlistRef, resolvedSource);
     syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
 }
 
@@ -1054,8 +1083,13 @@ async function onPlaylistOrganizePreferenceChange(playlistRef, enabled, source =
     }
 }
 
-async function applyMirroredOrganizePreference(playlistRef, source = 'spotify') {
+async function applyMirroredOrganizePreference(playlistRef, source = null) {
     await loadPlaylistOrganizePreferenceIntoModal(playlistRef, source);
+}
+
+/** Re-sync organize toggles when re-showing an existing Download Missing modal. */
+async function refreshOrganizePreferenceForDownloadModal(playlistRef, source = null) {
+    await applyMirroredOrganizePreference(playlistRef, source);
 }
 
 function playlistTrackCacheIsStale(playlistId, playlist) {
@@ -1209,10 +1243,11 @@ function playlistModalDownloadSyncFooterHtml(playlistId, options = {}) {
     const openDm = closeBeforeDownload
         ? `closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')`
         : `openDownloadMissingModal('${playlistId}')`;
+    const dmLabel = _isSoulsyncStandalone ? '📁 Download to Playlist Folder' : '📥 Download Missing Tracks';
     const downloadBtns = hasCompletedProcess
         ? `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="${openDm}">📊 View Last Results</button>
            <button class="playlist-modal-btn playlist-modal-btn-tertiary soulsync-standalone-action" onclick="restartPlaylistDownloadMissing('${playlistId}')">🔄 Download Missing (New)</button>`
-        : `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="${openDm}">📥 Download Missing Tracks</button>`;
+        : `<button class="playlist-modal-btn playlist-modal-btn-tertiary${_isSoulsyncStandalone ? ' soulsync-standalone-action' : ''}" onclick="${openDm}">${dmLabel}</button>`;
 
     if (_isSoulsyncStandalone) {
         return `${downloadBtns}
@@ -1290,6 +1325,9 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                 showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
             }
             process.modalElement.style.display = 'flex';
+            if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+                await refreshOrganizePreferenceForDownloadModal(virtualPlaylistId);
+            }
             if (showLoadingOverlayParam) {
                 hideLoadingOverlay();
             }
