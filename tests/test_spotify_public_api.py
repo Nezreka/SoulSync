@@ -49,6 +49,9 @@ def test_normalize_api_track_skips_unusable():
 # Paginated fetch with injected HTTP (no network)
 # --------------------------------------------------------------------------
 
+import json
+
+
 class _Resp:
     def __init__(self, *, text='', json_data=None, status=200):
         self.text, self._json, self.status_code = text, json_data, status
@@ -62,32 +65,50 @@ class _Resp:
         return self._json
 
 
+def _embed_html(token='BQ_aaaaaaaaaaaaaaaaaaaaaaaa', *, name='My Playlist',
+                subtitle='Owner', n_tracks=3, with_token=True):
+    """Fake embed page: a token blob + a __NEXT_DATA__ the scraper parses."""
+    track_list = [
+        {'uri': f'spotify:track:e{i}', 'title': f'Embed {i}', 'subtitle': 'Artist',
+         'duration': 1000, 'isExplicit': False}
+        for i in range(n_tracks)
+    ]
+    next_data = {'props': {'pageProps': {'state': {'data': {'entity': {
+        'type': 'playlist', 'name': name, 'subtitle': subtitle, 'trackList': track_list,
+    }}}}}}
+    tok = f'"accessToken":"{token}",' if with_token else ''
+    return (f'<html><script>var s={{{tok}"x":1}}</script>'
+            f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(next_data)}</script>'
+            f'</html>')
+
+
 def _make_items(start, count):
     return [{'track': {'id': f't{start + i}', 'name': f'Song {start + i}',
                        'artists': [{'name': 'Artist'}], 'duration_ms': 1000, 'explicit': False}}
             for i in range(count)]
 
 
-def _fake_http(*, total, token='BQ_aaaaaaaaaaaaaaaaaaaaaaaa', no_token=False):
-    """Build an http_get that serves the page, playlist meta, and track pages."""
+def _fake_http(*, total, embed_tracks=3, with_token=True, api_fail=False):
+    """http_get serving the embed page (token + name + first tracks) and API pages.
+    There is no metadata call anymore — name comes from the embed page."""
     def http(url, headers=None, params=None, timeout=None):
-        if 'open.spotify.com/playlist/' in url:
-            return _Resp(text='' if no_token else f'x={{"accessToken":"{token}"}}')
+        if 'open.spotify.com/embed/' in url:
+            return _Resp(text=_embed_html(n_tracks=embed_tracks, with_token=with_token))
         if url.endswith('/tracks'):
+            if api_fail:
+                return _Resp(status=429)
             offset = params['offset']
             remaining = max(0, total - offset)
             return _Resp(json_data={'items': _make_items(offset, min(100, remaining))})
-        # playlist meta
-        return _Resp(json_data={'name': 'My Playlist', 'owner': {'display_name': 'Owner'},
-                                'tracks': {'total': total}})
+        raise AssertionError(f'unexpected URL (no meta call expected): {url}')
     return http
 
 
 def test_full_fetch_paginates_past_100():
     result = papi.fetch_public_playlist_full('pl1', http_get=_fake_http(total=250))
-    assert result['name'] == 'My Playlist'
+    assert result['name'] == 'My Playlist'       # from the embed page — no meta call
     assert result['subtitle'] == 'Owner'
-    assert len(result['tracks']) == 250          # 3 pages (100+100+50), not capped at 100
+    assert len(result['tracks']) == 250          # API: 100+100+50, not capped at 100
     assert result['tracks'][0]['track_number'] == 1
     assert result['tracks'][-1]['id'] == 't249'
     assert result['type'] == 'playlist' and result['id'] == 'pl1'
@@ -98,14 +119,25 @@ def test_full_fetch_single_page():
     assert len(result['tracks']) == 30
 
 
-def test_full_fetch_raises_without_token():
-    with pytest.raises(Exception):
-        papi.fetch_public_playlist_full('pl1', http_get=_fake_http(total=10, no_token=True))
+def test_full_fetch_falls_back_to_embed_tracks_when_api_fails():
+    # Token works but the API 429s -> keep the embed page's tracks (<=100),
+    # never worse than the embed scraper, and DON'T raise.
+    result = papi.fetch_public_playlist_full(
+        'pl1', http_get=_fake_http(total=250, embed_tracks=100, api_fail=True))
+    assert len(result['tracks']) == 100
+    assert result['name'] == 'My Playlist'
 
 
-def test_full_fetch_raises_when_no_tracks():
+def test_full_fetch_raises_without_token_and_no_embed_tracks():
     with pytest.raises(Exception):
-        papi.fetch_public_playlist_full('pl1', http_get=_fake_http(total=0))
+        papi.fetch_public_playlist_full(
+            'pl1', http_get=_fake_http(total=10, embed_tracks=0, with_token=False))
+
+
+def test_full_fetch_raises_when_no_tracks_anywhere():
+    with pytest.raises(Exception):
+        papi.fetch_public_playlist_full(
+            'pl1', http_get=_fake_http(total=0, embed_tracks=0))
 
 
 # --------------------------------------------------------------------------

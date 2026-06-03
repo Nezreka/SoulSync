@@ -82,10 +82,18 @@ def scrape_spotify_embed(spotify_type: str, spotify_id: str) -> dict:
         logger.error(f"Failed to fetch Spotify embed: {e}")
         return {'error': f'Failed to fetch Spotify page: {str(e)}'}
 
+    return parse_embed_html(response.text, spotify_type, spotify_id)
+
+
+def parse_embed_html(html: str, spotify_type: str, spotify_id: str) -> dict:
+    """Parse a Spotify embed page's ``__NEXT_DATA__`` into the standard result
+    shape. Shared by the embed scraper and the full public fetch, which pulls
+    the name + first-page tracks from the same embed page it reads the token
+    from (so it needs no extra metadata request)."""
     # Extract __NEXT_DATA__ JSON
     match = re.search(
         r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-        response.text
+        html
     )
     if not match:
         logger.error("No __NEXT_DATA__ found in Spotify embed response")

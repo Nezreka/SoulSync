@@ -5,10 +5,10 @@ sees the ~100 tracks Spotify bakes into the embed widget — a public playlist
 added by link gets truncated. This module gets the *full* track list without
 any app credentials by:
 
-  1. reading the anonymous web-player ``accessToken`` Spotify already embeds in
-     its own ``open.spotify.com`` page HTML (server-minted — nothing for us to
-     sign or maintain, unlike the rotating TOTP secret the get_access_token
-     endpoint now demands), then
+  1. reading the anonymous web-player ``accessToken`` Spotify ships in its
+     ``open.spotify.com/embed/playlist/{id}`` page (server-minted — nothing for
+     us to sign or maintain, unlike the rotating TOTP secret the now-dead
+     get_access_token endpoint demanded), then
   2. paging the public Web API (`/v1/playlists/{id}/tracks`, 100 at a time)
      until the whole playlist is pulled.
 
@@ -80,49 +80,13 @@ def normalize_api_track(item: Any, index: int) -> Optional[Dict[str, Any]]:
     }
 
 
-def _get_anonymous_token(http_get: Callable, spotify_id: str) -> str:
-    """Fetch the public playlist page and pull the anonymous token out of it."""
-    resp = http_get(
-        f'https://open.spotify.com/playlist/{spotify_id}',
-        headers=_BROWSER_HEADERS, timeout=_TIMEOUT,
-    )
-    resp.raise_for_status()
-    token = extract_access_token(resp.text)
-    if not token:
-        raise RuntimeError('no anonymous access token found in Spotify page')
-    return token
-
-
-def fetch_public_playlist_full(
-    spotify_id: str,
-    *,
-    http_get: Callable = requests.get,
-) -> Dict[str, Any]:
-    """Pull a public playlist's FULL track list via the anonymous token.
-
-    Returns the same shape as ``scrape_spotify_embed`` (id/type/name/subtitle/
-    tracks/url/url_hash). Raises on any failure so the caller can fall back.
-    """
-    token = _get_anonymous_token(http_get, spotify_id)
+def _paginate_api_tracks(http_get: Callable, spotify_id: str, token: str) -> List[Dict[str, Any]]:
+    """Pull the full track list from the Web API, 100 at a time."""
     headers = {'Authorization': f'Bearer {token}', **_BROWSER_HEADERS}
-
-    meta_resp = http_get(
-        f'https://api.spotify.com/v1/playlists/{spotify_id}',
-        headers=headers,
-        params={'fields': 'name,owner(display_name),tracks(total)'},
-        timeout=_TIMEOUT,
-    )
-    meta_resp.raise_for_status()
-    meta = meta_resp.json() or {}
-    name = meta.get('name', 'Unknown')
-    subtitle = (meta.get('owner') or {}).get('display_name', '')
-    total = (meta.get('tracks') or {}).get('total', 0) or 0
-
     tracks: List[Dict[str, Any]] = []
     offset = 0
-    ceiling = min(total, _MAX_TRACKS) if total else _MAX_TRACKS
-    while offset < ceiling:
-        page_resp = http_get(
+    while offset < _MAX_TRACKS:
+        resp = http_get(
             f'https://api.spotify.com/v1/playlists/{spotify_id}/tracks',
             headers=headers,
             params={
@@ -132,8 +96,8 @@ def fetch_public_playlist_full(
             },
             timeout=_TIMEOUT,
         )
-        page_resp.raise_for_status()
-        items = (page_resp.json() or {}).get('items') or []
+        resp.raise_for_status()
+        items = (resp.json() or {}).get('items') or []
         if not items:
             break
         for item in items:
@@ -143,9 +107,50 @@ def fetch_public_playlist_full(
         offset += _PAGE_LIMIT
         if len(items) < _PAGE_LIMIT:
             break
+    return tracks
+
+
+def fetch_public_playlist_full(
+    spotify_id: str,
+    *,
+    http_get: Callable = requests.get,
+) -> Dict[str, Any]:
+    """Pull a public playlist's FULL track list with no app credentials.
+
+    Single embed-page fetch yields the anonymous token + name + first-page
+    tracks; the token then paginates the Web API for the whole list. If the API
+    is unavailable (e.g. the anonymous token gets rate-limited / 401s), we fall
+    back to the tracks the embed page already gave us (≤100) — so this is never
+    worse than the embed scraper. Returns ``scrape_spotify_embed``'s shape;
+    raises only when we get neither a token nor any embed tracks (caller then
+    drops to the embed scraper)."""
+    from core.spotify_public_scraper import parse_embed_html
+
+    page = http_get(
+        f'https://open.spotify.com/embed/playlist/{spotify_id}',
+        headers=_BROWSER_HEADERS, timeout=_TIMEOUT,
+    )
+    page.raise_for_status()
+    html = page.text
+
+    token = extract_access_token(html)
+    base = parse_embed_html(html, 'playlist', spotify_id)
+    embed_ok = isinstance(base, dict) and 'error' not in base
+    name = base.get('name', 'Unknown') if embed_ok else 'Unknown'
+    subtitle = base.get('subtitle', '') if embed_ok else ''
+    embed_tracks = base.get('tracks', []) if embed_ok else []
+
+    tracks: List[Dict[str, Any]] = []
+    if token:
+        try:
+            tracks = _paginate_api_tracks(http_get, spotify_id, token)
+        except Exception as e:
+            logger.info("Public API pagination failed (%s); using embed tracks", e)
 
     if not tracks:
-        raise RuntimeError('public API returned no usable tracks')
+        tracks = embed_tracks          # graceful: at least the embed's ≤100
+    if not tracks:
+        raise RuntimeError('no anonymous token usable and no embed tracks')
 
     source_url = f'https://open.spotify.com/playlist/{spotify_id}'
     return {
