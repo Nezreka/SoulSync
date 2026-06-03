@@ -173,6 +173,46 @@ def build_count_query(
     return sql, params
 
 
+# Reset scopes for re-queuing items so the worker re-attempts them.
+RESET_SCOPES = ('item', 'failed')
+
+
+def build_reset_query(
+    service: str,
+    entity_type: str,
+    scope: str = 'item',
+    entity_id=None,
+) -> Tuple[str, List]:
+    """Build the UPDATE that re-queues item(s) for enrichment.
+
+    Re-queuing means clearing ``<service>_match_status`` back to NULL (and
+    ``<service>_last_attempted`` to NULL): every worker's pending query selects
+    ``match_status IS NULL`` first, so the item is retried on the next pass.
+    Nulling last_attempted alone is NOT enough — the not_found retry path uses
+    ``last_attempted < cutoff`` and ``NULL < cutoff`` is false, so the item
+    would never be picked up.
+
+      * scope='item'   -> a single row (requires entity_id)
+      * scope='failed' -> every 'not_found' row for this entity type
+    """
+    _validate(service, entity_type)
+    if scope not in RESET_SCOPES:
+        raise UnmatchedQueryError(f"Invalid reset scope: {scope!r}")
+
+    meta = _ENTITY_TABLE[entity_type]
+    table = meta['table']
+    ms = match_status_column(service)
+    la = last_attempted_column(service)
+    set_clause = f"SET {ms} = NULL, {la} = NULL"
+
+    if scope == 'item':
+        if not entity_id:
+            raise UnmatchedQueryError("entity_id is required for an item reset")
+        return f"UPDATE {table} {set_clause} WHERE id = ?", [entity_id]
+    # 'failed' — re-queue everything this source explicitly gave up on.
+    return f"UPDATE {table} {set_clause} WHERE {ms} = 'not_found'", []
+
+
 def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
     """Build the matched / not_found / pending / total tally for one entity type."""
     _validate(service, entity_type)
@@ -211,4 +251,6 @@ __all__ = [
     'build_unmatched_query',
     'build_count_query',
     'build_breakdown_query',
+    'build_reset_query',
+    'RESET_SCOPES',
 ]

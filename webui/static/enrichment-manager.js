@@ -511,15 +511,22 @@ function _emRenderUnmatchedControls() {
     const data = enrichmentManagerState.unmatched;
     const supported = (data && data.entity_types) || ['artist'];
     const total = data ? (data.total || 0) : null;
+    const entity = enrichmentManagerState.entityTab;
+    const failed = enrichmentManagerState.breakdown?.[entity]?.not_found || 0;
     const tabs = supported.map(e => `
         <button class="em-seg-tab ${e === enrichmentManagerState.entityTab ? 'active' : ''}"
                 onclick="setEnrichmentEntityTab('${e}')">${_emEntityLabel(e, true)}</button>`).join('');
+    const bulkBtn = failed
+        ? `<button class="em-btn em-btn--sm em-btn--ghost em-retry-all" title="Re-queue every not-found ${_emEntityLabel(entity, true).toLowerCase()}"
+                   onclick="retryAllFailedEnrichment(this)">↻ Retry all failed</button>`
+        : '';
 
     host.innerHTML = `
         <div class="em-unmatched-bar">
             <div class="em-section-label em-section-label--inline">
                 Needs matching
                 ${total == null ? '' : `<span class="em-count">${total.toLocaleString()}</span>`}
+                ${bulkBtn}
             </div>
             <div class="em-filter-row">
                 <div class="em-seg-tabs">${tabs}</div>
@@ -535,7 +542,8 @@ function _emRenderUnmatchedControls() {
                            oninput="onEnrichmentSearchInput(this.value)">
                 </div>
             </div>
-        </div>`;
+        </div>
+        <div class="em-hint">Failed lookups auto-retry after 30 days · “Retry” re-queues immediately · “Match” assigns a result by hand.</div>`;
 }
 
 function _emRenderUnmatchedList() {
@@ -671,13 +679,15 @@ async function toggleEnrichmentWorker(id) {
 async function retryEnrichmentItem(service, entityType, entityId, btn) {
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
-        const res = await fetch('/api/library/clear-match', {
-            method: 'PUT',
+        // Reset match_status to NULL (pending) so the worker re-attempts on its
+        // next pass — see /retry (clearing to not_found would NOT re-queue).
+        const res = await fetch(`/api/enrichment/${service}/retry`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entity_type: entityType, entity_id: entityId, service }),
+            body: JSON.stringify({ entity_type: entityType, scope: 'item', entity_id: entityId }),
         });
         const data = await res.json().catch(() => ({}));
-        if (data.success) {
+        if (res.ok && data.success) {
             showToast('Re-queued for enrichment', 'success');
             await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
             _emRenderStats();
@@ -689,6 +699,39 @@ async function retryEnrichmentItem(service, entityType, entityId, btn) {
     } catch (_e) {
         showToast('Error re-queuing item', 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    }
+}
+
+// Bulk: re-queue every not_found item of the current entity type.
+async function retryAllFailedEnrichment(btn) {
+    const service = enrichmentManagerState.selected;
+    const entity = enrichmentManagerState.entityTab;
+    const bd = enrichmentManagerState.breakdown?.[entity];
+    const failed = bd ? (bd.not_found || 0) : 0;
+    if (!failed) { showToast('No failed items to retry', 'info'); return; }
+    if (!confirm(`Re-queue all ${failed.toLocaleString()} not-found ${_emEntityLabel(entity, true).toLowerCase()} for ${_emWorkerById[service].name}? The worker will retry them on its next pass.`)) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Re-queuing…'; }
+    try {
+        const res = await fetch(`/api/enrichment/${service}/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity_type: entity, scope: 'failed' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast(`Re-queued ${(data.reset || 0).toLocaleString()} item(s)`, 'success');
+            enrichmentManagerState.page = 0;
+            await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
+            _emRenderStats();
+            _emRenderUnmatchedControls();
+            _emRenderUnmatchedList();
+        } else {
+            showToast(data.error || 'Failed to re-queue', 'error');
+        }
+    } catch (_e) {
+        showToast('Error re-queuing failed items', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '↻ Retry all failed'; }
     }
 }
 
@@ -813,4 +856,5 @@ window.onEnrichmentSearchInput = onEnrichmentSearchInput;
 window.changeEnrichmentPage = changeEnrichmentPage;
 window.toggleEnrichmentWorker = toggleEnrichmentWorker;
 window.retryEnrichmentItem = retryEnrichmentItem;
+window.retryAllFailedEnrichment = retryAllFailedEnrichment;
 window.openEnrichmentMatch = openEnrichmentMatch;

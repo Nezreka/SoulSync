@@ -223,4 +223,31 @@ def create_blueprint() -> Blueprint:
         })
         return jsonify(result), 200
 
+    @bp.route('/api/enrichment/<service_id>/retry', methods=['POST'])
+    def enrichment_retry(service_id: str):
+        """Re-queue item(s) so the worker re-attempts them.
+
+        Body: ``entity_type`` (artist|album|track), ``scope`` (item|failed),
+        ``entity_id`` (required when scope='item'). 'failed' re-queues every
+        not_found item of that entity type.
+        """
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+
+        data = request.get_json(silent=True) or {}
+        entity_type = (data.get('entity_type') or 'artist').strip()
+        scope = (data.get('scope') or 'item').strip()
+        entity_id = data.get('entity_id')
+        try:
+            count = _db_getter().reset_enrichment(service_id, entity_type, scope, entity_id)
+        except UnmatchedQueryError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error("Error re-queuing %s %s (%s): %s", service_id, entity_type, scope, e)
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'reset': count, 'service': service_id,
+                        'entity_type': entity_type, 'scope': scope}), 200
+
     return bp

@@ -1079,6 +1079,24 @@ class MusicDatabase:
         finally:
             conn.close()
 
+    def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
+        """Re-queue item(s) for a source by clearing match_status back to NULL.
+
+        scope='item' resets one row (entity_id); scope='failed' resets every
+        'not_found' row for that entity type. Returns the number of rows reset.
+        Raises ``UnmatchedQueryError`` on bad input."""
+        from core.enrichment.unmatched import build_reset_query
+
+        sql, params = build_reset_query(service, entity_type, scope, entity_id)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount or 0
+        finally:
+            conn.close()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
