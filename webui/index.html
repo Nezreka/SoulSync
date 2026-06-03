@@ -565,6 +565,29 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Similar Artists (MusicMap) Enrichment Status Icon -->
+                            <div class="similar-artists-enrich-button-container">
+                                <button class="similar-artists-enrich-button" id="similar-artists-enrich-button" title="Similar Artists (MusicMap) Enrichment"
+                                    onclick="toggleSimilarArtistsEnrichment()">
+                                    <img src="https://www.music-map.com/elements/objects/og_logo.png"
+                                        alt="Similar Artists" class="similar-artists-enrich-logo">
+                                    <div class="similar-artists-enrich-spinner"></div>
+                                </button>
+                                <div class="similar-artists-enrich-tooltip" id="similar-artists-enrich-tooltip">
+                                    <div class="similar-artists-enrich-tooltip-content">
+                                        <div class="similar-artists-enrich-tooltip-header">Similar Artists Enrichment</div>
+                                        <div class="similar-artists-enrich-tooltip-body" id="similar-artists-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="similar-artists-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="similar-artists-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="similar-artists-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Hydrabase P2P Mirror Status Icon -->
                             <div class="hydrabase-button-container" id="hydrabase-button-container" style="display: none;">
                                 <button class="hydrabase-button" id="hydrabase-button" title="Hydrabase P2P Mirror">

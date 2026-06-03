@@ -1312,6 +1312,80 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// SIMILAR ARTISTS (MUSICMAP) WORKER — dashboard bubble
+// ===================================================================
+
+async function updateSimilarArtistsEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/enrichment/similar_artists/status');
+        if (!response.ok) return;
+        updateSimilarArtistsEnrichmentStatusFromData(await response.json());
+    } catch (error) {
+        console.error('Error updating Similar Artists enrichment status:', error);
+    }
+}
+
+function updateSimilarArtistsEnrichmentStatusFromData(data) {
+    const button = document.getElementById('similar-artists-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.paused) button.classList.add('paused');
+    else if (data.idle) button.classList.add('complete');
+    else if (data.running && !data.paused) button.classList.add('active');
+
+    const tStatus = document.getElementById('similar-artists-enrich-tooltip-status');
+    const tCurrent = document.getElementById('similar-artists-enrich-tooltip-current');
+    const tProgress = document.getElementById('similar-artists-enrich-tooltip-progress');
+
+    if (tStatus) {
+        if (data.paused) tStatus.textContent = 'Paused';
+        else if (data.idle) tStatus.textContent = 'Complete';
+        else if (data.running) tStatus.textContent = 'Running';
+        else tStatus.textContent = 'Idle';
+    }
+    if (tCurrent) {
+        if (data.idle) tCurrent.textContent = 'All library artists processed';
+        else if (data.current_item) tCurrent.textContent = `Now: ${data.current_item}`;
+        else tCurrent.textContent = 'No active matches';
+    }
+    // This worker has no artist/album/track phases — show its matched/pending tally.
+    if (tProgress && data.stats) {
+        const s = data.stats;
+        tProgress.textContent = `${s.matched || 0} matched · ${s.pending || 0} pending`;
+    }
+}
+
+async function toggleSimilarArtistsEnrichment() {
+    try {
+        const button = document.getElementById('similar-artists-enrich-button');
+        if (!button) return;
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/similar_artists/pause' : '/api/enrichment/similar_artists/resume';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Similar Artists enrichment`);
+        await updateSimilarArtistsEnrichmentStatus();
+    } catch (error) {
+        console.error('Error toggling Similar Artists enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+(function _wireSimilarArtistsBubble() {
+    const wire = () => {
+        const button = document.getElementById('similar-artists-enrich-button');
+        if (button) {
+            updateSimilarArtistsEnrichmentStatus();
+            setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+        }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+})();
+
+// ===================================================================
 // HYDRABASE P2P MIRROR WORKER
 // ===================================================================
 
