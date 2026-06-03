@@ -32889,6 +32889,27 @@ except Exception as e:
     amazon_worker = None
 
 
+# --- Similar Artists Worker Initialization ---
+# Fills the similar_artists table for LIBRARY artists (the watchlist scanner only
+# covers watchlist artists). Opt-in by default like Amazon: it leans on MusicMap
+# (a scraped, outage-prone source) and does per-candidate metadata-source
+# searches across the whole library, so it stays paused until the user enables it.
+similar_artists_worker = None
+try:
+    from core.similar_artists_worker import SimilarArtistsWorker
+    similar_artists_db = MusicDatabase()
+    similar_artists_worker = SimilarArtistsWorker(database=similar_artists_db)
+    similar_artists_worker.start()
+    if config_manager.get('similar_artists_enrichment_paused', True):
+        similar_artists_worker.pause()
+        logger.info("Similar Artists worker initialized (paused — enable it to populate library similars)")
+    else:
+        logger.info("Similar Artists worker initialized and started")
+except Exception as e:
+    logger.error(f"Similar Artists worker initialization failed: {e}")
+    similar_artists_worker = None
+
+
 # ================================================================================================
 # SPOTIFY ENRICHMENT INTEGRATION
 # ================================================================================================
@@ -34652,6 +34673,11 @@ _register_enrichment_services([
         id='amazon', display_name='Amazon Music',
         worker_getter=lambda: amazon_worker,
         config_paused_key='amazon_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='similar_artists', display_name='Similar Artists',
+        worker_getter=lambda: similar_artists_worker,
+        config_paused_key='similar_artists_enrichment_paused',
     ),
 ])
 

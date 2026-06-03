@@ -32,6 +32,12 @@ SERVICE_ENTITY_SUPPORT = {
     'tidal': ('artist', 'album', 'track'),
     'qobuz': ('artist', 'album', 'track'),
     'amazon': ('artist', 'album', 'track'),
+    # Relationship enrichment (not a metadata source): the Similar Artists worker
+    # only operates at the artist level, and its <service>_match_status tracks
+    # whether MusicMap similars were fetched (not a source-id match). So the
+    # breakdown / unmatched list here means "artists we have / don't have
+    # similars for" — informative, even though there's no manual-match action.
+    'similar_artists': ('artist',),
 }
 
 # entity_type -> table / display-name column / image expression / optional join

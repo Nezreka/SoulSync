@@ -427,6 +427,9 @@ class MusicDatabase:
             # Add Amazon artist ID column (migration)
             self._add_amazon_columns(cursor)
 
+            # Add Similar-Artists worker tracking columns (migration)
+            self._add_similar_artists_worker_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -2416,6 +2419,28 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
+
+    def _add_similar_artists_worker_columns(self, cursor):
+        """Add Similar-Artists worker tracking columns to the artists table.
+
+        Mirrors the per-source enrichment pattern: a match_status (NULL =
+        unattempted, then 'matched'/'not_found'/'error') + last_attempted
+        timestamp so the SimilarArtistsWorker can pick the next library artist to
+        fetch MusicMap similars for and retry transient failures after a window.
+        Idempotent — only adds columns that aren't already present.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'similar_artists_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_match_status TEXT")
+            if 'similar_artists_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status)")
+        except Exception as e:
+            logger.error(f"Error adding similar-artists worker columns: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
