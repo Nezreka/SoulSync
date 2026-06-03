@@ -1351,10 +1351,10 @@ function updateSimilarArtistsEnrichmentStatusFromData(data) {
         else if (data.current_item) tCurrent.textContent = `Now: ${data.current_item}`;
         else tCurrent.textContent = 'No active matches';
     }
-    // This worker has no artist/album/track phases — show its matched/pending tally.
-    if (tProgress && data.stats) {
-        const s = data.stats;
-        tProgress.textContent = `${s.matched || 0} matched · ${s.pending || 0} pending`;
+    // DB-backed artist progress (matches the Manage modal exactly).
+    if (tProgress) {
+        const a = (data.progress && data.progress.artists) || {};
+        tProgress.textContent = `Artists: ${a.matched || 0} / ${a.total || 0} (${a.percent || 0}%)`;
     }
 }
 

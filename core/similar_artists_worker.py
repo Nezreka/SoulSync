@@ -167,12 +167,17 @@ class SimilarArtistsWorker:
         self.paused = False
 
     def get_stats(self) -> Dict[str, Any]:
-        try:
-            self.stats['pending'] = self._count_pending()
-        except Exception:
-            pass
+        # Report PERSISTENT counts from the DB (not the in-memory session
+        # counters), so the dashboard orb and the Manage modal always agree and
+        # survive restarts — same approach as the other enrichment workers.
+        c = self._db_counts()
+        self.stats = {
+            'matched': c['matched'], 'not_found': c['not_found'],
+            'pending': c['pending'], 'errors': c['error'],
+        }
+        total = c['total']
         is_running = self.running and (self.thread is not None and self.thread.is_alive())
-        is_idle = is_running and not self.paused and self.stats['pending'] == 0 and self.current_item is None
+        is_idle = is_running and not self.paused and c['pending'] == 0 and self.current_item is None
         return {
             'enabled': True,
             'running': is_running and not self.paused,
@@ -180,7 +185,14 @@ class SimilarArtistsWorker:
             'idle': is_idle,
             'current_item': self.current_item,
             'stats': self.stats.copy(),
-            'progress': {},
+            # Artist-only progress (no album/track phases) so the orb tooltip can
+            # show "matched / total (percent%)" like every other worker.
+            'progress': {
+                'artists': {
+                    'matched': c['matched'], 'total': total,
+                    'percent': int(round(c['matched'] / total * 100)) if total else 0,
+                }
+            },
         }
 
     # ── worker loop ────────────────────────────────────────────────────────
@@ -284,13 +296,27 @@ class SimilarArtistsWorker:
             logger.debug("Similar Artists _mark failed for %s: %s", artist_id, exc)
 
     def _count_pending(self) -> int:
+        return self._db_counts()['pending']
+
+    def _db_counts(self) -> Dict[str, int]:
+        """Persistent tallies over the worker's universe (source-matched library
+        artists): matched / not_found / error / pending(NULL) / total."""
+        out = {'matched': 0, 'not_found': 0, 'error': 0, 'pending': 0, 'total': 0}
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                f"SELECT COUNT(*) FROM artists WHERE similar_artists_match_status IS NULL "
-                f"AND {self._has_source_id_clause()}"
-            )
-            return int(cursor.fetchone()[0] or 0)
-        except Exception:
-            return 0
+            cursor.execute(f"""
+                SELECT
+                    SUM(CASE WHEN similar_artists_match_status = 'matched' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN similar_artists_match_status = 'not_found' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN similar_artists_match_status = 'error' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN similar_artists_match_status IS NULL THEN 1 ELSE 0 END),
+                    COUNT(*)
+                FROM artists WHERE {self._has_source_id_clause()}
+            """)
+            row = cursor.fetchone() or (0, 0, 0, 0, 0)
+            out.update(matched=int(row[0] or 0), not_found=int(row[1] or 0),
+                       error=int(row[2] or 0), pending=int(row[3] or 0), total=int(row[4] or 0))
+        except Exception as exc:
+            logger.debug("Similar Artists _db_counts failed: %s", exc)
+        return out
