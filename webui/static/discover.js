@@ -5214,48 +5214,18 @@ async function openArtistMap() {
         setTimeout(async () => {
             _artMap.placed.forEach(n => { n.opacity = 1; });
 
-            // Load images in parallel using createImageBitmap (non-blocking)
-            const loadingText = container.querySelector('.artist-map-loading-text');
-            const imgNodes = _artMap.placed.filter(n => n.image_url);
-            let loaded = 0;
-
-            if (loadingText) loadingText.textContent = `Loading ${imgNodes.length} artist images...`;
-
-            // Batch image loading — 20 concurrent fetches
-            const CONCURRENT = 20;
-            let idx = 0;
-
-            async function loadNextBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    if (_artMap.images[n.id]) { loaded++; continue; }
-                    batch.push(
-                        _artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
-                            .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                            .finally(() => {
-                                loaded++;
-                                if (loadingText && loaded % 50 === 0) {
-                                    loadingText.textContent = `Loading images... ${loaded}/${imgNodes.length}`;
-                                }
-                            })
-                    );
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadNextBatch();
-            }
-
-            await loadNextBatch();
-
-            // Build buffer and render
-            if (loadingText) loadingText.textContent = 'Rendering map...';
-            await new Promise(r => setTimeout(r, 20)); // let text update render
-
+            // Paint NOW — the map is fully interactive (pan/zoom/hover/click)
+            // with placeholder circles before a single image is fetched. Images
+            // then stream in throttled waves and sharpen the map in place. This
+            // is the "click-click-click" win: no blocking on N image fetches
+            // before the first frame.
             _artMap.dirty = true;
             _artMapRender();
 
             const le = document.getElementById('artist-map-loading');
             if (le) le.remove();
+
+            _artMapStreamImages(_artMap.placed);
         }, 50);
 
     } catch (err) {
@@ -6250,31 +6220,14 @@ async function _openGenreMapWithSelection(selectedGenre) {
         // Load images + render
         if (loadingText) loadingText.textContent = `Rendering ${placedCount} artists...`;
 
-        setTimeout(async () => {
-            const imgNodes = _artMap.placed.filter(n => n.image_url && !n._isLabel);
-            let loaded = 0;
-            const CONCURRENT = 20;
-            let idx = 0;
-            async function loadBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
-                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                        .finally(() => { loaded++; }));
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadBatch();
-            }
-            await loadBatch();
-            _artMap.dirty = true;
-            _artMapRender();
-            const le = document.getElementById('artist-map-loading');
-            if (le) le.remove();
-        }, 50);
+        const le = document.getElementById('artist-map-loading');
+        if (le) le.remove();
 
         _artMap.dirty = true;
         _artMapRender();
+
+        // Stream images in throttled waves — interactive immediately, sharpens in place.
+        _artMapStreamImages(_artMap.placed.filter(n => !n._isLabel));
 
     } catch (err) {
         console.error('Genre map error:', err);
@@ -6477,31 +6430,14 @@ async function _openArtistMapExplorerWithName(name) {
         const loadingText = container.querySelector('.artist-map-loading-text');
         if (loadingText) loadingText.textContent = `Loading ${_artMap.placed.length} artists...`;
 
-        setTimeout(async () => {
-            const imgNodes = _artMap.placed.filter(n => n.image_url);
-            let loaded = 0;
-            const CONCURRENT = 20;
-            let idx = 0;
-            async function loadBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
-                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                        .finally(() => { loaded++; }));
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadBatch();
-            }
-            await loadBatch();
-            _artMap.dirty = true;
-            _artMapRender();
-            const le = document.getElementById('artist-map-loading');
-            if (le) le.remove();
-        }, 50);
+        const le = document.getElementById('artist-map-loading');
+        if (le) le.remove();
 
         _artMap.dirty = true;
         _artMapRender();
+
+        // Stream images in throttled waves — interactive immediately, sharpens in place.
+        _artMapStreamImages(_artMap.placed);
 
     } catch (err) {
         console.error('Artist explorer error:', err);
@@ -6666,6 +6602,48 @@ function _artMapLoadImage(url, px) {
 function _artMapNodeImgPx(n) {
     const isFocal = n.type === 'watchlist' || n.type === 'center' || n.ring === 1;
     return _artMapImgPx(isFocal ? Math.max(256, (n.radius || 0) * 1.4) : (n.radius || 0) * 1.6);
+}
+
+// Stream node images in the background WITHOUT blocking the first paint. The map
+// is drawn immediately with placeholder circles and stays fully interactive
+// (click/hover/pan) while images fill in. Redraws are throttled into ~waves so
+// 1000s of arrivals don't trigger 1000s of buffer rebuilds. A load token makes
+// opening another map cancel this stream (stale bitmaps are dropped). Focal
+// nodes are fetched first so what you're looking at sharpens soonest.
+function _artMapStreamImages(imgNodes, concurrent = 24) {
+    const token = (_artMap._loadToken = (_artMap._loadToken || 0) + 1);
+    // Focal/large nodes first — the user's eye lands there.
+    const queue = imgNodes.filter(n => n.image_url).slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
+    let idx = 0, inFlight = 0, redrawPending = false;
+
+    const scheduleRedraw = () => {
+        if (redrawPending || token !== _artMap._loadToken) return;
+        redrawPending = true;
+        setTimeout(() => {
+            redrawPending = false;
+            if (token !== _artMap._loadToken) return;
+            _artMap.dirty = true;
+            _artMapRender();
+        }, 280);
+    };
+
+    function pump() {
+        if (token !== _artMap._loadToken) return; // a newer map took over
+        while (inFlight < concurrent && idx < queue.length) {
+            const n = queue[idx++];
+            if (_artMap.images[n.id]) continue;
+            inFlight++;
+            _artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
+                .then(bmp => {
+                    if (bmp && token === _artMap._loadToken) {
+                        _artMap.images[n.id] = bmp;
+                        scheduleRedraw();
+                    }
+                })
+                .finally(() => { inFlight--; pump(); });
+        }
+    }
+    pump();
 }
 
 function _artMapHideContextMenu() {
