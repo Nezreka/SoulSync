@@ -1233,10 +1233,7 @@ function updateTidalModalButtons(urlHash, phase) {
     const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
     if (!modal) return;
 
-    const footerLeft = modal.querySelector('.modal-footer-left');
-    if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
-    }
+    setDiscoveryModalFooterActions(urlHash, phase);
 }
 
 async function startTidalDownloadMissing(urlHash) {
@@ -1314,7 +1311,7 @@ async function startTidalDownloadMissing(urlHash) {
     }
 }
 
-async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks) {
+async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks, options = {}) {
     showLoadingOverlay('Loading Tidal playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
@@ -1326,6 +1323,10 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             }
             process.modalElement.style.display = 'flex';
         }
+        if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+            await refreshOrganizePreferenceForDownloadModal(virtualPlaylistId);
+        }
+        hideLoadingOverlay();
         return;
     }
 
@@ -1464,10 +1465,12 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
                         </label>
-                        <label class="force-download-toggle">
+                        ${typeof downloadMissingModalOrganizeCheckboxHtml === 'function'
+                            ? downloadMissingModalOrganizeCheckboxHtml(virtualPlaylistId)
+                            : `<label class="force-download-toggle">
                             <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
                             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-                        </label>
+                        </label>`}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
@@ -1487,6 +1490,16 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     `;
 
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
+    const orgSource = typeof playlistOrganizeSourceForRef === 'function'
+        ? playlistOrganizeSourceForRef(virtualPlaylistId)
+        : 'spotify';
+    await applyMirroredOrganizePreference(virtualPlaylistId, orgSource);
+    if (options.forcePlaylistFolder) {
+        syncPlaylistOrganizeCheckboxes(virtualPlaylistId, true);
+        if (typeof setMirroredOrganizePreference === 'function') {
+            await setMirroredOrganizePreference(virtualPlaylistId, true, orgSource);
+        }
+    }
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -2366,7 +2379,7 @@ function updateQobuzModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 
@@ -3609,7 +3622,7 @@ function updateDeezerModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 
@@ -5634,7 +5647,7 @@ function updateBeatportModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 
@@ -7595,11 +7608,11 @@ function updateSpotifyPublicModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 
-async function startSpotifyPublicDownloadMissing(urlHash) {
+async function startSpotifyPublicDownloadMissing(urlHash, forcePlaylistFolder = false) {
     try {
         console.log('🔍 Starting download missing tracks for Spotify public playlist:', urlHash);
 
@@ -7661,7 +7674,9 @@ async function startSpotifyPublicDownloadMissing(urlHash) {
             discoveryModal.classList.add('hidden');
         }
 
-        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks, {
+            forcePlaylistFolder: !!forcePlaylistFolder,
+        });
 
     } catch (error) {
         console.error('Error starting Spotify public download missing:', error);
@@ -8619,7 +8634,7 @@ function updateITunesLinkModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 
@@ -9444,7 +9459,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     
                     <div class="modal-footer">
                         <div class="modal-footer-left">
-                            ${getModalActionButtons(urlHash, state.phase, state)}
+                            ${buildDiscoveryModalFooterLeftHtml(urlHash, state.phase, state)}
                         </div>
                         <div class="modal-footer-right">
                             <button class="modal-btn modal-btn-secondary" onclick="closeYouTubeDiscoveryModal('${urlHash}')">🏠 Close</button>
@@ -9569,6 +9584,48 @@ function openYouTubeDiscoveryModal(urlHash) {
         }
 
         console.log('✨ Created new modal with current state');
+        if (isSpotifyPublic && state.spotify_public_playlist_id && typeof loadPlaylistOrganizePreferenceIntoModal === 'function') {
+            void loadPlaylistOrganizePreferenceIntoModal(
+                `spotify_public_${state.spotify_public_playlist_id}`,
+                'spotify_public',
+            );
+        }
+    }
+}
+
+function discoveryModalOrganizeFooterHtml(state) {
+    if (!state || typeof playlistOrganizeToggleHtml !== 'function') {
+        return '';
+    }
+    if (state.is_spotify_public_playlist && state.spotify_public_playlist_id) {
+        const ref = `spotify_public_${state.spotify_public_playlist_id}`;
+        return `<div class="modal-footer-organize">${playlistOrganizeToggleHtml(ref, 'spotify_public')}</div>`;
+    }
+    return '';
+}
+
+function buildDiscoveryModalFooterLeftHtml(urlHash, phase, state) {
+    const organize = discoveryModalOrganizeFooterHtml(state);
+    const actions = getModalActionButtons(urlHash, phase, state);
+    return `${organize}<div class="modal-footer-actions">${actions}</div>`;
+}
+
+function setDiscoveryModalFooterActions(urlHash, phase, state = null) {
+    if (!state) {
+        state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
+    }
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    const footerLeft = modal?.querySelector('.modal-footer-left');
+    if (!footerLeft) {
+        return;
+    }
+    footerLeft.innerHTML = buildDiscoveryModalFooterLeftHtml(urlHash, phase, state);
+    if (state?.is_spotify_public_playlist && state.spotify_public_playlist_id
+        && typeof loadPlaylistOrganizePreferenceIntoModal === 'function') {
+        void loadPlaylistOrganizePreferenceIntoModal(
+            `spotify_public_${state.spotify_public_playlist_id}`,
+            'spotify_public',
+        );
     }
 }
 
@@ -9650,7 +9707,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 } else if (isDeezer) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                    const folderArg = _isSoulsyncStandalone ? ', true' : '';
+                    const label = _isSoulsyncStandalone
+                        ? '📁 Download to Playlist Folder'
+                        : '🔍 Download Missing Tracks';
+                    const extraClass = _isSoulsyncStandalone ? ' soulsync-standalone-action' : '';
+                    buttons += `<button class="modal-btn modal-btn-primary${extraClass}" onclick="startSpotifyPublicDownloadMissing('${urlHash}'${folderArg})">${label}</button>`;
                 } else if (isITunesLink) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
@@ -9819,7 +9881,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 } else if (isQobuz) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                    const folderArg = _isSoulsyncStandalone ? ', true' : '';
+                    const label = _isSoulsyncStandalone
+                        ? '📁 Download to Playlist Folder'
+                        : '🔍 Download Missing Tracks';
+                    const extraClass = _isSoulsyncStandalone ? ' soulsync-standalone-action' : '';
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary${extraClass}" onclick="startSpotifyPublicDownloadMissing('${urlHash}'${folderArg})">${label}</button>`;
                 } else if (isITunesLink) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
@@ -9875,7 +9942,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 } else if (isDeezer) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isSpotifyPublic) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                    const folderArg = _isSoulsyncStandalone ? ', true' : '';
+                    const label = _isSoulsyncStandalone
+                        ? '📁 Download to Playlist Folder'
+                        : '🔍 Download Missing Tracks';
+                    const extraClass = _isSoulsyncStandalone ? ' soulsync-standalone-action' : '';
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary${extraClass}" onclick="startSpotifyPublicDownloadMissing('${urlHash}'${folderArg})">${label}</button>`;
                 } else if (isITunesLink) {
                     dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
@@ -10118,18 +10190,17 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
         if (state && state.phase === 'discovering') {
             state.phase = 'discovered';
-            const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
-            if (actionButtonsContainer) {
-                actionButtonsContainer.innerHTML = getModalActionButtons(urlHash, 'discovered', state);
-                console.log(`✨ Updated action buttons for completed discovery: ${urlHash}`);
-            }
+            setDiscoveryModalFooterActions(urlHash, 'discovered', state);
+            console.log(`✨ Updated action buttons for completed discovery: ${urlHash}`);
             const descEl = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-description`);
             if (descEl) descEl.textContent = 'Discovery complete! View the results below.';
         } else if (state && state.phase === 'discovered') {
             // Already discovered — ensure buttons are correct (e.g. after rehydration)
-            const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
+            const actionButtonsContainer = document.querySelector(
+                `#youtube-discovery-modal-${urlHash} .modal-footer-actions`,
+            );
             if (actionButtonsContainer && actionButtonsContainer.querySelector('.modal-info')) {
-                actionButtonsContainer.innerHTML = getModalActionButtons(urlHash, 'discovered', state);
+                setDiscoveryModalFooterActions(urlHash, 'discovered', state);
             }
         }
     }
@@ -10626,7 +10697,7 @@ function updateYouTubeModalButtons(urlHash, phase) {
 
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
-        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+        setDiscoveryModalFooterActions(urlHash, phase);
     }
 }
 

@@ -19017,7 +19017,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'last_synced': now.isoformat()
         }
         # Store match counts and track hash for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash'):
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash', 'mirror_tracks_hash'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -23631,6 +23631,9 @@ def _build_sync_deps():
         update_and_save_sync_status=_update_and_save_sync_status,
         sync_states=sync_states,
         sync_lock=sync_lock,
+        process_wishlist_automatically=_process_wishlist_automatically,
+        run_playlist_organize_download=_run_playlist_organize_download,
+        is_wishlist_actually_processing=is_wishlist_actually_processing,
     )
 
 

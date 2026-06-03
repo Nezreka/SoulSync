@@ -18471,8 +18471,36 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .youtube-discovery-modal .modal-footer-left {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    flex: 1;
+    min-width: 0;
+}
+
+.youtube-discovery-modal .modal-footer-organize {
+    flex: none;
+    width: 100%;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.youtube-discovery-modal .modal-footer-organize .playlist-modal-organize-toggle {
+    width: 100%;
+    font-size: 14px;
+}
+
+.youtube-discovery-modal .modal-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     align-items: center;
+    width: 100%;
+}
+
+.youtube-discovery-modal .modal-footer-actions .modal-info {
+    flex: 1 1 100%;
+    margin-bottom: 4px;
 }
 
 .youtube-discovery-modal .modal-footer-right {
