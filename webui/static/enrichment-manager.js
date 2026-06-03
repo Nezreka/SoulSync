@@ -94,6 +94,15 @@ function _emEntityLabel(entity, plural) {
     return plural ? base + 's' : base;
 }
 
+// Always present entities in the worker's real processing order, regardless of
+// the order the API/object keys happen to arrive in.
+const _EM_ENTITY_ORDER = { artist: 0, album: 1, track: 2 };
+function _emOrderEntities(list) {
+    return [...new Set(list || [])].sort(
+        (a, b) => (_EM_ENTITY_ORDER[a] ?? 9) - (_EM_ENTITY_ORDER[b] ?? 9)
+    );
+}
+
 function _emEscape(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -207,7 +216,7 @@ async function refreshEnrichmentManager(btn) {
     renderEnrichmentRail();
     const sel = enrichmentManagerState.selected;
     if (sel) await Promise.all([_emLoadBreakdown(sel), _emLoadUnmatched()]);
-    _emRenderStats();
+    _emRenderEntityCards();
     _emRenderUnmatchedList();
     _emRenderPanelHeader();
     if (btn) setTimeout(() => btn.classList.remove('em-spinning'), 400);
@@ -236,7 +245,7 @@ async function _emPollSelected() {
             enrichmentManagerState.statuses[id] = await res.json();
             _emUpdateHeaderLive();   // in-place — no logo reflow/flicker
             _emUpdateRailRow(id);
-            _emRenderChain();        // current-phase highlight tracks live
+            _emRenderEntityCards();
         }
     } catch (_e) { /* transient — keep last */ }
 }
@@ -408,12 +417,11 @@ function renderEnrichmentPanel() {
     panel.innerHTML = `
         <div class="em-panel-header" id="em-panel-header"></div>
         <div class="em-banner" id="em-banner" hidden></div>
-        <div class="em-chain" id="em-chain"></div>
         <div class="em-section-label em-section-label--row">
-            <span>Enrichment coverage</span>
+            <span>Coverage &amp; processing order <span class="em-section-sub">— click a group to enrich it first</span></span>
             <span class="em-coverage-overall" id="em-coverage-overall"></span>
         </div>
-        <div class="em-stats" id="em-stats"></div>
+        <div class="em-cards" id="em-cards"></div>
         <div class="em-unmatched">
             <div class="em-unmatched-controls" id="em-unmatched-controls"></div>
             <div class="em-bulk-bar" id="em-bulk-bar" hidden></div>
@@ -421,56 +429,91 @@ function renderEnrichmentPanel() {
             <div class="em-pager" id="em-pager"></div>
         </div>`;
     _emRenderPanelHeader();
-    _emRenderChain();
-    _emRenderStats();
+    _emRenderEntityCards();
     _emRenderUnmatchedControls();
     _emRenderUnmatchedList();
 }
 
-// Processing-order strip: shows the artist→album→track chain, where the worker
-// currently is, and lets the user pin one group to run first.
-function _emRenderChain() {
-    const host = document.getElementById('em-chain');
+// Combined coverage + processing-order cards. Each entity card both visualises
+// coverage (matched/not_found/pending segmented bar + %) AND is the click target
+// to pin that group to enrich first ('now' = live phase, '📌 first' = pinned,
+// '✓ done' = nothing left). One section instead of two redundant ones.
+function _emRenderEntityCards() {
+    const host = document.getElementById('em-cards');
     if (!host) return;
     const id = enrichmentManagerState.selected;
-    const supported = (enrichmentManagerState.unmatched && enrichmentManagerState.unmatched.entity_types)
-        || (enrichmentManagerState.breakdown && Object.keys(enrichmentManagerState.breakdown))
-        || ['artist'];
+    const bd = enrichmentManagerState.breakdown;
+    const supported = _emOrderEntities(
+        (enrichmentManagerState.unmatched && enrichmentManagerState.unmatched.entity_types)
+        || (bd && Object.keys(bd)) || ['artist']
+    );
+
+    if (!bd) {
+        host.innerHTML = supported.map(() => `
+            <div class="em-card em-skel-card">
+                <div class="em-skel em-skel-line" style="width:45%"></div>
+                <div class="em-skel em-skel-bar"></div>
+                <div class="em-skel em-skel-line" style="width:70%"></div>
+            </div>`).join('');
+        return;
+    }
+
     const status = enrichmentManagerState.statuses[id];
     const phase = _emCurrentPhase(status);
     const pinned = enrichmentManagerState.priority;
-    const bd = enrichmentManagerState.breakdown || {};
     const glyphs = { artist: '🎤', album: '💿', track: '🎵' };
 
-    const steps = supported.map((e, i) => {
+    host.innerHTML = supported.map(e => {
         const d = bd[e] || {};
-        const pending = (d.pending || 0) + (d.not_found || 0);
-        const isCurrent = phase === e;
-        const isPinned = pinned === e;
-        const isDone = bd[e] && pending === 0;
-        const cls = ['em-step',
-            isPinned ? 'em-step--pinned' : '',
-            isCurrent ? 'em-step--current' : '',
-            isDone ? 'em-step--done' : ''].filter(Boolean).join(' ');
-        const note = isPinned ? 'first' : (isCurrent ? 'now' : (isDone ? 'done' : `${pending.toLocaleString()} left`));
-        const arrow = i < supported.length - 1 ? '<span class="em-step-arrow">→</span>' : '';
+        const total = d.total || 0, matched = d.matched || 0, nf = d.not_found || 0, pend = d.pending || 0;
+        const pct = total ? Math.round((matched / total) * 100) : 0;
+        const seg = (n) => (total ? (n / total) * 100 : 0);
+        const isPinned = pinned === e, isCurrent = phase === e, isDone = total > 0 && (pend + nf) === 0;
+        const cls = ['em-card',
+            isPinned ? 'em-card--pinned' : '',
+            isCurrent ? 'em-card--current' : '',
+            isDone ? 'em-card--done' : ''].filter(Boolean).join(' ');
+        const badge = isPinned
+            ? '<span class="em-card-badge em-card-badge--pin">📌 First</span>'
+            : isCurrent
+                ? '<span class="em-card-badge em-card-badge--now">● Now</span>'
+                : isDone
+                    ? '<span class="em-card-badge em-card-badge--done">✓ Done</span>'
+                    : `<span class="em-card-badge">${(pend + nf).toLocaleString()} left</span>`;
         return `
-            <button class="${cls}" title="Process ${_emEntityLabel(e, true).toLowerCase()} first"
+            <button class="${cls}" title="${isPinned ? 'Pinned first — click for automatic order' : 'Process ' + _emEntityLabel(e, true).toLowerCase() + ' first'}"
                     onclick="setEnrichmentPriority('${isPinned ? '' : e}')">
-                <span class="em-step-glyph">${glyphs[e] || '•'}</span>
-                <span class="em-step-name">${_emEntityLabel(e, true)}</span>
-                <span class="em-step-note">${note}</span>
-            </button>${arrow}`;
+                <div class="em-card-top">
+                    <span class="em-card-glyph">${glyphs[e] || '•'}</span>
+                    <span class="em-card-title">${_emEntityLabel(e, true)}</span>
+                    ${badge}
+                    <span class="em-card-pct">${pct}<span class="em-stat-pct-sym">%</span></span>
+                </div>
+                <div class="em-seg" title="${matched.toLocaleString()} matched · ${nf.toLocaleString()} not found · ${pend.toLocaleString()} pending">
+                    <div class="em-seg-fill em-seg--matched" data-pct="${seg(matched)}" style="width:0%"></div>
+                    <div class="em-seg-fill em-seg--nf" data-pct="${seg(nf)}" style="width:0%"></div>
+                    <div class="em-seg-fill em-seg--pend" data-pct="${seg(pend)}" style="width:0%"></div>
+                </div>
+                <div class="em-stat-legend">
+                    <span class="em-leg em-leg--matched" title="matched"><i></i>${matched.toLocaleString()}</span>
+                    <span class="em-leg em-leg--nf" title="not found"><i></i>${nf.toLocaleString()}</span>
+                    <span class="em-leg em-leg--pend" title="pending"><i></i>${pend.toLocaleString()}</span>
+                </div>
+            </button>`;
     }).join('');
 
-    host.innerHTML = `
-        <div class="em-chain-head">
-            <span class="em-section-label">Processing order</span>
-            <span class="em-chain-hint">${pinned
-                ? `Pinned <strong>${_emEntityLabel(pinned, true)}</strong> first · click again for auto`
-                : 'Click a group to process it first'}</span>
-        </div>
-        <div class="em-chain-flow">${steps}</div>`;
+    // Overall matched coverage across every entity type.
+    const overall = document.getElementById('em-coverage-overall');
+    if (overall) {
+        let m = 0, t = 0;
+        Object.values(bd).forEach(d => { m += d.matched || 0; t += d.total || 0; });
+        const pct = t ? Math.round((m / t) * 100) : 0;
+        overall.innerHTML = t ? `<strong>${pct}%</strong> matched · ${m.toLocaleString()} of ${t.toLocaleString()}` : '';
+    }
+
+    requestAnimationFrame(() => {
+        host.querySelectorAll('.em-seg-fill').forEach(el => { el.style.width = `${el.dataset.pct || 0}%`; });
+    });
 }
 
 async function setEnrichmentPriority(entity) {
@@ -491,7 +534,7 @@ async function setEnrichmentPriority(entity) {
 
         if (!enrichmentManagerState.priority) {
             showToast(`${name} back to automatic order`, 'success');
-            _emRenderChain();
+            _emRenderEntityCards();
             return;
         }
 
@@ -515,10 +558,9 @@ async function setEnrichmentPriority(entity) {
             ? `${name} will process all ${label} first · re-queued ${reset.toLocaleString()} previously-failed`
             : `${name} will process ${label} first`, 'success');
 
-        // Counts changed (failed -> pending) — refresh stats, chain and list.
+        // Counts changed (failed -> pending) — refresh cards + list.
         await Promise.all([_emLoadBreakdown(id), _emLoadUnmatched()]);
-        _emRenderStats();
-        _emRenderChain();
+        _emRenderEntityCards();
         _emRenderUnmatchedControls();
         _emRenderUnmatchedList();
     } catch (_e) {
@@ -622,69 +664,6 @@ function _emHumanDuration(seconds) {
     return m < 60 ? `${m}m` : `${Math.round(m / 60)}h`;
 }
 
-function _emRenderStats() {
-    const host = document.getElementById('em-stats');
-    if (!host) return;
-    const bd = enrichmentManagerState.breakdown;
-    if (!bd) {
-        // Skeleton cards (count unknown yet — 3 covers the common case).
-        host.innerHTML = Array.from({ length: 3 }, () => `
-            <div class="em-stat-card em-skel-card">
-                <div class="em-skel em-skel-line" style="width:40%"></div>
-                <div class="em-skel em-skel-bar"></div>
-                <div class="em-skel em-skel-line" style="width:75%"></div>
-            </div>`).join('');
-        return;
-    }
-
-    const glyphs = { artist: '🎤', album: '💿', track: '🎵' };
-    host.innerHTML = Object.keys(bd).map(entity => {
-        const d = bd[entity] || {};
-        const total = d.total || 0;
-        const matched = d.matched || 0;
-        const notFound = d.not_found || 0;
-        const pending = d.pending || 0;
-        const pct = total ? Math.round((matched / total) * 100) : 0;
-        const seg = (n) => (total ? (n / total) * 100 : 0);
-        return `
-            <div class="em-stat-card">
-                <div class="em-stat-head">
-                    <span class="em-stat-title"><span class="em-stat-ico">${glyphs[entity] || '•'}</span>${_emEntityLabel(entity, true)}</span>
-                    <span class="em-stat-pct">${pct}<span class="em-stat-pct-sym">%</span></span>
-                </div>
-                <div class="em-seg" title="${matched.toLocaleString()} matched · ${notFound.toLocaleString()} not found · ${pending.toLocaleString()} pending">
-                    <div class="em-seg-fill em-seg--matched" data-pct="${seg(matched)}" style="width:0%"></div>
-                    <div class="em-seg-fill em-seg--nf" data-pct="${seg(notFound)}" style="width:0%"></div>
-                    <div class="em-seg-fill em-seg--pend" data-pct="${seg(pending)}" style="width:0%"></div>
-                </div>
-                <div class="em-stat-legend">
-                    <span class="em-leg em-leg--matched"><i></i>${matched.toLocaleString()} matched</span>
-                    <span class="em-leg em-leg--nf"><i></i>${notFound.toLocaleString()} missed</span>
-                    <span class="em-leg em-leg--pend"><i></i>${pending.toLocaleString()} pending</span>
-                </div>
-            </div>`;
-    }).join('');
-
-    // Overall matched coverage across every entity type (relocated here from
-    // the hero per the refined-banner header).
-    const overall = document.getElementById('em-coverage-overall');
-    if (overall) {
-        let m = 0, t = 0;
-        Object.values(bd).forEach(d => { m += d.matched || 0; t += d.total || 0; });
-        const pct = t ? Math.round((m / t) * 100) : 0;
-        overall.innerHTML = t
-            ? `<strong>${pct}%</strong> matched · ${m.toLocaleString()} of ${t.toLocaleString()}`
-            : '';
-    }
-
-    // Animate the segments in from 0 on the next frame (CSS transition does the rest).
-    requestAnimationFrame(() => {
-        host.querySelectorAll('.em-seg-fill').forEach(el => {
-            el.style.width = `${el.dataset.pct || 0}%`;
-        });
-    });
-}
-
 function _emRenderUnmatchedControls() {
     const host = document.getElementById('em-unmatched-controls');
     if (!host) return;
@@ -774,8 +753,9 @@ function _emRenderUnmatchedList() {
                 ? `<span class="em-row-parent" title="${_emEscape(item.parent)}">· ${_emEscape(item.parent)}</span>`
                 : '';
             const checked = enrichmentManagerState.selectedItems.has(String(item.id)) ? 'checked' : '';
+            const rowCls = item.status === 'not_found' ? 'em-row em-row--nf' : 'em-row em-row--pend';
             return `
-                <div class="em-row">
+                <div class="${rowCls}">
                     <input type="checkbox" class="em-row-check" ${checked}
                            aria-label="Select ${safeName}"
                            onchange="toggleEnrichmentRowSelect('${safeId}', this.checked)">
@@ -857,7 +837,7 @@ async function retrySelectedEnrichment(btn) {
     showToast(`Re-queued ${ok.toLocaleString()} item(s)`, ok ? 'success' : 'error');
     enrichmentManagerState.selectedItems.clear();
     await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
-    _emRenderStats();
+    _emRenderEntityCards();
     _emRenderUnmatchedList();
 }
 
@@ -944,7 +924,7 @@ async function retryEnrichmentItem(service, entityType, entityId, btn) {
         if (res.ok && data.success) {
             showToast('Re-queued for enrichment', 'success');
             await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
-            _emRenderStats();
+            _emRenderEntityCards();
             _emRenderUnmatchedList();
         } else {
             showToast(data.error || 'Failed to re-queue', 'error');
@@ -976,7 +956,7 @@ async function retryAllFailedEnrichment(btn) {
             showToast(`Re-queued ${(data.reset || 0).toLocaleString()} item(s)`, 'success');
             enrichmentManagerState.page = 0;
             await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
-            _emRenderStats();
+            _emRenderEntityCards();
             _emRenderUnmatchedControls();
             _emRenderUnmatchedList();
         } else {
@@ -1089,7 +1069,7 @@ async function _emApplyMatch(entityType, entityId, service, serviceId, overlay) 
             // Refresh the manager's stats + list for the *selected* worker.
             const sel = enrichmentManagerState.selected;
             await Promise.all([_emLoadBreakdown(sel), _emLoadUnmatched()]);
-            _emRenderStats();
+            _emRenderEntityCards();
             _emRenderUnmatchedList();
         } else {
             showToast(data.error || 'Failed to match', 'error');
