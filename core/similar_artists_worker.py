@@ -298,7 +298,7 @@ class SimilarArtistsWorker:
             if not row:
                 return None
             keys = ['id', 'name'] + list(_LIBRARY_ID_COLUMNS)
-            return dict(zip(keys, row))
+            return dict(zip(keys, row, strict=False))
         except Exception as exc:
             logger.debug("Similar Artists _get_next_artist failed: %s", exc)
             return None

@@ -28292,8 +28292,8 @@ def log_artist_map_perf():
     try:
         data = request.get_json(silent=True) or {}
         logger.info("[ARTMAP-PERF] %s", json.dumps(data, ensure_ascii=False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("artist-map perf log failed: %s", e)
     return ('', 204)
 
 
