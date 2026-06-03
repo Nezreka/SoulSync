@@ -5033,6 +5033,32 @@ const _artMap = {
 // donut hole), with a floating genre title above it and a per-genre accent hue.
 // Islands are spread by a golden spiral + push-apart with generous spacing.
 
+// A cached circular "gloss" sprite — a soft top-left specular highlight that,
+// drawn over each bubble, makes it read as a glassy orb. One radial gradient,
+// rendered once; per-bubble it's just a cheap drawImage (no per-frame gradient).
+function _artMapGlossSprite() {
+    if (_artMap._gloss) return _artMap._gloss;
+    const S = 128;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const cx = c.getContext('2d');
+    cx.beginPath(); cx.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2); cx.clip();
+    const g = cx.createRadialGradient(S * 0.34, S * 0.28, S * 0.02, S * 0.5, S * 0.5, S * 0.62);
+    g.addColorStop(0, 'rgba(255,255,255,0.40)');
+    g.addColorStop(0.32, 'rgba(255,255,255,0.10)');
+    g.addColorStop(0.6, 'rgba(255,255,255,0.0)');
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, S, S);
+    // A faint inner-bottom shade for roundness
+    const g2 = cx.createRadialGradient(S * 0.5, S * 0.78, S * 0.05, S * 0.5, S * 0.5, S * 0.7);
+    g2.addColorStop(0, 'rgba(0,0,0,0.18)');
+    g2.addColorStop(0.5, 'rgba(0,0,0,0.0)');
+    cx.fillStyle = g2;
+    cx.fillRect(0, 0, S, S);
+    _artMap._gloss = c;
+    return c;
+}
+
 // Deterministic hue (0–360) from a genre name, so each island has a stable tint.
 function _artMapGenreHue(name) {
     let h = 0;
@@ -5119,7 +5145,7 @@ function _artMapLayoutIslands(groups, opts = {}) {
             for (let j = i + 1; j < islands.length; j++) {
                 const dx = islands[j].cx - islands[i].cx, dy = islands[j].cy - islands[i].cy;
                 const dist = Math.hypot(dx, dy) || 1;
-                const minD = islands[i].islandR + islands[j].islandR + nodeR * 7;
+                const minD = islands[i].islandR + islands[j].islandR + nodeR * 3.5;
                 if (dist < minD) {
                     const push = (minD - dist) / 2 + 1;
                     islands[i].cx -= dx / dist * push; islands[i].cy -= dy / dist * push;
@@ -5150,6 +5176,10 @@ function _artMapLayoutIslands(groups, opts = {}) {
                 deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
                 musicbrainz_id: n.musicbrainz_id || '',
                 popularity: n.popularity || 0, _hue: isl.hue, _island: isl.name,
+                // Ambient buoyancy — phase varies by position so bubbles bob in a
+                // gentle wave (not in unison); amplitude in world units.
+                _bobPhase: (isl.cx + p.dx + isl.cy + p.dy) * 0.0022,
+                _bobAmp: nodeR * 0.12,
             });
         }
         _artMap._islands.push({ name: isl.name, cx: isl.cx, cy: isl.cy, r: isl.islandR, hue: isl.hue, count: isl.count });
@@ -5338,6 +5368,10 @@ function closeArtistMap() {
     const sidebar = document.getElementById('artmap-genre-sidebar');
     if (sidebar) sidebar.style.display = 'none';
     if (_artMap.animFrame) cancelAnimationFrame(_artMap.animFrame);
+    // Stop the ambient buoyancy loop so it doesn't run with the map hidden.
+    _artMap._ambient = false;
+    _artMap._anim.running = false;
+    if (_artMap._anim.raf) { cancelAnimationFrame(_artMap._anim.raf); _artMap._anim.raf = null; }
     if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
     _artMapHideContextMenu();
 
@@ -5499,6 +5533,11 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         octx.fill();
     }
 
+    // Glassy specular highlight (orb look) — skip the tiniest where it'd be noise.
+    if (rScaled >= 5) {
+        octx.drawImage(_artMapGlossSprite(), n.x - r, n.y - r, r * 2, r * 2);
+    }
+
     const showLabel = rScaled >= 13;
 
     // Darken art behind the label so the name stays legible.
@@ -5606,6 +5645,9 @@ function _artMapDrawLiveLayer(ctx) {
     _artMap._drawAlphaMul = 1;
     ctx.restore();
     ctx.globalAlpha = 1;
+    // Count of non-label bubbles drawn live — drives whether the ambient loop
+    // keeps running (zoomed out = 0 = loop parks).
+    _artMap._liveCount = revealing ? 0 : drawn;
 }
 
 // Draw one live bubble with its animation transform. aScale scales about the
@@ -5617,9 +5659,14 @@ function _artMapDrawLiveNode(ctx, n) {
     if (sc <= 0.001) return;
     const baseMul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
     _artMap._drawAlphaMul = baseMul * (n.aAlpha == null ? 1 : n.aAlpha);
-    if (sc !== 1) {
+    // Ambient buoyancy (steady state only — the reveal has its own motion).
+    let bobY = 0;
+    if (!_artMap._revealing && n._bobAmp) {
+        bobY = Math.sin((_artMap._now || 0) * 0.0016 + (n._bobPhase || 0)) * n._bobAmp;
+    }
+    if (sc !== 1 || bobY) {
         ctx.save();
-        ctx.translate(n.x, n.y);
+        ctx.translate(n.x, n.y + bobY);
         ctx.scale(sc, sc);
         ctx.translate(-n.x, -n.y);
         _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
@@ -5642,9 +5689,14 @@ function _artMapStartLoop() {
     a.last = performance.now();
     const tick = (t) => {
         if (!a.running) return;
+        _artMap._now = t;
         const more = _artMapStepAnimations(t);
-        _artMapDraw();
-        if (more) {
+        _artMapDraw(); // sets _artMap._liveCount
+        // Keep looping while something is animating, OR while ambient buoyancy is
+        // on AND there are live bubbles on screen to bob (so a zoomed-out static
+        // overview costs nothing — the loop parks until the next interaction).
+        const keep = more || (_artMap._ambient && _artMap._liveCount > 0 && !document.hidden);
+        if (keep) {
             a.raf = requestAnimationFrame(tick);
         } else {
             a.running = false;
@@ -5652,6 +5704,12 @@ function _artMapStartLoop() {
         }
     };
     a.raf = requestAnimationFrame(tick);
+}
+
+// (Re)start the ambient loop if buoyancy is on and it isn't already running —
+// called after the reveal and on zoom/pan so bob resumes when bubbles appear.
+function _artMapEnsureAmbient() {
+    if (_artMap._ambient && !_artMap._anim.running && !document.hidden) _artMapStartLoop();
 }
 
 // Advance every active animation by absolute time t (ms). Returns true while
@@ -5698,6 +5756,7 @@ function _artMapBeginReveal() {
     const t0 = performance.now();
     _artMap._revealT0 = t0;
     _artMap._revealing = true;
+    _artMap._ambient = true; // keep the loop alive afterwards for buoyancy
     _artMap._fieldAlpha = 1; // buffer is bypassed while revealing; live layer draws all
 
     const islands = _artMap._islands || [];
@@ -5761,6 +5820,7 @@ function _artMapRender() {
 function _artMapDraw() {
     /**Blit offscreen buffer to screen canvas with pan/zoom. Near-zero cost.**/
     const _t0 = _artMap._perf ? performance.now() : 0;
+    if (!_artMap._anim.running) _artMap._now = performance.now(); // keep bob current on on-demand draws
     const ctx = _artMap.ctx;
     const w = _artMap.width;
     const h = _artMap.height;
@@ -6728,6 +6788,11 @@ function _artMapSetupInteraction(canvas) {
     if (canvas._artMapListenersAttached) return;
     canvas._artMapListenersAttached = true;
 
+    // Pause ambient buoyancy when the tab is hidden; resume on return.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) _artMapEnsureAmbient();
+    });
+
     let isPanning = false, panStartX = 0, panStartY = 0;
 
     canvas.addEventListener('wheel', (e) => {
@@ -6742,6 +6807,7 @@ function _artMapSetupInteraction(canvas) {
         _artMap.offsetY = my - (my - _artMap.offsetY) * (newZoom / _artMap.zoom);
         _artMap.zoom = newZoom;
         _artMapRender(); // fast blit
+        _artMapEnsureAmbient(); // resume buoyancy if we zoomed bubbles into view
         // Debounce hi-res rebuild after zoom settles
         clearTimeout(_artMap._zoomRebuild);
         _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); }, 300);
