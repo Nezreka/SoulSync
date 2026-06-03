@@ -1362,10 +1362,12 @@ async function toggleSimilarArtistsEnrichment() {
     try {
         const button = document.getElementById('similar-artists-enrich-button');
         if (!button) return;
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/similar_artists/pause' : '/api/enrichment/similar_artists/resume';
+        // Pause unless it's already paused — so a worker that has finished its
+        // library (green 'complete'/idle state, not 'active') can still be paused.
+        const isPaused = button.classList.contains('paused');
+        const endpoint = isPaused ? '/api/enrichment/similar_artists/resume' : '/api/enrichment/similar_artists/pause';
         const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Similar Artists enrichment`);
+        if (!response.ok) throw new Error(`Failed to ${isPaused ? 'resume' : 'pause'} Similar Artists enrichment`);
         await updateSimilarArtistsEnrichmentStatus();
     } catch (error) {
         console.error('Error toggling Similar Artists enrichment:', error);
@@ -1377,6 +1379,7 @@ async function toggleSimilarArtistsEnrichment() {
     const wire = () => {
         const button = document.getElementById('similar-artists-enrich-button');
         if (button) {
+            button.addEventListener('click', toggleSimilarArtistsEnrichment); // standard wiring (like spotify/itunes)
             updateSimilarArtistsEnrichmentStatus();
             setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
         }
