@@ -5004,6 +5004,13 @@ const _artMap = {
     dirty: true, // true = need to rebuild offscreen buffer
     WATCHLIST_R: 320,
     BUFFER: 8,
+    // Max offscreen-buffer dimension (px). The buffer renders the whole world,
+    // so on big/dense maps (e.g. 2000-node genre map) this was 10240 → a 76 MP
+    // canvas that took ~1s to rebuild and ~150ms to blit per frame (3 fps).
+    // Capping it far lower makes rebuild + blit cheap (and pushes more nodes
+    // under the LOD dot threshold). Only binds on large worlds — small maps
+    // stay crisp via the z*2 / 1.0 caps. Tunable.
+    MAX_BUFFER_PX: 4096,
 };
 
 async function openArtistMap() {
@@ -5348,7 +5355,7 @@ function _artMapRebuildBuffer() {
     const bh = maxY - minY;
     // Scale based on zoom — higher zoom = higher res buffer, capped for memory
     const z = _artMap.zoom || 0.1;
-    const scale = Math.min(z * 2, 1.0, 10240 / Math.max(bw, bh));
+    const scale = Math.min(z * 2, 1.0, _artMap.MAX_BUFFER_PX / Math.max(bw, bh));
 
     if (!_artMap.offscreen) _artMap.offscreen = document.createElement('canvas');
     const oc = _artMap.offscreen;
