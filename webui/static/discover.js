@@ -5659,14 +5659,17 @@ function _artMapDrawLiveNode(ctx, n) {
     if (sc <= 0.001) return;
     const baseMul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
     _artMap._drawAlphaMul = baseMul * (n.aAlpha == null ? 1 : n.aAlpha);
-    // Ambient buoyancy (steady state only — the reveal has its own motion).
-    let bobY = 0;
-    if (!_artMap._revealing && n._bobAmp) {
-        bobY = Math.sin((_artMap._now || 0) * 0.0016 + (n._bobPhase || 0)) * n._bobAmp;
+    // Ambient buoyancy + ripple shove (steady state only — the reveal has its
+    // own motion). Both are world-space offsets applied about the node centre.
+    let ox = 0, oy = 0;
+    if (!_artMap._revealing) {
+        if (n._bobAmp) oy += Math.sin((_artMap._now || 0) * 0.0016 + (n._bobPhase || 0)) * n._bobAmp;
+        const disp = _artMapNodeDisplacement(n);
+        if (disp) { ox += disp.dx; oy += disp.dy; }
     }
-    if (sc !== 1 || bobY) {
+    if (sc !== 1 || ox || oy) {
         ctx.save();
-        ctx.translate(n.x, n.y + bobY);
+        ctx.translate(n.x + ox, n.y + oy);
         ctx.scale(sc, sc);
         ctx.translate(-n.x, -n.y);
         _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
@@ -5805,6 +5808,43 @@ function _artMapDrawRipples(ctx) {
         ctx.stroke();
     }
     ctx.restore();
+}
+
+// Total world-space displacement on a node from all active "push" ripples — the
+// expanding wavefront shoves nearby bubbles radially outward, then they settle
+// back as the wave passes and decays. Returns null when nothing is pushing.
+function _artMapNodeDisplacement(n) {
+    const rip = _artMap._ripples;
+    if (!rip || !rip.length) return null;
+    const t = _artMap._now || performance.now();
+    let dx = 0, dy = 0;
+    for (const r of rip) {
+        if (!r.push) continue;
+        const p = (t - r.t0) / r.dur;
+        if (p < 0 || p > 1) continue;
+        const front = r.maxR * (0.08 + 0.92 * (1 - Math.pow(1 - p, 2)));
+        const ddx = n.x - r.cx, ddy = n.y - r.cy;
+        const d = Math.hypot(ddx, ddy) || 1;
+        const delta = d - front;
+        const width = r.width || (r.maxR * 0.2);
+        const env = Math.exp(-(delta * delta) / (2 * width * width)); // bump at the wavefront
+        const push = r.push * env * (1 - p);                          // decays over the ripple's life
+        if (push > 0.05) { dx += (ddx / d) * push; dy += (ddy / d) * push; }
+    }
+    return (dx || dy) ? { dx, dy } : null;
+}
+
+// Emit a water ripple at a world point — a fading ring plus a radial shove of
+// nearby bubbles. Used for click/tap feedback.
+function _artMapEmitRipple(wx, wy, hue) {
+    if (!_artMap._ripples) _artMap._ripples = [];
+    const WR = _artMap.WATCHLIST_R;
+    _artMap._ripples.push({
+        cx: wx, cy: wy, hue: hue == null ? 270 : hue,
+        maxR: WR * 2.6, t0: performance.now(), dur: 900,
+        push: WR * 0.22, width: WR * 0.6,
+    });
+    _artMapStartLoop(); // animate the ripple (guards against double-start)
 }
 
 function _artMapRender() {
@@ -6015,28 +6055,6 @@ function _artMapDraw() {
         ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
-    }
-
-    // Click ripple animation
-    if (_artMap._ripple) {
-        const rip = _artMap._ripple;
-        const elapsed = performance.now() - rip.start;
-        const progress = elapsed / 400; // 400ms duration
-        if (progress < 1) {
-            ctx.save();
-            ctx.translate(_artMap.offsetX, _artMap.offsetY);
-            ctx.scale(z, z);
-            const ripR = rip.radius + rip.radius * progress * 0.5;
-            ctx.beginPath();
-            ctx.arc(rip.x, rip.y, ripR, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(138,43,226,${0.5 * (1 - progress)})`;
-            ctx.lineWidth = 3 * (1 - progress);
-            ctx.stroke();
-            ctx.restore();
-            requestAnimationFrame(() => _artMapRender());
-        } else {
-            _artMap._ripple = null;
-        }
     }
 
     if (_artMap._perf) _artMapDrawPerf(ctx, _t0);
@@ -6931,15 +6949,13 @@ function _artMapSetupInteraction(canvas) {
         isPanning = false;
 
         if (!wasDrag && clickStart) {
-            // It was a click — find the node under cursor
+            // It was a click — emit a water ripple (shoves nearby bubbles) and,
+            // if it landed on an artist, open it after the ripple kicks off.
             const { nx, ny } = _artMapScreenToWorld(e, canvas);
             const node = _artMapHitTest(nx, ny);
-            if (node) {
-                _artMap._ripple = { x: node.x, y: node.y, radius: node.radius, start: performance.now() };
-                _artMapRender();
-                if (node.spotify_id || node.itunes_id || node.deezer_id) {
-                    setTimeout(() => openYourArtistInfoModal_direct(node), 200);
-                }
+            _artMapEmitRipple(node ? node.x : nx, node ? node.y : ny, node ? node._hue : null);
+            if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
+                setTimeout(() => openYourArtistInfoModal_direct(node), 200);
             }
         }
 
@@ -7001,6 +7017,7 @@ function _artMapSetupInteraction(canvas) {
             const wx = (t.clientX - rect.left - _artMap.offsetX) / _artMap.zoom;
             const wy = (t.clientY - rect.top - _artMap.offsetY) / _artMap.zoom;
             const node = _artMapHitTest(wx, wy);
+            _artMapEmitRipple(node ? node.x : wx, node ? node.y : wy, node ? node._hue : null);
             if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
                 openYourArtistInfoModal_direct(node);
             }
