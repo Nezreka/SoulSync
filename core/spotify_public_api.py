@@ -32,7 +32,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-logger = logging.getLogger(__name__)
+# 'soulsync.*' so these lines land in app.log (the bare module name isn't captured).
+logger = logging.getLogger('soulsync.spotify_public')
 
 _BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -96,6 +97,8 @@ def _paginate_api_tracks(http_get: Callable, spotify_id: str, token: str) -> Lis
             },
             timeout=_TIMEOUT,
         )
+        if resp.status_code != 200:
+            logger.warning("public API tracks offset=%s -> HTTP %s", offset, resp.status_code)
         resp.raise_for_status()
         items = (resp.json() or {}).get('items') or []
         if not items:
@@ -139,13 +142,16 @@ def fetch_public_playlist_full(
     name = base.get('name', 'Unknown') if embed_ok else 'Unknown'
     subtitle = base.get('subtitle', '') if embed_ok else ''
     embed_tracks = base.get('tracks', []) if embed_ok else []
+    logger.info("public fetch %s: token=%s, embed_parsed=%s, embed_tracks=%d",
+                spotify_id, 'yes' if token else 'NO', embed_ok, len(embed_tracks))
 
     tracks: List[Dict[str, Any]] = []
     if token:
         try:
             tracks = _paginate_api_tracks(http_get, spotify_id, token)
+            logger.info("public API pagination ok: %d tracks", len(tracks))
         except Exception as e:
-            logger.info("Public API pagination failed (%s); using embed tracks", e)
+            logger.warning("public API pagination failed (%s); using embed tracks (≤100)", e)
 
     if not tracks:
         tracks = embed_tracks          # graceful: at least the embed's ≤100

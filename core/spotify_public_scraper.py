@@ -9,7 +9,8 @@ import logging
 import hashlib
 import requests
 
-logger = logging.getLogger(__name__)
+# 'soulsync.*' so these lines land in app.log (the bare module name isn't captured).
+logger = logging.getLogger('soulsync.spotify_public')
 
 
 def parse_spotify_url(url: str) -> dict:
