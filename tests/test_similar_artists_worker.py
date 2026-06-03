@@ -72,8 +72,8 @@ def test_process_artist_matched_stores_with_keying():
             {'name': 'C', 'id': 'it_c', 'source': 'itunes', 'image_url': 'http://x'},
         ],
     }
-    status, count = w.process_artist('SRC1', 'A', lambda n, l: payload, store, limit=25, profile_id=1)
-    assert status == 'matched' and count == 2
+    status, count, detail = w.process_artist('SRC1', 'A', lambda n, l: payload, store, limit=25, profile_id=1)
+    assert status == 'matched' and count == 2 and detail == ''
     # All similars keyed by the SOURCE artist id we passed (not the library PK).
     assert all(c['source_artist_id'] == 'SRC1' for c in calls)
     assert all(c['profile_id'] == 1 for c in calls)
@@ -85,31 +85,34 @@ def test_process_artist_matched_stores_with_keying():
 
 def test_process_artist_not_found_when_no_matches():
     store, calls = _capture_store()
-    status, count = w.process_artist('S', 'A', lambda n, l: {'success': True, 'similar_artists': []}, store)
-    assert status == 'not_found' and count == 0 and calls == []
+    status, count, detail = w.process_artist('S', 'A', lambda n, l: {'success': True, 'similar_artists': []}, store)
+    assert status == 'not_found' and count == 0 and calls == [] and detail == 'no matches'
 
 
 def test_process_artist_not_found_on_404():
     # Genuinely no MusicMap entry — shouldn't be retried as an error.
     store, _ = _capture_store()
-    status, _ = w.process_artist('S', 'A', lambda n, l: {'success': False, 'status_code': 404}, store)
+    status, _, _ = w.process_artist('S', 'A', lambda n, l: {'success': False, 'status_code': 404}, store)
     assert status == 'not_found'
 
 
-def test_process_artist_error_on_outage_is_retriable():
-    # 5xx / no providers → transient error (worker retries after retry_days).
+def test_process_artist_error_on_outage_is_retriable_and_explains_why():
+    # 5xx / no providers → transient error (retried after retry_days), and the
+    # reason is surfaced (code + message) so the cause is diagnosable, not silent.
     store, _ = _capture_store()
-    status, _ = w.process_artist('S', 'A', lambda n, l: {'success': False, 'status_code': 502}, store)
+    status, _, detail = w.process_artist(
+        'S', 'A', lambda n, l: {'success': False, 'status_code': 502, 'error': 'Failed to fetch from MusicMap'}, store)
     assert status == 'error'
+    assert '502' in detail and 'MusicMap' in detail
 
 
-def test_process_artist_error_when_fetch_raises():
+def test_process_artist_error_when_fetch_raises_carries_detail():
     store, _ = _capture_store()
 
     def boom(n, l):
         raise RuntimeError('musicmap down')
-    status, count = w.process_artist('S', 'A', boom, store)
-    assert status == 'error' and count == 0
+    status, count, detail = w.process_artist('S', 'A', boom, store)
+    assert status == 'error' and count == 0 and 'musicmap down' in detail
 
 
 def test_process_artist_skips_unstorable_but_counts_real():
@@ -123,5 +126,5 @@ def test_process_artist_skips_unstorable_but_counts_real():
         {'name': 'B', 'id': '1', 'source': 'spotify'},
         {'name': 'C', 'id': '2', 'source': 'spotify'},
     ]}
-    status, count = w.process_artist('S', 'A', lambda n, l: payload, store)
+    status, count, _ = w.process_artist('S', 'A', lambda n, l: payload, store)
     assert status == 'matched' and count == 1 and len(calls) == 2

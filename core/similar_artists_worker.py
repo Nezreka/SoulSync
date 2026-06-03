@@ -78,26 +78,29 @@ def process_artist(
 
     ``fetch_similars(name, limit)`` returns the ``get_musicmap_similar_artists``
     payload; ``store_similar(**kwargs)`` is ``add_or_update_similar_artist``.
-    Returns ``(status, stored_count)`` where status is one of:
+    Returns ``(status, stored_count, detail)`` where status is one of:
       - ``'matched'``   — stored ≥1 similar artist
       - ``'not_found'`` — MusicMap had no entry / nothing matched a source
       - ``'error'``     — MusicMap/source failure (transient; eligible for retry)
+    ``detail`` is a short human-readable reason (status code + message, or
+    ``'no matches'`` / ``''``) so the worker can surface WHY a fetch failed
+    instead of swallowing it — needed to diagnose error rates.
     """
     try:
         result = fetch_similars(artist_name, limit) or {}
     except Exception as exc:
-        logger.debug("MusicMap fetch raised for %s: %s", artist_name, exc)
-        return ('error', 0)
+        return ('error', 0, f'exception: {exc}')
 
     if not result.get('success'):
         # 404/400 = genuinely no MusicMap entry → 'not_found' (don't keep retrying);
         # anything else (timeout, 5xx, no providers) = transient → 'error' (retry).
         code = result.get('status_code')
-        return ('not_found' if code in (400, 404) else 'error', 0)
+        detail = f"{code}: {result.get('error') or 'unknown'}"
+        return ('not_found' if code in (400, 404) else 'error', 0, detail)
 
     sims = result.get('similar_artists') or []
     if not sims:
-        return ('not_found', 0)
+        return ('not_found', 0, 'no matches')
 
     stored = 0
     for rank, s in enumerate(sims, 1):
@@ -121,7 +124,7 @@ def process_artist(
         except Exception as exc:
             logger.debug("store similar failed for %s: %s", name, exc)
 
-    return ('matched' if stored else 'not_found', stored)
+    return ('matched' if stored else 'not_found', stored, '')
 
 
 class SimilarArtistsWorker:
@@ -138,6 +141,8 @@ class SimilarArtistsWorker:
         self.stats = {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0}
         self.retry_days = 30
         self.limit = 25
+        self._err_logged = 0          # how many fetch errors we've logged at WARNING this session
+        self._last_error = None       # most recent fetch-error reason (for diagnosis)
         # similar_artists rows are profile-scoped; the library is shared. v1 keys
         # under the default profile (matches single-profile setups, which is the
         # common case). Multi-profile per-source-chain population is future work.
@@ -220,7 +225,7 @@ class SimilarArtistsWorker:
                     continue
 
                 self.current_item = artist.get('name')
-                status, count = process_artist(
+                status, count, detail = process_artist(
                     sid, artist['name'],
                     get_musicmap_similar_artists,
                     self.db.add_or_update_similar_artist,
@@ -234,6 +239,15 @@ class SimilarArtistsWorker:
                     self.stats['not_found'] += 1
                 else:
                     self.stats['errors'] += 1
+                    # Surface WHY fetches error — the first handful at WARNING (so
+                    # the cause is visible in app.log without spamming a 4000-artist
+                    # run), the rest at DEBUG. Keep the most recent reason for stats.
+                    self._last_error = detail
+                    if self._err_logged < 15:
+                        self._err_logged += 1
+                        logger.warning("Similar artists fetch error for '%s' — %s", artist['name'], detail)
+                    else:
+                        logger.debug("Similar artists fetch error for '%s' — %s", artist['name'], detail)
 
                 # Pace MusicMap (name search per candidate is heavy + rate-limited).
                 interruptible_sleep(self._stop_event, 3)
