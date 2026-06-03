@@ -35,6 +35,7 @@ logger = get_logger("enrichment.api")
 # Hooks the host wires up so the blueprint can persist pause state and
 # clean up auto-pause / yield-override sets without circular imports.
 _config_set: Optional[Callable[[str, Any], None]] = None
+_config_get: Optional[Callable[[str, Any], Any]] = None
 _auto_paused_discard: Optional[Callable[[str], None]] = None
 _yield_override_add: Optional[Callable[[str], None]] = None
 _db_getter: Optional[Callable[[], Any]] = None
@@ -43,6 +44,7 @@ _db_getter: Optional[Callable[[], Any]] = None
 def configure(
     *,
     config_set: Optional[Callable[[str, Any], None]] = None,
+    config_get: Optional[Callable[[str, Any], Any]] = None,
     auto_paused_discard: Optional[Callable[[str], None]] = None,
     yield_override_add: Optional[Callable[[str], None]] = None,
     db_getter: Optional[Callable[[], Any]] = None,
@@ -51,10 +53,12 @@ def configure(
 
     Each is optional — pass None for hosts that don't have a corresponding
     mechanism (e.g. tests). ``db_getter`` returns the live ``MusicDatabase``
-    for the unmatched-browser routes.
+    for the unmatched-browser routes; ``config_get``/``config_set`` read and
+    write the per-worker priority override.
     """
-    global _config_set, _auto_paused_discard, _yield_override_add, _db_getter
+    global _config_set, _config_get, _auto_paused_discard, _yield_override_add, _db_getter
     _config_set = config_set
+    _config_get = config_get
     _auto_paused_discard = auto_paused_discard
     _yield_override_add = yield_override_add
     _db_getter = db_getter
@@ -249,5 +253,46 @@ def create_blueprint() -> Blueprint:
             return jsonify({'error': str(e)}), 500
         return jsonify({'success': True, 'reset': count, 'service': service_id,
                         'entity_type': entity_type, 'scope': scope}), 200
+
+    @bp.route('/api/enrichment/<service_id>/priority', methods=['GET'])
+    def enrichment_get_priority(service_id: str):
+        """Return the pinned 'process this group first' entity for a worker."""
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        priority = ''
+        if _config_get is not None:
+            try:
+                priority = (_config_get(f'{service_id}_enrichment_priority', '') or '').strip().lower()
+            except Exception as e:
+                logger.debug("reading %s priority: %s", service_id, e)
+        if priority not in supported_entity_types(service_id):
+            priority = ''
+        return jsonify({'service': service_id, 'priority': priority,
+                        'entity_types': list(supported_entity_types(service_id))}), 200
+
+    @bp.route('/api/enrichment/<service_id>/priority', methods=['POST'])
+    def enrichment_set_priority(service_id: str):
+        """Pin (or clear) the entity type the worker should process first.
+
+        Body: ``entity`` = 'artist'|'album'|'track' to pin, or '' / null / 'none'
+        to clear. Must be an entity type the source actually enriches.
+        """
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _config_set is None:
+            return jsonify({'error': 'config unavailable'}), 503
+        data = request.get_json(silent=True) or {}
+        entity = (data.get('entity') or '').strip().lower()
+        if entity in ('none', 'clear'):
+            entity = ''
+        if entity and entity not in supported_entity_types(service_id):
+            return jsonify({'error': f'{service_id} does not enrich {entity!r}'}), 400
+        try:
+            _config_set(f'{service_id}_enrichment_priority', entity)
+        except Exception as e:
+            logger.error("setting %s priority: %s", service_id, e)
+            return jsonify({'error': str(e)}), 500
+        logger.info("%s enrichment priority set to %r via UI", service_id, entity or '(none)')
+        return jsonify({'success': True, 'service': service_id, 'priority': entity}), 200
 
     return bp

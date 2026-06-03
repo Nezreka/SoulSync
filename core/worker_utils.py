@@ -78,3 +78,67 @@ def set_album_api_track_count(cursor, album_id, count):
         logger.warning(
             "Failed to cache api_track_count for album %s: %s", album_id, e
         )
+
+
+# --- Enrichment "process this group first" override -----------------------
+# Each enrichment worker normally processes artist -> album -> track. A user
+# can pin one entity type to run first via the Manage Enrichment Workers modal;
+# the choice is stored in config as "<service>_enrichment_priority" and read
+# at the top of each worker's _get_next_item so it takes effect live. When the
+# pinned group is exhausted (or unset), the worker falls back to its normal
+# chain — so the default path is unchanged.
+
+PRIORITY_ENTITIES = ('artist', 'album', 'track')
+
+
+def read_enrichment_priority(service: str) -> str:
+    """Return the pinned entity ('artist'|'album'|'track') for a worker, or ''.
+
+    Read every loop so the override applies without restarting the worker.
+    Any error / unset / invalid value yields '' (no override)."""
+    try:
+        from config.settings import config_manager
+        val = (config_manager.get(f'{service}_enrichment_priority', '') or '')
+        val = str(val).strip().lower()
+        return val if val in PRIORITY_ENTITIES else ''
+    except Exception:
+        return ''
+
+
+def priority_pending_item(cursor, service, entity, type_overrides=None):
+    """Return one pending (NULL match_status) item of `entity`, or None.
+
+    `service` is the column prefix (e.g. 'spotify' -> spotify_match_status) and
+    MUST be a trusted worker-supplied literal (it is interpolated into SQL).
+    `type_overrides` maps the canonical entity to the worker's dispatch 'type'
+    string — Spotify/iTunes process individual items as 'album_individual' /
+    'track_individual', the other workers use 'album' / 'track'. The returned
+    dict matches the shape those workers already return from _get_next_item."""
+    if not str(service).isalpha() or entity not in PRIORITY_ENTITIES:
+        return None
+    type_overrides = type_overrides or {}
+    ms = f"{service}_match_status"
+
+    if entity == 'artist':
+        cursor.execute(
+            f"SELECT id, name FROM artists WHERE {ms} IS NULL AND id IS NOT NULL "
+            f"ORDER BY id ASC LIMIT 1"
+        )
+        r = cursor.fetchone()
+        return {'type': type_overrides.get('artist', 'artist'), 'id': r[0], 'name': r[1]} if r else None
+
+    if entity == 'album':
+        cursor.execute(
+            f"SELECT a.id, a.title, ar.name FROM albums a JOIN artists ar ON a.artist_id = ar.id "
+            f"WHERE a.{ms} IS NULL AND a.id IS NOT NULL ORDER BY a.id ASC LIMIT 1"
+        )
+        r = cursor.fetchone()
+        return {'type': type_overrides.get('album', 'album'), 'id': r[0], 'name': r[1], 'artist': r[2]} if r else None
+
+    # track
+    cursor.execute(
+        f"SELECT t.id, t.title, ar.name FROM tracks t JOIN artists ar ON t.artist_id = ar.id "
+        f"WHERE t.{ms} IS NULL AND t.id IS NOT NULL ORDER BY t.id ASC LIMIT 1"
+    )
+    r = cursor.fetchone()
+    return {'type': type_overrides.get('track', 'track'), 'id': r[0], 'name': r[1], 'artist': r[2]} if r else None
