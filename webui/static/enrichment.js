@@ -1312,6 +1312,91 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// SIMILAR ARTISTS (MUSICMAP) WORKER — dashboard bubble
+// ===================================================================
+
+async function updateSimilarArtistsEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/enrichment/similar_artists/status');
+        if (!response.ok) return;
+        updateSimilarArtistsEnrichmentStatusFromData(await response.json());
+    } catch (error) {
+        console.error('Error updating Similar Artists enrichment status:', error);
+    }
+}
+
+function updateSimilarArtistsEnrichmentStatusFromData(data) {
+    const button = document.getElementById('similar-artists-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.paused) button.classList.add('paused');
+    else if (data.idle) button.classList.add('complete');
+    else if (data.running && !data.paused) button.classList.add('active');
+
+    const tStatus = document.getElementById('similar-artists-enrich-tooltip-status');
+    const tCurrent = document.getElementById('similar-artists-enrich-tooltip-current');
+    const tProgress = document.getElementById('similar-artists-enrich-tooltip-progress');
+
+    if (tStatus) {
+        if (data.paused) tStatus.textContent = 'Paused';
+        else if (data.idle) tStatus.textContent = 'Complete';
+        else if (data.running) tStatus.textContent = 'Running';
+        else tStatus.textContent = 'Idle';
+    }
+    if (tCurrent) {
+        if (data.idle) tCurrent.textContent = 'All library artists processed';
+        else if (data.current_item) tCurrent.textContent = `Now: ${data.current_item}`;
+        else tCurrent.textContent = 'No active matches';
+    }
+    // DB-backed artist progress (matches the Manage modal exactly).
+    if (tProgress) {
+        const a = (data.progress && data.progress.artists) || {};
+        tProgress.textContent = `Artists: ${a.matched || 0} / ${a.total || 0} (${a.percent || 0}%)`;
+    }
+}
+
+async function toggleSimilarArtistsEnrichment() {
+    // Identical logic to the other orbs (e.g. toggleAmazonEnrichment): if the orb
+    // is 'active' (running) → pause, otherwise → resume. A paused orb isn't
+    // 'active', so this resumes it.
+    try {
+        const button = document.getElementById('similar-artists-enrich-button');
+        if (!button) return;
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/similar_artists/pause' : '/api/enrichment/similar_artists/resume';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Similar Artists enrichment`);
+        await updateSimilarArtistsEnrichmentStatus();
+    } catch (error) {
+        console.error('Error toggling Similar Artists enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize Similar Artists UI on page load — identical pattern to AudioDB/Deezer
+// (addEventListener for the click; no inline onclick on the button).
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('similar-artists-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleSimilarArtistsEnrichment);
+            updateSimilarArtistsEnrichmentStatus();
+            setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('similar-artists-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleSimilarArtistsEnrichment);
+        updateSimilarArtistsEnrichmentStatus();
+        setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
 // HYDRABASE P2P MIRROR WORKER
 // ===================================================================
 

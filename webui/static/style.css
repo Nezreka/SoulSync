@@ -34248,6 +34248,21 @@ div.artist-hero-badge {
 .artmap-tool-btn.artmap-zoom { border: none; background: none; width: 30px; padding: 0; justify-content: center; border-radius: 6px; }
 .artmap-tool-btn.artmap-zoom:hover { background: rgba(255,255,255,0.06); }
 
+/* Mobile: the toolbar wraps — back/title/stats + compact tools on row 1, the
+   search drops to its own full-width row below so nothing gets crushed. */
+@media (max-width: 760px) {
+    .artist-map-toolbar { flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+    /* Clear the fixed hamburger menu (top:16 left:16, 44px wide) so the map's
+       back button isn't hidden under it. */
+    .artmap-nav-left { flex: 1 1 auto; min-width: 0; gap: 6px; margin-left: 52px; }
+    .artmap-brand-text { display: none; }
+    .artmap-brand { flex: none; }
+    .artmap-stats { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .artmap-nav-right { flex: 0 0 auto; gap: 3px; }
+    .artmap-nav-center { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+    .artmap-search-wrap { width: 100%; }
+}
+
 /* Shortcuts modal */
 .artmap-shortcuts-modal {
     background: rgba(20,20,32,0.95); border-radius: 14px; width: 340px; max-width: 90vw;
@@ -34299,6 +34314,7 @@ div.artist-hero-badge {
 .artmap-tip-info { min-width: 0; }
 .artmap-tip-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .artmap-tip-badge { display: inline-block; font-size: 9px; font-weight: 700; color: #fbbf24; margin-top: 2px; }
+.artmap-tip-conn { font-size: 10px; font-weight: 600; color: rgba(138,43,226,0.85); margin-top: 3px; }
 .artmap-tip-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 .artmap-tip-genres span {
     font-size: 9px; padding: 2px 6px; border-radius: 4px;
@@ -34356,6 +34372,36 @@ div.artist-hero-badge {
 .artmap-explore-input:focus { border-color: rgba(138,43,226,0.4); }
 .artmap-explore-input::placeholder { color: rgba(255,255,255,0.2); }
 .artmap-search-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Artist Explorer — search + select picker */
+.artmap-explore-search-wrap { position: relative; }
+.artmap-explore-search-wrap .artmap-explore-input { margin-bottom: 12px; }
+.artmap-explore-spinner { position: absolute; right: 12px; top: 11px; pointer-events: none; }
+.artmap-explore-spinner .watch-all-loading-spinner { width: 18px; height: 18px; border-width: 2px; }
+.artmap-explore-results {
+    max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: 18px;
+}
+.artmap-explore-results:empty { margin-bottom: 0; }
+.artmap-explore-result {
+    display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px;
+    cursor: pointer; transition: background 0.15s ease;
+}
+.artmap-explore-result:hover { background: rgba(138,43,226,0.14); }
+.artmap-explore-result img {
+    width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 auto;
+    background: rgba(255,255,255,0.06);
+}
+.artmap-explore-result-name {
+    flex: 1 1 auto; min-width: 0; color: #fff; font-size: 14px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artmap-explore-result-go {
+    flex: 0 0 auto; font-size: 11px; font-weight: 700; color: rgba(138,43,226,0.9);
+    opacity: 0; transition: opacity 0.15s ease;
+}
+.artmap-explore-result:hover .artmap-explore-result-go { opacity: 1; }
+.artmap-explore-empty { padding: 18px; text-align: center; color: rgba(255,255,255,0.35); font-size: 13px; }
 
 /* Genre picker modal */
 .artmap-genre-picker-modal {
@@ -39663,6 +39709,74 @@ div.artist-hero-badge {
     color: #FF9900;
     font-weight: 600;
 }
+
+/* Similar Artists (MusicMap relationship worker) dashboard bubble — mirrors the
+   per-source bubbles with a purple accent. The MusicMap logo is a wide branded
+   image, so it's cover-cropped + rounded rather than icon-filtered. */
+.similar-artists-enrich-button-container { position: relative; display: inline-block; margin-right: 12px; }
+.similar-artists-enrich-button {
+    position: relative; width: 44px; height: 44px;
+    background: linear-gradient(135deg, rgba(168,85,247,0.10) 0%, rgba(124,58,237,0.16) 100%);
+    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(168,85,247,0.22); border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 4px 16px rgba(168,85,247,0.12), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.similar-artists-enrich-logo {
+    width: 26px; height: 26px; opacity: 0.7; object-fit: cover; border-radius: 7px;
+    transition: all 0.3s ease;
+}
+.similar-artists-enrich-button:hover {
+    transform: scale(1.1); border-color: rgba(168,85,247,0.45);
+    box-shadow: 0 6px 24px rgba(168,85,247,0.28), 0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.similar-artists-enrich-spinner {
+    position: absolute; width: 44px; height: 44px; border: 3px solid transparent;
+    border-top-color: rgba(168,85,247,0.85); border-right-color: rgba(168,85,247,0.5);
+    border-radius: 50%; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+}
+@keyframes similar-artists-enrich-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.similar-artists-enrich-button.active .similar-artists-enrich-spinner { opacity: 1; animation: similar-artists-enrich-spin 1.2s linear infinite; }
+.similar-artists-enrich-button.active {
+    background: linear-gradient(135deg, rgba(168,85,247,0.20) 0%, rgba(124,58,237,0.26) 100%);
+    border-color: rgba(168,85,247,0.55);
+    box-shadow: 0 6px 24px rgba(168,85,247,0.35), 0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.similar-artists-enrich-button.active .similar-artists-enrich-logo { opacity: 1; }
+.similar-artists-enrich-button.complete {
+    background: linear-gradient(135deg, rgba(76,175,80,0.15) 0%, rgba(56,142,60,0.20) 100%);
+    border-color: rgba(76,175,80,0.35);
+    box-shadow: 0 4px 16px rgba(76,175,80,0.2), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.similar-artists-enrich-button.complete .similar-artists-enrich-spinner { opacity: 0; }
+.similar-artists-enrich-button.paused {
+    background: linear-gradient(135deg, rgba(255,193,7,0.12) 0%, rgba(255,152,0,0.18) 100%);
+    border-color: rgba(255,193,7,0.35);
+    box-shadow: 0 4px 16px rgba(255,193,7,0.2), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.similar-artists-enrich-button.paused .similar-artists-enrich-logo { opacity: 0.5; }
+.similar-artists-enrich-button.paused .similar-artists-enrich-spinner { opacity: 0; }
+.similar-artists-enrich-tooltip {
+    position: absolute; left: 50%; top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px); z-index: 5000;
+    opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); pointer-events: none;
+}
+.similar-artists-enrich-button:hover + .similar-artists-enrich-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.similar-artists-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30,30,30,0.98) 0%, rgba(20,20,20,0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6); -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.3); border-radius: 16px; padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.similar-artists-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif; font-size: 13px; font-weight: 600;
+    color: rgba(255,255,255,0.95); letter-spacing: -0.2px; margin-bottom: 12px;
+    padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.similar-artists-enrich-tooltip-body { display: flex; flex-direction: column; gap: 8px; }
+#similar-artists-enrich-tooltip-status { color: #c084fc; font-weight: 600; }
 
 .deezer-button-container {
     position: relative;

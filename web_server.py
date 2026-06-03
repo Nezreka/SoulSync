@@ -28284,6 +28284,19 @@ def get_artist_map_explore():
     return _artists_map_get_artist_map_explore()
 
 
+@app.route('/api/discover/artist-map/perf', methods=['POST'])
+def log_artist_map_perf():
+    """Debug sink: the artist-map frontend POSTs its render timings here (toggled
+    with 'd' on the map) so they land in app.log — the on-canvas overlay text
+    can't be copied. Used to find the real drag/zoom bottleneck."""
+    try:
+        data = request.get_json(silent=True) or {}
+        logger.info("[ARTMAP-PERF] %s", json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        logger.debug("artist-map perf log failed: %s", e)
+    return ('', 204)
+
+
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
 def search_artists_for_playlist():
     """Search for artists to use as seeds for custom playlist building"""
@@ -32876,6 +32889,27 @@ except Exception as e:
     amazon_worker = None
 
 
+# --- Similar Artists Worker Initialization ---
+# Fills the similar_artists table for LIBRARY artists (the watchlist scanner only
+# covers watchlist artists). Runs by default (like the metadata workers); it
+# self-paces (~3s/artist) and backs off on MusicMap outages. Respects a saved
+# pause choice across restarts.
+similar_artists_worker = None
+try:
+    from core.similar_artists_worker import SimilarArtistsWorker
+    similar_artists_db = MusicDatabase()
+    similar_artists_worker = SimilarArtistsWorker(database=similar_artists_db)
+    similar_artists_worker.start()
+    if config_manager.get('similar_artists_enrichment_paused', False):
+        similar_artists_worker.pause()
+        logger.info("Similar Artists worker initialized (paused — restored from config)")
+    else:
+        logger.info("Similar Artists worker initialized and started")
+except Exception as e:
+    logger.error(f"Similar Artists worker initialization failed: {e}")
+    similar_artists_worker = None
+
+
 # ================================================================================================
 # SPOTIFY ENRICHMENT INTEGRATION
 # ================================================================================================
@@ -34640,6 +34674,11 @@ _register_enrichment_services([
         worker_getter=lambda: amazon_worker,
         config_paused_key='amazon_enrichment_paused',
     ),
+    _EnrichmentService(
+        id='similar_artists', display_name='Similar Artists',
+        worker_getter=lambda: similar_artists_worker,
+        config_paused_key='similar_artists_enrichment_paused',
+    ),
 ])
 
 _configure_enrichment_api(
@@ -34722,6 +34761,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'amazon-enrichment': lambda: amazon_worker,
+        'similar_artists': lambda: similar_artists_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,
         'listening-stats': lambda: listening_stats_worker,
