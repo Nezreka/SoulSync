@@ -5370,114 +5370,143 @@ function _artMapRebuildBuffer() {
             else if (pass === 2 && !n._isLabel && (n.type === 'watchlist' || n.type === 'center' || n.ring === 1)) { /* draw */ }
             else continue;
             if (hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
-            const op = n.opacity || 0;
-            if (op < 0.01) continue;
-            const r = n.radius;
-            const isW = n.type === 'watchlist' || n.type === 'center';
-            octx.globalAlpha = op;
-
-            // Genre label node — transparent circle with large text
-            if (n._isLabel) {
-                octx.globalAlpha = 0.6;
-                octx.beginPath();
-                octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-                octx.fillStyle = 'rgba(138,43,226,0.04)';
-                octx.fill();
-                octx.strokeStyle = 'rgba(138,43,226,0.08)';
-                octx.lineWidth = 1;
-                octx.stroke();
-                const labelSize = Math.max(12, n.radius * 0.25);
-                octx.font = `800 ${labelSize}px system-ui`;
-                octx.textAlign = 'center';
-                octx.textBaseline = 'middle';
-                octx.fillStyle = 'rgba(138,43,226,0.35)';
-                octx.fillText(n.name, n.x, n.y - labelSize * 0.3);
-                octx.font = `500 ${labelSize * 0.5}px system-ui`;
-                octx.fillStyle = 'rgba(255,255,255,0.15)';
-                octx.fillText(`${n._count || 0} artists`, n.x, n.y + labelSize * 0.5);
-                octx.globalAlpha = 1;
-                continue;
-            }
-
-            // Render quality based on node size in buffer pixels
-            const rScaled = r * scale;
-            const isSmall = rScaled < 8;
-            const isTiny = rScaled < 3;
-
-            // Tiny nodes: just a colored dot (no clip, no image, no text)
-            if (isTiny) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-                octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
-                octx.fill();
-                continue;
-            }
-
-            // Small nodes: filled circle + border, no image clip
-            if (isSmall) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-                const img = _artMap.images[n.id];
-                if (img) {
-                    octx.save(); octx.clip();
-                    octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-                    octx.restore();
-                } else {
-                    octx.fillStyle = isW ? '#1a0a30' : '#141420';
-                    octx.fill();
-                }
-                octx.strokeStyle = isW ? 'rgba(138,43,226,0.3)' : 'rgba(255,255,255,0.06)';
-                octx.lineWidth = isW ? 1.5 : 0.5;
-                octx.stroke();
-                continue;
-            }
-
-            // Full quality: glow + clip + image + text
-            if (isW) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
-                octx.strokeStyle = 'rgba(138,43,226,0.25)';
-                octx.lineWidth = 5;
-                octx.stroke();
-            }
-
-            octx.save();
-            octx.beginPath();
-            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-            octx.closePath();
-            octx.clip();
-
-            const img = _artMap.images[n.id];
-            if (img) {
-                octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-                octx.fillStyle = 'rgba(0,0,0,0.45)';
-                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
-            } else {
-                octx.fillStyle = isW ? '#1a0a30' : '#141420';
-                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
-            }
-            octx.restore();
-
-            octx.beginPath();
-            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-            octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
-            octx.lineWidth = isW ? 2 : 0.5;
-            octx.stroke();
-
-            const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
-            octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
-            octx.textAlign = 'center';
-            octx.textBaseline = 'middle';
-            octx.fillStyle = '#fff';
-            const maxC = isW ? 20 : 12;
-            const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
-            octx.fillText(label, n.x, n.y);
+            _artMapDrawNodeToBuffer(octx, n, scale);
         }
     }
 
     octx.globalAlpha = 1;
 
     _artMap.dirty = false;
+}
+
+// Draw a SINGLE node into the offscreen buffer (in world coords; caller has
+// already applied the buffer's scale+translate). Shared by the full rebuild and
+// the incremental image compositor so the two can never drift visually.
+function _artMapDrawNodeToBuffer(octx, n, scale) {
+    const op = n.opacity || 0;
+    if (op < 0.01) return;
+    const r = n.radius;
+    const isW = n.type === 'watchlist' || n.type === 'center';
+    octx.globalAlpha = op;
+
+    // Genre label node — transparent circle with large text
+    if (n._isLabel) {
+        octx.globalAlpha = 0.6;
+        octx.beginPath();
+        octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+        octx.fillStyle = 'rgba(138,43,226,0.04)';
+        octx.fill();
+        octx.strokeStyle = 'rgba(138,43,226,0.08)';
+        octx.lineWidth = 1;
+        octx.stroke();
+        const labelSize = Math.max(12, n.radius * 0.25);
+        octx.font = `800 ${labelSize}px system-ui`;
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillStyle = 'rgba(138,43,226,0.35)';
+        octx.fillText(n.name, n.x, n.y - labelSize * 0.3);
+        octx.font = `500 ${labelSize * 0.5}px system-ui`;
+        octx.fillStyle = 'rgba(255,255,255,0.15)';
+        octx.fillText(`${n._count || 0} artists`, n.x, n.y + labelSize * 0.5);
+        octx.globalAlpha = 1;
+        return;
+    }
+
+    // Render quality based on node size in buffer pixels
+    const rScaled = r * scale;
+    const isSmall = rScaled < 8;
+    const isTiny = rScaled < 3;
+
+    // Tiny nodes: just a colored dot (no clip, no image, no text)
+    if (isTiny) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
+        octx.fill();
+        return;
+    }
+
+    // Small nodes: filled circle + border, no image clip
+    if (isSmall) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        const img = _artMap.images[n.id];
+        if (img) {
+            octx.save(); octx.clip();
+            octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+            octx.restore();
+        } else {
+            octx.fillStyle = isW ? '#1a0a30' : '#141420';
+            octx.fill();
+        }
+        octx.strokeStyle = isW ? 'rgba(138,43,226,0.3)' : 'rgba(255,255,255,0.06)';
+        octx.lineWidth = isW ? 1.5 : 0.5;
+        octx.stroke();
+        return;
+    }
+
+    // Full quality: glow + clip + image + text
+    if (isW) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+        octx.strokeStyle = 'rgba(138,43,226,0.25)';
+        octx.lineWidth = 5;
+        octx.stroke();
+    }
+
+    octx.save();
+    octx.beginPath();
+    octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    octx.closePath();
+    octx.clip();
+
+    const img = _artMap.images[n.id];
+    if (img) {
+        octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+        octx.fillStyle = 'rgba(0,0,0,0.45)';
+        octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
+    } else {
+        octx.fillStyle = isW ? '#1a0a30' : '#141420';
+        octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
+    }
+    octx.restore();
+
+    octx.beginPath();
+    octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
+    octx.lineWidth = isW ? 2 : 0.5;
+    octx.stroke();
+
+    const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
+    octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+    octx.textAlign = 'center';
+    octx.textBaseline = 'middle';
+    octx.fillStyle = '#fff';
+    const maxC = isW ? 20 : 12;
+    const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
+    octx.fillText(label, n.x, n.y);
+}
+
+// Composite ONE node into the EXISTING buffer without a full rebuild. This is
+// what makes image streaming cheap: when a bitmap arrives we redraw only that
+// node (in place, over its placeholder) instead of redrawing all ~1500 nodes.
+// Returns false if there's no buffer yet (or the node is hidden) so the caller
+// can fall back to a full rebuild. Zoom changes rebuild the buffer at a new
+// scale; this always reads the CURRENT buffer scale/origin, so it stays correct.
+function _artMapCompositeNode(n) {
+    const oc = _artMap.offscreen;
+    const scale = _artMap._bufferScale;
+    if (!oc || scale == null) return false;
+    if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) return false;
+    if ((n.opacity || 0) < 0.01) return false;
+    const octx = oc.getContext('2d');
+    octx.save();
+    octx.scale(scale, scale);
+    octx.translate(-_artMap._bufferMinX, -_artMap._bufferMinY);
+    _artMapDrawNodeToBuffer(octx, n, scale);
+    octx.restore();
+    octx.globalAlpha = 1;
+    return true;
 }
 
 function _artMapRender() {
@@ -6616,6 +6645,8 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
     const queue = imgNodes.filter(n => n.image_url).slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
     let idx = 0, inFlight = 0, redrawPending = false;
 
+    // Fallback full-rebuild path, used only if the buffer isn't ready yet
+    // (e.g. images returned before the first paint built the offscreen buffer).
     const scheduleRedraw = () => {
         if (redrawPending || token !== _artMap._loadToken) return;
         redrawPending = true;
@@ -6637,7 +6668,12 @@ function _artMapStreamImages(imgNodes, concurrent = 24) {
                 .then(bmp => {
                     if (bmp && token === _artMap._loadToken) {
                         _artMap.images[n.id] = bmp;
-                        scheduleRedraw();
+                        // Composite just this node into the existing buffer (cheap)
+                        // and blit. Only fall back to a full rebuild if the buffer
+                        // isn't built yet. This keeps pan/hover at blit-speed the
+                        // whole time images are streaming in — the lag fix.
+                        if (_artMapCompositeNode(n)) _artMapRender();
+                        else scheduleRedraw();
                     }
                 })
                 .finally(() => { inFlight--; pump(); });
