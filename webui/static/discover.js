@@ -5533,8 +5533,9 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         octx.fill();
     }
 
-    // Glassy specular highlight (orb look) — skip the tiniest where it'd be noise.
-    if (rScaled >= 5) {
+    // Glassy specular highlight (orb look) — only on bubbles big enough to read
+    // it; skipping the dense swarm halves per-frame drawImage cost when zoomed in.
+    if (rScaled >= 12) {
         octx.drawImage(_artMapGlossSprite(), n.x - r, n.y - r, r * 2, r * 2);
     }
 
@@ -5694,10 +5695,14 @@ function _artMapStartLoop() {
         if (!a.running) return;
         _artMap._now = t;
         const more = _artMapStepAnimations(t);
-        _artMapDraw(); // sets _artMap._liveCount
-        // Keep looping while something is animating, OR while ambient buoyancy is
-        // on AND there are live bubbles on screen to bob (so a zoomed-out static
-        // overview costs nothing — the loop parks until the next interaction).
+        // Reveal/ripple → full 60fps. Idle buoyancy → ~30fps (the gentle bob
+        // doesn't need 60, and halving the redraws keeps dense zoomed-in maps
+        // smooth + cool).
+        const ambientOnly = !more && _artMap._ambient;
+        if (!ambientOnly || (t - (a._lastDraw || 0)) >= 32) {
+            _artMapDraw(); // sets _artMap._liveCount
+            a._lastDraw = t;
+        }
         const keep = more || (_artMap._ambient && _artMap._liveCount > 0 && !document.hidden);
         if (keep) {
             a.raf = requestAnimationFrame(tick);
@@ -5996,23 +6001,21 @@ function _artMapDraw() {
                         ctx.stroke();
                     }
 
-                    // Circle + image
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
-                    ctx.closePath();
-                    ctx.clip();
-
+                    // Circle + image — pre-masked, so no per-frame clip (that was
+                    // the hover-lag culprit once the ambient loop forced redraws).
                     const img = _artMap.images[hn.id];
                     if (img) {
                         ctx.drawImage(img, hn.x - r, hn.y - r, r * 2, r * 2);
-                        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                        ctx.beginPath();
+                        ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(0,0,0,0.35)'; // keep the name legible over art
+                        ctx.fill();
                     } else {
+                        ctx.beginPath();
+                        ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
                         ctx.fillStyle = isW ? '#1a0a30' : '#141420';
-                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                        ctx.fill();
                     }
-                    ctx.restore();
 
                     // Border
                     ctx.beginPath();
@@ -6155,7 +6158,13 @@ function _artMapShowTooltip(e, node) {
     // the hovered artist actually changes — a plain mousemove just repositions.
     if (_artMap._tipNodeId !== node.id) {
         _artMap._tipNodeId = node.id;
-        const img = node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>';
+        // Prefer the already-decoded (pre-masked) bitmap — instant, and it can't
+        // churn-blank while sweeping across dense zoomed-in bubbles the way a
+        // fresh <img src> reload does. Fall back to the URL, then a glyph.
+        const bmp = _artMap.images[node.id];
+        const img = bmp
+            ? '<canvas class="artmap-tip-img" width="88" height="88"></canvas>'
+            : (node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
         const genres = (node.genres || []).slice(0, 3);
         const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
         const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
@@ -6176,6 +6185,11 @@ function _artMapShowTooltip(e, node) {
             </div>
         `;
         tip.style.display = 'block';
+        // Paint the cached bitmap into the tooltip canvas (instant, no reload).
+        if (bmp) {
+            const c = tip.querySelector('canvas.artmap-tip-img');
+            if (c) { try { c.getContext('2d').drawImage(bmp, 0, 0, 88, 88); } catch (e) { /* ignore */ } }
+        }
     }
 
     // Position — keep on screen (cheap; runs every move)
