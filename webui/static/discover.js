@@ -5027,6 +5027,164 @@ const _artMap = {
     _revealT0: 0,     // performance.now() when the current reveal began
 };
 
+// ── Genre-island layout (shared by watchlist / genre / explore) ───────────
+// Every map groups its artists into genre "islands" floating on the water:
+// each island is a FILLED disc of album covers (packed centre-out, no empty
+// donut hole), with a floating genre title above it and a per-genre accent hue.
+// Islands are spread by a golden spiral + push-apart with generous spacing.
+
+// Deterministic hue (0–360) from a genre name, so each island has a stable tint.
+function _artMapGenreHue(name) {
+    let h = 0;
+    const s = (name || '').toLowerCase();
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+}
+
+// Pack members into a filled disc, centre outward. Returns relative offsets and
+// the disc radius. Most-popular members land nearest the centre.
+function _artMapPackDisc(members, nodeR, gap) {
+    const placements = [];
+    if (!members.length) return { placements, islandR: nodeR };
+    placements.push({ node: members[0], dx: 0, dy: 0 });
+    let idx = 1, ring = 1, ringDist = nodeR * 2 + gap;
+    const step = nodeR * 2 + gap;
+    while (idx < members.length) {
+        const circ = 2 * Math.PI * ringDist;
+        const cap = Math.max(1, Math.floor(circ / step));
+        const cnt = Math.min(cap, members.length - idx);
+        const aStep = (2 * Math.PI) / cnt;
+        const off = ring * 2.399963; // golden offset per ring → no spokes
+        for (let i = 0; i < cnt; i++) {
+            const a = off + i * aStep;
+            placements.push({ node: members[idx + i], dx: Math.cos(a) * ringDist, dy: Math.sin(a) * ringDist });
+        }
+        idx += cnt;
+        ringDist += step;
+        ring++;
+    }
+    return { placements, islandR: ringDist };
+}
+
+// Group flat nodes by primary genre into {name, count, nodes[]}, largest first.
+// Nodes with no genre fall into "Other". Focal nodes (watchlist/center) keep
+// their flag so the layout can size them up.
+function _artMapGroupByGenre(nodes, maxIslands = 14) {
+    const byGenre = {};
+    for (const n of nodes) {
+        const g = (n.genres && n.genres.length) ? String(n.genres[0]) : 'Other';
+        const key = g.replace(/\b\w/g, c => c.toUpperCase());
+        (byGenre[key] = byGenre[key] || []).push(n);
+    }
+    let groups = Object.keys(byGenre).map(name => ({ name, nodes: byGenre[name], count: byGenre[name].length }));
+    groups.sort((a, b) => b.count - a.count);
+    if (groups.length > maxIslands) {
+        // Fold the long tail of tiny genres into one "Other" island.
+        const head = groups.slice(0, maxIslands - 1);
+        const tail = groups.slice(maxIslands - 1);
+        const tailNodes = tail.flatMap(g => g.nodes);
+        head.push({ name: 'Other', nodes: tailNodes, count: tailNodes.length });
+        groups = head;
+    }
+    return groups;
+}
+
+// Lay out islands → fills _artMap.placed and _artMap._islands. groups is an
+// array of {name, count, nodes[]} where each node has name/image_url/genres/ids.
+function _artMapLayoutIslands(groups, opts = {}) {
+    _artMap.placed = [];
+    _artMap._islands = [];
+    const nodeR = opts.nodeR || (_artMap.WATCHLIST_R * 0.22);
+    const gap = opts.gap || (_artMap.BUFFER * 2.2);
+    const cap = opts.maxPerIsland || 500;
+    let pid = 0;
+
+    const islands = groups.map(g => {
+        const members = g.nodes.slice()
+            .sort((a, b) => (b._focal ? 1 : 0) - (a._focal ? 1 : 0) || (b.popularity || 0) - (a.popularity || 0))
+            .slice(0, cap);
+        const { placements, islandR } = _artMapPackDisc(members, nodeR, gap);
+        return { name: g.name, count: g.count != null ? g.count : members.length, placements, islandR, hue: _artMapGenreHue(g.name) };
+    });
+
+    // Golden-spiral seed placement
+    islands.forEach((isl, i) => {
+        if (i === 0) { isl.cx = 0; isl.cy = 0; }
+        else { const a = i * 2.399963; const r = isl.islandR * Math.sqrt(i) * 1.05; isl.cx = Math.cos(a) * r; isl.cy = Math.sin(a) * r; }
+    });
+    // Push apart — generous water between islands
+    for (let pass = 0; pass < 160; pass++) {
+        let moved = false;
+        for (let i = 0; i < islands.length; i++) {
+            for (let j = i + 1; j < islands.length; j++) {
+                const dx = islands[j].cx - islands[i].cx, dy = islands[j].cy - islands[i].cy;
+                const dist = Math.hypot(dx, dy) || 1;
+                const minD = islands[i].islandR + islands[j].islandR + nodeR * 7;
+                if (dist < minD) {
+                    const push = (minD - dist) / 2 + 1;
+                    islands[i].cx -= dx / dist * push; islands[i].cy -= dy / dist * push;
+                    islands[j].cx += dx / dist * push; islands[j].cy += dy / dist * push;
+                    moved = true;
+                }
+            }
+        }
+        if (!moved) break;
+    }
+
+    for (const isl of islands) {
+        // Floating genre title above the island
+        _artMap.placed.push({
+            id: `label_${isl.name}`, name: isl.name, x: isl.cx, y: isl.cy - isl.islandR - nodeR * 1.4,
+            radius: Math.max(nodeR * 1.3, isl.islandR * 0.16), opacity: 1,
+            type: 'genre_label', _isLabel: true, _count: isl.count, _hue: isl.hue, image_url: '',
+        });
+        for (const p of isl.placements) {
+            const n = p.node;
+            _artMap.placed.push({
+                id: pid++, _origId: n.id, name: n.name,
+                x: isl.cx + p.dx, y: isl.cy + p.dy,
+                radius: nodeR * (n._focal ? 1.45 : 1), opacity: 1,
+                type: n.type || 'similar',
+                image_url: n.image_url || '', genres: n.genres || [],
+                spotify_id: n.spotify_id || '', itunes_id: n.itunes_id || '',
+                deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
+                musicbrainz_id: n.musicbrainz_id || '',
+                popularity: n.popularity || 0, _hue: isl.hue, _island: isl.name,
+            });
+        }
+        _artMap._islands.push({ name: isl.name, cx: isl.cx, cy: isl.cy, r: isl.islandR, hue: isl.hue, count: isl.count });
+    }
+
+    _artMap._nodeById = {};
+    _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
+}
+
+// Remap edges that used original node ids to the new placed-node ids.
+function _artMapRemapEdges(edges) {
+    const map = {};
+    for (const n of _artMap.placed) if (n._origId != null && map[n._origId] == null) map[n._origId] = n.id;
+    const out = [];
+    for (const e of (edges || [])) {
+        const s = map[e.source], t = map[e.target];
+        if (s != null && t != null && s !== t) out.push({ source: s, target: t, weight: e.weight || 1 });
+    }
+    return out;
+}
+
+// Auto-zoom/pan so all placed nodes fit the viewport with a margin.
+function _artMapFitToContent(marginPx = 120) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of _artMap.placed) {
+        minX = Math.min(minX, n.x - n.radius); maxX = Math.max(maxX, n.x + n.radius);
+        minY = Math.min(minY, n.y - n.radius); maxY = Math.max(maxY, n.y + n.radius);
+    }
+    if (!isFinite(minX)) return;
+    const mapW = maxX - minX + marginPx * 2, mapH = maxY - minY + marginPx * 2;
+    _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
+    _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+    _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+}
+
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (!container) return;
@@ -5073,141 +5231,15 @@ async function openArtistMap() {
         document.getElementById('artist-map-stats').textContent =
             `${data.watchlist_count} watchlist · ${data.similar_count} similar`;
 
-        _artMap.edges = data.edges;
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        // ── PHASE 1: Place watchlist artists with guaranteed no-overlap ──
-        const wNodes = data.nodes.filter(n => n.type === 'watchlist');
-        // Minimum center-to-center distance between watchlist nodes
-        const minCenterDist = WR * 3.5; // WR*2 for radii + WR*1.5 gap — similar artists fill the gaps via spiral packing
-
-        // Place watchlist nodes in a spiral — deterministic, guaranteed spacing
-        wNodes.forEach((n, i) => {
-            n.radius = WR;
-            n.opacity = 0;
-            if (i === 0) {
-                n.x = 0; n.y = 0;
-            } else {
-                // Golden angle spiral for even distribution
-                const angle = i * 2.399963; // golden angle in radians
-                const r = minCenterDist * Math.sqrt(i) * 0.7;
-                n.x = Math.cos(angle) * r;
-                n.y = Math.sin(angle) * r;
-            }
-        });
-
-        // Post-process: push apart any watchlist nodes that ended up too close
-        for (let pass = 0; pass < 50; pass++) {
-            let moved = false;
-            for (let i = 0; i < wNodes.length; i++) {
-                for (let j = i + 1; j < wNodes.length; j++) {
-                    const dx = wNodes[j].x - wNodes[i].x;
-                    const dy = wNodes[j].y - wNodes[i].y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    if (dist < minCenterDist) {
-                        const push = (minCenterDist - dist) / 2 + 1;
-                        const nx = (dx / dist) * push;
-                        const ny = (dy / dist) * push;
-                        wNodes[i].x -= nx; wNodes[i].y -= ny;
-                        wNodes[j].x += nx; wNodes[j].y += ny;
-                        moved = true;
-                    }
-                }
-            }
-            if (!moved) break;
-        }
-
-        wNodes.forEach(n => { _artMap.placed.push(n); });
-
-        // ── PHASE 2: Place similar artists around their source watchlist nodes ──
-        const sNodes = data.nodes.filter(n => n.type === 'similar');
-        sNodes.forEach(n => {
-            const occ = n.occurrence || 1;
-            const rank = n.rank || 5;
-            // Bigger overall: min 25% of WR, max 55%, scaled by relevance
-            n.radius = Math.min(WR * 0.55, Math.max(WR * 0.25, WR * 0.2 + occ * WR * 0.06 + (10 - rank) * WR * 0.025));
-        });
-        sNodes.sort((a, b) => b.radius - a.radius);
-
-        // Build edge lookup: target_id → source node (O(1) instead of .find())
-        const edgeMap = {};
-        _artMap.edges.forEach(e => { edgeMap[e.target] = e.source; });
-        const nodeById = {};
-        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
-
-        // Spatial grid for fast collision detection
-        // Cell size must cover the largest possible bubble diameter + buffer
-        const CELL = WR * 2 + BUF * 2;
-        const grid = {};
-        function _gridKey(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
-        function _gridAdd(n) {
-            const k = _gridKey(n.x, n.y);
-            if (!grid[k]) grid[k] = [];
-            grid[k].push(n);
-        }
-        function _gridCheck(x, y, r) {
-            const cx = Math.floor(x / CELL);
-            const cy = Math.floor(y / CELL);
-            // Search wider radius to catch large watchlist bubbles
-            for (let dx = -3; dx <= 3; dx++) {
-                for (let dy = -3; dy <= 3; dy++) {
-                    const cell = grid[`${cx + dx},${cy + dy}`];
-                    if (!cell) continue;
-                    for (const p of cell) {
-                        const ddx = x - p.x, ddy = y - p.y;
-                        const minD = r + p.radius + BUF;
-                        if (ddx * ddx + ddy * ddy < minD * minD) return true;
-                    }
-                }
-            }
-            return false;
-        }
-        // Add watchlist nodes to grid
-        _artMap.placed.forEach(n => _gridAdd(n));
-
-        // Place similar nodes with spatial grid collision
-        for (const sn of sNodes) {
-            const srcId = edgeMap[sn.id];
-            const src = srcId != null ? nodeById[srcId] : null;
-            const cx = src ? src.x : 0;
-            const cy = src ? src.y : 0;
-            const startDist = (src ? src.radius : WR) + sn.radius + BUF;
-
-            let placed = false;
-            for (let dist = startDist; dist < startDist + WR * 3; dist += sn.radius * 0.5) {
-                const steps = Math.max(8, Math.floor(dist * 0.1));
-                const off = Math.random() * Math.PI * 2;
-                for (let a = 0; a < steps; a++) {
-                    const angle = off + (a / steps) * Math.PI * 2;
-                    const tx = cx + Math.cos(angle) * dist;
-                    const ty = cy + Math.sin(angle) * dist;
-                    if (!_gridCheck(tx, ty, sn.radius)) {
-                        sn.x = tx; sn.y = ty; sn.opacity = 0;
-                        _artMap.placed.push(sn);
-                        nodeById[sn.id] = sn;
-                        _gridAdd(sn);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        }
-
-        // Auto-zoom to fit all nodes
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200;
-        const mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        // Group every watchlist + similar artist into genre islands. Watchlist
+        // artists are focal (sit centre-most + sized up). The discovery edges
+        // (watchlist → similar) are remapped to the new node ids so the hover
+        // constellation still shows who's related across islands.
+        const rawNodes = data.nodes.map(n => ({ ...n, _focal: n.type === 'watchlist' }));
+        const groups = _artMapGroupByGenre(rawNodes);
+        _artMapLayoutIslands(groups);
+        _artMap.edges = _artMapRemapEdges(data.edges);
+        _artMapFitToContent();
 
         // Setup interaction
         _artMapSetupInteraction(canvas);
@@ -5409,25 +5441,26 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
     const mul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
     octx.globalAlpha = op * mul;
 
-    // Genre label node — transparent circle with large text
+    // Genre title — a clean floating label above its island (no big bubble).
     if (n._isLabel) {
-        octx.globalAlpha = 0.6 * mul;
-        octx.beginPath();
-        octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-        octx.fillStyle = 'rgba(138,43,226,0.04)';
-        octx.fill();
-        octx.strokeStyle = 'rgba(138,43,226,0.08)';
-        octx.lineWidth = 1;
-        octx.stroke();
-        const labelSize = Math.max(12, n.radius * 0.25);
-        octx.font = `800 ${labelSize}px system-ui`;
+        const hue = n._hue == null ? 270 : n._hue;
+        const titleSize = Math.max(13, n.radius * 0.42);
+        const name = (n.name || '').toUpperCase();
         octx.textAlign = 'center';
         octx.textBaseline = 'middle';
-        octx.fillStyle = 'rgba(138,43,226,0.35)';
-        octx.fillText(n.name, n.x, n.y - labelSize * 0.3);
-        octx.font = `500 ${labelSize * 0.5}px system-ui`;
-        octx.fillStyle = 'rgba(255,255,255,0.15)';
-        octx.fillText(`${n._count || 0} artists`, n.x, n.y + labelSize * 0.5);
+        // Soft glow behind the title for legibility over the water.
+        octx.globalAlpha = mul;
+        octx.font = `800 ${titleSize}px system-ui, sans-serif`;
+        octx.shadowColor = `hsla(${hue},70%,12%,0.9)`;
+        octx.shadowBlur = titleSize * 0.6;
+        octx.fillStyle = `hsla(${hue},85%,82%,0.96)`;
+        octx.fillText(name, n.x, n.y);
+        octx.shadowBlur = 0;
+        // Count subtitle
+        octx.globalAlpha = 0.55 * mul;
+        octx.font = `600 ${titleSize * 0.42}px system-ui, sans-serif`;
+        octx.fillStyle = 'rgba(255,255,255,0.7)';
+        octx.fillText(`${n._count || 0} artists`, n.x, n.y + titleSize * 0.85);
         octx.globalAlpha = 1;
         return;
     }
@@ -5476,10 +5509,12 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         octx.fill();
     }
 
-    // Border
+    // Border — tinted with the island's genre hue so clusters read as a family.
     octx.beginPath();
     octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    octx.strokeStyle = isW ? 'rgba(138,43,226,0.45)' : 'rgba(255,255,255,0.10)';
+    if (isW) octx.strokeStyle = 'rgba(138,43,226,0.5)';
+    else if (n._hue != null) octx.strokeStyle = `hsla(${n._hue},70%,70%,0.22)`;
+    else octx.strokeStyle = 'rgba(255,255,255,0.10)';
     octx.lineWidth = isW ? 2 : (rScaled >= 7 ? 1 : 0.5);
     octx.stroke();
 
@@ -6230,154 +6265,17 @@ async function _openGenreMapWithSelection(selectedGenre) {
         document.getElementById('artist-map-stats').innerHTML =
             `<span class="artmap-genre-change" onclick="event.stopPropagation(); _changeGenre()" title="Change genre">${escapeHtml(selectedGenre)} ▾</span> · ${genres.length} genre${genres.length > 1 ? 's' : ''} · ${totalArtists} artists`;
 
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        const maxPerGenre = 500;
-        const nodeR = WR * 0.2;
-
-        // Calculate actual cluster radius for each genre based on ring count
-        function getClusterRadius(artistCount) {
-            const count = Math.min(artistCount, maxPerGenre);
-            let ringDist = WR + nodeR * 2 + BUF;
-            let placed = 0;
-            while (placed < count) {
-                const circ = 2 * Math.PI * ringDist;
-                const inRing = Math.max(1, Math.floor(circ / (nodeR * 2 + BUF)));
-                placed += Math.min(inRing, count - placed);
-                ringDist += nodeR * 2 + BUF;
-            }
-            return ringDist;
-        }
-
-        // Pre-compute cluster radii
-        genres.forEach(g => { g._clusterR = getClusterRadius(g.artist_ids.length); });
-
-        // Golden spiral placement
-        genres.forEach((g, i) => {
-            if (i === 0) { g._cx = 0; g._cy = 0; }
-            else {
-                const angle = i * 2.399963;
-                const r = g._clusterR * Math.sqrt(i) * 0.9;
-                g._cx = Math.cos(angle) * r;
-                g._cy = Math.sin(angle) * r;
-            }
-        });
-
-        // Push apart using actual cluster radii — no overlap possible
-        for (let pass = 0; pass < 80; pass++) {
-            let moved = false;
-            for (let i = 0; i < genres.length; i++) {
-                for (let j = i + 1; j < genres.length; j++) {
-                    const dx = genres[j]._cx - genres[i]._cx;
-                    const dy = genres[j]._cy - genres[i]._cy;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const minDist = genres[i]._clusterR + genres[j]._clusterR + BUF * 4;
-                    if (dist < minDist) {
-                        const push = (minDist - dist) / 2 + 1;
-                        genres[i]._cx -= (dx / dist) * push; genres[i]._cy -= (dy / dist) * push;
-                        genres[j]._cx += (dx / dist) * push; genres[j]._cy += (dy / dist) * push;
-                        moved = true;
-                    }
-                }
-            }
-            if (!moved) break;
-        }
-
-        let placedCount = 0;
-
-        // Place genre labels as big watchlist-style bubbles
-        for (const g of genres) {
-            _artMap.placed.push({
-                id: `genre_${g.name}`, name: g.name.toUpperCase(),
-                x: g._cx, y: g._cy, radius: WR, opacity: 1,
-                type: 'genre_label', image_url: '', genres: [g.name],
-                _isLabel: true, _count: g.count
-            });
-        }
-
-        // Place artists in concentric rings — deterministic O(1) per node, handles 10K+ instantly
-        let genreIdx = 0;
-
-        async function placeGenreArtists() {
-            for (; genreIdx < genres.length; genreIdx++) {
-                const genre = genres[genreIdx];
-                const artists = genre.artist_ids.slice(0, maxPerGenre);
-                const sorted = artists.map(nid => data.nodes[nid]).filter(Boolean).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-
-                let ringDist = WR + nodeR * 2 + BUF;
-                let ringNum = 0;
-                let placed = 0;
-
-                while (placed < sorted.length) {
-                    const circumference = 2 * Math.PI * ringDist;
-                    const nodesInRing = Math.max(1, Math.floor(circumference / (nodeR * 2 + BUF)));
-                    const count = Math.min(nodesInRing, sorted.length - placed);
-                    const angleStep = (2 * Math.PI) / nodesInRing;
-                    const angleOffset = ringNum * 0.618;
-
-                    for (let i = 0; i < count; i++) {
-                        const n = sorted[placed + i];
-                        if (!n) continue;
-                        const isW = n.type === 'watchlist' || n.type === 'center';
-                        const r = isW ? nodeR * 1.5 : nodeR;
-                        const angle = angleOffset + i * angleStep;
-
-                        _artMap.placed.push({
-                            id: placedCount + 1000, _origId: n.id, name: n.name,
-                            x: genre._cx + Math.cos(angle) * ringDist,
-                            y: genre._cy + Math.sin(angle) * ringDist,
-                            radius: r, opacity: 1,
-                            type: isW ? 'watchlist' : 'similar',
-                            image_url: n.image_url || '', genres: n.genres || [],
-                            spotify_id: n.spotify_id || '', itunes_id: n.itunes_id || '',
-                            deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
-                        });
-                        placedCount++;
-                    }
-                    placed += count;
-                    ringDist += nodeR * 2 + BUF;
-                    ringNum++;
-                }
-
-                if (loadingText) loadingText.textContent = `Placing artists... ${genreIdx + 1}/${genres.length} genres (${placedCount} placed)`;
-                if (genreIdx % 5 === 0) await new Promise(r => setTimeout(r, 0));
-            }
-        }
-        await placeGenreArtists();
-
-        // Build edges: connect artists that appear in multiple genre clusters
+        // Build genre-island groups from the selected + related genres and lay
+        // them out as filled-disc islands on the water (shared engine).
+        const groups = genres.map(g => ({
+            name: g.name,
+            count: g.count,
+            nodes: (g.artist_ids || []).map(nid => data.nodes[nid]).filter(Boolean),
+        }));
+        _artMapLayoutIslands(groups);
         _artMap.edges = [];
-        const artistNodes = {};
-        _artMap.placed.forEach(n => {
-            if (n._origId != null) {
-                if (!artistNodes[n._origId]) artistNodes[n._origId] = [];
-                artistNodes[n._origId].push(n.id);
-            }
-        });
-        Object.values(artistNodes).forEach(ids => {
-            if (ids.length > 1) {
-                for (let i = 0; i < ids.length - 1; i++) {
-                    _artMap.edges.push({ source: ids[i], target: ids[i + 1], weight: 5 });
-                }
-            }
-        });
-
-        _artMap._nodeById = {};
-        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
-
-        // Auto-zoom
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        _artMapFitToContent();
+        const placedCount = _artMap.placed.filter(n => !n._isLabel).length;
 
         _artMapSetupInteraction(canvas);
 
@@ -6477,116 +6375,15 @@ async function _openArtistMapExplorerWithName(name) {
         document.getElementById('artist-map-stats').textContent =
             `${data.center} · ${ring1Count} similar · ${ring2Count} extended`;
 
-        _artMap.edges = data.edges;
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        // Layout: center node at origin, ring 1 in circle around it, ring 2 around ring 1
-        const centerNode = data.nodes[0];
-        centerNode.x = 0; centerNode.y = 0;
-        centerNode.radius = WR * 1.2; // Extra large center
-        centerNode.opacity = 1;
-        centerNode.type = 'center';
-        _artMap.placed.push(centerNode);
-
-        const CELL = WR * 2 + BUF * 2;
-        const grid = {};
-        function _gk(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
-        function _ga(n) { const k = _gk(n.x, n.y); if (!grid[k]) grid[k] = []; grid[k].push(n); }
-        function _gc(x, y, r) {
-            const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
-            for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
-                const cell = grid[`${cx + dx},${cy + dy}`];
-                if (!cell) continue;
-                for (const p of cell) {
-                    const ddx = x - p.x, ddy = y - p.y;
-                    if (ddx * ddx + ddy * ddy < (r + p.radius + BUF) * (r + p.radius + BUF)) return true;
-                }
-            }
-            return false;
-        }
-        _ga(centerNode);
-
-        // Place ring 1 in a circle
-        const ring1 = data.nodes.filter(n => n.ring === 1);
-        const ring1Dist = WR * 2.5;
-        ring1.forEach((n, i) => {
-            const angle = (i / ring1.length) * Math.PI * 2;
-            const rank = n.rank || 5;
-            n.radius = WR * 0.4 + (10 - rank) * WR * 0.03;
-            n.opacity = 1;
-
-            // Find non-colliding position near ideal
-            let placed = false;
-            for (let dist = ring1Dist; dist < ring1Dist + WR * 3; dist += n.radius * 0.5) {
-                for (let ao = 0; ao < 6; ao++) {
-                    const a = angle + (ao * 0.1 * (ao % 2 ? 1 : -1));
-                    const tx = Math.cos(a) * dist;
-                    const ty = Math.sin(a) * dist;
-                    if (!_gc(tx, ty, n.radius)) {
-                        n.x = tx; n.y = ty;
-                        _artMap.placed.push(n);
-                        _ga(n);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        });
-
-        // Place ring 2 around their ring 1 sources
-        const ring2 = data.nodes.filter(n => n.ring === 2);
-        const nodeById = {};
-        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
-
-        ring2.forEach(n => {
-            // Find the ring 1 node that connects to this
-            const edge = data.edges.find(e => e.target === n.id);
-            const src = edge ? nodeById[edge.source] : null;
-            const cx = src ? src.x : 0;
-            const cy = src ? src.y : 0;
-
-            n.radius = WR * 0.2 + (n.popularity || 0) / 100 * WR * 0.1;
-            n.opacity = 1;
-
-            const startDist = (src ? src.radius : WR) + n.radius + BUF;
-            let placed = false;
-            for (let dist = startDist; dist < startDist + WR * 2; dist += n.radius * 0.5) {
-                const steps = Math.max(8, Math.floor(dist * 0.08));
-                const off = Math.random() * Math.PI * 2;
-                for (let a = 0; a < steps; a++) {
-                    const angle = off + (a / steps) * Math.PI * 2;
-                    const tx = cx + Math.cos(angle) * dist;
-                    const ty = cy + Math.sin(angle) * dist;
-                    if (!_gc(tx, ty, n.radius)) {
-                        n.x = tx; n.y = ty;
-                        _artMap.placed.push(n);
-                        _ga(n);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        });
-
-        // Build node lookup for edges
-        _artMap._nodeById = {};
-        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
-
-        // Auto-zoom
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        // Group the center + all discovered artists into genre islands. The
+        // center artist is focal. Discovery edges (center → similar → extended)
+        // are remapped so the hover constellation still traces how you got from
+        // one artist to another across the islands.
+        const rawNodes = data.nodes.map(n => ({ ...n, _focal: n.ring === 0 || n.type === 'center' }));
+        const groups = _artMapGroupByGenre(rawNodes);
+        _artMapLayoutIslands(groups);
+        _artMap.edges = _artMapRemapEdges(data.edges);
+        _artMapFitToContent();
 
         _artMapSetupInteraction(canvas);
 
