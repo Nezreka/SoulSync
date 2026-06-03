@@ -34358,6 +34358,36 @@ div.artist-hero-badge {
 .artmap-explore-input::placeholder { color: rgba(255,255,255,0.2); }
 .artmap-search-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* Artist Explorer — search + select picker */
+.artmap-explore-search-wrap { position: relative; }
+.artmap-explore-search-wrap .artmap-explore-input { margin-bottom: 12px; }
+.artmap-explore-spinner { position: absolute; right: 12px; top: 11px; pointer-events: none; }
+.artmap-explore-spinner .watch-all-loading-spinner { width: 18px; height: 18px; border-width: 2px; }
+.artmap-explore-results {
+    max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: 18px;
+}
+.artmap-explore-results:empty { margin-bottom: 0; }
+.artmap-explore-result {
+    display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px;
+    cursor: pointer; transition: background 0.15s ease;
+}
+.artmap-explore-result:hover { background: rgba(138,43,226,0.14); }
+.artmap-explore-result img {
+    width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: 0 0 auto;
+    background: rgba(255,255,255,0.06);
+}
+.artmap-explore-result-name {
+    flex: 1 1 auto; min-width: 0; color: #fff; font-size: 14px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artmap-explore-result-go {
+    flex: 0 0 auto; font-size: 11px; font-weight: 700; color: rgba(138,43,226,0.9);
+    opacity: 0; transition: opacity 0.15s ease;
+}
+.artmap-explore-result:hover .artmap-explore-result-go { opacity: 1; }
+.artmap-explore-empty { padding: 18px; text-align: center; color: rgba(255,255,255,0.35); font-size: 13px; }
+
 /* Genre picker modal */
 .artmap-genre-picker-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%);
