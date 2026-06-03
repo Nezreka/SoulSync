@@ -83,6 +83,7 @@ const enrichmentManagerState = {
     page: 0,
     pageSize: 25,
     unmatched: null,    // { total, items }
+    selectedItems: new Set(),  // ids checked for bulk retry
     pollTimer: null,
     loadToken: 0,       // guards against out-of-order async renders
 };
@@ -120,7 +121,7 @@ function _emRelativeTime(value) {
 
 // ── Open / close ──────────────────────────────────────────────────────────
 
-async function openEnrichmentManager() {
+async function openEnrichmentManager(workerId) {
     let overlay = document.getElementById('enrichment-manager-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -157,11 +158,16 @@ async function openEnrichmentManager() {
     await refreshAllEnrichmentStatuses();
     renderEnrichmentRail();
 
-    // Default selection: first running worker, else first in the list.
-    const running = ENRICHMENT_WORKERS.find(
-        w => enrichmentManagerState.statuses[w.id]?.running
-    );
-    selectEnrichmentWorker((running || ENRICHMENT_WORKERS[0]).id);
+    // Selection priority: explicit deep-link arg → last-viewed (remembered) →
+    // first running worker → first in the list.
+    let remembered = null;
+    try { remembered = localStorage.getItem('em-last-worker'); } catch (_e) { /* ignore */ }
+    const valid = (wid) => wid && _emWorkerById[wid];
+    const running = ENRICHMENT_WORKERS.find(w => enrichmentManagerState.statuses[w.id]?.running);
+    const initial = (valid(workerId) && workerId)
+        || (valid(remembered) && remembered)
+        || (running || ENRICHMENT_WORKERS[0]).id;
+    selectEnrichmentWorker(initial);
     if (modal) setTimeout(() => modal.focus(), 60);
 
     if (enrichmentManagerState.pollTimer) clearInterval(enrichmentManagerState.pollTimer);
@@ -307,6 +313,8 @@ function _emUpdateRailRow(id) {
 
 async function selectEnrichmentWorker(id) {
     enrichmentManagerState.selected = id;
+    try { localStorage.setItem('em-last-worker', id); } catch (_e) { /* ignore */ }
+    enrichmentManagerState.selectedItems.clear();
     enrichmentManagerState.breakdown = null;
     enrichmentManagerState.unmatched = null;
     enrichmentManagerState.priority = '';
@@ -389,6 +397,7 @@ function renderEnrichmentPanel() {
 
     panel.innerHTML = `
         <div class="em-panel-header" id="em-panel-header"></div>
+        <div class="em-banner" id="em-banner" hidden></div>
         <div class="em-chain" id="em-chain"></div>
         <div class="em-section-label em-section-label--row">
             <span>Enrichment coverage</span>
@@ -397,7 +406,8 @@ function renderEnrichmentPanel() {
         <div class="em-stats" id="em-stats"></div>
         <div class="em-unmatched">
             <div class="em-unmatched-controls" id="em-unmatched-controls"></div>
-            <div class="em-unmatched-list" id="em-unmatched-list"></div>
+            <div class="em-bulk-bar" id="em-bulk-bar" hidden></div>
+            <div class="em-unmatched-list" id="em-unmatched-list" onkeydown="onEnrichmentListKey(event)"></div>
             <div class="em-pager" id="em-pager"></div>
         </div>`;
     _emRenderPanelHeader();
@@ -543,6 +553,33 @@ function _emUpdateHeaderLive() {
         toggle.classList.toggle('em-btn--go', !!isPaused);
         toggle.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
     }
+
+    // #1 unconfigured + #2 rate-limit banner.
+    const banner = document.getElementById('em-banner');
+    if (banner) {
+        let html = '', cls = 'em-banner';
+        if (status && status.enabled === false) {
+            cls += ' em-banner--warn';
+            html = '⚙️ This source isn’t configured — add its credentials in Settings. '
+                 + 'Browsing works, but matches and retries won’t run until it’s set up.';
+        } else if (status && status.rate_limited) {
+            cls += ' em-banner--warn';
+            const rl = status.rate_limit || {};
+            const secs = rl.retry_after || rl.reset_in || rl.cooldown_seconds;
+            const when = secs ? ` — resumes in ~${_emHumanDuration(secs)}` : ' — it will resume automatically';
+            html = `⏳ Rate-limited by the source${when}.`;
+        }
+        banner.className = cls;
+        banner.innerHTML = html;
+        banner.hidden = !html;
+    }
+}
+
+function _emHumanDuration(seconds) {
+    const s = Math.max(0, Math.round(Number(seconds) || 0));
+    if (s < 60) return `${s}s`;
+    const m = Math.round(s / 60);
+    return m < 60 ? `${m}m` : `${Math.round(m / 60)}h`;
 }
 
 function _emRenderStats() {
@@ -692,22 +729,96 @@ function _emRenderUnmatchedList() {
                 ? '<span class="em-chip em-chip--nf">not found</span>'
                 : '<span class="em-chip em-chip--pend">pending</span>';
             const safeName = _emEscape(item.name || 'Unknown');
+            const safeId = _emEscape(item.id);
+            const parent = item.parent
+                ? `<span class="em-row-parent" title="${_emEscape(item.parent)}">· ${_emEscape(item.parent)}</span>`
+                : '';
+            const checked = enrichmentManagerState.selectedItems.has(String(item.id)) ? 'checked' : '';
             return `
                 <div class="em-row">
+                    <input type="checkbox" class="em-row-check" ${checked}
+                           aria-label="Select ${safeName}"
+                           onchange="toggleEnrichmentRowSelect('${safeId}', this.checked)">
                     ${img}
                     <div class="em-row-info">
-                        <div class="em-row-name" title="${safeName}">${safeName}</div>
+                        <div class="em-row-name" title="${safeName}">${safeName} ${parent}</div>
                         <div class="em-row-meta">${statusBadge} ${last}</div>
                     </div>
                     <div class="em-row-actions">
-                        <button class="em-btn em-btn--sm" onclick="openEnrichmentMatch('${id}','${entity}','${_emEscape(item.id)}', this)">Match</button>
+                        <button class="em-btn em-btn--sm" onclick="openEnrichmentMatch('${id}','${entity}','${safeId}', this)">Match</button>
                         <button class="em-btn em-btn--sm em-btn--ghost" title="Re-queue for the worker to try again"
-                                onclick="retryEnrichmentItem('${id}','${entity}','${_emEscape(item.id)}', this)">Retry</button>
+                                onclick="retryEnrichmentItem('${id}','${entity}','${safeId}', this)">Retry</button>
                     </div>
                 </div>`;
         }).join('');
     }
     _emRenderPager();
+    _emRenderBulkBar();
+}
+
+function _emRenderBulkBar() {
+    const bar = document.getElementById('em-bulk-bar');
+    if (!bar) return;
+    const n = enrichmentManagerState.selectedItems.size;
+    if (!n) { bar.hidden = true; bar.innerHTML = ''; return; }
+    bar.hidden = false;
+    bar.innerHTML = `
+        <span class="em-bulk-count">${n} selected</span>
+        <button class="em-btn em-btn--sm" onclick="retrySelectedEnrichment(this)">↻ Retry selected</button>
+        <button class="em-btn em-btn--sm em-btn--ghost" onclick="clearEnrichmentSelection()">Clear</button>`;
+}
+
+function toggleEnrichmentRowSelect(id, checked) {
+    if (checked) enrichmentManagerState.selectedItems.add(String(id));
+    else enrichmentManagerState.selectedItems.delete(String(id));
+    _emRenderBulkBar();
+}
+
+function clearEnrichmentSelection() {
+    enrichmentManagerState.selectedItems.clear();
+    _emRenderUnmatchedList();
+}
+
+// #6 keyboard nav: ↑/↓ moves focus between rows' Match buttons (Enter/Space
+// then activates natively). The list isn't refreshed by polling, so focus
+// stays put between user actions.
+function onEnrichmentListKey(e) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const host = document.getElementById('em-unmatched-list');
+    if (!host) return;
+    const btns = Array.from(host.querySelectorAll('.em-row .em-row-actions .em-btn:first-child'));
+    if (!btns.length) return;
+    e.preventDefault();
+    const idx = btns.indexOf(document.activeElement);
+    const next = e.key === 'ArrowDown'
+        ? (idx < 0 ? 0 : Math.min(idx + 1, btns.length - 1))
+        : (idx <= 0 ? 0 : idx - 1);
+    btns[next].focus();
+}
+
+async function retrySelectedEnrichment(btn) {
+    const service = enrichmentManagerState.selected;
+    const entity = enrichmentManagerState.entityTab;
+    const ids = Array.from(enrichmentManagerState.selectedItems);
+    if (!ids.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Re-queuing…'; }
+    let ok = 0;
+    // Cap concurrency to be gentle on the server.
+    for (let i = 0; i < ids.length; i += 5) {
+        const slice = ids.slice(i, i + 5);
+        const results = await Promise.all(slice.map(eid =>
+            fetch(`/api/enrichment/${service}/retry`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_type: entity, scope: 'item', entity_id: eid }),
+            }).then(r => r.ok).catch(() => false)
+        ));
+        ok += results.filter(Boolean).length;
+    }
+    showToast(`Re-queued ${ok.toLocaleString()} item(s)`, ok ? 'success' : 'error');
+    enrichmentManagerState.selectedItems.clear();
+    await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
+    _emRenderStats();
+    _emRenderUnmatchedList();
 }
 
 function _emRenderPager() {
@@ -961,4 +1072,8 @@ window.toggleEnrichmentWorker = toggleEnrichmentWorker;
 window.setEnrichmentPriority = setEnrichmentPriority;
 window.retryEnrichmentItem = retryEnrichmentItem;
 window.retryAllFailedEnrichment = retryAllFailedEnrichment;
+window.toggleEnrichmentRowSelect = toggleEnrichmentRowSelect;
+window.clearEnrichmentSelection = clearEnrichmentSelection;
+window.retrySelectedEnrichment = retrySelectedEnrichment;
+window.onEnrichmentListKey = onEnrichmentListKey;
 window.openEnrichmentMatch = openEnrichmentMatch;

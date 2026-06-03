@@ -34,21 +34,26 @@ SERVICE_ENTITY_SUPPORT = {
     'amazon': ('artist', 'album', 'track'),
 }
 
-# entity_type -> table / display-name column / image expression / optional join.
+# entity_type -> table / display-name column / image expression / optional join
+# / parent-context expression (the artist an album belongs to; the album a
+# track belongs to) so the UI can disambiguate same-named items.
 # tracks carry no artwork column of their own, so we borrow the parent album's.
 _ENTITY_TABLE = {
     'artist': {
         'table': 'artists', 'name': 'name',
-        'image': 'artists.thumb_url', 'join': '',
+        'image': 'artists.thumb_url', 'join': '', 'parent': None,
     },
     'album': {
         'table': 'albums', 'name': 'title',
-        'image': 'albums.thumb_url', 'join': '',
+        'image': 'albums.thumb_url',
+        'join': 'LEFT JOIN artists par ON albums.artist_id = par.id',
+        'parent': 'par.name',
     },
     'track': {
         'table': 'tracks', 'name': 'title',
         'image': 'al.thumb_url',
         'join': 'LEFT JOIN albums al ON tracks.album_id = al.id',
+        'parent': 'al.title',
     },
 }
 
@@ -134,9 +139,11 @@ def build_unmatched_query(
         where.append(f"{table}.{name_col} LIKE ?")
         params.append(f"%{query}%")
 
+    parent_expr = meta.get('parent')
+    parent_select = f"{parent_expr} AS parent" if parent_expr else "NULL AS parent"
     sql = (
         f"SELECT {table}.id AS id, {table}.{name_col} AS name, "
-        f"{image_expr} AS image_url, {table}.{ms} AS status, "
+        f"{image_expr} AS image_url, {parent_select}, {table}.{ms} AS status, "
         f"{table}.{la} AS last_attempted "
         f"FROM {table} {join} "
         f"WHERE {' AND '.join(where)} "
