@@ -32891,18 +32891,18 @@ except Exception as e:
 
 # --- Similar Artists Worker Initialization ---
 # Fills the similar_artists table for LIBRARY artists (the watchlist scanner only
-# covers watchlist artists). Opt-in by default like Amazon: it leans on MusicMap
-# (a scraped, outage-prone source) and does per-candidate metadata-source
-# searches across the whole library, so it stays paused until the user enables it.
+# covers watchlist artists). Runs by default (like the metadata workers); it
+# self-paces (~3s/artist) and backs off on MusicMap outages. Respects a saved
+# pause choice across restarts.
 similar_artists_worker = None
 try:
     from core.similar_artists_worker import SimilarArtistsWorker
     similar_artists_db = MusicDatabase()
     similar_artists_worker = SimilarArtistsWorker(database=similar_artists_db)
     similar_artists_worker.start()
-    if config_manager.get('similar_artists_enrichment_paused', True):
+    if config_manager.get('similar_artists_enrichment_paused', False):
         similar_artists_worker.pause()
-        logger.info("Similar Artists worker initialized (paused — enable it to populate library similars)")
+        logger.info("Similar Artists worker initialized (paused — restored from config)")
     else:
         logger.info("Similar Artists worker initialized and started")
 except Exception as e:
