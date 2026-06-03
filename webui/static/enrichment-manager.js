@@ -349,14 +349,16 @@ function _emRailSubText(status) {
 function renderEnrichmentRail() {
     const rail = document.getElementById('em-rail');
     if (!rail) return;
-    rail.innerHTML = ENRICHMENT_WORKERS.map(w => {
+    rail.innerHTML = ENRICHMENT_WORKERS.map((w, i) => {
         const status = enrichmentManagerState.statuses[w.id];
         const info = _emStatusInfo(status);
         const pct = _emOverallPct(status);
         const cov = pct == null ? '' : `
                     <span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:${pct}%"></span></span>`;
+        const accent = _emHexToRgb(w.color);
         return `
             <button class="em-worker-row" id="em-row-${w.id}"
+                    style="--i:${i};--row-accent:${accent}"
                     onclick="selectEnrichmentWorker('${w.id}')">
                 ${_emIconHtml(w.id)}
                 <span class="em-worker-meta">
