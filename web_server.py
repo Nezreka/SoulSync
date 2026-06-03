@@ -34645,6 +34645,7 @@ _configure_enrichment_api(
     config_set=lambda key, value: config_manager.set(key, value),
     auto_paused_discard=lambda token: _download_auto_paused.discard(token),
     yield_override_add=lambda token: _download_yield_override.add(token),
+    db_getter=get_database,
 )
 
 app.register_blueprint(_create_enrichment_blueprint())
