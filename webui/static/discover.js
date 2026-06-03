@@ -5283,10 +5283,15 @@ function _artMapBloomIsland(isl) {
         n.aScale = 0; n.aAlpha = 0;
         let radial = 0;
         if (isl.r > 0) radial = Math.min(1, Math.hypot(n.x - isl.cx, n.y - isl.cy) / isl.r);
-        n._revealAt = t0 + (n._isLabel ? 60 : radial * 360);
-        n._revealDur = 430;
+        // Continuous radial stagger + deterministic per-bubble jitter so they
+        // surface organically rather than in visible rings/segments.
+        const jitter = ((Math.abs((n.id | 0) * 1103515245 + 12345) % 1000) / 1000) * 200;
+        n._revealAt = t0 + radial * 300 + jitter;
+        n._revealDur = 560;
+        n._riseAmp = (n.radius || 20) * 1.15; // bubbles rise up into place (surfacing)
+        n._revealRise = n._riseAmp;
     }
-    _artMap._ripples = [{ cx: isl.cx, cy: isl.cy, hue: isl.hue, maxR: isl.r * 1.4, t0, dur: 1000 }];
+    _artMap._ripples = [{ cx: isl.cx, cy: isl.cy, hue: isl.hue, maxR: isl.r * 1.45, t0, dur: 1100 }];
     _artMapStartLoop();
 }
 
@@ -5866,7 +5871,9 @@ function _artMapDrawLiveNode(ctx, n) {
     // Ambient buoyancy + ripple shove (steady state only — the reveal has its
     // own motion). Both are world-space offsets applied about the node centre.
     let ox = 0, oy = 0;
-    if (!_artMap._revealing) {
+    if (_artMap._revealing) {
+        if (n._revealRise) oy += n._revealRise; // surfacing rise during the bloom
+    } else {
         if (n._bobAmp) oy += Math.sin((_artMap._now || 0) * 0.0016 + (n._bobPhase || 0)) * n._bobAmp;
         const disp = _artMapNodeDisplacement(n);
         if (disp) { ox += disp.dx; oy += disp.dy; }
@@ -5936,9 +5943,19 @@ function _artMapStepAnimations(t) {
             if (n.aScale == null || n.aScale >= 1) continue;
             if (t < n._revealAt) { active = true; continue; }
             const p = Math.min(1, (t - n._revealAt) / (n._revealDur || 480));
-            const e = 1 - Math.pow(1 - p, 3); // ease-out-cubic
-            if (p >= 1) { n.aScale = 1; n.aAlpha = 1; }
-            else { n.aScale = 0.55 + 0.45 * e; n.aAlpha = e; active = true; }
+            if (p >= 1) { n.aScale = 1; n.aAlpha = 1; n._revealRise = 0; }
+            else {
+                // Scale eases in with a gentle overshoot (ease-out-back, subtle),
+                // alpha fades a touch faster, and the bubble rises up into place
+                // like it's surfacing through water — the remaining rise decays
+                // as (1-p)^3.
+                const c1 = 1.18, c3 = c1 + 1;
+                const back = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+                n.aScale = back;
+                n.aAlpha = Math.min(1, p * 1.6);
+                n._revealRise = Math.pow(1 - p, 3) * (n._riseAmp || 0);
+                active = true;
+            }
         }
     }
 
