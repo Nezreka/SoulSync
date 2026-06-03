@@ -5059,6 +5059,26 @@ function _artMapGlossSprite() {
     return c;
 }
 
+// A cached soft radial "halo" sprite per genre hue — drawn behind the focused
+// island so it reads as a glowing place on the water. Cached per hue (≤ a few),
+// so it's just a drawImage per frame, never a per-frame gradient.
+function _artMapHaloSprite(hue) {
+    _artMap._halos = _artMap._halos || {};
+    if (_artMap._halos[hue]) return _artMap._halos[hue];
+    const S = 256;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, `hsla(${hue},75%,55%,0.22)`);
+    g.addColorStop(0.45, `hsla(${hue},75%,50%,0.08)`);
+    g.addColorStop(1, `hsla(${hue},75%,50%,0)`);
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, S, S);
+    _artMap._halos[hue] = c;
+    return c;
+}
+
 // Deterministic hue (0–360) from a genre name, so each island has a stable tint.
 function _artMapGenreHue(name) {
     let h = 0;
@@ -5229,11 +5249,11 @@ function _artMapFocusIsland(idx, opts = {}) {
     _artMap._focusIdx = idx;
     const isl = islands[idx];
 
-    // Show only this island's bubbles + its title; hide everything else so the
-    // buffer/zoom frame just this island.
+    // Show only this island's bubbles; hide everything else (and the in-world
+    // titles — the nav bar already names the genre) so the frame is just this
+    // island's covers.
     for (const n of _artMap.placed) {
-        const mine = n._isLabel ? (n.name === isl.name) : (n._island === isl.name);
-        n.opacity = mine ? 1 : 0;
+        n.opacity = (!n._isLabel && n._island === isl.name) ? 1 : 0;
     }
 
     // Frame the island in ~80% of the viewport.
@@ -5299,15 +5319,53 @@ function _artMapUpdateIslandNav() {
     nav.style.cssText = `position:absolute;top:64px;left:${sbW + 16}px;display:flex;align-items:center;gap:12px;padding:7px 12px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:14px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;`;
     const idx = _artMap._focusIdx || 0;
     const isl = islands[idx];
-    const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+    const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;';
     nav.innerHTML = `
         <button style="${btn}" onclick="_artMapIslandNav(-1)" title="Previous genre (←)">&#9664;</button>
-        <div style="text-align:center;min-width:120px;">
-            <div style="font-weight:700;font-size:13px;letter-spacing:0.04em;color:hsl(${isl.hue},80%,80%);">${escapeHtml((isl.name || '').toUpperCase())}</div>
+        <div style="text-align:center;min-width:120px;cursor:pointer;" onclick="_artMapToggleIslandMenu(event)" title="Jump to a genre">
+            <div style="font-weight:700;font-size:13px;letter-spacing:0.04em;color:hsl(${isl.hue},80%,80%);">${escapeHtml((isl.name || '').toUpperCase())} &#9662;</div>
             <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:1px;">${isl.count} artists &middot; ${idx + 1} / ${islands.length}</div>
         </div>
         <button style="${btn}" onclick="_artMapIslandNav(1)" title="Next genre (→)">&#9654;</button>
     `;
+    // Re-anchor an open menu (or leave it closed).
+    const menu = document.getElementById('artmap-island-menu');
+    if (menu) menu.remove();
+}
+
+// Quick-jump dropdown: list every genre island; click to jump straight to it.
+function _artMapToggleIslandMenu(ev) {
+    if (ev) ev.stopPropagation();
+    const existing = document.getElementById('artmap-island-menu');
+    if (existing) { existing.remove(); return; }
+    const islands = _artMap._islands || [];
+    const nav = document.getElementById('artmap-island-nav');
+    if (!nav || !islands.length) return;
+    const menu = document.createElement('div');
+    menu.id = 'artmap-island-menu';
+    menu.style.cssText = `position:absolute;top:${nav.offsetTop + nav.offsetHeight + 6}px;left:${nav.offsetLeft}px;min-width:${Math.max(180, nav.offsetWidth)}px;max-height:50vh;overflow-y:auto;background:rgba(16,12,28,0.96);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:12px;z-index:31;box-shadow:0 8px 28px rgba(0,0,0,0.5);padding:6px;`;
+    const cur = _artMap._focusIdx || 0;
+    menu.innerHTML = islands.map((isl, i) => `
+        <div onclick="_artMapJumpIsland(${i})" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;${i === cur ? 'background:rgba(168,85,247,0.18);' : ''}"
+             onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='${i === cur ? 'rgba(168,85,247,0.18)' : 'transparent'}'">
+            <span style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#fff;">
+                <span style="width:9px;height:9px;border-radius:50%;background:hsl(${isl.hue},75%,62%);flex:none;"></span>
+                ${escapeHtml(isl.name)}
+            </span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.45);">${isl.count}</span>
+        </div>`).join('');
+    nav.parentElement.appendChild(menu);
+    // Close on next outside click.
+    setTimeout(() => {
+        const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+        document.addEventListener('mousedown', close);
+    }, 0);
+}
+
+function _artMapJumpIsland(i) {
+    const menu = document.getElementById('artmap-island-menu');
+    if (menu) menu.remove();
+    _artMapFocusIsland(i, { bloom: true });
 }
 
 async function openArtistMap() {
@@ -5770,6 +5828,32 @@ function _artMapDrawLiveLayer(ctx) {
     _artMap._liveCount = revealing ? 0 : drawn;
 }
 
+// Tactile hover-pop: redraw the hovered bubble slightly larger with its cover
+// + a bright hue ring, on top of everything. Works even when the bubble lives
+// in the static buffer (genre islands), so hover always feels responsive.
+// ctx is already in world space (translate(offset) + scale(zoom)).
+function _artMapDrawHoverPop(ctx, n) {
+    const r = n.radius;
+    const hue = n._hue == null ? 270 : n._hue;
+    const s = 1.16;
+    const img = _artMap.images[n.id];
+    ctx.save();
+    ctx.translate(n.x, n.y); ctx.scale(s, s); ctx.translate(-n.x, -n.y);
+    if (img) {
+        ctx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+    } else {
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a0a30'; ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(${hue},90%,78%,0.95)`;
+    ctx.lineWidth = 2.5 / s; ctx.stroke();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(n.x, n.y, r * s + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(${hue},85%,66%,0.45)`;
+    ctx.lineWidth = 3; ctx.stroke();
+}
+
 // Draw one live bubble with its animation transform. aScale scales about the
 // node centre; aAlpha fades it (folded into the global draw-alpha multiplier).
 // Reuses the shared node painter so the bubble is identical to its baked form
@@ -6008,6 +6092,18 @@ function _artMapDraw() {
 
     const z = _artMap.zoom;
 
+    // Soft genre-hued halo behind the focused island (one-island mode) — gives
+    // the island a sense of place on the water. Cached sprite → one drawImage.
+    if (_artMap._oneIsland && _artMap._islands && _artMap._islands.length) {
+        const isl = _artMap._islands[_artMap._focusIdx || 0];
+        if (isl) {
+            const hr = (isl.r * 2.5) * z;
+            const hsx = _artMap.offsetX + isl.cx * z;
+            const hsy = _artMap.offsetY + isl.cy * z;
+            ctx.drawImage(_artMapHaloSprite(isl.hue), hsx - hr, hsy - hr, hr * 2, hr * 2);
+        }
+    }
+
     // While the ripple-bloom reveal is running, bypass the static buffer
     // entirely and let the live layer draw every bubble (so each can animate).
     // The buffer is (re)built once when the reveal ends.
@@ -6156,27 +6252,18 @@ function _artMapDraw() {
                 }
                 ctx.globalAlpha = 1;
             } else {
-                // Single node, no connections
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-                ctx.lineWidth = 3;
-                ctx.stroke();
+                // Single node, no connections — pop the hovered bubble.
+                _artMapDrawHoverPop(ctx, n);
             }
 
             ctx.restore();
         } // end if(n)
     } else if (_artMap.hoveredNode && !_artMap._constellationActive) {
-        // Pre-constellation: just show a simple highlight ring (instant, no delay)
-        const n = _artMap.hoveredNode;
+        // Pre-constellation: instant tactile pop on the hovered bubble.
         ctx.save();
         ctx.translate(_artMap.offsetX, _artMap.offsetY);
         ctx.scale(z, z);
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.radius + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        _artMapDrawHoverPop(ctx, _artMap.hoveredNode);
         ctx.restore();
     }
 
