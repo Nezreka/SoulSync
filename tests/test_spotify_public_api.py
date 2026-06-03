@@ -1,9 +1,9 @@
-"""Anonymous full-playlist fetch for the public 'Spotify link' path.
+"""Full public-playlist fetch via the optional SpotipyFree library.
 
-Covers the testable seams (token extraction, track normalisation, paginated
-fetch via an injected http_get) and — most importantly — the embed fallback
-orchestration, so a broken anonymous path can never make the link worse than
-today.
+The library is GPL-3.0 and user-installed, so it's never imported in tests —
+a fake spotipy-compatible client is injected to exercise normalisation +
+pagination, and the embed fallback orchestration is tested separately. So a
+missing/broken library can never make the link path worse than the embed ≤100.
 """
 
 from __future__ import annotations
@@ -15,133 +15,84 @@ import core.spotify_public_scraper as scraper
 
 
 # --------------------------------------------------------------------------
-# Pure helpers
+# Track normalisation
 # --------------------------------------------------------------------------
-
-def test_extract_access_token_found():
-    html = 'window.foo={"accessToken":"BQ_abcdefghijklmnopqrstuvwxyz","other":1}'
-    assert papi.extract_access_token(html) == 'BQ_abcdefghijklmnopqrstuvwxyz'
-
-
-def test_extract_access_token_absent_or_short():
-    assert papi.extract_access_token('<html>no token here</html>') is None
-    assert papi.extract_access_token('') is None
-    assert papi.extract_access_token('{"accessToken":"short"}') is None  # too short to be real
-
 
 def test_normalize_api_track_shape():
     item = {'track': {'id': 't1', 'name': 'Song', 'artists': [{'name': 'A'}, {'name': 'B'}],
                       'duration_ms': 1000, 'explicit': True}}
-    t = papi.normalize_api_track(item, 4)
-    assert t == {'id': 't1', 'name': 'Song', 'artists': [{'name': 'A'}, {'name': 'B'}],
-                 'duration_ms': 1000, 'is_explicit': True, 'track_number': 5}
+    assert papi.normalize_api_track(item, 4) == {
+        'id': 't1', 'name': 'Song', 'artists': [{'name': 'A'}, {'name': 'B'}],
+        'duration_ms': 1000, 'is_explicit': True, 'track_number': 5,
+    }
 
 
 def test_normalize_api_track_skips_unusable():
-    assert papi.normalize_api_track({'track': {'id': None}}, 0) is None   # local file / removed
+    assert papi.normalize_api_track({'track': {'id': None}}, 0) is None   # local/removed
     assert papi.normalize_api_track({}, 0) is None
-    # missing artists -> Unknown Artist fallback
     t = papi.normalize_api_track({'track': {'id': 'x', 'name': 'N'}}, 0)
-    assert t['artists'] == [{'name': 'Unknown Artist'}]
+    assert t['artists'] == [{'name': 'Unknown Artist'}]                   # fallback
 
 
 # --------------------------------------------------------------------------
-# Paginated fetch with injected HTTP (no network)
+# Full fetch with an injected fake SpotipyFree client (spotipy-shaped)
 # --------------------------------------------------------------------------
 
-import json
+class _FakeClient:
+    """Minimal spotipy-compatible client: playlist() + playlist_items() + next()."""
+    def __init__(self, total, *, fail_items=False):
+        self.total, self.fail_items = total, fail_items
 
+    def playlist(self, pid):
+        return {'name': 'My Playlist', 'owner': {'display_name': 'Owner'}}
 
-class _Resp:
-    def __init__(self, *, text='', json_data=None, status=200):
-        self.text, self._json, self.status_code = text, json_data, status
+    def _page(self, offset):
+        n = min(100, max(0, self.total - offset))
+        items = [{'track': {'id': f't{offset + i}', 'name': f'S{offset + i}',
+                            'artists': [{'name': 'A'}], 'duration_ms': 1000, 'explicit': False}}
+                 for i in range(n)]
+        nxt = offset + 100
+        return {'items': items, 'next': ('u' if nxt < self.total else None), '_next': nxt}
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            import requests
-            raise requests.HTTPError(str(self.status_code))
+    def playlist_items(self, pid):
+        if self.fail_items:
+            raise RuntimeError('boom')
+        return self._page(0)
 
-    def json(self):
-        return self._json
-
-
-def _embed_html(token='BQ_aaaaaaaaaaaaaaaaaaaaaaaa', *, name='My Playlist',
-                subtitle='Owner', n_tracks=3, with_token=True):
-    """Fake embed page: a token blob + a __NEXT_DATA__ the scraper parses."""
-    track_list = [
-        {'uri': f'spotify:track:e{i}', 'title': f'Embed {i}', 'subtitle': 'Artist',
-         'duration': 1000, 'isExplicit': False}
-        for i in range(n_tracks)
-    ]
-    next_data = {'props': {'pageProps': {'state': {'data': {'entity': {
-        'type': 'playlist', 'name': name, 'subtitle': subtitle, 'trackList': track_list,
-    }}}}}}
-    tok = f'"accessToken":"{token}",' if with_token else ''
-    return (f'<html><script>var s={{{tok}"x":1}}</script>'
-            f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(next_data)}</script>'
-            f'</html>')
-
-
-def _make_items(start, count):
-    return [{'track': {'id': f't{start + i}', 'name': f'Song {start + i}',
-                       'artists': [{'name': 'Artist'}], 'duration_ms': 1000, 'explicit': False}}
-            for i in range(count)]
-
-
-def _fake_http(*, total, embed_tracks=3, with_token=True, api_fail=False):
-    """http_get serving the embed page (token + name + first tracks) and API pages.
-    There is no metadata call anymore — name comes from the embed page."""
-    def http(url, headers=None, params=None, timeout=None):
-        if 'open.spotify.com/embed/' in url:
-            return _Resp(text=_embed_html(n_tracks=embed_tracks, with_token=with_token))
-        if url.endswith('/tracks'):
-            if api_fail:
-                return _Resp(status=429)
-            offset = params['offset']
-            remaining = max(0, total - offset)
-            return _Resp(json_data={'items': _make_items(offset, min(100, remaining))})
-        raise AssertionError(f'unexpected URL (no meta call expected): {url}')
-    return http
+    def next(self, results):
+        return self._page(results['_next'])
 
 
 def test_full_fetch_paginates_past_100():
-    result = papi.fetch_public_playlist_full('pl1', http_get=_fake_http(total=250))
-    assert result['name'] == 'My Playlist'       # from the embed page — no meta call
+    result = papi.fetch_public_playlist_full('pl1', client_factory=lambda: _FakeClient(250))
+    assert result['name'] == 'My Playlist'
     assert result['subtitle'] == 'Owner'
-    assert len(result['tracks']) == 250          # API: 100+100+50, not capped at 100
+    assert len(result['tracks']) == 250          # 100+100+50, not capped at 100
     assert result['tracks'][0]['track_number'] == 1
     assert result['tracks'][-1]['id'] == 't249'
     assert result['type'] == 'playlist' and result['id'] == 'pl1'
 
 
 def test_full_fetch_single_page():
-    result = papi.fetch_public_playlist_full('pl1', http_get=_fake_http(total=30))
+    result = papi.fetch_public_playlist_full('pl1', client_factory=lambda: _FakeClient(30))
     assert len(result['tracks']) == 30
 
 
-def test_full_fetch_falls_back_to_embed_tracks_when_api_fails():
-    # Token works but the API 429s -> keep the embed page's tracks (<=100),
-    # never worse than the embed scraper, and DON'T raise.
-    result = papi.fetch_public_playlist_full(
-        'pl1', http_get=_fake_http(total=250, embed_tracks=100, api_fail=True))
-    assert len(result['tracks']) == 100
-    assert result['name'] == 'My Playlist'
-
-
-def test_full_fetch_raises_without_token_and_no_embed_tracks():
+def test_full_fetch_raises_when_library_missing():
+    # _default_client would raise ImportError; simulate via the factory.
+    def missing():
+        raise ImportError("No module named 'SpotipyFree'")
     with pytest.raises(Exception):
-        papi.fetch_public_playlist_full(
-            'pl1', http_get=_fake_http(total=10, embed_tracks=0, with_token=False))
+        papi.fetch_public_playlist_full('pl1', client_factory=missing)
 
 
-def test_full_fetch_raises_when_no_tracks_anywhere():
+def test_full_fetch_raises_when_no_tracks():
     with pytest.raises(Exception):
-        papi.fetch_public_playlist_full(
-            'pl1', http_get=_fake_http(total=0, embed_tracks=0))
+        papi.fetch_public_playlist_full('pl1', client_factory=lambda: _FakeClient(0))
 
 
 # --------------------------------------------------------------------------
-# Fallback orchestration (the safety net)
+# Fallback orchestration (the safety net) — full path vs embed scraper
 # --------------------------------------------------------------------------
 
 def test_fetch_public_uses_full_when_it_succeeds(monkeypatch):
@@ -151,18 +102,17 @@ def test_fetch_public_uses_full_when_it_succeeds(monkeypatch):
     monkeypatch.setattr(scraper, 'scrape_spotify_embed',
                         lambda *a, **k: calls.__setitem__('embed', calls['embed'] + 1) or {'tracks': []})
     out = scraper.fetch_spotify_public('playlist', 'pl1')
-    assert len(out['tracks']) == 200
-    assert calls['embed'] == 0          # full path won — embed never called
+    assert len(out['tracks']) == 200 and calls['embed'] == 0   # full won, embed not called
 
 
 def test_fetch_public_falls_back_to_embed_on_failure(monkeypatch):
     def boom(pid, **kw):
-        raise RuntimeError('spotify changed their page')
+        raise RuntimeError('library not installed / spotify changed')
     monkeypatch.setattr(papi, 'fetch_public_playlist_full', boom)
     monkeypatch.setattr(scraper, 'scrape_spotify_embed',
                         lambda *a, **k: {'name': 'Embed', 'tracks': [{'id': 'e'}]})
     out = scraper.fetch_spotify_public('playlist', 'pl1')
-    assert out['name'] == 'Embed'       # gracefully fell back
+    assert out['name'] == 'Embed'                              # graceful fallback
 
 
 def test_fetch_public_album_uses_embed_directly(monkeypatch):
@@ -172,5 +122,4 @@ def test_fetch_public_album_uses_embed_directly(monkeypatch):
     monkeypatch.setattr(scraper, 'scrape_spotify_embed',
                         lambda *a, **k: {'name': 'Album', 'tracks': [{'id': 'x'}]})
     out = scraper.fetch_spotify_public('album', 'al1')
-    assert out['name'] == 'Album'
-    assert full_called['n'] == 0        # albums don't attempt the playlist full-fetch
+    assert out['name'] == 'Album' and full_called['n'] == 0    # albums skip full-fetch
