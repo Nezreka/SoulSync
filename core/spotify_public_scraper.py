@@ -151,3 +151,31 @@ def scrape_spotify_embed(spotify_type: str, spotify_id: str) -> dict:
 
     logger.info(f"Scraped Spotify {spotify_type}: {result['name']} ({len(tracks)} tracks)")
     return result
+
+
+def fetch_spotify_public(spotify_type: str, spotify_id: str) -> dict:
+    """Fetch a public Spotify link, preferring the FULL track list.
+
+    Playlists are pulled via the anonymous public-API path
+    (``spotify_public_api.fetch_public_playlist_full``), which paginates past
+    the embed widget's ~100-track cap. On ANY failure — or for albums, which
+    the embed already returns whole — this falls back to ``scrape_spotify_embed``
+    (today's behaviour). Same return shape either way, so callers don't care
+    which path produced the data.
+    """
+    if spotify_type == 'playlist':
+        try:
+            from core.spotify_public_api import fetch_public_playlist_full
+            result = fetch_public_playlist_full(spotify_id)
+            if result and result.get('tracks'):
+                logger.info(
+                    f"Spotify public API (full): {result.get('name')} "
+                    f"({len(result['tracks'])} tracks)"
+                )
+                return result
+        except Exception as e:
+            logger.info(
+                f"Spotify public full fetch failed ({e}); "
+                f"falling back to embed scraper (≤100 tracks)"
+            )
+    return scrape_spotify_embed(spotify_type, spotify_id)
