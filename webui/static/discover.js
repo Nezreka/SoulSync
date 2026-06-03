@@ -5230,7 +5230,7 @@ function _artMapFitToContent(marginPx = 120) {
         minY = Math.min(minY, n.y - n.radius); maxY = Math.max(maxY, n.y + n.radius);
     }
     if (!isFinite(minX)) return;
-    const usableW = Math.max(200, _artMap.width - _artMap._panelW);
+    const usableW = Math.max(200, _artMap.width - _artMapReservedW());
     const mapW = maxX - minX + marginPx * 2, mapH = maxY - minY + marginPx * 2;
     _artMap.zoom = Math.min(usableW / mapW, _artMap.height / mapH, 1);
     _artMap.offsetX = usableW / 2 - ((minX + maxX) / 2) * _artMap.zoom;
@@ -5259,7 +5259,7 @@ function _artMapFocusIsland(idx, opts = {}) {
     }
 
     // Frame the island in the space LEFT of the info panel (~80% of it).
-    const usableW = Math.max(200, _artMap.width - _artMap._panelW);
+    const usableW = Math.max(200, _artMap.width - _artMapReservedW());
     const span = (isl.r * 2.3) + 120;
     const z = Math.min(usableW / span, _artMap.height / span, 1.2);
     _artMap.zoom = z;
@@ -5380,7 +5380,18 @@ function _artMapJumpIsland(i) {
 // ── Right-side info panel ──────────────────────────────────────────────────
 // A polished detail panel: a discovery dashboard + current-view coverage at the
 // top, a clickable top-artists list, and a rich artist card when you hover/click
-// a bubble. Lives on the right so it never collides with the genre sidebar.
+// a bubble. On desktop it's a right sidebar; on mobile it's a bottom sheet that
+// slides up on tap and doesn't steal map width.
+
+function _artMapIsMobile() {
+    return (window.innerWidth || document.documentElement.clientWidth || 9999) <= 760;
+}
+
+// Horizontal space the panel reserves when framing islands — none on mobile
+// (the bottom sheet overlays instead of sitting beside the map).
+function _artMapReservedW() {
+    return _artMapIsMobile() ? 0 : _artMap._panelW;
+}
 
 function _artMapNodeBest(n) {
     const map = [['spotify_id', 'spotify'], ['itunes_id', 'itunes'], ['deezer_id', 'deezer'], ['discogs_id', 'discogs'], ['musicbrainz_id', 'musicbrainz']];
@@ -5468,25 +5479,74 @@ function _artMapEnsurePanel() {
     if (!p) {
         p = document.createElement('div');
         p.id = 'artmap-info-panel';
-        p.innerHTML = `<div id="artmap-panel-head" style="padding:16px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);"></div>`
-            + `<div id="artmap-panel-body" style="flex:1;overflow-y:auto;padding:12px 14px;"></div>`;
+        p.innerHTML = `<div id="artmap-panel-grip"></div>`
+            + `<div id="artmap-panel-head" style="padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);"></div>`
+            + `<div id="artmap-panel-body" style="flex:1;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch;"></div>`;
         container.appendChild(p);
     }
-    // Start below the toolbar so it never covers the navbar (measured each call
-    // in case the toolbar height changes).
-    const tb = container.querySelector('.artist-map-toolbar');
-    const top = tb ? tb.offsetHeight : 56;
-    p.style.cssText = `position:absolute;top:${top}px;right:0;width:${_artMap._panelW}px;height:calc(100% - ${top}px);`
-        + `background:linear-gradient(180deg,rgba(20,15,34,0.92),rgba(11,8,20,0.96));backdrop-filter:blur(16px);`
-        + `border-left:1px solid rgba(168,85,247,0.18);z-index:20;display:flex;flex-direction:column;`
-        + `color:#fff;overflow:hidden;box-shadow:-10px 0 36px rgba(0,0,0,0.45);font-size:13px;`;
+    const base = `background:linear-gradient(180deg,rgba(20,15,34,0.95),rgba(11,8,20,0.97));backdrop-filter:blur(16px);`
+        + `z-index:22;display:flex;flex-direction:column;color:#fff;overflow:hidden;font-size:13px;`;
+    const grip = document.getElementById('artmap-panel-grip');
+    if (_artMapIsMobile()) {
+        // Bottom sheet — overlays the map, slides up/down, doesn't steal width.
+        const open = !!_artMap._panelOpen;
+        p.style.cssText = base + `position:absolute;left:0;right:0;bottom:0;width:auto;max-height:62%;`
+            + `border-top:1px solid rgba(168,85,247,0.25);border-radius:18px 18px 0 0;`
+            + `box-shadow:0 -10px 36px rgba(0,0,0,0.5);transition:transform 0.28s cubic-bezier(.4,0,.2,1);`
+            + `transform:translateY(${open ? '0' : '100%'});`;
+        if (grip) grip.style.cssText = `flex:none;height:22px;display:flex;align-items:center;justify-content:center;cursor:grab;`
+            + `position:relative;` ;
+        if (grip && !grip.dataset.wired) {
+            grip.dataset.wired = '1';
+            grip.onclick = () => _artMapTogglePanelSheet(false);
+            grip.innerHTML = `<span style="width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.25);"></span>`;
+        }
+    } else {
+        // Right sidebar — below the toolbar so it never covers the navbar.
+        const tb = container.querySelector('.artist-map-toolbar');
+        const top = tb ? tb.offsetHeight : 56;
+        p.style.cssText = base + `position:absolute;top:${top}px;right:0;width:${_artMap._panelW}px;height:calc(100% - ${top}px);`
+            + `border-left:1px solid rgba(168,85,247,0.18);box-shadow:-10px 0 36px rgba(0,0,0,0.45);transform:none;`;
+        if (grip) grip.style.display = 'none';
+    }
     return p;
+}
+
+// Mobile bottom-sheet open/close.
+function _artMapTogglePanelSheet(open) {
+    _artMap._panelOpen = open;
+    const p = document.getElementById('artmap-info-panel');
+    if (p && _artMapIsMobile()) p.style.transform = `translateY(${open ? '0' : '100%'})`;
+    _artMapEnsureStatsFab();
+}
+
+// A floating button (mobile only) to open the panel to the dashboard/top list.
+function _artMapEnsureStatsFab() {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+    let fab = document.getElementById('artmap-stats-fab');
+    if (!_artMapIsMobile()) { if (fab) fab.remove(); return; }
+    if (!fab) {
+        fab = document.createElement('button');
+        fab.id = 'artmap-stats-fab';
+        fab.innerHTML = '&#9776;';
+        fab.title = 'View stats & artists';
+        fab.style.cssText = `position:absolute;right:14px;bottom:14px;width:46px;height:46px;border-radius:50%;`
+            + `background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;color:#fff;font-size:18px;`
+            + `box-shadow:0 6px 20px rgba(0,0,0,0.5);z-index:21;cursor:pointer;`;
+        fab.onclick = () => { _artMap._panelArtistId = null; _artMapRefreshPanel(); _artMapTogglePanelSheet(true); };
+        container.appendChild(fab);
+    }
+    fab.style.display = _artMap._panelOpen ? 'none' : 'flex';
 }
 
 function _artMapClosePanel() {
     const p = document.getElementById('artmap-info-panel');
     if (p) p.remove();
+    const fab = document.getElementById('artmap-stats-fab');
+    if (fab) fab.remove();
     _artMap._panelArtistId = null;
+    _artMap._panelOpen = false;
 }
 
 // Stat tile helper
@@ -5501,6 +5561,7 @@ function _miniStat(label, value, hue) {
 function _artMapRefreshPanel() {
     const p = _artMapEnsurePanel();
     if (!p) return;
+    _artMapEnsureStatsFab();
     const head = document.getElementById('artmap-panel-head');
     const body = document.getElementById('artmap-panel-body');
     if (!head || !body) return;
@@ -5608,6 +5669,9 @@ function _artMapPanelArtist(node) {
     // Confirm watchlist membership from the server (refreshes the button if it
     // differs from the optimistic guess).
     _artMapCheckWatched(node);
+
+    // On mobile, sliding the bottom sheet up reveals the card.
+    if (_artMapIsMobile()) _artMapTogglePanelSheet(true);
 }
 
 // Top-list / external entry: show a node's card by id (also ripples it on the map).
@@ -6852,10 +6916,13 @@ async function _openGenreMapWithSelection(selectedGenre) {
     }
     container.style.display = 'flex';
 
-    // Show + populate genre sidebar
+    // Show + populate genre sidebar (hidden on mobile — the top-left quick-jump
+    // nav handles genre switching there, and there's no room for a sidebar).
     const sidebar = document.getElementById('artmap-genre-sidebar');
     const genreListData = window._artMapGenreList || window._artMapGenreData;
-    if (sidebar && genreListData?.genres) {
+    if (sidebar && _artMapIsMobile()) {
+        sidebar.style.display = 'none';
+    } else if (sidebar && genreListData?.genres) {
         sidebar.style.display = 'flex';
         const list = document.getElementById('artmap-genre-sidebar-list');
         if (list) {
@@ -7556,25 +7623,43 @@ function _artMapSetupInteraction(canvas) {
             const wx = (t.clientX - rect.left - _artMap.offsetX) / _artMap.zoom;
             const wy = (t.clientY - rect.top - _artMap.offsetY) / _artMap.zoom;
             const node = _artMapHitTest(wx, wy);
-            _artMapEmitRipple(node ? node.x : wx, node ? node.y : wy, node ? node._hue : null);
-            if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
-                openYourArtistInfoModal_direct(node);
+            const moved = Math.abs(t.clientX - (lastTouches[0].clientX)) > 8 || Math.abs(t.clientY - (lastTouches[0].clientY)) > 8;
+            if (!moved) {
+                _artMapEmitRipple(node ? node.x : wx, node ? node.y : wy, node ? node._hue : null);
+                if (node) _artMapPanelArtist(node); // tap selects → card in the bottom sheet
             }
         }
         lastTouches = null;
     }, { passive: false });
 
-    // Handle resize
+    // Handle resize / orientation change — debounced, and re-frames for the new
+    // breakpoint (mobile bottom-sheet ⇄ desktop sidebar).
     window.addEventListener('resize', () => {
         const container = document.getElementById('artist-map-container');
         if (!container || container.style.display === 'none') return;
-        _artMap.width = container.clientWidth;
-        _artMap.height = container.clientHeight - 50;
-        canvas.width = _artMap.width * window.devicePixelRatio;
-        canvas.height = _artMap.height * window.devicePixelRatio;
-        canvas.style.width = _artMap.width + 'px';
-        canvas.style.height = _artMap.height + 'px';
-        _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        clearTimeout(_artMap._resizeTimer);
+        _artMap._resizeTimer = setTimeout(() => {
+            if (container.style.display === 'none') return;
+            const sb = document.getElementById('artmap-genre-sidebar');
+            const sbW = (sb && sb.style.display !== 'none') ? (sb.offsetWidth || 0) : 0;
+            const tb = container.querySelector('.artist-map-toolbar');
+            _artMap.width = Math.max(120, container.clientWidth - sbW);
+            _artMap.height = Math.max(120, container.clientHeight - (tb ? tb.offsetHeight : 50));
+            canvas.width = _artMap.width * window.devicePixelRatio;   // resets ctx transform
+            canvas.height = _artMap.height * window.devicePixelRatio;
+            canvas.style.width = _artMap.width + 'px';
+            canvas.style.height = _artMap.height + 'px';
+            _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            _artMapEnsurePanel(); // re-style sidebar ⇄ bottom sheet
+            if (_artMap._oneIsland && (_artMap._islands || []).length) {
+                _artMapFocusIsland(_artMap._focusIdx || 0, { bloom: false });
+            } else {
+                _artMapFitToContent();
+                _artMapRefreshPanel();
+            }
+            _artMap.dirty = true;
+            _artMapRender();
+        }, 160);
     });
 }
 
