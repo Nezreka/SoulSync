@@ -6606,16 +6606,33 @@ function artMapToggleSimilar() {
     showToast(_artMap._hideSimilar ? 'Showing watchlist only' : 'Showing all artists', 'info', 1500);
 }
 
+// Artist images come in at up to 1000×1000. Nodes are drawn tiny, so holding
+// full-res bitmaps is pointless and ruinous: ~1500 nodes × 1000² × 4 bytes ≈ 6 GB
+// of decoded image memory → GC/GPU thrash that locks the browser even though the
+// per-frame draw is cheap. Decode straight to a small avatar (~128px) so the
+// whole map's images fit in ~100 MB instead of gigabytes.
+const _ARTMAP_IMG_PX = 128;
+function _artMapDecodeSmall(blob) {
+    if (!blob) return Promise.resolve(null);
+    try {
+        return createImageBitmap(blob, {
+            resizeWidth: _ARTMAP_IMG_PX, resizeHeight: _ARTMAP_IMG_PX, resizeQuality: 'medium',
+        }).catch(() => createImageBitmap(blob).catch(() => null)); // older engines ignore opts
+    } catch (e) {
+        return createImageBitmap(blob).catch(() => null);
+    }
+}
+
 function _artMapLoadImage(url) {
     // Try direct CORS fetch first (zero server load, works for Spotify/iTunes/Discogs)
     return fetch(url, { mode: 'cors' })
         .then(r => r.ok ? r.blob() : Promise.reject('not ok'))
-        .then(b => createImageBitmap(b))
+        .then(b => _artMapDecodeSmall(b))
         .catch(() => {
             // Fallback: server proxy for CDNs without CORS headers
             return fetch('/api/image-proxy?url=' + encodeURIComponent(url))
                 .then(r => r.ok ? r.blob() : null)
-                .then(b => b ? createImageBitmap(b) : null)
+                .then(b => _artMapDecodeSmall(b))
                 .catch(() => null);
         });
 }
