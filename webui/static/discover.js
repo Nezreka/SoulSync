@@ -5350,6 +5350,7 @@ function _artMapRebuildBuffer() {
     _artMap._bufferMinY = minY;
     // Freeze the live/buffer partition to this build's zoom (see _artMapIsLiveSize).
     _artMap._liveBuildZoom = _artMap.zoom;
+    _artMap._drawAlphaMul = 1; // buffer bakes at full alpha; the blit applies the reveal fade
 
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
@@ -5403,11 +5404,14 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
     if (op < 0.01) return;
     const r = n.radius;
     const isW = n.type === 'watchlist' || n.type === 'center';
-    octx.globalAlpha = op;
+    // Global fade multiplier (reveal). Lets the whole map fade in cleanly while
+    // each painter keeps its own per-element alpha.
+    const mul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
+    octx.globalAlpha = op * mul;
 
     // Genre label node — transparent circle with large text
     if (n._isLabel) {
-        octx.globalAlpha = 0.6;
+        octx.globalAlpha = 0.6 * mul;
         octx.beginPath();
         octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
         octx.fillStyle = 'rgba(138,43,226,0.04)';
@@ -5428,13 +5432,14 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         return;
     }
 
-    // Render quality based on node size in buffer pixels
+    // On-screen size drives detail. Album art shows at nearly every size (the
+    // images are pre-masked to circles, so this is just a cheap drawImage — no
+    // per-frame clip) for a consistent "sea of covers" look. Only the very
+    // smallest fall back to a coloured dot.
     const rScaled = r * scale;
-    const isSmall = rScaled < 8;
-    const isTiny = rScaled < 3;
+    const img = _artMap.images[n.id];
 
-    // Tiny nodes: just a colored dot (no clip, no image, no text)
-    if (isTiny) {
+    if (rScaled < 2.2) {
         octx.beginPath();
         octx.arc(n.x, n.y, r, 0, Math.PI * 2);
         octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
@@ -5442,27 +5447,8 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         return;
     }
 
-    // Small nodes: filled circle + border, no image clip
-    if (isSmall) {
-        octx.beginPath();
-        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        const img = _artMap.images[n.id];
-        if (img) {
-            octx.save(); octx.clip();
-            octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-            octx.restore();
-        } else {
-            octx.fillStyle = isW ? '#1a0a30' : '#141420';
-            octx.fill();
-        }
-        octx.strokeStyle = isW ? 'rgba(138,43,226,0.3)' : 'rgba(255,255,255,0.06)';
-        octx.lineWidth = isW ? 1.5 : 0.5;
-        octx.stroke();
-        return;
-    }
-
-    // Full quality: glow + clip + image + text
-    if (isW) {
+    // Focal glow ring for watchlist/center bubbles
+    if (isW && rScaled >= 7) {
         octx.beginPath();
         octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
         octx.strokeStyle = 'rgba(138,43,226,0.25)';
@@ -5470,37 +5456,43 @@ function _artMapDrawNodeToBuffer(octx, n, scale) {
         octx.stroke();
     }
 
-    octx.save();
-    octx.beginPath();
-    octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    octx.closePath();
-    octx.clip();
-
-    const img = _artMap.images[n.id];
+    // Body — pre-masked circular image (no clip) or a placeholder disc.
     if (img) {
         octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-        octx.fillStyle = 'rgba(0,0,0,0.45)';
-        octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
     } else {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
         octx.fillStyle = isW ? '#1a0a30' : '#141420';
-        octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
+        octx.fill();
     }
-    octx.restore();
 
+    const showLabel = rScaled >= 13;
+
+    // Darken art behind the label so the name stays legible.
+    if (showLabel && img) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        octx.fillStyle = 'rgba(0,0,0,0.42)';
+        octx.fill();
+    }
+
+    // Border
     octx.beginPath();
     octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
-    octx.lineWidth = isW ? 2 : 0.5;
+    octx.strokeStyle = isW ? 'rgba(138,43,226,0.45)' : 'rgba(255,255,255,0.10)';
+    octx.lineWidth = isW ? 2 : (rScaled >= 7 ? 1 : 0.5);
     octx.stroke();
 
-    const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
-    octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'middle';
-    octx.fillStyle = '#fff';
-    const maxC = isW ? 20 : 12;
-    const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
-    octx.fillText(label, n.x, n.y);
+    if (showLabel) {
+        const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
+        octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillStyle = '#fff';
+        const maxC = isW ? 20 : 12;
+        const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
+        octx.fillText(label, n.x, n.y);
+    }
 }
 
 // Composite ONE node into the EXISTING buffer without a full rebuild. This is
@@ -5558,6 +5550,8 @@ function _artMapDrawLiveLayer(ctx) {
     ctx.save();
     ctx.translate(ox, oy);
     ctx.scale(z, z);
+    // The live layer fades in together with the far field during the reveal.
+    _artMap._drawAlphaMul = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
 
     let drawn = 0;
     const CAP = 600;
@@ -5571,6 +5565,7 @@ function _artMapDrawLiveLayer(ctx) {
         _artMapDrawLiveNode(ctx, n);
         if (++drawn >= CAP) break;
     }
+    _artMap._drawAlphaMul = 1;
     ctx.restore();
     ctx.globalAlpha = 1;
 }
@@ -5618,59 +5613,26 @@ function _artMapStartLoop() {
 }
 
 // Advance every active animation by absolute time t (ms). Returns true while
-// anything is still moving. Phase A: global field fade-in + staggered per-node
-// reveal pop (ease-out-back) for the live bubbles.
+// anything is still moving. Phase A: a clean global fade-in (ease-out-cubic).
+// The bubbly per-island ripple bloom is layered on in Phase C.
 function _artMapStepAnimations(t) {
     let active = false;
 
-    // Global far-field fade-in over the reveal window.
     if (_artMap._fieldAlpha < 1) {
-        const FIELD_MS = 700;
+        const FIELD_MS = 600;
         const p = Math.min(1, (t - _artMap._revealT0) / FIELD_MS);
-        _artMap._fieldAlpha = p;
+        _artMap._fieldAlpha = 1 - Math.pow(1 - p, 3); // ease-out-cubic
         if (p < 1) active = true;
-    }
-
-    // Per-node reveal pop: each node eases its aScale 0→1 once past its
-    // staggered start time. Ease-out-back gives a subtle overshoot ("bloom").
-    const placed = _artMap.placed;
-    if (placed) {
-        for (const n of placed) {
-            if (n.aScale == null || n.aScale >= 1) continue;
-            const start = n._revealAt || _artMap._revealT0;
-            if (t < start) { active = true; continue; }
-            const DUR = 520;
-            const p = Math.min(1, (t - start) / DUR);
-            // ease-out-back
-            const c1 = 1.70158, c3 = c1 + 1;
-            const e = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
-            n.aScale = p >= 1 ? 1 : e;
-            if (p < 1) active = true;
-        }
     }
 
     return active;
 }
 
-// Kick off the reveal: fade the far field in, and stagger each live bubble's
-// pop by its distance from the camera centre so islands bloom outward.
+// Kick off the reveal: a clean fade-in of the whole map (far field via the
+// buffer-blit alpha, live bubbles via _drawAlphaMul — they ramp together).
 function _artMapBeginReveal() {
-    const t0 = performance.now();
-    _artMap._revealT0 = t0;
+    _artMap._revealT0 = performance.now();
     _artMap._fieldAlpha = 0;
-    const cx = (_artMap.width / 2 - _artMap.offsetX) / _artMap.zoom;
-    const cy = (_artMap.height / 2 - _artMap.offsetY) / _artMap.zoom;
-    let maxD = 1;
-    for (const n of _artMap.placed) {
-        n._d2 = (n.x - cx) * (n.x - cx) + (n.y - cy) * (n.y - cy);
-        if (n._d2 > maxD) maxD = n._d2;
-    }
-    const maxD2 = Math.sqrt(maxD) || 1;
-    for (const n of _artMap.placed) {
-        n.aScale = 0;
-        const d = Math.sqrt(n._d2);
-        n._revealAt = t0 + (d / maxD2) * 520; // farther = later → outward bloom
-    }
     _artMapStartLoop();
 }
 
@@ -6778,9 +6740,35 @@ function _artMapDecodeSmall(blob, px) {
     try {
         return createImageBitmap(blob, {
             resizeWidth: d, resizeHeight: d, resizeQuality: 'high',
-        }).catch(() => createImageBitmap(blob).catch(() => null)); // older engines ignore opts
+        }).then(_artMapCircleMask)
+          .catch(() => createImageBitmap(blob).then(_artMapCircleMask).catch(() => null));
     } catch (e) {
-        return createImageBitmap(blob).catch(() => null);
+        return createImageBitmap(blob).then(_artMapCircleMask).catch(() => null);
+    }
+}
+
+// Pre-mask a decoded bitmap into a CIRCLE once, at load time, returning a
+// canvas. The whole map then draws bubbles with a plain drawImage (the canvas
+// is already round) instead of a per-frame ctx.clip() per bubble — clipping is
+// one of the most expensive canvas ops and, at hundreds of visible bubbles per
+// frame, was the live-layer stutter. Done once here, it's free forever after.
+function _artMapCircleMask(src) {
+    if (!src) return null;
+    const w = src.width || 0;
+    if (!w) return src;
+    try {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = w;
+        const cx = c.getContext('2d');
+        cx.beginPath();
+        cx.arc(w / 2, w / 2, w / 2, 0, Math.PI * 2);
+        cx.closePath();
+        cx.clip();
+        cx.drawImage(src, 0, 0, w, w);
+        if (src.close) src.close(); // free the ImageBitmap; we keep the canvas
+        return c;
+    } catch (e) {
+        return src; // fall back to the raw bitmap (draw path still clips defensively)
     }
 }
 
