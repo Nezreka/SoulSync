@@ -34248,6 +34248,19 @@ div.artist-hero-badge {
 .artmap-tool-btn.artmap-zoom { border: none; background: none; width: 30px; padding: 0; justify-content: center; border-radius: 6px; }
 .artmap-tool-btn.artmap-zoom:hover { background: rgba(255,255,255,0.06); }
 
+/* Mobile: the toolbar wraps — back/title/stats + compact tools on row 1, the
+   search drops to its own full-width row below so nothing gets crushed. */
+@media (max-width: 760px) {
+    .artist-map-toolbar { flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+    .artmap-nav-left { flex: 1 1 auto; min-width: 0; gap: 6px; }
+    .artmap-brand-text { display: none; }
+    .artmap-brand { flex: none; }
+    .artmap-stats { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .artmap-nav-right { flex: 0 0 auto; gap: 3px; }
+    .artmap-nav-center { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+    .artmap-search-wrap { width: 100%; }
+}
+
 /* Shortcuts modal */
 .artmap-shortcuts-modal {
     background: rgba(20,20,32,0.95); border-radius: 14px; width: 340px; max-width: 90vw;
