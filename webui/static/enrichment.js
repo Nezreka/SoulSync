@@ -1377,10 +1377,10 @@ async function toggleSimilarArtistsEnrichment() {
 }
 
 (function _wireSimilarArtistsBubble() {
+    // Click is the inline onclick on the button (like Amazon) — we only need to
+    // kick off + poll the status here.
     const wire = () => {
-        const button = document.getElementById('similar-artists-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleSimilarArtistsEnrichment); // standard wiring (like spotify/itunes)
+        if (document.getElementById('similar-artists-enrich-button')) {
             updateSimilarArtistsEnrichmentStatus();
             setInterval(updateSimilarArtistsEnrichmentStatus, 2000);
         }
@@ -1388,6 +1388,8 @@ async function toggleSimilarArtistsEnrichment() {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
 })();
+
+window.toggleSimilarArtistsEnrichment = toggleSimilarArtistsEnrichment; // ensure inline onclick can resolve it
 
 // ===================================================================
 // HYDRABASE P2P MIRROR WORKER
