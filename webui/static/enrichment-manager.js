@@ -273,27 +273,45 @@ function _emStatusInfo(status) {
     return { cls: 'stopped', label: 'Stopped' };
 }
 
-// Global "process first" — applies a group to EVERY worker. Workers that don't
-// enrich that entity (Genius/album, Discogs/track) reject with 400 and are
-// skipped. Sets processing order only (no mass failed re-queue across sources).
+// Global "process first" — applies a group to EVERY worker. Like the per-worker
+// pin, it also re-queues that group's previously-failed items so each worker
+// sweeps ALL pending + failed of the group before moving on. Workers that don't
+// enrich the entity (Genius/album, Discogs/track) reject with 400 and are
+// skipped (no priority set, no re-queue). Workers run independently in parallel.
 async function setGlobalPriority(entity, btn) {
     if (btn) {
         document.querySelectorAll('#em-global-tabs button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
     }
-    const results = await Promise.all(ENRICHMENT_WORKERS.map(w =>
-        fetch(`/api/enrichment/${w.id}/priority`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entity: entity || 'none' }),
-        }).then(r => r.ok).catch(() => false)
-    ));
-    const n = results.filter(Boolean).length;
+    const perWorker = await Promise.all(ENRICHMENT_WORKERS.map(async (w) => {
+        let okP = false, reset = 0;
+        try {
+            const r = await fetch(`/api/enrichment/${w.id}/priority`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity: entity || 'none' }),
+            });
+            okP = r.ok;
+        } catch (_e) { /* skip */ }
+        if (okP && entity) {
+            try {
+                const rr = await fetch(`/api/enrichment/${w.id}/retry`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entity_type: entity, scope: 'failed' }),
+                });
+                if (rr.ok) reset = (await rr.json()).reset || 0;
+            } catch (_e) { /* priority still set */ }
+        }
+        return { okP, reset };
+    }));
+    const n = perWorker.filter(x => x.okP).length;
+    const totalReset = perWorker.reduce((s, x) => s + x.reset, 0);
     showToast(entity
-        ? `${n} worker${n === 1 ? '' : 's'} will process ${_emEntityLabel(entity, true).toLowerCase()} first`
+        ? `${n} worker${n === 1 ? '' : 's'} → ${_emEntityLabel(entity, true).toLowerCase()} first`
+          + (totalReset ? ` · re-queued ${totalReset.toLocaleString()} failed` : '')
         : `${n} worker${n === 1 ? '' : 's'} back to automatic order`, 'success');
     // Reflect on the currently-open worker.
     const sel = enrichmentManagerState.selected;
-    if (sel) { await _emLoadPriority(sel); _emRenderEntityCards(); }
+    if (sel) { await _emLoadBreakdown(sel); await _emLoadPriority(sel); _emRenderEntityCards(); }
 }
 
 // ── Left rail ───────────────────────────────────────────────────────────────
