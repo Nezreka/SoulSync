@@ -51,7 +51,8 @@ SPLIT_MODULES = [
 ]
 
 # Other JS files that exist in static/ but are NOT part of the split
-NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js"}
+NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
+                "enrichment-manager.js"}
 
 # Pre-existing duplicate helper functions that lived in the original monolith.
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
@@ -216,7 +217,7 @@ class TestOnclickCoverage:
             self.all_fns.update(_all_function_decls(text))
 
         # Also include non-split JS files that are loaded
-        for extra in ("setup-wizard.js", "docs.js", "helper.js"):
+        for extra in ("setup-wizard.js", "docs.js", "helper.js", "enrichment-manager.js"):
             path = _STATIC / extra
             if path.exists():
                 self.all_fns.update(_all_function_decls(_read(path)))
