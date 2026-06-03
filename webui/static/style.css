@@ -65129,3 +65129,8 @@ body.em-scroll-lock { overflow: hidden; }
 .em-search-wrap .em-search { padding-left: 30px; }
 .em-search:focus, .em-select:focus { outline: none; border-color: rgba(var(--em-accent-rgb, 99,102,241), 0.6); }
 .em-row:hover { background: rgba(var(--em-accent-rgb, 255,255,255), 0.07); border-color: rgba(var(--em-accent-rgb, 255,255,255), 0.14); }
+
+/* Bulk retry-all + helper hint */
+.em-retry-all { margin-left: 4px; }
+.em-hint { font-size: 11px; color: rgba(255,255,255,0.38); flex: 0 0 auto; margin-top: -2px; }
+.em-hint :is(b, strong) { color: rgba(255,255,255,0.6); }

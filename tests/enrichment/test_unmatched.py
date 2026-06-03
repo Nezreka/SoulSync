@@ -17,6 +17,7 @@ from core.enrichment.unmatched import (
     UnmatchedQueryError,
     build_breakdown_query,
     build_count_query,
+    build_reset_query,
     build_unmatched_query,
     supported_entity_types,
 )
@@ -155,6 +156,43 @@ def test_db_raises_on_bad_input(db):
 
 
 # --------------------------------------------------------------------------
+# Reset / retry (re-queue) — must clear match_status to NULL so the worker
+# re-attempts (nulling last_attempted alone leaves not_found in limbo).
+# --------------------------------------------------------------------------
+
+def test_reset_builder_requires_id_for_item():
+    with pytest.raises(UnmatchedQueryError):
+        build_reset_query('spotify', 'artist', 'item')  # no entity_id
+
+
+def test_reset_builder_bad_scope():
+    with pytest.raises(UnmatchedQueryError):
+        build_reset_query('spotify', 'artist', 'bogus', entity_id='x')
+
+
+def test_reset_builder_nulls_status_not_just_attempted():
+    sql, _ = build_reset_query('spotify', 'artist', 'failed')
+    assert 'spotify_match_status = NULL' in sql
+    assert 'spotify_last_attempted = NULL' in sql
+    assert "WHERE spotify_match_status = 'not_found'" in sql
+
+
+def test_reset_item_requeues_to_pending(db):
+    n = db.reset_enrichment('spotify', 'artist', 'item', entity_id='a2')  # was not_found
+    assert n == 1
+    # not_found dropped by 1, pending gained 1
+    bd = db.get_enrichment_breakdown('spotify', 'artist')
+    assert bd == {'matched': 1, 'not_found': 0, 'pending': 2, 'total': 3}
+
+
+def test_reset_failed_requeues_all(db):
+    n = db.reset_enrichment('spotify', 'album', 'failed')  # one not_found album
+    assert n == 1
+    bd = db.get_enrichment_breakdown('spotify', 'album')
+    assert bd['not_found'] == 0 and bd['pending'] == 1
+
+
+# --------------------------------------------------------------------------
 # Flask routes
 # --------------------------------------------------------------------------
 
@@ -192,3 +230,24 @@ def test_route_breakdown(client):
     assert r.status_code == 200
     bd = r.get_json()['breakdown']
     assert bd['artist'] == {'matched': 1, 'not_found': 1, 'pending': 1, 'total': 3}
+
+
+def test_route_retry_item(client):
+    r = client.post('/api/enrichment/spotify/retry',
+                    json={'entity_type': 'artist', 'scope': 'item', 'entity_id': 'a2'})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['success'] is True and body['reset'] == 1
+
+
+def test_route_retry_failed_bulk(client):
+    r = client.post('/api/enrichment/spotify/retry',
+                    json={'entity_type': 'artist', 'scope': 'failed'})
+    assert r.status_code == 200
+    assert r.get_json()['reset'] == 1  # one not_found artist re-queued
+
+
+def test_route_retry_item_missing_id_400(client):
+    r = client.post('/api/enrichment/spotify/retry',
+                    json={'entity_type': 'artist', 'scope': 'item'})
+    assert r.status_code == 400
