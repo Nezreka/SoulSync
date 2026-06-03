@@ -34252,7 +34252,9 @@ div.artist-hero-badge {
    search drops to its own full-width row below so nothing gets crushed. */
 @media (max-width: 760px) {
     .artist-map-toolbar { flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
-    .artmap-nav-left { flex: 1 1 auto; min-width: 0; gap: 6px; }
+    /* Clear the fixed hamburger menu (top:16 left:16, 44px wide) so the map's
+       back button isn't hidden under it. */
+    .artmap-nav-left { flex: 1 1 auto; min-width: 0; gap: 6px; margin-left: 52px; }
     .artmap-brand-text { display: none; }
     .artmap-brand { flex: none; }
     .artmap-stats { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
