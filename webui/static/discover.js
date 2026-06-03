@@ -5231,7 +5231,7 @@ async function openArtistMap() {
                     const n = imgNodes[idx++];
                     if (_artMap.images[n.id]) { loaded++; continue; }
                     batch.push(
-                        _artMapLoadImage(n.image_url)
+                        _artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
                             .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
                             .finally(() => {
                                 loaded++;
@@ -5530,6 +5530,19 @@ function _artMapDraw() {
     ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, w, h);
 
+    // Premium backdrop: a soft central glow fading to a dark vignette. The
+    // gradient is cached and only rebuilt on resize, so it's one cheap fillRect.
+    if (!_artMap._bgGrad || _artMap._bgW !== w || _artMap._bgH !== h) {
+        const g = ctx.createRadialGradient(w / 2, h * 0.42, Math.min(w, h) * 0.12,
+            w / 2, h / 2, Math.max(w, h) * 0.78);
+        g.addColorStop(0, 'rgba(46,34,78,0.40)');
+        g.addColorStop(0.5, 'rgba(16,12,28,0.0)');
+        g.addColorStop(1, 'rgba(0,0,0,0.55)');
+        _artMap._bgGrad = g; _artMap._bgW = w; _artMap._bgH = h;
+    }
+    ctx.fillStyle = _artMap._bgGrad;
+    ctx.fillRect(0, 0, w, h);
+
     if (_artMap.dirty || !_artMap.offscreen) {
         const _rt = _artMap._perf ? performance.now() : 0;
         _artMapRebuildBuffer();
@@ -5603,17 +5616,21 @@ function _artMapDraw() {
                 ctx.globalAlpha = 1;
                 ctx.restore();
 
-                // Draw connection lines — ONE path, ONE solid stroke. The old
-                // code built a fresh linear-gradient object per line every frame,
-                // which is the main cause of the hover-lag on dense maps.
-                ctx.strokeStyle = `rgba(138,43,226,${0.42 * cFade})`;
-                ctx.lineWidth = 2;
+                // Connection lines — build the path ONCE, then two cheap strokes
+                // (wide faint halo + crisp core) for a glow look without per-frame
+                // gradients or shadowBlur (those were the hover-lag culprits).
+                ctx.lineCap = 'round';
                 ctx.beginPath();
                 for (const cn of highlightNodes) {
                     if (cn === n) continue;
                     ctx.moveTo(n.x, n.y);
                     ctx.lineTo(cn.x, cn.y);
                 }
+                ctx.strokeStyle = `rgba(168,85,247,${0.18 * cFade})`;
+                ctx.lineWidth = 6;
+                ctx.stroke();
+                ctx.strokeStyle = `rgba(201,150,255,${0.6 * cFade})`;
+                ctx.lineWidth = 1.5;
                 ctx.stroke();
 
                 // Redraw highlighted nodes on top
@@ -6242,7 +6259,7 @@ async function _openGenreMapWithSelection(selectedGenre) {
                 const batch = [];
                 while (idx < imgNodes.length && batch.length < CONCURRENT) {
                     const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url)
+                    batch.push(_artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
                         .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
                         .finally(() => { loaded++; }));
                 }
@@ -6469,7 +6486,7 @@ async function _openArtistMapExplorerWithName(name) {
                 const batch = [];
                 while (idx < imgNodes.length && batch.length < CONCURRENT) {
                     const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url)
+                    batch.push(_artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
                         .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
                         .finally(() => { loaded++; }));
                 }
@@ -6611,30 +6628,44 @@ function artMapToggleSimilar() {
 // of decoded image memory → GC/GPU thrash that locks the browser even though the
 // per-frame draw is cheap. Decode straight to a small avatar (~128px) so the
 // whole map's images fit in ~100 MB instead of gigabytes.
-const _ARTMAP_IMG_PX = 128;
-function _artMapDecodeSmall(blob) {
+// Decode to a sensible avatar size for how big the node actually draws — crisp
+// where it matters (focal/watchlist nodes), light for the swarm of small ones —
+// so total image memory stays ~150-250 MB instead of multiple GB.
+function _artMapImgPx(px) {
+    return Math.min(384, Math.max(112, Math.round(px || 144)));
+}
+function _artMapDecodeSmall(blob, px) {
     if (!blob) return Promise.resolve(null);
+    const d = _artMapImgPx(px);
     try {
         return createImageBitmap(blob, {
-            resizeWidth: _ARTMAP_IMG_PX, resizeHeight: _ARTMAP_IMG_PX, resizeQuality: 'medium',
+            resizeWidth: d, resizeHeight: d, resizeQuality: 'high',
         }).catch(() => createImageBitmap(blob).catch(() => null)); // older engines ignore opts
     } catch (e) {
         return createImageBitmap(blob).catch(() => null);
     }
 }
 
-function _artMapLoadImage(url) {
+function _artMapLoadImage(url, px) {
     // Try direct CORS fetch first (zero server load, works for Spotify/iTunes/Discogs)
     return fetch(url, { mode: 'cors' })
         .then(r => r.ok ? r.blob() : Promise.reject('not ok'))
-        .then(b => _artMapDecodeSmall(b))
+        .then(b => _artMapDecodeSmall(b, px))
         .catch(() => {
             // Fallback: server proxy for CDNs without CORS headers
             return fetch('/api/image-proxy?url=' + encodeURIComponent(url))
                 .then(r => r.ok ? r.blob() : null)
-                .then(b => _artMapDecodeSmall(b))
+                .then(b => _artMapDecodeSmall(b, px))
                 .catch(() => null);
         });
+}
+
+// Target avatar px for a node, based on its world radius (≈ its on-screen size
+// at full zoom). Focal/watchlist nodes get a big crisp avatar; small ones stay
+// light. Used by every map's image loader.
+function _artMapNodeImgPx(n) {
+    const isFocal = n.type === 'watchlist' || n.type === 'center' || n.ring === 1;
+    return _artMapImgPx(isFocal ? Math.max(256, (n.radius || 0) * 1.4) : (n.radius || 0) * 1.6);
 }
 
 function _artMapHideContextMenu() {
@@ -6762,7 +6793,8 @@ function _artMapSetupInteraction(canvas) {
                     _artMapAnimateConstellation(); // fade out
                 }
                 if (_artMap.hoveredNode) {
-                    // Delay constellation effect by 800ms of sustained hover
+                    // Snappy sustained-hover delay before the constellation lights up
+                    // (was 800ms, which felt like nothing happened).
                     _artMap._constellationTimer = setTimeout(() => {
                         if (_artMap.hoveredNode) {
                             _artMap._constellationActive = true;
@@ -6770,7 +6802,7 @@ function _artMapSetupInteraction(canvas) {
                             _artMap._constellationCache = null;
                             _artMapAnimateConstellation();
                         }
-                    }, 800);
+                    }, 220);
                 }
                 _artMapRender();
             }
