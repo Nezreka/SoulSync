@@ -1360,14 +1360,18 @@ function updateSimilarArtistsEnrichmentStatusFromData(data) {
 
 async function toggleSimilarArtistsEnrichment() {
     try {
-        const button = document.getElementById('similar-artists-enrich-button');
-        if (!button) return;
-        // Pause unless it's already paused — so a worker that has finished its
-        // library (green 'complete'/idle state, not 'active') can still be paused.
-        const isPaused = button.classList.contains('paused');
-        const endpoint = isPaused ? '/api/enrichment/similar_artists/resume' : '/api/enrichment/similar_artists/pause';
+        // Decide from the ACTUAL backend state, not the orb's CSS class — the
+        // class can be stale/absent (before the first status poll, or a 'complete'
+        // worker isn't 'active'/'paused'), which made class-based toggling pause a
+        // paused worker (no-op). Read paused, then do the opposite.
+        let paused = false;
+        try {
+            const s = await fetch('/api/enrichment/similar_artists/status');
+            if (s.ok) paused = (await s.json()).paused === true;
+        } catch (_e) { /* fall back to pause */ }
+        const endpoint = paused ? '/api/enrichment/similar_artists/resume' : '/api/enrichment/similar_artists/pause';
         const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) throw new Error(`Failed to ${isPaused ? 'resume' : 'pause'} Similar Artists enrichment`);
+        if (!response.ok) throw new Error(`Failed to ${paused ? 'resume' : 'pause'} Similar Artists enrichment`);
         await updateSimilarArtistsEnrichmentStatus();
     } catch (error) {
         console.error('Error toggling Similar Artists enrichment:', error);
