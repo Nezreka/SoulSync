@@ -66,11 +66,12 @@ flask-socketio==5.6.1
 gunicorn==26.0.0
 simple-websocket==1.1.0
 
-# ── Optional: full public-playlist link imports (no Spotify credentials) ──
-# The "Spotify link" tab scrapes Spotify's embed widget, which caps at ~100
-# tracks. SpotipyFree pulls the full list with no login. It is GPL-3.0, so it is
-# intentionally NOT installed by default (SoulSync is MIT — bundling GPL would
-# force the project to GPL). To enable full link imports, install it yourself:
-#     pip install SpotipyFree
-# Without it, the link tab simply falls back to the ~100-track embed result.
-# spotipyFree>=1.1.2,<2
+# Full public-playlist link imports (no Spotify credentials). The "Spotify link"
+# tab scrapes Spotify's embed widget, which caps at ~100 tracks; SpotipyFree
+# (the no-creds spotipy drop-in spotDL uses) pulls the full list. It is GPL-3.0,
+# used here as a normal pip dependency — aggregation, exactly like spotDL (also
+# MIT). It is NOT vendored into SoulSync's own code, so the project stays MIT.
+# The code soft-imports it and falls back to the embed scraper (~100 tracks) if
+# it's missing or fails, so this is never a hard runtime requirement.
+spotipyFree>=1.1.2,<2
+websockets>=12  # required by SpotipyFree/spotapi, not pulled in automatically
