@@ -18,9 +18,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from core.enrichment.services import EnrichmentService, get_service
+from core.enrichment.unmatched import (
+    SERVICE_ENTITY_SUPPORT,
+    UnmatchedQueryError,
+    supported_entity_types,
+)
 from utils.logging_config import get_logger
 
 
@@ -32,6 +37,7 @@ logger = get_logger("enrichment.api")
 _config_set: Optional[Callable[[str, Any], None]] = None
 _auto_paused_discard: Optional[Callable[[str], None]] = None
 _yield_override_add: Optional[Callable[[str], None]] = None
+_db_getter: Optional[Callable[[], Any]] = None
 
 
 def configure(
@@ -39,16 +45,19 @@ def configure(
     config_set: Optional[Callable[[str, Any], None]] = None,
     auto_paused_discard: Optional[Callable[[str], None]] = None,
     yield_override_add: Optional[Callable[[str], None]] = None,
+    db_getter: Optional[Callable[[], Any]] = None,
 ) -> None:
     """Wire host-side mutators that the generic routes call after pause/resume.
 
     Each is optional — pass None for hosts that don't have a corresponding
-    mechanism (e.g. tests).
+    mechanism (e.g. tests). ``db_getter`` returns the live ``MusicDatabase``
+    for the unmatched-browser routes.
     """
-    global _config_set, _auto_paused_discard, _yield_override_add
+    global _config_set, _auto_paused_discard, _yield_override_add, _db_getter
     _config_set = config_set
     _auto_paused_discard = auto_paused_discard
     _yield_override_add = yield_override_add
+    _db_getter = db_getter
 
 
 def _persist_paused(service: EnrichmentService, paused: bool) -> None:
@@ -152,5 +161,66 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.error("Error resuming %s worker: %s", service.id, e)
             return jsonify({'error': str(e)}), 500
+
+    @bp.route('/api/enrichment/<service_id>/breakdown', methods=['GET'])
+    def enrichment_breakdown(service_id: str):
+        """matched / not_found / pending tallies per entity type for the modal."""
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        try:
+            db = _db_getter()
+            breakdown = {
+                entity: db.get_enrichment_breakdown(service_id, entity)
+                for entity in supported_entity_types(service_id)
+            }
+            return jsonify({'service': service_id, 'breakdown': breakdown}), 200
+        except UnmatchedQueryError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error("Error building %s enrichment breakdown: %s", service_id, e)
+            return jsonify({'error': str(e)}), 500
+
+    @bp.route('/api/enrichment/<service_id>/unmatched', methods=['GET'])
+    def enrichment_unmatched(service_id: str):
+        """Paginated list of items this source hasn't matched (for manual match).
+
+        Query params: ``entity_type`` (artist|album|track), ``status``
+        (not_found|pending|unmatched), ``q`` (name search), ``limit``, ``offset``.
+        """
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+
+        entity_type = (request.args.get('entity_type') or 'artist').strip()
+        status = (request.args.get('status') or 'not_found').strip()
+        query = (request.args.get('q') or '').strip() or None
+        try:
+            limit = int(request.args.get('limit', 50))
+            offset = int(request.args.get('offset', 0))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'limit/offset must be integers'}), 400
+
+        try:
+            result = _db_getter().get_enrichment_unmatched(
+                service_id, entity_type, status, query, limit, offset
+            )
+        except UnmatchedQueryError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error("Error listing %s unmatched %ss: %s", service_id, entity_type, e)
+            return jsonify({'error': str(e)}), 500
+
+        result.update({
+            'service': service_id,
+            'entity_type': entity_type,
+            'status': status,
+            'limit': limit,
+            'offset': offset,
+            'entity_types': list(supported_entity_types(service_id)),
+        })
+        return jsonify(result), 200
 
     return bp
