@@ -140,12 +140,26 @@ async function openEnrichmentManager(workerId) {
         overlay.innerHTML = `
             <div class="enrichment-manager-modal" role="dialog" aria-modal="true"
                  aria-label="Manage Enrichment Workers" tabindex="-1">
-                <div class="enhanced-bulk-modal-header">
-                    <h3>🧬 Manage Enrichment Workers</h3>
-                    <div class="em-header-actions">
+                <div class="em-topbar">
+                    <div class="em-topbar-icon"><span>🧬</span></div>
+                    <div class="em-topbar-titles">
+                        <h3 class="em-topbar-title">Enrichment Workers</h3>
+                        <div class="em-topbar-sub">Match your library across every metadata source</div>
+                    </div>
+                    <div class="em-global">
+                        <span class="em-global-label">Process first<br><span>everywhere</span></span>
+                        <div class="em-global-tabs" id="em-global-tabs">
+                            <button data-e="artist" onclick="setGlobalPriority('artist', this)">Artists</button>
+                            <button data-e="album"  onclick="setGlobalPriority('album', this)">Albums</button>
+                            <button data-e="track"  onclick="setGlobalPriority('track', this)">Tracks</button>
+                            <button data-e="" class="em-global-auto" onclick="setGlobalPriority('', this)">Auto</button>
+                        </div>
+                    </div>
+                    <div class="em-topbar-actions">
                         <button class="em-icon-btn" id="em-refresh-btn" title="Refresh"
                                 onclick="refreshEnrichmentManager(this)">⟳</button>
-                        <button class="enhanced-bulk-modal-close" onclick="closeEnrichmentManager()">&times;</button>
+                        <button class="em-icon-btn em-icon-btn--close" title="Close"
+                                onclick="closeEnrichmentManager()">&times;</button>
                     </div>
                 </div>
                 <div class="em-body">
@@ -257,6 +271,29 @@ function _emStatusInfo(status) {
     if (status.idle) return { cls: 'idle', label: 'Idle' };
     if (status.running) return { cls: 'running', label: 'Running' };
     return { cls: 'stopped', label: 'Stopped' };
+}
+
+// Global "process first" — applies a group to EVERY worker. Workers that don't
+// enrich that entity (Genius/album, Discogs/track) reject with 400 and are
+// skipped. Sets processing order only (no mass failed re-queue across sources).
+async function setGlobalPriority(entity, btn) {
+    if (btn) {
+        document.querySelectorAll('#em-global-tabs button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+    const results = await Promise.all(ENRICHMENT_WORKERS.map(w =>
+        fetch(`/api/enrichment/${w.id}/priority`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity: entity || 'none' }),
+        }).then(r => r.ok).catch(() => false)
+    ));
+    const n = results.filter(Boolean).length;
+    showToast(entity
+        ? `${n} worker${n === 1 ? '' : 's'} will process ${_emEntityLabel(entity, true).toLowerCase()} first`
+        : `${n} worker${n === 1 ? '' : 's'} back to automatic order`, 'success');
+    // Reflect on the currently-open worker.
+    const sel = enrichmentManagerState.selected;
+    if (sel) { await _emLoadPriority(sel); _emRenderEntityCards(); }
 }
 
 // ── Left rail ───────────────────────────────────────────────────────────────
@@ -737,9 +774,14 @@ function _emRenderUnmatchedList() {
         const id = enrichmentManagerState.selected;
         const entity = enrichmentManagerState.entityTab;
         host.innerHTML = data.items.map(item => {
-            const img = item.image_url
-                ? `<img class="em-row-img" src="${_emEscape(item.image_url)}" alt="" loading="lazy" onerror="this.style.display='none'">`
-                : '<div class="em-row-img em-row-img--ph">♪</div>';
+            // Unmatched items rarely have artwork yet, so the box always shows a
+            // subtle entity glyph; a real image (if any) layers over it and, on
+            // error, removes itself to reveal the glyph — no ragged gaps.
+            const phGlyph = { artist: '🎤', album: '💿', track: '🎵' }[entity] || '♪';
+            const pic = item.image_url
+                ? `<img class="em-row-img-pic" src="${_emEscape(item.image_url)}" alt="" loading="lazy" onerror="this.remove()">`
+                : '';
+            const img = `<div class="em-row-img em-row-img--ph">${phGlyph}${pic}</div>`;
             const rel = _emRelativeTime(item.last_attempted);
             const last = rel
                 ? `<span class="em-muted">tried ${rel}</span>`
@@ -1090,6 +1132,7 @@ window.onEnrichmentSearchInput = onEnrichmentSearchInput;
 window.changeEnrichmentPage = changeEnrichmentPage;
 window.toggleEnrichmentWorker = toggleEnrichmentWorker;
 window.setEnrichmentPriority = setEnrichmentPriority;
+window.setGlobalPriority = setGlobalPriority;
 window.retryEnrichmentItem = retryEnrichmentItem;
 window.retryAllFailedEnrichment = retryAllFailedEnrichment;
 window.toggleEnrichmentRowSelect = toggleEnrichmentRowSelect;
