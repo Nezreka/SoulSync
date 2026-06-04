@@ -69,13 +69,32 @@
         return result;
     }
 
+    // Cache viewport dims so initLayer/setPreset (runs on every page nav) doesn't
+    // force a synchronous layout flush by reading clientWidth/clientHeight each time.
+    let _vpW = 0, _vpH = 0;
+    function measureViewport() {
+        _vpW = canvas.clientWidth;
+        _vpH = canvas.clientHeight;
+    }
     function resize() {
-        const dpr = 1; // keep 1:1 for performance
-        canvas.width = canvas.clientWidth * dpr;
-        canvas.height = canvas.clientHeight * dpr;
+        if (_vpW === 0) measureViewport(); // first run only
+        if (canvas.width !== _vpW || canvas.height !== _vpH) {
+            canvas.width = _vpW;
+            canvas.height = _vpH;
+        }
     }
 
-    window.addEventListener('resize', resize);
+    let _resizeRaf = 0;
+    window.addEventListener('resize', () => {
+        // Debounce to a frame; re-measure (reads layout) then apply.
+        if (_resizeRaf) return;
+        _resizeRaf = requestAnimationFrame(() => {
+            _resizeRaf = 0;
+            measureViewport();
+            resize();
+        });
+    });
+    measureViewport();
     resize();
 
     // ── Preset Definitions ──
@@ -2061,8 +2080,30 @@
         return { preset, particles: parts, extras: layerExtras, name: presetName };
     }
 
-    function loop() {
+    let _lastFrameTime = 0;
+    const _targetFps = 30;
+    const _frameInterval = 1000 / _targetFps;
+
+    // Pause particle drawing during active scroll (timestamp threshold, ms).
+    let _scrollPauseUntil = 0;
+    (function attachScrollPause() {
+        const scroller = document.querySelector('.main-content') || window;
+        scroller.addEventListener('scroll', () => {
+            // requestAnimationFrame timestamps share the performance.now() clock.
+            _scrollPauseUntil = performance.now() + 180;
+        }, { passive: true });
+    })();
+
+    function loop(timestamp) {
         animFrame = requestAnimationFrame(loop);
+
+        // Give the scroll its full frame budget: while the user is actively
+        // scrolling, skip the full-viewport canvas redraw (particles freeze on
+        // their last frame, then resume on scroll-idle). Eliminates scroll jank.
+        if (timestamp < _scrollPauseUntil) return;
+
+        if (timestamp - _lastFrameTime < _frameInterval) return;
+        _lastFrameTime = timestamp - ((timestamp - _lastFrameTime) % _frameInterval);
 
         const w = canvas.width, h = canvas.height;
         if (w === 0 || h === 0) { resize(); return; }
@@ -2286,6 +2327,8 @@
     // Listen for page changes from script.js
     window.pageParticles = {
         setPage(pageId) {
+            // Reduce Visual Effects performance mode halts the loop entirely.
+            if (window._reduceEffectsActive) { stop(); return; }
             const presetName = PAGE_PRESETS[pageId] || 'none';
             setPreset(presetName);
         },
@@ -2294,7 +2337,7 @@
 
     // Auto-start for initial page (respect particles toggle)
     requestAnimationFrame(() => {
-        if (window._particlesEnabled === false) return;
+        if (window._particlesEnabled === false || window._reduceEffectsActive) return;
         const activePage = document.querySelector('.page.active');
         if (activePage) {
             const pageId = activePage.id.replace('-page', '');

@@ -331,6 +331,14 @@
 
     let frameCount = 0;
 
+    let _scrollPauseUntil = 0;
+    (function attachScrollPause() {
+        const scroller = document.querySelector('.main-content') || window;
+        scroller.addEventListener('scroll', () => {
+            _scrollPauseUntil = performance.now() + 180;
+        }, { passive: true });
+    })();
+
     function startLoop() {
         if (animFrame) return;
         tick();
@@ -346,6 +354,9 @@
     function tick() {
         animFrame = requestAnimationFrame(tick);
         if (!canvas || !ctx) return;
+
+        // Yield the frame to active scrolling (orbs freeze, resume on idle).
+        if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
         const time = frameCount / 60;
@@ -582,7 +593,7 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        return window._workerOrbsEnabled !== false;
+        return window._workerOrbsEnabled !== false && !window._reduceEffectsActive;
     }
 
     function setPage(pageId) {

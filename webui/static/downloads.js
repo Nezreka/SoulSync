@@ -5784,12 +5784,12 @@ function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
-    // Hide on the Search page where the unified search already exists. Accept the
-    // legacy 'downloads' id for callers that predate the page rename.
-    const onSearchPage = typeof currentPage !== 'undefined' && (currentPage === 'search' || currentPage === 'downloads');
-    bar.style.display = onSearchPage ? 'none' : '';
-    if (aura) aura.classList.toggle('hidden', onSearchPage);
-    if (onSearchPage && _gsState.active) _gsDeactivate();
+    // Hide on pages where global search doesn't belong.
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
+    const onHidePage = typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage);
+    bar.style.display = onHidePage ? 'none' : '';
+    if (aura) aura.classList.toggle('hidden', onHidePage);
+    if (onHidePage && _gsState.active) _gsDeactivate();
 }
 
 function _gsDeactivate() {
