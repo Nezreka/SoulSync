@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from core.sync.playlist_edit import plan_playlist_add, remove_one_occurrence
+from core.sync.playlist_edit import (
+    plan_playlist_add,
+    plan_playlist_reconcile,
+    remove_one_occurrence,
+)
 
 
 # ── plan_playlist_add: link must not duplicate ────────────────────────────
@@ -78,3 +82,47 @@ def test_remove_single_occurrence():
 def test_remove_stringifies():
     new_ids, removed = remove_one_occurrence([1, 2, 2, 3], 2)
     assert removed and new_ids == ["1", "2", "3"]
+
+
+# ── plan_playlist_reconcile: in-place delta (#792) ────────────────────────
+
+def test_reconcile_adds_new_keeps_existing():
+    # 4-track playlist + a 5th in source → add only the 5th, remove nothing.
+    plan = plan_playlist_reconcile(['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd', 'e'])
+    assert plan == {'add': ['e'], 'remove': []}
+
+
+def test_reconcile_removes_gone():
+    # Source dropped 'b' → remove it, add nothing.
+    plan = plan_playlist_reconcile(['a', 'b', 'c'], ['a', 'c'])
+    assert plan == {'add': [], 'remove': ['b']}
+
+
+def test_reconcile_add_and_remove_together():
+    plan = plan_playlist_reconcile(['a', 'b', 'c'], ['a', 'c', 'd', 'e'])
+    assert plan['add'] == ['d', 'e']       # desired order preserved
+    assert plan['remove'] == ['b']
+
+
+def test_reconcile_noop_when_identical():
+    assert plan_playlist_reconcile(['a', 'b'], ['a', 'b']) == {'add': [], 'remove': []}
+
+
+def test_reconcile_empty_desired_removes_all():
+    assert plan_playlist_reconcile(['a', 'b'], []) == {'add': [], 'remove': ['a', 'b']}
+
+
+def test_reconcile_empty_current_adds_all():
+    assert plan_playlist_reconcile([], ['a', 'b']) == {'add': ['a', 'b'], 'remove': []}
+
+
+def test_reconcile_stringifies_ids():
+    plan = plan_playlist_reconcile([1, 2], [2, 3])
+    assert plan == {'add': ['3'], 'remove': ['1']}
+
+
+def test_reconcile_duplicate_still_desired_not_removed():
+    # 'a' appears twice and is still desired → never queued for removal;
+    # a gone id is listed once even if it had duplicates.
+    plan = plan_playlist_reconcile(['a', 'a', 'b', 'b'], ['a'])
+    assert plan == {'add': [], 'remove': ['b']}

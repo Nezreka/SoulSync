@@ -23546,7 +23546,9 @@ def start_playlist_sync():
     # playlist — only adds tracks that aren't there yet. Per-server clients
     # implement append via native add APIs (Plex addItems, Jellyfin POST
     # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
-    sync_mode = data.get('sync_mode', 'replace')
+    # Per-request sync_mode wins; otherwise use the configured default
+    # (Settings > Playlist sync mode). Default 'replace' keeps today's behavior.
+    sync_mode = data.get('sync_mode') or config_manager.get('playlist_sync.mode', 'replace')
     if sync_mode not in ('replace', 'append'):
         sync_mode = 'replace'
 

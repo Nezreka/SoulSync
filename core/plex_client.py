@@ -667,6 +667,53 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error appending to Plex playlist '{playlist_name}': {e}")
             return False
 
+    def reconcile_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
+        """In-place reconcile (#792): bring an existing playlist's tracks to match
+        ``tracks`` by adding the missing ones and removing the gone ones, WITHOUT
+        deleting/recreating the playlist — so its custom poster, summary, and
+        ratingKey survive the sync. Creates the playlist if it doesn't exist.
+
+        Returns False on any failure so the caller can fall back to replace."""
+        if not self.ensure_connection():
+            return False
+        try:
+            from core.sync.playlist_edit import plan_playlist_reconcile
+            try:
+                existing = self.server.playlist(playlist_name)
+            except NotFound:
+                logger.info(f"Plex reconcile: '{playlist_name}' doesn't exist — creating")
+                return self.create_playlist(playlist_name, tracks)
+
+            current_items = [i for i in existing.items() if hasattr(i, 'ratingKey')]
+            current_ids = [str(i.ratingKey) for i in current_items]
+            desired_ids = [str(t.ratingKey) for t in tracks if hasattr(t, 'ratingKey')]
+            plan = plan_playlist_reconcile(current_ids, desired_ids)
+
+            add_set, remove_set = set(plan['add']), set(plan['remove'])
+            to_add = [t for t in tracks if hasattr(t, 'ratingKey') and str(t.ratingKey) in add_set]
+            to_remove = [i for i in current_items if str(i.ratingKey) in remove_set]
+
+            if to_add:
+                existing.addItems(to_add)
+            if to_remove:
+                try:
+                    existing.removeItems(to_remove)
+                except (AttributeError, TypeError):
+                    # Older plexapi: no batch removeItems — drop one at a time.
+                    for it in to_remove:
+                        try:
+                            existing.removeItem(it)
+                        except Exception as one_err:
+                            logger.debug("Plex reconcile: removeItem failed: %s", one_err)
+            logger.info(
+                f"Plex reconcile '{playlist_name}': +{len(to_add)} / -{len(to_remove)} "
+                f"(playlist preserved)"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
         if not self.ensure_connection():
             return False

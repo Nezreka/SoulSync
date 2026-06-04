@@ -1124,6 +1124,60 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error appending to Navidrome playlist '{playlist_name}': {e}")
             return False
 
+    def reconcile_playlist(self, playlist_name: str, tracks) -> bool:
+        """In-place reconcile (#792): add missing + remove gone via Subsonic
+        updatePlaylist (songIdToAdd / songIndexToRemove), keeping the existing
+        playlist object so its comment/identity survive — no delete/recreate.
+        Creates the playlist if missing. Returns False so the caller can fall
+        back to replace on any failure."""
+        if not self.ensure_connection():
+            return False
+        try:
+            from core.sync.playlist_edit import plan_playlist_reconcile
+            existing_playlists = self.get_playlists_by_name(playlist_name)
+            if not existing_playlists:
+                logger.info(f"Navidrome reconcile: '{playlist_name}' doesn't exist — creating")
+                return self.create_playlist(playlist_name, tracks)
+
+            primary = existing_playlists[0]
+            existing_tracks = self.get_playlist_tracks(primary.id)
+            current_ids = [str(t.id) for t in existing_tracks if getattr(t, 'id', None)]
+            desired_ids = []
+            for t in tracks:
+                tid = (str(t.ratingKey) if hasattr(t, 'ratingKey')
+                       else str(t.id) if getattr(t, 'id', None)
+                       else str(t.get('id', '')) if isinstance(t, dict) else '')
+                if tid:
+                    desired_ids.append(tid)
+
+            plan = plan_playlist_reconcile(current_ids, desired_ids)
+            if not plan['add'] and not plan['remove']:
+                return True
+
+            params = {'playlistId': primary.id}
+            if plan['add']:
+                params['songIdToAdd'] = plan['add']
+            if plan['remove']:
+                # Indices into the CURRENT list; remove descending so earlier
+                # removals don't shift the indices of later ones.
+                remove_set = set(plan['remove'])
+                params['songIndexToRemove'] = sorted(
+                    (i for i, cid in enumerate(current_ids) if cid in remove_set),
+                    reverse=True,
+                )
+            response = self._make_request('updatePlaylist', params)
+            if response and response.get('status') == 'ok':
+                logger.info(
+                    f"Navidrome reconcile '{playlist_name}': +{len(plan['add'])} / "
+                    f"-{len(plan['remove'])} (playlist preserved)"
+                )
+                return True
+            logger.error(f"Navidrome reconcile failed for '{playlist_name}'")
+            return False
+        except Exception as e:
+            logger.error(f"Error reconciling Navidrome playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist. Handles duplicates."""
         if not self.ensure_connection():
