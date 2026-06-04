@@ -150,6 +150,51 @@ def test_qbit_login_failure_returns_none() -> None:
     assert sess is None
 
 
+def test_qbit_login_accepts_204_no_content() -> None:
+    """qBittorrent 5.2.0+ returns HTTP 204 with an empty body on a successful
+    login (was HTTP 200 + 'Ok.'). The adapter must treat that as success even
+    when no SID cookie is visible to us."""
+    adapter = _qbit_with_config()
+    fake_session = MagicMock()
+    fake_session.cookies.get.return_value = None  # no SID surfaced
+    resp = _mock_response(204, text='')
+    resp.text = ''
+    fake_session.post.return_value = resp
+    with patch('core.torrent_clients.qbittorrent.http_requests.Session',
+               return_value=fake_session):
+        sess = adapter._ensure_session_sync()
+    assert sess is not None
+
+
+def test_qbit_login_accepts_sid_cookie_with_empty_body() -> None:
+    """A SID auth cookie is the authoritative success signal regardless of body."""
+    adapter = _qbit_with_config()
+    fake_session = MagicMock()
+    fake_session.cookies.get.return_value = 'SID-abc123'
+    resp = _mock_response(200, text='')
+    resp.text = ''
+    fake_session.post.return_value = resp
+    with patch('core.torrent_clients.qbittorrent.http_requests.Session',
+               return_value=fake_session):
+        sess = adapter._ensure_session_sync()
+    assert sess is not None
+
+
+def test_qbit_login_rejects_fails_even_with_stale_cookie() -> None:
+    """Bad creds: qBittorrent returns HTTP 200 'Fails.' (not a 4xx). Must fail
+    even if a stale SID cookie lingers on the session."""
+    adapter = _qbit_with_config()
+    fake_session = MagicMock()
+    fake_session.cookies.get.return_value = 'SID-stale'
+    resp = _mock_response(200, text='Fails.')
+    resp.text = 'Fails.'
+    fake_session.post.return_value = resp
+    with patch('core.torrent_clients.qbittorrent.http_requests.Session',
+               return_value=fake_session):
+        sess = adapter._ensure_session_sync()
+    assert sess is None
+
+
 def test_qbit_parse_status_normalises_native_fields() -> None:
     adapter = _qbit_with_config()
     status = adapter._parse_status({
