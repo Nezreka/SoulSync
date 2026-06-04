@@ -97,33 +97,62 @@ def test_fetch_music_folders_parses_without_ensure_connection(nav_client):
     ]
 
 
+def _fake_request(endpoint, params=None):
+    if endpoint == 'ping':
+        return {'status': 'ok', 'version': '1.16.1'}
+    if endpoint == 'getMusicFolders':
+        return {'musicFolders': {'musicFolder': [
+            {'id': 1, 'name': 'Music'},
+            {'id': 2, 'name': 'Audiobooks'},
+        ]}}
+    return None
+
+
+def _prefs(values):
+    """A MusicDatabase mock whose get_preference reads from `values`."""
+    db = MagicMock()
+    db.get_preference.side_effect = lambda key, *a, **k: values.get(key)
+    return db
+
+
+def _connect_with(nav_client, fake_db):
+    with patch('core.navidrome_client.config_manager.get_navidrome_config',
+               return_value={'base_url': 'http://nav', 'username': 'u', 'password': 'p'}), \
+         patch('database.music_database.MusicDatabase', return_value=fake_db), \
+         patch.object(nav_client, '_make_request', side_effect=_fake_request):
+        assert nav_client.ensure_connection() is True
+
+
 def test_setup_client_restores_saved_music_folder(nav_client):
     """Regression for #789: a saved music-folder selection must survive
     _setup_client. The restore runs while still inside ensure_connection()
     (_is_connecting=True); the old code called the public get_music_folders(),
     which re-entered the guard, got [], and left music_folder_id=None — so
     every scan imported all libraries regardless of the user's selection."""
-    def fake_request(endpoint, params=None):
-        if endpoint == 'ping':
-            return {'status': 'ok', 'version': '1.16.1'}
-        if endpoint == 'getMusicFolders':
-            return {'musicFolders': {'musicFolder': [
-                {'id': 1, 'name': 'Music'},
-                {'id': 2, 'name': 'Audiobooks'},
-            ]}}
-        return None
-
-    fake_db = MagicMock()
-    fake_db.get_preference.return_value = 'Audiobooks'
-
-    with patch('core.navidrome_client.config_manager.get_navidrome_config',
-               return_value={'base_url': 'http://nav', 'username': 'u', 'password': 'p'}), \
-         patch('database.music_database.MusicDatabase', return_value=fake_db), \
-         patch.object(nav_client, '_make_request', side_effect=fake_request):
-        assert nav_client.ensure_connection() is True
-
-    # Selection ('Audiobooks') was restored to its folder id, not left None.
+    fake_db = _prefs({'navidrome_music_folder_id': '2', 'navidrome_music_folder': 'Audiobooks'})
+    _connect_with(nav_client, fake_db)
     assert nav_client.music_folder_id == '2'
+    # Nothing drifted → no self-heal writes.
+    fake_db.set_preference.assert_not_called()
+
+
+def test_setup_client_restores_by_id_after_folder_rename(nav_client):
+    """Hardening: the id is the primary key, so a folder renamed in Navidrome
+    (stored name no longer matches its title) still resolves by id — and the
+    stale name is healed so the settings dropdown stays correct."""
+    fake_db = _prefs({'navidrome_music_folder_id': '2', 'navidrome_music_folder': 'Old Stale Name'})
+    _connect_with(nav_client, fake_db)
+    assert nav_client.music_folder_id == '2'
+    fake_db.set_preference.assert_any_call('navidrome_music_folder', 'Audiobooks')
+
+
+def test_setup_client_name_fallback_self_heals_id(nav_client):
+    """Back-compat: installs saved before the id was persisted match by name,
+    and the id is written back so a later rename can't break the match."""
+    fake_db = _prefs({'navidrome_music_folder_id': None, 'navidrome_music_folder': 'Audiobooks'})
+    _connect_with(nav_client, fake_db)
+    assert nav_client.music_folder_id == '2'
+    fake_db.set_preference.assert_any_call('navidrome_music_folder_id', '2')
 
 
 def test_navidrome_album_exposes_cover_art_url(nav_client):

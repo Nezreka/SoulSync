@@ -224,7 +224,10 @@ class NavidromeClient(MediaServerClient):
                     logger.info(f"Set music folder to: {folder_name} (ID: {self.music_folder_id})")
                     from database.music_database import MusicDatabase
                     db = MusicDatabase()
+                    # Persist the id (stable across renames) as the primary key,
+                    # keep the name for display + back-compat fallback.
                     db.set_preference('navidrome_music_folder', folder_name)
+                    db.set_preference('navidrome_music_folder_id', folder['key'])
                     return True
             # If folder_name is empty, clear the selection
             if not folder_name:
@@ -233,6 +236,7 @@ class NavidromeClient(MediaServerClient):
                 from database.music_database import MusicDatabase
                 db = MusicDatabase()
                 db.set_preference('navidrome_music_folder', '')
+                db.set_preference('navidrome_music_folder_id', '')
                 logger.info("Cleared music folder selection — will use all libraries")
                 return True
             logger.warning(f"Music folder '{folder_name}' not found")
@@ -284,18 +288,35 @@ class NavidromeClient(MediaServerClient):
                 try:
                     from database.music_database import MusicDatabase
                     db = MusicDatabase()
+                    saved_id = db.get_preference('navidrome_music_folder_id')
                     saved_folder = db.get_preference('navidrome_music_folder')
-                    if saved_folder:
+                    if saved_id or saved_folder:
                         # Use the non-reentrant fetch: we're still inside
                         # ensure_connection() here (_is_connecting=True), so the
                         # public get_music_folders() would re-enter the guard and
                         # return [], silently dropping the saved selection.
                         folders = self._fetch_music_folders()
-                        for folder in folders:
-                            if folder['title'] == saved_folder:
-                                self.music_folder_id = folder['key']
-                                logger.info(f"Restored music folder preference: {saved_folder} (ID: {self.music_folder_id})")
-                                break
+                        # Match by id first (stable across renames in Navidrome);
+                        # fall back to name for installs saved before the id was
+                        # persisted.
+                        matched = None
+                        if saved_id:
+                            matched = next((f for f in folders if f['key'] == str(saved_id)), None)
+                        if matched is None and saved_folder:
+                            matched = next((f for f in folders if f['title'] == saved_folder), None)
+                        if matched is not None:
+                            self.music_folder_id = matched['key']
+                            logger.info(f"Restored music folder preference: {matched['title']} (ID: {self.music_folder_id})")
+                            # Self-heal drifted prefs: a pre-id install (no saved
+                            # id) or a folder renamed in Navidrome (stale name).
+                            # id stays the durable key; name is kept fresh so the
+                            # settings dropdown highlights the right option.
+                            if str(saved_id or '') != matched['key'] or (saved_folder or '') != matched['title']:
+                                try:
+                                    db.set_preference('navidrome_music_folder_id', matched['key'])
+                                    db.set_preference('navidrome_music_folder', matched['title'])
+                                except Exception as heal_err:
+                                    logger.debug(f"Could not self-heal music folder prefs: {heal_err}")
                 except Exception as e:
                     logger.warning(f"Could not restore music folder preference: {e}")
             else:
