@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 @dataclass
@@ -105,6 +105,8 @@ class AutomationDeps:
     # --- Playlist pipeline entry points ---
     run_playlist_discovery_worker: Callable[..., Any]
     run_sync_task: Callable[..., Any]
+    run_playlist_organize_download: Callable[..., Dict[str, Any]]
+    missing_download_executor: Any
     load_sync_status_file: Callable[[], dict]
     get_deezer_client: Callable[[], Any]
     parse_youtube_playlist: Callable[[str], Any]

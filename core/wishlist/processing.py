@@ -394,12 +394,17 @@ def resolve_wishlist_source_type_for_batch(batch: Dict[str, Any]) -> str:
 def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime | None = None) -> Dict[str, Any]:
     """Build the source_context payload used when adding failed tracks back to the wishlist."""
     current_time = current_time or datetime.now()
+    playlist_id = batch.get('source_playlist_ref') or batch.get('playlist_id')
     context = {
         'playlist_name': batch.get('playlist_name', 'Unknown Playlist'),
-        'playlist_id': batch.get('playlist_id', None),
+        'playlist_id': playlist_id,
         'added_from': 'webui_modal',
         'timestamp': current_time.isoformat(),
     }
+    if batch.get('mirrored_playlist_id') is not None:
+        context['mirrored_playlist_id'] = batch.get('mirrored_playlist_id')
+    if batch.get('organize_by_playlist'):
+        context['organize_by_playlist'] = True
     # Preserve album-batch provenance so wishlist requeue has a real signal
     # for album-vs-single routing instead of relying on per-track album dicts
     # that may have been mangled by reconstruction fallbacks.

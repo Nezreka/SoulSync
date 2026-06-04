@@ -20,6 +20,7 @@ class _FakeSyncResult:
     failed_tracks: int = 1
     synced_tracks: int = 4
     total_tracks: int = 6
+    wishlist_added_count: int = 0
     match_details: list = None
 
     def __post_init__(self):
@@ -139,6 +140,9 @@ def _build_deps(
     update_automation_progress=None,
     update_and_save_sync_status=None,
     run_async=None,
+    process_wishlist_automatically=None,
+    run_playlist_organize_download=None,
+    is_wishlist_actually_processing=None,
 ):
     return ds.SyncDeps(
         config_manager=config or _FakeConfig(),
@@ -154,6 +158,9 @@ def _build_deps(
         update_and_save_sync_status=update_and_save_sync_status or (lambda *a, **kw: None),
         sync_states=sync_states if sync_states is not None else {},
         sync_lock=sync_lock or threading.Lock(),
+        process_wishlist_automatically=process_wishlist_automatically,
+        run_playlist_organize_download=run_playlist_organize_download,
+        is_wishlist_actually_processing=is_wishlist_actually_processing,
     )
 
 
@@ -443,6 +450,64 @@ def test_update_and_save_sync_status_called(patched_db):
     assert len(save_calls) == 1
     args, kwargs = save_calls[0]
     assert kwargs.get('tracks_hash')  # md5 hash present
+
+
+# ---------------------------------------------------------------------------
+# Post-sync automation follow-up
+# ---------------------------------------------------------------------------
+
+def test_post_sync_triggers_wishlist_processor_for_mirror_automation(patched_db):
+    wishlist_calls = []
+    result = _FakeSyncResult(
+        matched_tracks=5,
+        failed_tracks=2,
+        wishlist_added_count=2,
+        total_tracks=7,
+    )
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(
+        sync_service=svc,
+        process_wishlist_automatically=lambda **kw: wishlist_calls.append(kw),
+        is_wishlist_actually_processing=lambda: False,
+    )
+
+    ds.run_sync_task(
+        'auto_mirror_42',
+        'Mirror',
+        [_track()],
+        automation_id='auto-1',
+        deps=deps,
+    )
+
+    assert len(wishlist_calls) == 1
+    assert wishlist_calls[0]['automation_id'] == 'auto-1'
+
+
+def test_post_sync_starts_organize_download_when_skip_wishlist_add(patched_db):
+    org_calls = []
+    result = _FakeSyncResult(
+        matched_tracks=50,
+        failed_tracks=10,
+        total_tracks=60,
+    )
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(
+        sync_service=svc,
+        run_playlist_organize_download=lambda **kw: org_calls.append(kw) or {'status': 'started'},
+    )
+
+    ds.run_sync_task(
+        'auto_mirror_7',
+        'Organized',
+        [_track()],
+        automation_id='auto-2',
+        deps=deps,
+        skip_wishlist_add=True,
+    )
+
+    assert len(org_calls) == 1
+    assert org_calls[0]['mirrored_playlist_id'] == 7
+    assert org_calls[0]['automation_id'] == 'auto-2'
 
 
 # ---------------------------------------------------------------------------

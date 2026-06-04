@@ -590,6 +590,26 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             record_library_history_download(context)
             record_download_provenance(context)
 
+            try:
+                pf_album_info = build_import_album_info(context, force_album=False)
+                if not pf_album_info or not pf_album_info.get("album_name"):
+                    pf_album_info = {
+                        "is_album": True,
+                        "album_name": playlist_name,
+                        "track_number": track_info.get("track_number", 1) or 1,
+                        "disc_number": track_info.get("disc_number", 1) or 1,
+                        "clean_track_name": get_import_clean_title(
+                            context,
+                            default=get_import_original_search(context).get("title", "Unknown"),
+                        ),
+                        "source": get_import_source(context) or "spotify",
+                    }
+                elif not pf_album_info.get("is_album"):
+                    pf_album_info["is_album"] = True
+                record_soulsync_library_entry(context, artist_context, pf_album_info)
+            except Exception as lib_err:
+                logger.error(f"[Playlist Folder] SoulSync library registration failed: {lib_err}")
+
             task_id = context.get('task_id')
             batch_id = context.get('batch_id')
             if task_id and batch_id:

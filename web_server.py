@@ -1084,6 +1084,8 @@ def _register_automation_handlers():
         get_watchlist_scan_state=lambda: watchlist_scan_state,
         run_playlist_discovery_worker=_run_playlist_discovery_worker,
         run_sync_task=_run_sync_task,
+        run_playlist_organize_download=_run_playlist_organize_download,
+        missing_download_executor=missing_download_executor,
         load_sync_status_file=_load_sync_status_file,
         get_deezer_client=_get_deezer_client,
         parse_youtube_playlist=parse_youtube_playlist,
@@ -18750,6 +18752,23 @@ def start_missing_tracks_process(playlist_id):
     if playlist_folder_mode:
         logger.info(f"[Playlist Folder] Enabled for playlist: '{playlist_name}'")
 
+    # Persist organize-by-playlist preference on the mirrored playlist row
+    try:
+        profile_id = get_current_profile_id()
+        db_pref = get_database()
+        mirrored_pl = db_pref.resolve_mirrored_playlist(
+            playlist_id,
+            profile_id=profile_id,
+            default_source='spotify',
+        )
+        if mirrored_pl and mirrored_pl.get('id'):
+            db_pref.set_mirrored_playlist_organize_by_playlist(
+                int(mirrored_pl['id']),
+                bool(playlist_folder_mode),
+            )
+    except Exception as pref_err:
+        logger.debug(f"[Playlist Folder] Could not persist mirrored preference: {pref_err}")
+
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
         active_analysis_count = sum(1 for batch in download_batches.values() 
@@ -18960,7 +18979,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'last_synced': now.isoformat()
         }
         # Store match counts and track hash for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash'):
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash', 'mirror_tracks_hash'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -23575,14 +23594,44 @@ def _build_sync_deps():
         update_and_save_sync_status=_update_and_save_sync_status,
         sync_states=sync_states,
         sync_lock=sync_lock,
+        process_wishlist_automatically=_process_wishlist_automatically,
+        run_playlist_organize_download=_run_playlist_organize_download,
+        is_wishlist_actually_processing=is_wishlist_actually_processing,
     )
 
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', sync_mode='replace'):
+def _run_sync_task(
+    playlist_id,
+    playlist_name,
+    tracks_json,
+    automation_id=None,
+    profile_id=1,
+    playlist_image_url='',
+    sync_mode='replace',
+    skip_wishlist_add=False,
+):
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
         sync_mode=sync_mode,
+        skip_wishlist_add=skip_wishlist_add,
+    )
+
+
+def _run_playlist_organize_download(mirrored_playlist_id, automation_id=None, profile_id=None):
+    """Start a playlist-folder missing-tracks batch for automation / pipeline."""
+    from core.playlists.organize_download import run_playlist_organize_download
+
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    return run_playlist_organize_download(
+        _automation_deps,
+        mirrored_playlist_id=int(mirrored_playlist_id),
+        profile_id=profile_id,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        record_sync_history_start=_record_sync_history_start,
+        detect_sync_source=_downloads_history.detect_sync_source,
     )
 
 
@@ -31652,6 +31701,55 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist source reference: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/preferences', methods=['PATCH'])
+def update_mirrored_playlist_preferences_endpoint(playlist_id):
+    """Update per-playlist download preferences (e.g. organize by playlist folder)."""
+    try:
+        data = request.get_json() or {}
+        if 'organize_by_playlist' not in data:
+            return jsonify({"error": "organize_by_playlist is required"}), 400
+
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        enabled = bool(data.get('organize_by_playlist'))
+        ok = database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled)
+        if not ok:
+            return jsonify({"error": "Failed to update preferences"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist preferences: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/resolve', methods=['GET'])
+def resolve_mirrored_playlist_endpoint():
+    """Resolve mirrored playlist by numeric id or upstream source id (e.g. Spotify playlist id)."""
+    try:
+        playlist_ref = request.args.get('ref') or request.args.get('playlist_id')
+        source = request.args.get('source', 'spotify')
+        profile_id = get_current_profile_id()
+        if not playlist_ref:
+            return jsonify({"error": "ref or playlist_id query param required"}), 400
+
+        database = get_database()
+        playlist = database.resolve_mirrored_playlist(
+            playlist_ref,
+            profile_id=profile_id,
+            default_source=source,
+        )
+        if not playlist:
+            return jsonify({"found": False, "playlist": None})
+        return jsonify({"found": True, "playlist": playlist})
+    except Exception as e:
+        logger.error(f"Error resolving mirrored playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 

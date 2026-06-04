@@ -1610,6 +1610,11 @@ async function loadSpotifyPlaylists() {
             throw new Error(error.error || 'Failed to fetch playlists');
         }
         spotifyPlaylists = await response.json();
+        if (typeof invalidatePlaylistTrackCache === 'function') {
+            invalidatePlaylistTrackCache();
+        } else {
+            playlistTrackCache = {};
+        }
         renderSpotifyPlaylists();
         spotifyPlaylistsLoaded = true;
 
@@ -1833,35 +1838,35 @@ async function openPlaylistDetailsModal(event, playlistId) {
     showLoadingOverlay(`Loading playlist: ${playlist.name}...`);
 
     try {
-        // --- CACHING LOGIC START ---
-        if (playlistTrackCache[playlistId]) {
+        const cacheStale = typeof playlistTrackCacheIsStale === 'function'
+            && playlistTrackCacheIsStale(playlistId, playlist);
+        if (playlistTrackCache[playlistId] && !cacheStale) {
             console.log(`Cache HIT for playlist ${playlistId}. Using cached tracks.`);
-            // Use the cached tracks instead of fetching
             const fullPlaylist = { ...playlist, tracks: playlistTrackCache[playlistId] };
             showPlaylistDetailsModal(fullPlaylist);
         } else {
-            console.log(`Cache MISS for playlist ${playlistId}. Fetching from server...`);
-            // Fetch from the server if not in cache
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
-            const fullPlaylist = await response.json();
-            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
-
-            // Store the fetched tracks in the cache
-            playlistTrackCache[playlistId] = fullPlaylist.tracks;
+            if (cacheStale) {
+                console.log(`Cache STALE for playlist ${playlistId} — refetching tracks.`);
+                if (typeof invalidatePlaylistTrackCache === 'function') {
+                    invalidatePlaylistTrackCache(playlistId);
+                } else {
+                    delete playlistTrackCache[playlistId];
+                }
+            } else {
+                console.log(`Cache MISS for playlist ${playlistId}. Fetching from server...`);
+            }
+            const fullPlaylist = typeof fetchAndCacheSpotifyPlaylistTracks === 'function'
+                ? await fetchAndCacheSpotifyPlaylistTracks(playlistId)
+                : await (async () => {
+                    const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+                    const data = await response.json();
+                    if (data.error) throw new Error(data.error);
+                    playlistTrackCache[playlistId] = data.tracks;
+                    return data;
+                })();
             console.log(`Cached ${fullPlaylist.tracks.length} tracks for playlist ${playlistId}.`);
-
-            // Auto-mirror this Spotify playlist
-            mirrorPlaylist('spotify', playlistId, fullPlaylist.name, fullPlaylist.tracks.map(t => ({
-                track_name: t.name, artist_name: (t.artists && t.artists[0]) ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0]) : '',
-                album_name: t.album ? (typeof t.album === 'object' ? t.album.name : t.album) : '',
-                duration_ms: t.duration_ms || 0,
-                image_url: t.album && typeof t.album === 'object' && t.album.images && t.album.images[0] ? t.album.images[0].url : null,
-                source_track_id: t.id || t.spotify_track_id || ''
-            })), { description: fullPlaylist.description, owner: fullPlaylist.owner, image_url: fullPlaylist.image_url });
-
             showPlaylistDetailsModal(fullPlaylist);
         }
-        // --- CACHING LOGIC END ---
 
     } catch (error) {
         showToast(`Error: ${error.message}`, 'error');
@@ -1929,22 +1934,27 @@ function showPlaylistDetailsModal(playlist) {
             </div>
             
             <div class="playlist-modal-footer">
-                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
-                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">
-                    ${hasCompletedProcess
-            ? '📊 View Download Results'
-            : '📥 Download Missing Tracks'}
-                </button>
-                <select id="sync-mode-${playlist.id}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)" ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>
-                    <option value="replace" selected>Replace</option>
-                    <option value="append">Append only</option>
-                </select>
-                <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''} ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
+                <div class="playlist-modal-footer-left">
+                    ${typeof playlistOrganizeToggleHtml === 'function' ? playlistOrganizeToggleHtml(playlist.id, 'spotify') : ''}
+                </div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
+                    ${typeof playlistModalDownloadSyncFooterHtml === 'function'
+                        ? playlistModalDownloadSyncFooterHtml(playlist.id, {
+                            hasCompletedProcess,
+                            isSyncing,
+                            source: 'spotify',
+                        })
+                        : `<button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">📥 Download Missing Tracks</button>`}
+                </div>
             </div>
         </div>
     `;
 
     modal.style.display = 'flex';
+    if (typeof loadPlaylistOrganizePreferenceIntoModal === 'function') {
+        void loadPlaylistOrganizePreferenceIntoModal(playlist.id, 'spotify');
+    }
 }
 
 function closePlaylistDetailsModal() {
@@ -2184,19 +2194,39 @@ async function openDownloadMissingModal(playlistId) {
     showLoadingOverlay('Loading playlist...');
 
     // **NEW**: Check if a process is already active for this playlist
-    if (activeDownloadProcesses[playlistId]) {
+    const playlistMeta = spotifyPlaylists.find(p => p.id === playlistId);
+    const processStale = typeof isPlaylistDownloadProcessStale === 'function'
+        ? isPlaylistDownloadProcessStale(playlistId, playlistMeta)
+        : (typeof playlistTrackCacheIsStale === 'function'
+            && playlistTrackCacheIsStale(playlistId, playlistMeta));
+
+    if (activeDownloadProcesses[playlistId] && !processStale) {
         console.log(`Modal for ${playlistId} already exists. Showing it.`);
-        closePlaylistDetailsModal(); // Close playlist details modal even when reusing existing modal
+        closePlaylistDetailsModal();
         const process = activeDownloadProcesses[playlistId];
         if (process.modalElement) {
-            // Show helpful message if it's a completed process
             if (process.status === 'complete') {
-                showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+                showToast('Showing previous results. Use "Download Missing (New)" for a fresh run.', 'info');
             }
             process.modalElement.style.display = 'flex';
         }
+        if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+            await refreshOrganizePreferenceForDownloadModal(playlistId);
+        }
         hideLoadingOverlay();
-        return; // Don't create a new one
+        return;
+    }
+    if (processStale && activeDownloadProcesses[playlistId]) {
+        if (typeof restartPlaylistDownloadMissing === 'function') {
+            await restartPlaylistDownloadMissing(playlistId);
+            hideLoadingOverlay();
+            return;
+        }
+        if (typeof clearPlaylistDownloadProcess === 'function') {
+            clearPlaylistDownloadProcess(playlistId);
+        } else if (typeof invalidatePlaylistTrackCache === 'function') {
+            invalidatePlaylistTrackCache(playlistId);
+        }
     }
 
     console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
@@ -2210,16 +2240,29 @@ async function openDownloadMissingModal(playlistId) {
     }
 
     let tracks = playlistTrackCache[playlistId];
-    if (!tracks) {
+    const needFreshTracks = !tracks || (
+        typeof playlistTrackCacheIsStale === 'function'
+        && playlistTrackCacheIsStale(playlistId, playlist)
+    );
+    if (needFreshTracks) {
         try {
-            const fetchUrl = playlistId.startsWith('deezer_arl_')
-                ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
-                : `/api/spotify/playlist/${playlistId}`;
-            const response = await fetch(fetchUrl);
-            const fullPlaylist = await response.json();
-            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
-            tracks = fullPlaylist.tracks;
-            playlistTrackCache[playlistId] = tracks;
+            if (playlistId.startsWith('deezer_arl_')) {
+                const fetchUrl = `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`;
+                const response = await fetch(fetchUrl);
+                const fullPlaylist = await response.json();
+                if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+                tracks = fullPlaylist.tracks;
+                playlistTrackCache[playlistId] = tracks;
+            } else if (typeof fetchAndCacheSpotifyPlaylistTracks === 'function') {
+                const fullPlaylist = await fetchAndCacheSpotifyPlaylistTracks(playlistId);
+                tracks = fullPlaylist.tracks;
+            } else {
+                const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+                const fullPlaylist = await response.json();
+                if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+                tracks = fullPlaylist.tracks;
+                playlistTrackCache[playlistId] = tracks;
+            }
         } catch (error) {
             showToast(`Failed to fetch tracks: ${error.message}`, 'error');
             hideLoadingOverlay();
@@ -2335,10 +2378,9 @@ async function openDownloadMissingModal(playlistId) {
                             <input type="checkbox" id="force-download-all-${playlistId}">
                             <span>Force Download All</span>
                         </label>
-                        <label class="force-download-toggle">
-                            <input type="checkbox" id="playlist-folder-mode-${playlistId}">
-                            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-                        </label>
+                        ${typeof downloadMissingModalOrganizeCheckboxHtml === 'function'
+                            ? downloadMissingModalOrganizeCheckboxHtml(playlistId)
+                            : `<input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync">`}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startMissingTracksProcess('${playlistId}')">
                         Begin Analysis
@@ -2361,6 +2403,7 @@ async function openDownloadMissingModal(playlistId) {
     `;
 
     applyProgressiveTrackRendering(playlistId, tracks.length);
+    await applyMirroredOrganizePreference(playlistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }

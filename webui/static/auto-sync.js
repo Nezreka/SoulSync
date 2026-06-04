@@ -675,6 +675,7 @@ function autoSyncWeeklyCardHtml(playlist, schedule) {
                     ${_esc(playlist.name)}
                 </div>
                 <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
+                ${autoSyncOrganizeToggleHtml(playlist)}
                 <div class="auto-sync-scheduled-timing">
                     <span>${_esc(label)}</span>
                     <small>${_esc(tz)}</small>
@@ -1576,6 +1577,34 @@ function autoSyncAutomationCardHtml(auto, playlists) {
     `;
 }
 
+function autoSyncOrganizeToggleHtml(playlist) {
+    const checked = playlist.organize_by_playlist ? 'checked' : '';
+    return `
+        <label class="auto-sync-organize-toggle" onclick="event.stopPropagation();" title="Download missing tracks into a playlist-named folder (artist - track)">
+            <input type="checkbox" ${checked} onchange="setAutoSyncOrganizeByPlaylist(${playlist.id}, this.checked)">
+            <span>Organize by playlist</span>
+        </label>
+    `;
+}
+
+async function setAutoSyncOrganizeByPlaylist(playlistId, enabled) {
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/preferences`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organize_by_playlist: !!enabled }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        const pl = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+        if (pl) pl.organize_by_playlist = !!enabled;
+        showToast(enabled ? 'Auto-Sync will use playlist folders' : 'Auto-Sync will use standard download layout', 'success');
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+        await refreshAutoSyncScheduleModal();
+    }
+}
+
 function autoSyncScheduledCardHtml(playlist, schedule) {
     const enabled = schedule?.enabled !== false;
     const nextLabel = schedule?.next_run ? autoSyncNextRunLabel(schedule.next_run) : '';
@@ -1592,6 +1621,7 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
                     ${_esc(playlist.name)}
                 </div>
                 <div class="auto-sync-scheduled-meta">${_esc(autoSyncSourceLabel(playlist.source))} &middot; ${playlist.track_count || 0} tracks</div>
+                ${autoSyncOrganizeToggleHtml(playlist)}
                 <div class="auto-sync-scheduled-timing">
                     <span>${_esc(autoSyncIntervalLabel(schedule?.hours || 24))}</span>
                     ${nextLabel ? `<small>${_esc(nextLabel)}</small>` : ''}
