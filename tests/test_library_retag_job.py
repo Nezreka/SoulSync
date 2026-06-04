@@ -47,7 +47,7 @@ def _context(conn, settings):
     findings = []
     return SimpleNamespace(
         db=SimpleNamespace(_get_connection=lambda: conn),
-        config_manager=SimpleNamespace(get=lambda k, d=None: {f'repair.jobs.library_retag.settings': settings}.get(k, d)),
+        config_manager=SimpleNamespace(get=lambda k, d=None: {'repair.jobs.library_retag.settings': settings}.get(k, d)),
         check_stop=lambda: False, wait_if_paused=lambda: False,
         update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
         create_finding=lambda **kw: (findings.append(kw) or True),
