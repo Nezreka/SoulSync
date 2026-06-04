@@ -591,12 +591,16 @@
                 ctx.fill();
 
                 if (hubImageReady) {
-                    // SoulSync logo as the nucleus — sized to the pulsing radius,
-                    // brightness lifts a touch with energy
-                    const imgSize = hubR * 3.2;
+                    // SoulSync logo as the nucleus — fit to the pulsing radius while
+                    // preserving the image's natural aspect ratio (no stretch)
+                    const natW = hubImage.naturalWidth || 1;
+                    const natH = hubImage.naturalHeight || 1;
+                    const fit = (hubR * 3.2) / Math.max(natW, natH);
+                    const dw = natW * fit;
+                    const dh = natH * fit;
                     ctx.save();
                     ctx.globalAlpha = Math.min(1, 0.85 + energy * 0.15 + slow * 0.1);
-                    ctx.drawImage(hubImage, orb.x - imgSize / 2, orb.y - imgSize / 2, imgSize, imgSize);
+                    ctx.drawImage(hubImage, orb.x - dw / 2, orb.y - dh / 2, dw, dh);
                     ctx.restore();
                 } else {
                     // Fallback while the logo loads: solid bright core + highlight
