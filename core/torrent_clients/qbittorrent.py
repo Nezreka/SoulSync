@@ -117,7 +117,19 @@ class QBittorrentAdapter:
                     headers={'Referer': self._url},
                     timeout=self.DEFAULT_TIMEOUT,
                 )
-                if not resp.ok or resp.text.strip() != 'Ok.':
+                body = resp.text.strip()
+                has_sid = bool(sess.cookies.get('SID'))
+                # qBittorrent reports BAD credentials as HTTP 200 + body "Fails."
+                # (it does NOT use a 4xx). SUCCESS is the SID auth cookie and/or a
+                # success body: "Ok." on <= 5.1, or an empty HTTP 204 on 5.2.0+,
+                # which changed /api/v2/auth/login to return 204 No Content.
+                # The old check required body == "Ok." and so rejected 5.2.0+.
+                login_ok = (
+                    resp.ok
+                    and body.lower() != 'fails.'
+                    and (has_sid or resp.status_code == 204 or body in ('', 'Ok.'))
+                )
+                if not login_ok:
                     logger.error("qBittorrent login failed: HTTP %s body=%r", resp.status_code, resp.text[:200])
                     return None
                 self._session = sess
