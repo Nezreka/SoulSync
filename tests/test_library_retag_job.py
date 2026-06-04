@@ -91,6 +91,26 @@ def test_scan_creates_detailed_finding(tmp_path, monkeypatch):
     assert tp['db_data']['title'] == 'Real Title'
 
 
+def test_scan_dry_run_off_auto_applies_no_finding(tmp_path, monkeypatch):
+    """dry_run=False: scan applies in place (auto_fixed) and creates NO finding."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'skip', 'source': 'spotify', 'dry_run': False})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    writes = []
+    monkeypatch.setattr('core.tag_writer.write_tags_to_file',
+                        lambda fp, db_data, **k: writes.append(db_data) or {'success': True})
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert ctx.findings == []                 # no finding in apply mode
+    assert result.auto_fixed == 1
+    assert writes and writes[0]['title'] == 'Real Title'   # actually wrote
+
+
 def test_scan_skips_album_already_correct(tmp_path, monkeypatch):
     track = tmp_path / 'track.flac'; track.write_bytes(b'')
     conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Real Title')

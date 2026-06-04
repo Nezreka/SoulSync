@@ -1365,68 +1365,30 @@ class RepairWorker:
         if not tracks:
             return {'success': False, 'error': 'No tracks to re-tag in finding'}
 
-        cover_action = details.get('cover_action')
-        cover_url = details.get('cover_url')
-        embed_cover = bool(cover_action and cover_url)
+        # Resolve container/host path mismatches, then delegate to the shared
+        # apply path the job's auto-fix mode also uses.
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-
-        # Download the cover once for the whole album (batch embed).
-        cover_data = None
-        if embed_cover:
-            try:
-                from core.tag_writer import download_cover_art
-                cover_data = download_cover_art(cover_url)
-            except Exception as e:
-                logger.debug("library_retag: cover download failed: %s", e)
-        embed_cover = embed_cover and cover_data is not None
-
-        from core.tag_writer import write_tags_to_file
-        written = failed = skipped = 0
-        last_dir = None
+        resolved_plans = []
         for t in tracks:
             raw = t.get('file_path')
-            db_data = t.get('db_data') or {}
-            if not raw or (not db_data and not embed_cover):
-                skipped += 1
+            if not raw:
                 continue
-            resolved = _resolve_file_path(raw, self.transfer_folder, download_folder,
-                                          config_manager=self._config_manager) or raw
-            if not os.path.isfile(resolved):
-                skipped += 1
-                continue
-            try:
-                res = write_tags_to_file(resolved, db_data, embed_cover=embed_cover, cover_data=cover_data)
-                if res.get('success'):
-                    written += 1
-                    last_dir = os.path.dirname(resolved)
-                else:
-                    failed += 1
-            except Exception as e:
-                logger.warning("library_retag write failed for %s: %s", resolved, e)
-                failed += 1
+            rp = _resolve_file_path(raw, self.transfer_folder, download_folder,
+                                    config_manager=self._config_manager) or raw
+            resolved_plans.append({'file_path': rp, 'db_data': t.get('db_data') or {}})
 
-        # Refresh the cover.jpg sidecar to match (replace, or fill when missing).
-        cover_written = False
-        if cover_action and cover_data and last_dir:
-            try:
-                cover_path = os.path.join(last_dir, 'cover.jpg')
-                if cover_action == 'replace' or not os.path.exists(cover_path):
-                    with open(cover_path, 'wb') as fh:
-                        fh.write(cover_data[0])
-                    cover_written = True
-            except Exception as e:
-                logger.debug("library_retag: cover.jpg write failed: %s", e)
+        from core.repair_jobs.library_retag import apply_track_plans
+        res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'))
 
-        if written == 0 and not cover_written:
+        if res['written'] == 0 and not res['cover_written']:
             return {'success': False,
                     'error': 'Nothing could be written — files unreachable or read-only?'}
-        msg = f'Re-tagged {written} track(s)'
-        if failed:
-            msg += f' ({failed} failed)'
-        if cover_written:
+        msg = f"Re-tagged {res['written']} track(s)"
+        if res['failed']:
+            msg += f" ({res['failed']} failed)"
+        if res['cover_written']:
             msg += ' + refreshed cover.jpg'
-        return {'success': True, 'action': 'library_retag', 'message': msg,
-                'written': written, 'failed': failed, 'skipped': skipped}
+        return {'success': True, 'action': 'library_retag', 'message': msg, **res}
 
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""

@@ -45,6 +45,55 @@ def _read_current_tags(file_path):
         return {}
 
 
+def apply_track_plans(track_plans, cover_action=None, cover_url=None) -> dict:
+    """Write each plan's tags in place (+ optionally embed/refresh cover art),
+    reusing tag_writer.write_tags_to_file. ``file_path`` on each plan must be a
+    real, reachable path (caller resolves Docker paths). Shared by the dry-run=
+    False auto-apply and the repair_worker fix handler. Never raises.
+    """
+    import os as _os
+    result = {'written': 0, 'failed': 0, 'skipped': 0, 'cover_written': False}
+    embed_cover = bool(cover_action and cover_url)
+    cover_data = None
+    if embed_cover:
+        try:
+            from core.tag_writer import download_cover_art
+            cover_data = download_cover_art(cover_url)
+        except Exception as e:
+            logger.debug("retag cover download failed: %s", e)
+    embed_cover = embed_cover and cover_data is not None
+
+    from core.tag_writer import write_tags_to_file
+    last_dir = None
+    for tp in track_plans or []:
+        fp = tp.get('file_path')
+        db_data = tp.get('db_data') or {}
+        if not fp or not _os.path.isfile(fp) or (not db_data and not embed_cover):
+            result['skipped'] += 1
+            continue
+        try:
+            res = write_tags_to_file(fp, db_data, embed_cover=embed_cover, cover_data=cover_data)
+            if res.get('success'):
+                result['written'] += 1
+                last_dir = _os.path.dirname(fp)
+            else:
+                result['failed'] += 1
+        except Exception as e:
+            logger.warning("retag write failed for %s: %s", fp, e)
+            result['failed'] += 1
+
+    if cover_action and cover_data and last_dir:
+        try:
+            cover_path = _os.path.join(last_dir, 'cover.jpg')
+            if cover_action == 'replace' or not _os.path.exists(cover_path):
+                with open(cover_path, 'wb') as fh:
+                    fh.write(cover_data[0])
+                result['cover_written'] = True
+        except Exception as e:
+            logger.debug("retag cover.jpg write failed: %s", e)
+    return result
+
+
 def _add_source_ids(db_data, source, album_source_id, source_track):
     """Stamp the album/track source IDs onto the write payload so the canonical
     writer embeds them too (Spotify / iTunes / MusicBrainz)."""
@@ -95,6 +144,8 @@ class LibraryRetagJob(RepairJob):
         'comes from. Each finding lists every tag that would change (old -> new) per '
         'track so you can review before applying — nothing is written until you do.\n\n'
         'Settings:\n'
+        '- Dry run (default ON): only create findings to review; nothing is written. '
+        'Turn it off to auto-apply on scan.\n'
         '- Mode: "overwrite" rewrites every field the source provides; "fill_missing" '
         'only fills blank tags (keeps your existing values).\n'
         '- Cover art: replace / fill-missing / skip.\n'
@@ -104,6 +155,7 @@ class LibraryRetagJob(RepairJob):
     default_enabled = False
     default_interval_hours = 168
     default_settings = {
+        'dry_run': True,
         'mode': MODE_OVERWRITE,
         'cover_art': 'replace',
         'source': '',
@@ -113,7 +165,7 @@ class LibraryRetagJob(RepairJob):
         'cover_art': ['replace', 'fill_missing', 'skip'],
         'source': ['', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
     }
-    auto_fix = False
+    auto_fix = True
 
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
@@ -133,6 +185,7 @@ class LibraryRetagJob(RepairJob):
         settings = self._get_settings(context)
         mode = settings.get('mode', MODE_OVERWRITE)
         cover_mode = settings.get('cover_art', 'replace')
+        dry_run = settings.get('dry_run', True)
         source_order = self._source_order(settings)
         if not source_order:
             logger.warning("Library re-tag: no usable metadata sources configured")
@@ -180,7 +233,7 @@ class LibraryRetagJob(RepairJob):
 
             try:
                 self._scan_album(context, result, album_id, album_title, artist_name,
-                                 source, album_source_id, mode, cover_mode)
+                                 source, album_source_id, mode, cover_mode, dry_run)
             except Exception as e:
                 logger.debug("Library re-tag: album %s failed: %s", album_id, e)
                 result.errors += 1
@@ -192,7 +245,7 @@ class LibraryRetagJob(RepairJob):
         return result
 
     def _scan_album(self, context, result, album_id, album_title, artist_name,
-                    source, album_source_id, mode, cover_mode):
+                    source, album_source_id, mode, cover_mode, dry_run=True):
         # Local tracks for this album.
         with context.db._get_connection() as conn:
             cur = conn.cursor()
@@ -255,6 +308,16 @@ class LibraryRetagJob(RepairJob):
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])
         if not tag_change_tracks and not cover_action:
             result.skipped += 1
+            return
+
+        # Not dry-run: apply the tags in place now (the track paths were already
+        # isfile-checked above) and count it as an auto-fix — no finding.
+        if not dry_run:
+            res = apply_track_plans(track_plans, cover_action, cover_url)
+            if res['written'] or res['cover_written']:
+                result.auto_fixed += 1
+            else:
+                result.errors += 1
             return
 
         total_changes = sum(len(tp['changes']) for tp in track_plans)
