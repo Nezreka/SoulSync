@@ -652,19 +652,21 @@
                 const energy = workers.length ? activeCount / workers.length : 0; // 0..1
                 const stress = errorHeat;                        // 0..1 health gauge
 
-                // Stress quickens the heartbeat (agitation) and blends the
-                // nucleus toward red — a calm green-purple hub means "all good".
-                const beatSpeed = 1.0 + energy * 1.4 + stress * 2.5;
+                // Health shows as a gentle, gradual warm-red shift in the
+                // nucleus — never a fast flicker. Stress does NOT speed up the
+                // heartbeat (that read as jitter); only the colour eases over.
+                const beatSpeed = 1.0 + energy * 1.4;
                 const slow = 0.5 + 0.5 * Math.sin(time * beatSpeed);
                 // Barely-there breathing — the nucleus is mostly steady
                 const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (0.6 + energy * 0.8);
-                const hr = Math.round(r + (235 - r) * stress);
-                const hg = Math.round(g + (60 - g) * stress);
-                const hb = Math.round(b + (60 - b) * stress);
+                const tint = stress * 0.55;                      // softened, never full alarm-red
+                const hr = Math.round(r + (235 - r) * tint);
+                const hg = Math.round(g + (60 - g) * tint);
+                const hb = Math.round(b + (60 - b) * tint);
 
                 // Wide ambient glow — steady, only gently lifting with energy
                 const glowR = hubR * (4 + energy * 1.5);
-                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.16 + energy * 0.16 + slow * 0.04 + stress * 0.15);
+                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.16 + energy * 0.16 + slow * 0.04 + stress * 0.08);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -703,15 +705,15 @@
                     ctx.stroke();
                 }
 
-                // Health warning: a fast-flickering red ring when workers are
-                // actually erroring (fades out as stress cools).
-                if (stress > 0.05) {
-                    const warn = 0.5 + 0.5 * Math.sin(time * 12);
-                    const wr = hubR + 3 + warn * 5;
+                // Health warning: a single soft red ring that breathes slowly
+                // (no flicker) and fades in/out gradually as stress rises/cools.
+                if (stress > 0.04) {
+                    const warn = 0.5 + 0.5 * Math.sin(time * 1.4);
+                    const wr = hubR + 3 + warn * 3;
                     ctx.beginPath();
                     ctx.arc(orb.x, orb.y, wr, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(255, 70, 70, ${stress * (0.3 + warn * 0.35)})`;
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = `rgba(255, 90, 90, ${stress * (0.12 + warn * 0.10)})`;
+                    ctx.lineWidth = 1.5;
                     ctx.stroke();
                 }
                 continue;
@@ -880,9 +882,10 @@
         if (dErr > 0) {
             orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
             orb.errRate = Math.max(MIN_RELEASE_RATE, orb.pendingErr / STATUS_FRAMES);
-            // Feed the nucleus health gauge — each real error raises the hub's
-            // stress (404s are not_found now, so this only fires on true failures).
-            errorHeat = Math.min(1, errorHeat + 0.25 * dErr);
+            // Feed the nucleus health gauge — each real error eases the hub's
+            // stress up gradually (404s are not_found now, so this only fires on
+            // true failures). Small bump so it ramps in softly, never spikes.
+            errorHeat = Math.min(0.85, errorHeat + 0.1 * dErr);
         }
     }
 
