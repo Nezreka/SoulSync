@@ -79,6 +79,53 @@ def test_get_all_album_ids_returns_set(nav_client):
     assert result == {'nav-1', 'nav-2'}
 
 
+def test_fetch_music_folders_parses_without_ensure_connection(nav_client):
+    """The seam: _fetch_music_folders does its own _make_request + parse and
+    does NOT gate on ensure_connection, so it is safe to call mid-connect."""
+    nav_client.base_url = 'http://nav'
+    nav_client.username = 'u'
+    nav_client.password = 'p'
+    folders_envelope = {'musicFolders': {'musicFolder': [
+        {'id': 1, 'name': 'Music'},
+        {'id': 2, 'name': 'Audiobooks'},
+    ]}}
+    with patch.object(nav_client, '_make_request', return_value=folders_envelope):
+        folders = nav_client._fetch_music_folders()
+    assert folders == [
+        {'title': 'Music', 'key': '1'},
+        {'title': 'Audiobooks', 'key': '2'},
+    ]
+
+
+def test_setup_client_restores_saved_music_folder(nav_client):
+    """Regression for #789: a saved music-folder selection must survive
+    _setup_client. The restore runs while still inside ensure_connection()
+    (_is_connecting=True); the old code called the public get_music_folders(),
+    which re-entered the guard, got [], and left music_folder_id=None — so
+    every scan imported all libraries regardless of the user's selection."""
+    def fake_request(endpoint, params=None):
+        if endpoint == 'ping':
+            return {'status': 'ok', 'version': '1.16.1'}
+        if endpoint == 'getMusicFolders':
+            return {'musicFolders': {'musicFolder': [
+                {'id': 1, 'name': 'Music'},
+                {'id': 2, 'name': 'Audiobooks'},
+            ]}}
+        return None
+
+    fake_db = MagicMock()
+    fake_db.get_preference.return_value = 'Audiobooks'
+
+    with patch('core.navidrome_client.config_manager.get_navidrome_config',
+               return_value={'base_url': 'http://nav', 'username': 'u', 'password': 'p'}), \
+         patch('database.music_database.MusicDatabase', return_value=fake_db), \
+         patch.object(nav_client, '_make_request', side_effect=fake_request):
+        assert nav_client.ensure_connection() is True
+
+    # Selection ('Audiobooks') was restored to its folder id, not left None.
+    assert nav_client.music_folder_id == '2'
+
+
 def test_navidrome_album_exposes_cover_art_url(nav_client):
     album = NavidromeAlbum({
         'id': 'album-1',
