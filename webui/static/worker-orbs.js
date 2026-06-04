@@ -30,8 +30,11 @@
     ];
 
     const ERROR_COLOR = [255, 80, 80];   // pulses fired on real worker errors
-    const PULSE_CAP = 8;                  // max pulses queued per status update
-    const PULSE_DRAIN = 2;                // pulses released into flight per frame
+    const PULSE_CAP = 12;                 // max pulses queued per status update
+    // Status pushes arrive ~every 2s (120 frames). Spread each window's pulses
+    // across that interval so they drip steadily instead of bursting on arrival.
+    const STATUS_FRAMES = 120;
+    const MIN_RELEASE_RATE = 1 / 45;     // a lone event still appears within ~0.75s
 
     const ORB_RADIUS = 7;
     const ORB_DIAMETER = ORB_RADIUS * 2;
@@ -103,8 +106,12 @@
                 statusSeen: false,    // has a real WS status arrived for this worker?
                 lastProcessed: 0,     // cumulative matched+not_found seen last update
                 lastErrors: 0,        // cumulative error count seen last update
-                pendingWork: 0,       // brand-colour pulses queued to fly to the hub
-                pendingErr: 0,        // red pulses queued (real errors)
+                pendingWork: 0,       // brand-colour pulses still to release
+                pendingErr: 0,        // red pulses still to release (real errors)
+                workRate: 0,          // pulses/frame, set so pending drains over the interval
+                errRate: 0,
+                workCarry: 0,         // fractional-pulse accumulators
+                errCarry: 0,
             });
         });
 
@@ -487,14 +494,25 @@
             if (!hub) continue;
 
             if (orb.statusSeen) {
-                let drained = 0;
-                while (orb.pendingWork > 0 && drained < PULSE_DRAIN) {
-                    emitInflow(orb, orb.rainbow ? getRainbowColor(time) : null);
-                    orb.pendingWork--; drained++;
+                // Release queued pulses at a steady drip so a 2s window of
+                // events streams up the spoke instead of arriving all at once.
+                if (orb.pendingWork > 0) {
+                    orb.workCarry += orb.workRate;
+                    while (orb.workCarry >= 1 && orb.pendingWork > 0) {
+                        emitInflow(orb, orb.rainbow ? getRainbowColor(time) : null);
+                        orb.workCarry -= 1; orb.pendingWork -= 1;
+                    }
+                } else {
+                    orb.workCarry = 0;
                 }
-                while (orb.pendingErr > 0 && drained < PULSE_DRAIN) {
-                    emitInflow(orb, ERROR_COLOR);
-                    orb.pendingErr--; drained++;
+                if (orb.pendingErr > 0) {
+                    orb.errCarry += orb.errRate;
+                    while (orb.errCarry >= 1 && orb.pendingErr > 0) {
+                        emitInflow(orb, ERROR_COLOR);
+                        orb.errCarry -= 1; orb.pendingErr -= 1;
+                    }
+                } else {
+                    orb.errCarry = 0;
                 }
             } else if (orb.active && Math.random() < INFLOW_RATE) {
                 // No real status yet — keep the old ambient trickle as fallback
@@ -829,8 +847,17 @@
         const dErr = errors - orb.lastErrors;
         orb.lastProcessed = processed;
         orb.lastErrors = errors;
-        if (dWork > 0) orb.pendingWork = Math.min(PULSE_CAP, orb.pendingWork + dWork);
-        if (dErr > 0) orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
+
+        // Queue the new events and (re)set a drip rate that empties the current
+        // backlog over the interval until the next push — steady stream, not a burst.
+        if (dWork > 0) {
+            orb.pendingWork = Math.min(PULSE_CAP, orb.pendingWork + dWork);
+            orb.workRate = Math.max(MIN_RELEASE_RATE, orb.pendingWork / STATUS_FRAMES);
+        }
+        if (dErr > 0) {
+            orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
+            orb.errRate = Math.max(MIN_RELEASE_RATE, orb.pendingErr / STATUS_FRAMES);
+        }
     }
 
     function setPage(pageId) {
