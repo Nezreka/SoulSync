@@ -152,12 +152,20 @@ def run_playlist_organize_download(
         except Exception as hist_err:
             logger.debug("organize download sync history: %s", hist_err)
 
-    deps.missing_download_executor.submit(
-        run_full_missing_tracks_process,
-        batch_id,
-        playlist_id,
-        tracks_json,
-    )
+    try:
+        deps.missing_download_executor.submit(
+            run_full_missing_tracks_process,
+            batch_id,
+            playlist_id,
+            tracks_json,
+        )
+    except Exception as submit_err:
+        # Don't leave the batch stranded in 'analysis' holding one of the limited
+        # analysis slots if the executor refuses the job.
+        logger.error("[Organize Download] Failed to submit batch %s: %s", batch_id, submit_err)
+        with tasks_lock:
+            download_batches.pop(batch_id, None)
+        return {'status': 'error', 'reason': f'submit failed: {submit_err}'}
     logger.info(
         "[Organize Download] Started batch %s for mirrored playlist %s (%s tracks)",
         batch_id,
