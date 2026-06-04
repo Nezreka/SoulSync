@@ -143,6 +143,25 @@ function handleMetadataSourceChange(event) {
 }
 
 let _settingsInitialized = false;
+// Tell password-manager extensions (Bitwarden / 1Password / LastPass) to ignore
+// this app's credential inputs. The settings page is full of API-key / token /
+// secret fields; password managers treat them as login forms and re-scan the
+// whole (large, constantly-mutating) DOM on every change, which can peg the main
+// thread for seconds. These attributes make them skip the fields entirely.
+function _markCredentialFieldsNoAutofill(root) {
+    const scope = root || document;
+    scope.querySelectorAll('input, textarea').forEach((el) => {
+        if (el.dataset.bwignore !== undefined) return; // already tagged
+        el.setAttribute('data-bwignore', '');          // Bitwarden
+        el.setAttribute('data-1p-ignore', '');         // 1Password
+        el.setAttribute('data-lpignore', 'true');      // LastPass
+        if (!el.getAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+    });
+}
+// Run once on load (inputs exist from page load — all pages are mounted).
+if (document.readyState !== 'loading') _markCredentialFieldsNoAutofill();
+else document.addEventListener('DOMContentLoaded', () => _markCredentialFieldsNoAutofill());
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
@@ -150,6 +169,9 @@ function initializeSettings() {
     // re-scanning the ~960-node settings subtree on every revisit (scroll jank).
     if (_settingsInitialized) return;
     _settingsInitialized = true;
+
+    // Re-tag in case any inputs were added dynamically since page load.
+    _markCredentialFieldsNoAutofill(document.getElementById('settings-page'));
 
     // Accent color listeners (live preview + custom picker toggle)
     initAccentColorListeners();
