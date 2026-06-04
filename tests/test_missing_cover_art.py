@@ -162,6 +162,37 @@ def test_missing_cover_art_prefers_explicit_source_over_primary(monkeypatch):
     assert context.findings[0]['details']['found_artwork_url'] == 'https://img/spotify-direct'
 
 
+def test_missing_cover_art_uses_configured_art_sources(monkeypatch):
+    """When cover-art sources are configured (album_art_order), the Filler pulls
+    art from them and skips the metadata source-priority loop — same 'cover art
+    sources' notion the Re-tag job and post-process embed honor."""
+    conn = _make_db((1, 'Album', 1, '', 'sp-album', 'it-album', 'dz-album', 'dg-album', 'hy-album'))
+    settings = {
+        'repair.jobs.missing_cover_art.settings': {},
+        'metadata_enhancement.album_art_order': ['itunes', 'deezer'],
+    }
+    findings = []
+    context = SimpleNamespace(
+        db=SimpleNamespace(_get_connection=lambda: conn),
+        config_manager=SimpleNamespace(get=lambda key, default=None: settings.get(key, default)),
+        check_stop=lambda: False, wait_if_paused=lambda: False,
+        update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
+        create_finding=lambda **kw: (findings.append(kw) or True),
+        findings=findings,
+    )
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    consulted = []
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: consulted.append(s) or _FakeClient())
+    monkeypatch.setattr('core.metadata.art_lookup.select_preferred_art_url',
+                        lambda artist, album, meta, order, **k: 'https://configured/art.jpg')
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['found_artwork_url'] == 'https://configured/art.jpg'
+    assert consulted == []  # source-priority loop skipped when configured art wins
+
+
 def test_missing_cover_art_uses_primary_when_prefer_unset(monkeypatch):
     conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
     context = _make_context(conn)

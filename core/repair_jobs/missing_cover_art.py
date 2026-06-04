@@ -46,9 +46,10 @@ class MissingCoverArtJob(RepairJob):
     description = 'Finds albums missing artwork and locates art from metadata sources'
     help_text = (
         'Scans your library for albums that have no cover art stored in the database. '
-        'For each missing cover, it searches the configured metadata sources using the '
-        'album name and artist to find matching artwork. If Prefer Source is set, that '
-        'source is tried first; otherwise the primary metadata source is used.\n\n'
+        'For each missing cover, it searches for matching artwork using the album name '
+        'and artist. If you have configured cover-art sources (Settings > metadata '
+        'enhancement art order), those are used first; otherwise it falls back to '
+        'Prefer Source (if set) or the primary metadata source.\n\n'
         'When artwork is found, a finding is created with the image URL so you can review '
         'and apply it. The job does not download or embed artwork automatically.\n\n'
         'Settings:\n'
@@ -66,6 +67,10 @@ class MissingCoverArtJob(RepairJob):
         settings = self._get_settings(context)
         primary_source = get_primary_source()
         source_priority = get_source_priority(primary_source)
+        # User's configured cover-art source order (caa/deezer/itunes/spotify/
+        # audiodb). Empty by default → falls back to the source-priority loop.
+        art_order = (context.config_manager.get('metadata_enhancement.album_art_order')
+                     if context.config_manager else None)
         prefer_source = settings.get('prefer_source')
         if prefer_source and prefer_source != primary_source and prefer_source in source_priority:
             source_priority.remove(prefer_source)
@@ -170,11 +175,27 @@ class MissingCoverArtJob(RepairJob):
 
             artwork_url = None
 
+            # Honor the user's configured cover-art sources first (the same
+            # metadata_enhancement.album_art_order the post-process embed and the
+            # Library Re-tag job use) so "cover art sources" means one thing
+            # app-wide. Non-breaking: returns None when no order is configured
+            # (the default), so we fall back to the prefer_source / metadata
+            # source-priority loop below — unchanged behavior for existing users.
+            try:
+                from core.metadata.art_lookup import select_preferred_art_url
+                artwork_url = select_preferred_art_url(
+                    artist_name, title,
+                    {'musicbrainz_release_id': None}, art_order,
+                )
+            except Exception as e:
+                logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
+
             # Try source-specific IDs first, then title/artist search, in priority order.
-            for source in source_priority:
-                artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
-                if artwork_url:
-                    break
+            if not artwork_url:
+                for source in source_priority:
+                    artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
+                    if artwork_url:
+                        break
 
             if artwork_url:
                 if context.report_progress:
