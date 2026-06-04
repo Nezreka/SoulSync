@@ -54,12 +54,22 @@
     let collapseDelay = null;
     const COLLAPSE_DELAY_MS = 7000;
 
+    // SoulSync logo, drawn as the hub/nucleus once loaded
+    let hubImage = null;
+    let hubImageReady = false;
+
     // ── Init ──
 
     function init() {
         dashboardHeader = document.querySelector('#dashboard-page .dashboard-header');
         headerActions = document.querySelector('#dashboard-page .header-actions');
         if (!dashboardHeader || !headerActions) return;
+
+        if (!hubImage) {
+            hubImage = new Image();
+            hubImage.onload = () => { hubImageReady = true; };
+            hubImage.src = '/static/trans2.png';
+        }
 
         canvas = document.createElement('canvas');
         canvas.className = 'worker-orb-canvas';
@@ -580,17 +590,25 @@
                 ctx.fillStyle = halo;
                 ctx.fill();
 
-                // Solid bright core
-                ctx.beginPath();
-                ctx.arc(orb.x, orb.y, hubR, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.8 + energy * 0.15})`;
-                ctx.fill();
-
-                // Bright inner highlight — hotter when energized
-                ctx.beginPath();
-                ctx.arc(orb.x, orb.y, hubR * 0.5, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + energy * 0.25 + slow * 0.2})`;
-                ctx.fill();
+                if (hubImageReady) {
+                    // SoulSync logo as the nucleus — sized to the pulsing radius,
+                    // brightness lifts a touch with energy
+                    const imgSize = hubR * 3.2;
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(1, 0.85 + energy * 0.15 + slow * 0.1);
+                    ctx.drawImage(hubImage, orb.x - imgSize / 2, orb.y - imgSize / 2, imgSize, imgSize);
+                    ctx.restore();
+                } else {
+                    // Fallback while the logo loads: solid bright core + highlight
+                    ctx.beginPath();
+                    ctx.arc(orb.x, orb.y, hubR, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.8 + energy * 0.15})`;
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(orb.x, orb.y, hubR * 0.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + energy * 0.25 + slow * 0.2})`;
+                    ctx.fill();
+                }
 
                 // Expanding heartbeat ring(s) — radiate faster + brighter with energy
                 const ringSpeed = 0.5 + energy * 0.9;
