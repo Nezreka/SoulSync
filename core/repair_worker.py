@@ -976,6 +976,7 @@ class RepairWorker:
             'unknown_artist': self._fix_unknown_artist,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'missing_discography_track': self._fix_discography_backfill,
+            'library_retag': self._fix_library_retag,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1355,6 +1356,77 @@ class RepairWorker:
             # DB updated but nothing reached disk (e.g. read-only mount).
             msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
+
+    def _fix_library_retag(self, entity_type, entity_id, file_path, details):
+        """Apply a library re-tag finding: write each track's planned tags in
+        place (core.tag_writer.write_tags_to_file) + optionally embed/refresh
+        cover art. Only ADDS/overwrites the planned fields — no moves/renames."""
+        tracks = details.get('tracks') or []
+        if not tracks:
+            return {'success': False, 'error': 'No tracks to re-tag in finding'}
+
+        cover_action = details.get('cover_action')
+        cover_url = details.get('cover_url')
+        embed_cover = bool(cover_action and cover_url)
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+
+        # Download the cover once for the whole album (batch embed).
+        cover_data = None
+        if embed_cover:
+            try:
+                from core.tag_writer import download_cover_art
+                cover_data = download_cover_art(cover_url)
+            except Exception as e:
+                logger.debug("library_retag: cover download failed: %s", e)
+        embed_cover = embed_cover and cover_data is not None
+
+        from core.tag_writer import write_tags_to_file
+        written = failed = skipped = 0
+        last_dir = None
+        for t in tracks:
+            raw = t.get('file_path')
+            db_data = t.get('db_data') or {}
+            if not raw or (not db_data and not embed_cover):
+                skipped += 1
+                continue
+            resolved = _resolve_file_path(raw, self.transfer_folder, download_folder,
+                                          config_manager=self._config_manager) or raw
+            if not os.path.isfile(resolved):
+                skipped += 1
+                continue
+            try:
+                res = write_tags_to_file(resolved, db_data, embed_cover=embed_cover, cover_data=cover_data)
+                if res.get('success'):
+                    written += 1
+                    last_dir = os.path.dirname(resolved)
+                else:
+                    failed += 1
+            except Exception as e:
+                logger.warning("library_retag write failed for %s: %s", resolved, e)
+                failed += 1
+
+        # Refresh the cover.jpg sidecar to match (replace, or fill when missing).
+        cover_written = False
+        if cover_action and cover_data and last_dir:
+            try:
+                cover_path = os.path.join(last_dir, 'cover.jpg')
+                if cover_action == 'replace' or not os.path.exists(cover_path):
+                    with open(cover_path, 'wb') as fh:
+                        fh.write(cover_data[0])
+                    cover_written = True
+            except Exception as e:
+                logger.debug("library_retag: cover.jpg write failed: %s", e)
+
+        if written == 0 and not cover_written:
+            return {'success': False,
+                    'error': 'Nothing could be written — files unreachable or read-only?'}
+        msg = f'Re-tagged {written} track(s)'
+        if failed:
+            msg += f' ({failed} failed)'
+        if cover_written:
+            msg += ' + refreshed cover.jpg'
+        return {'success': True, 'action': 'library_retag', 'message': msg,
+                'written': written, 'failed': failed, 'skipped': skipped}
 
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
