@@ -109,4 +109,26 @@ def plan_playlist_reconcile(
     return {"add": add, "remove": remove}
 
 
-__all__ = ["plan_playlist_add", "remove_one_occurrence", "plan_playlist_reconcile"]
+VALID_SYNC_MODES = ("replace", "append", "reconcile")
+
+
+def normalize_sync_mode(requested, configured, default: str = "replace") -> str:
+    """Resolve the effective playlist sync mode.
+
+    An explicit per-request value wins; otherwise the configured default
+    (Settings > Playlist sync mode); anything unrecognized falls back to
+    ``default``. Keeping ``reconcile`` in ``VALID_SYNC_MODES`` is load-bearing —
+    a validation list that omits it silently downgrades reconcile to replace,
+    which is exactly the #792 regression this helper exists to prevent.
+    """
+    mode = (requested or "") or (configured or "") or default
+    return mode if mode in VALID_SYNC_MODES else default
+
+
+__all__ = [
+    "plan_playlist_add",
+    "remove_one_occurrence",
+    "plan_playlist_reconcile",
+    "normalize_sync_mode",
+    "VALID_SYNC_MODES",
+]

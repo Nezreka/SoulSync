@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.sync.playlist_edit import (
+    normalize_sync_mode,
     plan_playlist_add,
     plan_playlist_reconcile,
     remove_one_occurrence,
@@ -126,3 +127,28 @@ def test_reconcile_duplicate_still_desired_not_removed():
     # a gone id is listed once even if it had duplicates.
     plan = plan_playlist_reconcile(['a', 'a', 'b', 'b'], ['a'])
     assert plan == {'add': [], 'remove': ['b']}
+
+
+# ── normalize_sync_mode: reconcile must survive resolution (#792 regression) ──
+
+def test_normalize_keeps_reconcile_from_config():
+    # The bug: a validation list omitting 'reconcile' downgraded the configured
+    # setting to 'replace'. No per-request override → configured value wins.
+    assert normalize_sync_mode(None, 'reconcile') == 'reconcile'
+    assert normalize_sync_mode('', 'reconcile') == 'reconcile'
+
+
+def test_normalize_request_overrides_config():
+    assert normalize_sync_mode('append', 'reconcile') == 'append'
+    assert normalize_sync_mode('reconcile', 'replace') == 'reconcile'
+
+
+def test_normalize_falls_back_for_unknown():
+    assert normalize_sync_mode('bogus', 'replace') == 'replace'
+    assert normalize_sync_mode(None, None) == 'replace'
+    assert normalize_sync_mode(None, 'also-bogus') == 'replace'
+
+
+def test_normalize_all_real_modes_pass_through():
+    for m in ('replace', 'append', 'reconcile'):
+        assert normalize_sync_mode(m, 'replace') == m

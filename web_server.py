@@ -23548,9 +23548,9 @@ def start_playlist_sync():
     # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
     # Per-request sync_mode wins; otherwise use the configured default
     # (Settings > Playlist sync mode). Default 'replace' keeps today's behavior.
-    sync_mode = data.get('sync_mode') or config_manager.get('playlist_sync.mode', 'replace')
-    if sync_mode not in ('replace', 'append'):
-        sync_mode = 'replace'
+    from core.sync.playlist_edit import normalize_sync_mode
+    sync_mode = normalize_sync_mode(data.get('sync_mode'),
+                                    config_manager.get('playlist_sync.mode', 'replace'))
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
