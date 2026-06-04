@@ -3067,6 +3067,25 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
+                    <!-- Recommended For You Section (similar-artists graph) -->
+                    <div class="discover-section" id="recommended-artists-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">Recommended For You</h2>
+                                <p class="discover-section-subtitle">Artists similar to ones across your library — not yet on your watchlist</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" onclick="openRecommendedArtistsModal()">
+                                    <span>View All</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="discover-carousel" id="recommended-artists-carousel">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
                     <!-- Your Artists Section -->
                     <div class="discover-section" id="your-artists-section" style="display: none;">
                         <div class="discover-section-header">

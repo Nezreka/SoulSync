@@ -27,6 +27,7 @@ async function loadDiscoverPage() {
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadRecommendedArtistsSection(),
         loadYourArtists(),
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
@@ -197,14 +198,10 @@ function displayDiscoverHeroArtist(artist) {
     }
 
     if (subtitleEl) {
-        // Show recommendation context based on occurrence count
-        let subtitle = '';
-        if (artist.occurrence_count > 1) {
-            subtitle = `Similar to ${artist.occurrence_count} artists in your watchlist`;
-        } else {
-            subtitle = 'Similar to an artist in your watchlist';
-        }
-        subtitleEl.textContent = subtitle;
+        // Prefer the real "because you have X, Y" names; fall back to a
+        // library-wide occurrence count (no longer watchlist-only).
+        subtitleEl.textContent = _recommendationReason(artist);
+        subtitleEl.title = _recommendationReasonTitle(artist);
     }
 
     // Build metadata section with popularity and genres
@@ -388,6 +385,30 @@ async function watchAllHeroArtists(btn) {
 let _recommendedArtistsCache = null;
 let _recommendedArtistsSource = null;
 
+// Builds the "because you have X, Y" explanation for a recommendation.
+// Prefers the real contributing artist names from the backend (the `because`
+// array); falls back to an occurrence count — which is now LIBRARY-wide, not
+// just watchlist, thanks to the similar-artists enrichment worker.
+function _recommendationReason(artist) {
+    const names = (artist && artist.because) || [];
+    if (names.length === 1) return `Because you have ${escapeHtml(names[0])}`;
+    if (names.length === 2) return `Because you have ${escapeHtml(names[0])} & ${escapeHtml(names[1])}`;
+    if (names.length >= 3) {
+        const shown = names.slice(0, 2).map(escapeHtml).join(', ');
+        return `Because you have ${shown} +${names.length - 2} more`;
+    }
+    const n = (artist && artist.occurrence_count) || 0;
+    return n > 1
+        ? `Similar to ${n} artists in your library`
+        : 'Similar to an artist in your library';
+}
+
+// Full contributing-artist list for a hover tooltip (when there are names).
+function _recommendationReasonTitle(artist) {
+    const names = (artist && artist.because) || [];
+    return names.length ? `In your library: ${names.join(', ')}` : '';
+}
+
 async function openRecommendedArtistsModal() {
     let modal = document.getElementById('recommended-artists-modal');
     if (!modal) {
@@ -553,9 +574,8 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
         const genreTags = (artist.genres || []).slice(0, 3).map(g =>
             `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
         ).join('');
-        const similarText = artist.occurrence_count > 1
-            ? `Similar to ${artist.occurrence_count} in your watchlist`
-            : 'Similar to an artist in your watchlist';
+        const similarText = _recommendationReason(artist);
+        const similarTitle = _recommendationReasonTitle(artist);
                 const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
@@ -582,7 +602,7 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
                                     </div>
                                     <div class="recommended-card-info">
                                         <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                                        <span class="recommended-card-similarity">${similarText}</span>
+                                        <span class="recommended-card-similarity" title="${escapeHtml(similarTitle)}">${similarText}</span>
                                         <div class="recommended-card-genres">${genreTags}</div>
                                     </div>
                                 </a>
@@ -649,6 +669,113 @@ async function addAllRecommendedToWatchlist(btn) {
         btn.textContent = originalText;
         btn.disabled = false;
     }
+}
+
+// ── Recommended For You — first-class Discover section (carousel) ──
+// Reuses the recommended-card markup/CSS and the modal's watchlist + cache
+// machinery, so the inline carousel and the "View All" modal stay in sync.
+let _recommendedSectionCtrl = null;
+
+function _renderRecommendedMini(artist, source) {
+    const artistSource = artist.source || source || '';
+    const reason = _recommendationReason(artist);
+    const reasonTitle = _recommendationReasonTitle(artist);
+    const genreTags = (artist.genres || []).slice(0, 2).map(g =>
+        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+    ).join('');
+    const img = artist.image_url
+        ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
+                onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
+        : `<div class="recommended-card-image-fallback">🎤</div>`;
+    return `
+        <div class="recommended-artist-card recommended-card--carousel"
+             data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
+             data-artist-id="${artist.artist_id}"
+             data-artist-source="${escapeHtml(artistSource)}">
+            <button class="recommended-card-watchlist-btn"
+                    data-artist-id="${artist.artist_id}"
+                    data-artist-name="${escapeHtml(artist.artist_name)}">
+                Add to Watchlist
+            </button>
+            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+               style="display:block;text-decoration:none;color:inherit;">
+                <div class="recommended-card-image">${img}</div>
+                <div class="recommended-card-info">
+                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
+                    <span class="recommended-card-similarity" title="${escapeHtml(reasonTitle)}">${reason}</span>
+                    <div class="recommended-card-genres">${genreTags}</div>
+                </div>
+            </a>
+        </div>`;
+}
+
+// Progressively fill in images for the cards we actually rendered (the API
+// returns cached images only; the rest are fetched on demand — same endpoint
+// the modal uses).
+async function _enrichRecommendedCarouselCards(items, source) {
+    const idKey = source === 'spotify' ? 'spotify_artist_id'
+                : source === 'deezer' ? 'deezer_artist_id'
+                : 'itunes_artist_id';
+    const ids = items.filter(a => !a.image_url).map(a => a[idKey]).filter(Boolean);
+    if (!ids.length) return;
+    try {
+        const resp = await fetch('/api/discover/similar-artists/enrich', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_ids: ids, source }),
+        });
+        const data = await resp.json();
+        if (!data.success || !data.artists) return;
+        const carousel = document.getElementById('recommended-artists-carousel');
+        if (!carousel) return;
+        for (const [aid, info] of Object.entries(data.artists)) {
+            if (!info.image_url) continue;
+            const card = carousel.querySelector(`.recommended-artist-card[data-artist-id="${aid}"]`);
+            const imgContainer = card && card.querySelector('.recommended-card-image');
+            if (imgContainer) {
+                imgContainer.innerHTML = `<img src="${info.image_url}" alt="" loading="lazy"
+                    onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`;
+            }
+        }
+    } catch (e) { /* non-fatal — fallbacks stay */ }
+}
+
+async function loadRecommendedArtistsSection() {
+    if (!_recommendedSectionCtrl) {
+        _recommendedSectionCtrl = createDiscoverSectionController({
+            id: 'recommended-artists',
+            sectionEl: '#recommended-artists-section',
+            contentEl: '#recommended-artists-carousel',
+            fetchUrl: '/api/discover/similar-artists',
+            extractItems: (data) => data.artists || [],
+            isEmpty: (items) => items.length === 0,
+            hideWhenEmpty: true,
+            renderItems: (items, data) => {
+                const source = data.source || 'spotify';
+                // Prime the modal cache so "View All" opens instantly in sync
+                _recommendedArtistsCache = items;
+                _recommendedArtistsSource = source;
+                const shown = items.slice(0, 18);
+                return shown.map(a => _renderRecommendedMini(a, source)).join('');
+            },
+            onRendered: ({ data }) => {
+                const carousel = document.getElementById('recommended-artists-carousel');
+                if (carousel && !carousel._recoWired) {
+                    carousel._recoWired = true;
+                    carousel.addEventListener('click', function (e) {
+                        const btn = e.target.closest('.recommended-card-watchlist-btn');
+                        if (btn) { e.preventDefault(); e.stopPropagation(); toggleRecommendedWatchlist(btn); }
+                    });
+                }
+                const source = (data && data.source) || 'spotify';
+                _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source);
+            },
+            loadingMessage: 'Finding recommendations...',
+            emptyMessage: 'No recommendations yet — let the Similar Artists worker run',
+            errorMessage: 'Failed to load recommendations',
+        });
+    }
+    return _recommendedSectionCtrl.load();
 }
 
 function closeRecommendedArtistsModal() {
