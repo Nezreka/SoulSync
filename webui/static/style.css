@@ -52587,6 +52587,13 @@ tr.tag-diff-same {
     accent-color: var(--accent-color, #6366f1);
 }
 
+/* Native <option> popups don't inherit the translucent select background, so
+   they rendered as white-on-white. Give the options a solid dark background. */
+.repair-setting-input option {
+    background: #1e1e24;
+    color: #fff;
+}
+
 .repair-save-settings-btn {
     margin-top: 10px;
     background: var(--accent-color, #6366f1);
