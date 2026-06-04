@@ -382,7 +382,11 @@ function initializeWebSocket() {
     }
 
     socket = io({
-        transports: ['websocket', 'polling'],
+        // Polling-first (Socket.IO default) then upgrade — most compatible behind
+        // reverse proxies that don't cleanly forward WebSocket upgrade headers
+        // (common in self-hosted setups). websocket-first shaves connect time when
+        // it works but silently breaks real-time updates where the proxy blocks WS.
+        transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
