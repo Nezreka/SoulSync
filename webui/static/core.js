@@ -466,6 +466,18 @@ function initializeWebSocket() {
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
     socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
 
+    // Forward enrichment status to the dashboard worker-orbs so the hub fires
+    // a pulse on each real item matched / error (additional listener — does not
+    // disturb the UI handlers above).
+    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'spotify-enrichment',
+     'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
+     'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
+     'soulid', 'repair'].forEach((ch) => {
+        socket.on('enrichment:' + ch, (data) => {
+            if (window.workerOrbs && window.workerOrbs.onStatus) window.workerOrbs.onStatus(ch, data);
+        });
+    });
+
     // Phase 4 event listeners (tool progress)
     socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
     socket.on('tool:quality-scanner', (data) => updateQualityScanProgressFromData(data));
