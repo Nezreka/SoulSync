@@ -1265,8 +1265,10 @@ function playlistModalDownloadSyncFooterHtml(playlistId, options = {}) {
     }
 
     return `${downloadBtns}
-        <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)">
-            <option value="replace" selected>Replace</option>
+        <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Default uses your Settings > Playlist sync mode. Replace overwrites the server playlist; Reconcile edits it in place (keeps custom image/description); Append only adds new tracks.">
+            <option value="" selected>Sync mode: default</option>
+            <option value="replace">Replace</option>
+            <option value="reconcile">Reconcile (keep image/desc)</option>
             <option value="append">Append only</option>
         </select>
         <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>`;
