@@ -63437,9 +63437,10 @@ body.reduce-effects .dash-card::after {
     .dash-card[data-card="enrichment"] .rate-monitor-grid--equalizer {
         --eq-track-h: 124px;
         flex-wrap: wrap;
-        justify-content: flex-start;
+        justify-content: center;
+        row-gap: 14px;
     }
-    .rate-eq { flex: 0 0 calc(20% - 4px); }
+    .rate-eq { flex: 0 0 calc(20% - 6px); }
 }
 
 @media (max-width: 480px) {
@@ -63449,6 +63450,21 @@ body.reduce-effects .dash-card::after {
     }
     .rate-eq-avatar { width: 26px; height: 26px; }
     .rate-eq-avatar-glyph { font-size: 9px; }
+    .rate-eq-value { font-size: 14px; }
+    .rate-eq-name { font-size: 9px; }
+}
+
+/* Keep the status pill + name inside their (often narrow) bar — labels like
+   "Not configured" / "Yielding" are wider than a thin equalizer column and
+   would otherwise spill over neighbours. Truncate instead of overflow. */
+.rate-eq-state {
+    max-width: 100%;
+}
+.rate-eq-state-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 /* Active downloads container */
