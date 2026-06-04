@@ -53,6 +53,7 @@
     let orbs = [];
     let sparks = [];             // particle emissions from active orbs
     let inflows = [];            // pulses traveling from active orbs into the hub
+    let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
     let onDashboard = false;
@@ -464,6 +465,9 @@
             return;
         }
 
+        // Health stress cools off when errors stop (~6s to settle from a spike)
+        if (errorHeat > 0.0001) errorHeat *= 0.992; else errorHeat = 0;
+
         // Check active state every 30 frames (button ref is cached at init)
         if (frameCount % 30 === 0) {
             orbs.forEach(orb => {
@@ -646,14 +650,20 @@
                 const workers = visible.filter(o => !o.hub);
                 const activeCount = workers.filter(o => o.active).length;
                 const energy = workers.length ? activeCount / workers.length : 0; // 0..1
+                const stress = errorHeat;                        // 0..1 health gauge
 
-                const beatSpeed = 1.0 + energy * 1.8;            // faster heartbeat when busy
+                // Stress quickens the heartbeat (agitation) and blends the
+                // nucleus toward red — a calm green-purple hub means "all good".
+                const beatSpeed = 1.0 + energy * 1.8 + stress * 2.5;
                 const slow = 0.5 + 0.5 * Math.sin(time * beatSpeed);
                 const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (2 + energy * 2);
+                const hr = Math.round(r + (235 - r) * stress);
+                const hg = Math.round(g + (60 - g) * stress);
+                const hb = Math.round(b + (60 - b) * stress);
 
                 // Wide ambient glow — brighter + wider with energy (cached sprite)
                 const glowR = hubR * (4 + energy * 1.5);
-                drawGlow(ctx, orb.x, orb.y, glowR, r, g, b, 0.18 + energy * 0.18 + slow * 0.12);
+                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.18 + energy * 0.18 + slow * 0.12 + stress * 0.15);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -687,8 +697,20 @@
                     const ringR = hubR + ringPhase * hubR * 2.5;
                     ctx.beginPath();
                     ctx.arc(orb.x, orb.y, ringR, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - ringPhase) * (0.25 + energy * 0.2)})`;
+                    ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${(1 - ringPhase) * (0.25 + energy * 0.2)})`;
                     ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+
+                // Health warning: a fast-flickering red ring when workers are
+                // actually erroring (fades out as stress cools).
+                if (stress > 0.05) {
+                    const warn = 0.5 + 0.5 * Math.sin(time * 12);
+                    const wr = hubR + 3 + warn * 5;
+                    ctx.beginPath();
+                    ctx.arc(orb.x, orb.y, wr, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(255, 70, 70, ${stress * (0.3 + warn * 0.35)})`;
+                    ctx.lineWidth = 2;
                     ctx.stroke();
                 }
                 continue;
@@ -857,6 +879,9 @@
         if (dErr > 0) {
             orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
             orb.errRate = Math.max(MIN_RELEASE_RATE, orb.pendingErr / STATUS_FRAMES);
+            // Feed the nucleus health gauge — each real error raises the hub's
+            // stress (404s are not_found now, so this only fires on true failures).
+            errorHeat = Math.min(1, errorHeat + 0.25 * dErr);
         }
     }
 
