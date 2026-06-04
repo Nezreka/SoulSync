@@ -12502,13 +12502,26 @@ class MusicDatabase:
         *,
         default_source: str = 'spotify',
     ) -> Optional[Dict]:
-        """Resolve a mirrored playlist from numeric id or upstream source id."""
+        """Resolve a mirrored playlist from an upstream source id or numeric PK.
+
+        Resolves by ``(source, source_playlist_id)`` FIRST, then falls back to
+        treating an all-digit ref as the mirrored-playlists primary key. The
+        order matters: some sources (e.g. Deezer) use all-numeric upstream ids,
+        and the old PK-first logic mistook those for the PK — so the Deezer
+        organize-by-playlist toggle resolved the wrong row (or nothing).
+        """
         if playlist_ref is None or playlist_ref == '':
             return None
         ref = str(playlist_ref).strip()
+        if not ref:
+            return None
+        if default_source:
+            row = self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
+            if row:
+                return row
         if ref.isdigit():
             return self.get_mirrored_playlist(int(ref))
-        return self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
+        return None
 
     def set_mirrored_playlist_organize_by_playlist(
         self,

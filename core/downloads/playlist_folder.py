@@ -101,6 +101,7 @@ def resolve_playlist_folder_mode_for_batch(
     playlist_name: str,
     batch_playlist_folder_mode: bool,
     profile_id: int = 1,
+    source: str = 'spotify',
 ) -> tuple[bool, str]:
     """Merge batch flag with persisted mirrored-playlist preference."""
     if batch_playlist_folder_mode:
@@ -109,7 +110,11 @@ def resolve_playlist_folder_mode_for_batch(
     if not hasattr(db, 'resolve_mirrored_playlist'):
         return False, playlist_name
 
-    mirrored = db.resolve_mirrored_playlist(playlist_id, profile_id=profile_id)
+    # Pass the batch's source so numeric upstream ids (e.g. Deezer) resolve by
+    # source instead of colliding with the mirrored-playlists primary key.
+    mirrored = db.resolve_mirrored_playlist(
+        playlist_id, profile_id=profile_id, default_source=source or 'spotify'
+    )
     if mirrored and mirrored.get('organize_by_playlist'):
         return True, mirrored.get('name') or playlist_name
     return False, playlist_name
