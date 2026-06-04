@@ -429,6 +429,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             }
             process.modalElement.style.display = 'flex';
         }
+        if (typeof refreshOrganizePreferenceForDownloadModal === 'function') {
+            await refreshOrganizePreferenceForDownloadModal(virtualPlaylistId);
+        }
         hideLoadingOverlay(); // Hide overlay when reopening existing modal
         return;
     }
@@ -2449,8 +2452,9 @@ async function startMissingTracksProcess(playlistId) {
         const forceDownloadAll = forceDownloadCheckbox ? forceDownloadCheckbox.checked : false;
 
         // Check if playlist folder mode toggle is enabled (only for sync page playlists)
-        const playlistFolderModeCheckbox = document.getElementById(`playlist-folder-mode-${playlistId}`);
-        const playlistFolderMode = playlistFolderModeCheckbox ? playlistFolderModeCheckbox.checked : false;
+        const playlistFolderMode = typeof isPlaylistOrganizeEnabled === 'function'
+            ? isPlaylistOrganizeEnabled(playlistId)
+            : (document.getElementById(`playlist-folder-mode-${playlistId}`)?.checked ?? false);
 
         // Hide the force download toggle during processing
         const forceToggleContainer = forceDownloadCheckbox ? forceDownloadCheckbox.closest('.force-download-toggle-container') : null;
@@ -4425,20 +4429,34 @@ async function startPlaylistSync(playlistId, syncModeOverride = null) {
     }
 
     // Ensure we have the full track list before starting
+    const playlistMeta = spotifyPlaylists.find(p => p.id === playlistId);
     let tracks = playlistTrackCache[playlistId];
-    if (!tracks) {
+    const cacheStale = typeof playlistTrackCacheIsStale === 'function'
+        && playlistTrackCacheIsStale(playlistId, playlistMeta);
+    if (!tracks || cacheStale) {
         const trackFetchStart = Date.now();
-        console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Cache miss - fetching tracks for playlist ${playlistId}`);
+        console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] ${cacheStale ? 'Cache stale' : 'Cache miss'} - fetching tracks for playlist ${playlistId}`);
         try {
-            // Use the right endpoint based on playlist source
-            const fetchUrl = playlistId.startsWith('deezer_arl_')
-                ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
-                : `/api/spotify/playlist/${playlistId}`;
-            const response = await fetch(fetchUrl);
-            const fullPlaylist = await response.json();
-            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
-            tracks = fullPlaylist.tracks;
-            playlistTrackCache[playlistId] = tracks; // Cache it
+            if (cacheStale && typeof invalidatePlaylistTrackCache === 'function') {
+                invalidatePlaylistTrackCache(playlistId);
+            }
+            if (playlistId.startsWith('deezer_arl_') && typeof fetchAndCacheDeezerArlPlaylistTracks === 'function') {
+                const deezerId = playlistId.replace('deezer_arl_', '');
+                const fullPlaylist = await fetchAndCacheDeezerArlPlaylistTracks(playlistId, deezerId);
+                tracks = fullPlaylist.tracks;
+            } else if (typeof fetchAndCacheSpotifyPlaylistTracks === 'function' && !playlistId.startsWith('deezer_arl_')) {
+                const fullPlaylist = await fetchAndCacheSpotifyPlaylistTracks(playlistId);
+                tracks = fullPlaylist.tracks;
+            } else {
+                const fetchUrl = playlistId.startsWith('deezer_arl_')
+                    ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
+                    : `/api/spotify/playlist/${playlistId}`;
+                const response = await fetch(fetchUrl);
+                const fullPlaylist = await response.json();
+                if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+                tracks = fullPlaylist.tracks;
+                playlistTrackCache[playlistId] = tracks;
+            }
             const trackFetchTime = Date.now() - trackFetchStart;
             console.log(`✅ [${new Date().toTimeString().split(' ')[0]}] Fetched and cached ${tracks.length} tracks (took ${trackFetchTime}ms)`);
         } catch (error) {
@@ -5784,12 +5802,12 @@ function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
-    // Hide on the Search page where the unified search already exists. Accept the
-    // legacy 'downloads' id for callers that predate the page rename.
-    const onSearchPage = typeof currentPage !== 'undefined' && (currentPage === 'search' || currentPage === 'downloads');
-    bar.style.display = onSearchPage ? 'none' : '';
-    if (aura) aura.classList.toggle('hidden', onSearchPage);
-    if (onSearchPage && _gsState.active) _gsDeactivate();
+    // Hide on pages where global search doesn't belong.
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
+    const onHidePage = typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage);
+    bar.style.display = onHidePage ? 'none' : '';
+    if (aura) aura.classList.toggle('hidden', onHidePage);
+    if (onHidePage && _gsState.active) _gsDeactivate();
 }
 
 function _gsDeactivate() {

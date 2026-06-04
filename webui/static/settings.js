@@ -41,6 +41,10 @@ async function copyAddress(address, cryptoName) {
 let settingsAutoSaveTimer = null;
 
 function debouncedAutoSaveSettings() {
+    // Ignore changes made while the page is programmatically populating its
+    // fields on load — those aren't user edits and must not trigger a full
+    // save (which re-initializes every backend service client).
+    if (window._suppressSettingsAutoSave) return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
 }
@@ -138,9 +142,14 @@ function handleMetadataSourceChange(event) {
     sanitizeMetadataSourceSelection({ quiet: false });
 }
 
+let _settingsInitialized = false;
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
+    // Listeners are stable for the page lifetime, so wiring them once avoids
+    // re-scanning the ~960-node settings subtree on every revisit (scroll jank).
+    if (_settingsInitialized) return;
+    _settingsInitialized = true;
 
     // Accent color listeners (live preview + custom picker toggle)
     initAccentColorListeners();

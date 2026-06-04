@@ -52,8 +52,11 @@ function setActivePageChrome(pageId) {
             downloadSidebar.classList.add('hidden');
         }
     }
-    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
-    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+    // Defer to next frame so the page switch paints before particle/orb reinitialization
+    requestAnimationFrame(() => {
+        if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+        if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+    });
 }
 
 function showReactHost(pageId) {
@@ -82,6 +85,14 @@ function activateLegacyPath(pathname) {
         }
         return;
     }
+
+    // If the page was already shown optimistically (forward nav), skip re-activation
+    // to avoid a duplicate data load. Back-button nav always has _optimisticNavPageId = null.
+    if (typeof _optimisticNavPageId !== 'undefined' && _optimisticNavPageId === targetPage) {
+        _optimisticNavPageId = null;
+        return;
+    }
+    _optimisticNavPageId = null;
 
     notifyPageWillChange(targetPage);
     activatePage(targetPage, { forceReload: true });
@@ -241,4 +252,15 @@ function _isModifiedLinkClick(event) {
 
 window.addEventListener('popstate', syncActivePageFromLocation);
 document.addEventListener('click', _handleShellLinkClick, true);
+
+// Fire nav on pointerdown (fires on press, 100-200ms before click) for instant sidebar response.
+// navigateToPage's early-return guard (pageId === currentPage) prevents double-navigation on click.
+document.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || _isModifiedLinkClick(event)) return;
+    const btn = event.target?.closest?.('.nav-button[data-page]');
+    if (!btn) return;
+    const pageId = btn.getAttribute('data-page');
+    if (pageId) void navigateToPage(pageId);
+}, true);
+
 window.dispatchEvent(new CustomEvent(SHELL_BRIDGE_READY_EVENT));

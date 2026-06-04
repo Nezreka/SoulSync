@@ -427,6 +427,9 @@ class MusicDatabase:
             # Add Amazon artist ID column (migration)
             self._add_amazon_columns(cursor)
 
+            # Add Similar-Artists worker tracking columns (migration)
+            self._add_similar_artists_worker_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -571,6 +574,7 @@ class MusicDatabase:
 
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
+            self._add_mirrored_playlist_organize_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -956,8 +960,146 @@ class MusicDatabase:
             if album_cols and 'api_track_count' not in album_cols:
                 cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
                 logger.info("Repaired missing api_track_count column on albums table")
+
+            # Canonical album version (#765 / #767-Bug2). Additive + nullable:
+            # a NULL canonical means "unresolved" and every tool falls back to
+            # today's behavior, so this is safe to ship dormant. Columns are
+            # populated/consumed in later stages.
+            _canonical_cols = {
+                'canonical_source': 'TEXT DEFAULT NULL',
+                'canonical_album_id': 'TEXT DEFAULT NULL',
+                'canonical_score': 'REAL DEFAULT NULL',
+                'canonical_resolved_at': 'TIMESTAMP DEFAULT NULL',
+            }
+            for _col, _typedef in _canonical_cols.items():
+                if album_cols and _col not in album_cols:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
+                    logger.info("Added %s column to albums table (canonical version)", _col)
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
+
+    def set_album_canonical(self, album_id, source: str, canonical_album_id: str, score: float) -> bool:
+        """Persist the resolved canonical (source, album_id, score) for an album
+        (#765 Stage 2). Returns True if a row was updated."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
+                "canonical_score = ?, canonical_resolved_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (source, str(canonical_album_id), float(score), album_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting album canonical for %s: %s", album_id, e)
+            return False
+        finally:
+            conn.close()
+
+    def get_album_canonical(self, album_id) -> Optional[dict]:
+        """Return ``{'source','album_id','score','resolved_at'}`` for an album's
+        pinned canonical release, or ``None`` when unresolved (#765 Stage 2).
+        Consumers treat ``None`` as 'fall back to today's behavior'."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT canonical_source, canonical_album_id, canonical_score, "
+                "canonical_resolved_at FROM albums WHERE id = ?",
+                (album_id,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0] or not row[1]:
+                return None
+            return {
+                'source': row[0],
+                'album_id': row[1],
+                'score': row[2],
+                'resolved_at': row[3],
+            }
+        except Exception as e:
+            logger.error("Error reading album canonical for %s: %s", album_id, e)
+            return None
+        finally:
+            conn.close()
+
+    def get_enrichment_unmatched(
+        self,
+        service: str,
+        entity_type: str,
+        status: str = 'not_found',
+        query: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """List items a given enrichment source hasn't matched, paginated.
+
+        Powers the "Manage Enrichment Workers" modal's unmatched browser.
+        Returns ``{'total': int, 'items': [{id, name, image_url, status,
+        last_attempted}]}``. Raises ``UnmatchedQueryError`` for an unknown
+        service / unsupported entity type / bad status (the caller maps that to
+        an HTTP 400)."""
+        from core.enrichment.unmatched import (
+            build_count_query,
+            build_unmatched_query,
+        )
+
+        sql, params = build_unmatched_query(
+            service, entity_type, status, query, limit, offset
+        )
+        count_sql, count_params = build_count_query(service, entity_type, status, query)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            total = cursor.execute(count_sql, count_params).fetchone()[0]
+            rows = cursor.execute(sql, params).fetchall()
+            items = [dict(row) for row in rows]
+            return {'total': total or 0, 'items': items}
+        finally:
+            conn.close()
+
+    def get_enrichment_breakdown(self, service: str, entity_type: str) -> dict:
+        """Return ``{matched, not_found, pending, total}`` for a source/entity.
+
+        The per-worker ``get_stats().progress`` lumps matched + not_found into a
+        single 'processed' count; this splits them so the modal can show the
+        real match rate. Raises ``UnmatchedQueryError`` on bad input."""
+        from core.enrichment.unmatched import build_breakdown_query
+
+        sql, params = build_breakdown_query(service, entity_type)
+        conn = self._get_connection()
+        try:
+            row = conn.cursor().execute(sql, params).fetchone()
+            if not row:
+                return {'matched': 0, 'not_found': 0, 'pending': 0, 'total': 0}
+            return {
+                'matched': row[0] or 0,
+                'not_found': row[1] or 0,
+                'pending': row[2] or 0,
+                'total': row[3] or 0,
+            }
+        finally:
+            conn.close()
+
+    def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
+        """Re-queue item(s) for a source by clearing match_status back to NULL.
+
+        scope='item' resets one row (entity_id); scope='failed' resets every
+        'not_found' row for that entity type. Returns the number of rows reset.
+        Raises ``UnmatchedQueryError`` on bad input."""
+        from core.enrichment.unmatched import build_reset_query
+
+        sql, params = build_reset_query(service, entity_type, scope, entity_id)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount or 0
+        finally:
+            conn.close()
 
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
@@ -969,6 +1111,19 @@ class MusicDatabase:
                 logger.info("Added explored_at column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding explored_at column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_organize_column(self, cursor):
+        """Add organize_by_playlist preference for playlist-folder downloads."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'organize_by_playlist' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN organize_by_playlist INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added organize_by_playlist column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -2278,6 +2433,28 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
+
+    def _add_similar_artists_worker_columns(self, cursor):
+        """Add Similar-Artists worker tracking columns to the artists table.
+
+        Mirrors the per-source enrichment pattern: a match_status (NULL =
+        unattempted, then 'matched'/'not_found'/'error') + last_attempted
+        timestamp so the SimilarArtistsWorker can pick the next library artist to
+        fetch MusicMap similars for and retry transient failures after a window.
+        Idempotent — only adds columns that aren't already present.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'similar_artists_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_match_status TEXT")
+            if 'similar_artists_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status)")
+        except Exception as e:
+            logger.error(f"Error adding similar-artists worker columns: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
@@ -7248,6 +7425,22 @@ class MusicDatabase:
                     # Titles differ in length by more than 30% — penalize heavily
                     best_title_similarity *= len_ratio
 
+            # Word-level guard: SequenceMatcher's char ratio over-credits
+            # different songs that share a long substring or only a stopword
+            # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
+            # vs "Around the World" = 0.62). Since a same-artist comparison
+            # always scores artist = 1.0, the title is the only discriminator,
+            # so a bad-but-moderate title score gets carried over the threshold
+            # (#769). Reject pairs that aren't near-identical AND share no
+            # significant word — the real track is then reported missing.
+            from core.text.title_match import titles_plausibly_same
+            if not titles_plausibly_same(
+                clean_search_title or search_title_norm,
+                clean_db_title or db_title_norm,
+                best_title_similarity,
+            ):
+                return best_title_similarity * 0.5  # below any threshold
+
             # Require minimum title similarity to prevent a perfect artist match from
             # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
             if best_title_similarity < 0.6:
@@ -9118,6 +9311,70 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting top similar artists: {e}")
             return []
+
+    def get_recommendation_sources(
+        self,
+        similar_artist_names: List[str],
+        profile_id: int = 1,
+        max_per: int = 6,
+    ) -> Dict[str, List[str]]:
+        """The 'because you have X, Y, Z' explanation behind each recommendation.
+
+        For each name in ``similar_artist_names``, return the display names of the
+        user's OWN artists (library or watchlist) that list it as a similar
+        artist. ``similar_artists.source_artist_id`` is a polymorphic provider id
+        (the spotify / itunes / deezer / musicbrainz id of one of the user's
+        artists), so we resolve it back to a name by matching against every
+        provider-id column on ``artists`` and ``watchlist_artists``.
+
+        Returns ``{similar_artist_name: [source_name, ...]}`` — deduped,
+        name-sorted, capped at ``max_per`` per recommendation. Names with no
+        resolvable source are omitted from the dict.
+        """
+        names = [n for n in (similar_artist_names or []) if n]
+        if not names:
+            return {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in names)
+                cursor.execute(f"""
+                    SELECT sa.similar_artist_name AS rec_name,
+                           COALESCE(a.name, wa.artist_name) AS source_name
+                    FROM similar_artists sa
+                    LEFT JOIN artists a ON (
+                        (a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id = sa.source_artist_id)
+                        OR (a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id = sa.source_artist_id)
+                        OR (a.deezer_id IS NOT NULL AND a.deezer_id = sa.source_artist_id)
+                        OR (a.musicbrainz_id IS NOT NULL AND a.musicbrainz_id = sa.source_artist_id)
+                    )
+                    LEFT JOIN watchlist_artists wa ON (
+                        wa.profile_id = ? AND (
+                            (wa.spotify_artist_id IS NOT NULL AND wa.spotify_artist_id = sa.source_artist_id)
+                            OR (wa.itunes_artist_id IS NOT NULL AND wa.itunes_artist_id = sa.source_artist_id)
+                            OR (wa.deezer_artist_id IS NOT NULL AND wa.deezer_artist_id = sa.source_artist_id)
+                            OR (wa.musicbrainz_artist_id IS NOT NULL AND wa.musicbrainz_artist_id = sa.source_artist_id)
+                        )
+                    )
+                    WHERE sa.profile_id = ? AND sa.similar_artist_name IN ({placeholders})
+                """, (profile_id, profile_id, *names))
+
+                # Collect distinct source names per recommendation, preserving
+                # nothing-special order then sorting for a deterministic result.
+                buckets: Dict[str, set] = {}
+                for row in cursor.fetchall():
+                    src = row['source_name']
+                    if not src:
+                        continue
+                    buckets.setdefault(row['rec_name'], set()).add(src)
+
+                return {
+                    rec: sorted(srcs, key=lambda s: s.lower())[:max_per]
+                    for rec, srcs in buckets.items()
+                }
+        except Exception as e:
+            logger.error(f"Error resolving recommendation sources: {e}")
+            return {}
 
     def mark_artists_featured(self, artist_names: List[str]):
         """Update last_featured timestamp for artists shown in the hero slider"""
@@ -12171,7 +12428,11 @@ class MusicDatabase:
                     WHERE profile_id = ?
                     ORDER BY updated_at DESC
                 """, (profile_id,))
-                return [dict(row) for row in cursor.fetchall()]
+                return [
+                    self._normalize_mirrored_playlist_row(row)
+                    for row in cursor.fetchall()
+                    if row
+                ]
         except Exception as e:
             logger.error(f"Error getting mirrored playlists: {e}")
             return []
@@ -12198,10 +12459,92 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM mirrored_playlists WHERE id = ?", (playlist_id,))
                 row = cursor.fetchone()
-                return dict(row) if row else None
+                return self._normalize_mirrored_playlist_row(row)
         except Exception as e:
             logger.error(f"Error getting mirrored playlist: {e}")
             return None
+
+    @staticmethod
+    def _normalize_mirrored_playlist_row(row) -> Optional[Dict]:
+        if not row:
+            return None
+        pl = dict(row)
+        pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        return pl
+
+    def get_mirrored_playlist_by_source(
+        self,
+        source: str,
+        source_playlist_id: str,
+        profile_id: int = 1,
+    ) -> Optional[Dict]:
+        """Return a mirrored playlist by upstream source id."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM mirrored_playlists
+                    WHERE source = ? AND source_playlist_id = ? AND profile_id = ?
+                    """,
+                    (source, str(source_playlist_id), profile_id),
+                )
+                row = cursor.fetchone()
+                return self._normalize_mirrored_playlist_row(row)
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlist by source: {e}")
+            return None
+
+    def resolve_mirrored_playlist(
+        self,
+        playlist_ref: Any,
+        profile_id: int = 1,
+        *,
+        default_source: str = 'spotify',
+    ) -> Optional[Dict]:
+        """Resolve a mirrored playlist from an upstream source id or numeric PK.
+
+        Resolves by ``(source, source_playlist_id)`` FIRST, then falls back to
+        treating an all-digit ref as the mirrored-playlists primary key. The
+        order matters: some sources (e.g. Deezer) use all-numeric upstream ids,
+        and the old PK-first logic mistook those for the PK — so the Deezer
+        organize-by-playlist toggle resolved the wrong row (or nothing).
+        """
+        if playlist_ref is None or playlist_ref == '':
+            return None
+        ref = str(playlist_ref).strip()
+        if not ref:
+            return None
+        if default_source:
+            row = self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
+            if row:
+                return row
+        if ref.isdigit():
+            return self.get_mirrored_playlist(int(ref))
+        return None
+
+    def set_mirrored_playlist_organize_by_playlist(
+        self,
+        playlist_id: int,
+        enabled: bool,
+    ) -> bool:
+        """Persist whether downloads for this playlist use playlist-folder layout."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE mirrored_playlists
+                    SET organize_by_playlist = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (1 if enabled else 0, playlist_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:
         """Return all tracks for a mirrored playlist ordered by position."""

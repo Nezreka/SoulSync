@@ -565,6 +565,28 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Similar Artists (MusicMap) Enrichment Status Icon -->
+                            <div class="similar-artists-enrich-button-container">
+                                <button class="similar-artists-enrich-button" id="similar-artists-enrich-button" title="Similar Artists (MusicMap) Enrichment">
+                                    <img src="https://www.music-map.com/elements/objects/og_logo.png"
+                                        alt="Similar Artists" class="similar-artists-enrich-logo">
+                                    <div class="similar-artists-enrich-spinner"></div>
+                                </button>
+                                <div class="similar-artists-enrich-tooltip" id="similar-artists-enrich-tooltip">
+                                    <div class="similar-artists-enrich-tooltip-content">
+                                        <div class="similar-artists-enrich-tooltip-header">Similar Artists Enrichment</div>
+                                        <div class="similar-artists-enrich-tooltip-body" id="similar-artists-enrich-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="similar-artists-enrich-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="similar-artists-enrich-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="similar-artists-enrich-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Hydrabase P2P Mirror Status Icon -->
                             <div class="hydrabase-button-container" id="hydrabase-button-container" style="display: none;">
                                 <button class="hydrabase-button" id="hydrabase-button" title="Hydrabase P2P Mirror">
@@ -625,6 +647,13 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Manage Enrichment Workers — opens the full management modal -->
+                            <button class="em-manage-btn" id="manage-enrichment-btn"
+                                    title="Manage enrichment workers — stats, unmatched items, manual matching"
+                                    onclick="openEnrichmentManager()">
+                                <span class="em-manage-btn-icon"><img src="/static/trans2.png" alt="SoulSync" class="em-manage-btn-logo"></span>
+                                <span class="em-manage-btn-label">Manage Workers</span>
+                            </button>
                         </div>
                         <!-- Watchlist / Wishlist quick-nav (top-right corner) -->
                         <div class="header-quick-nav">
@@ -3036,6 +3065,25 @@
                         </div>
                         <div class="artist-map-tooltip" id="artist-map-tooltip"></div>
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
+                    </div>
+
+                    <!-- Recommended For You Section (similar-artists graph) -->
+                    <div class="discover-section" id="recommended-artists-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">Recommended For You</h2>
+                                <p class="discover-section-subtitle">Artists similar to ones across your library — not yet on your watchlist</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" onclick="openRecommendedArtistsModal()">
+                                    <span>View All</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="discover-carousel" id="recommended-artists-carousel">
+                            <!-- Populated by JS -->
+                        </div>
                     </div>
 
                     <!-- Your Artists Section -->
@@ -8032,6 +8080,7 @@
     <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='enrichment-manager.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>

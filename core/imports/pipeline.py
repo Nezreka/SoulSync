@@ -110,6 +110,33 @@ def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
             download_tasks[task_id]['quarantine_entry_id'] = entry_id
 
 
+def import_rejection_reason(context: dict) -> str | None:
+    """Human-readable reason if post-processing terminally rejected the file
+    (quarantine or race-guard), else ``None`` for a clean import.
+
+    ``post_process_matched_download`` signals these outcomes by setting context
+    flags and returning normally — it only raises on unexpected errors. The
+    download path reads those flags in
+    ``post_process_matched_download_with_verification`` and marks the task
+    failed, but the MANUAL-import routes call ``post_process_matched_download``
+    directly with no task_id, so without this check a quarantined file (now in
+    ss_quarantine, not the library) is counted as a successful import and the
+    UI shows a green "Done" (#764). Pure + testable: it only inspects the
+    context dict the inner pipeline populated."""
+    if context.get('_integrity_failure_msg'):
+        return f"integrity check failed: {context['_integrity_failure_msg']}"
+    if context.get('_acoustid_quarantined'):
+        return (
+            "AcoustID verification failed: "
+            f"{context.get('_acoustid_failure_msg', 'fingerprint mismatch')}"
+        )
+    if context.get('_bitdepth_rejected'):
+        return "rejected by bit-depth filter"
+    if context.get('_race_guard_failed'):
+        return "source file disappeared before import completed"
+    return None
+
+
 def build_import_pipeline_runtime(
     *,
     automation_engine: Any | None = None,
@@ -562,6 +589,26 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
             record_download_provenance(context)
+
+            try:
+                pf_album_info = build_import_album_info(context, force_album=False)
+                if not pf_album_info or not pf_album_info.get("album_name"):
+                    pf_album_info = {
+                        "is_album": True,
+                        "album_name": playlist_name,
+                        "track_number": track_info.get("track_number", 1) or 1,
+                        "disc_number": track_info.get("disc_number", 1) or 1,
+                        "clean_track_name": get_import_clean_title(
+                            context,
+                            default=get_import_original_search(context).get("title", "Unknown"),
+                        ),
+                        "source": get_import_source(context) or "spotify",
+                    }
+                elif not pf_album_info.get("is_album"):
+                    pf_album_info["is_album"] = True
+                record_soulsync_library_entry(context, artist_context, pf_album_info)
+            except Exception as lib_err:
+                logger.error(f"[Playlist Folder] SoulSync library registration failed: {lib_err}")
 
             task_id = context.get('task_id')
             batch_id = context.get('batch_id')

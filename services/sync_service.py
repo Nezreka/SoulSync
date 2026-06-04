@@ -115,6 +115,12 @@ class PlaylistSyncService:
                     logger.error("Navidrome client not provided to sync service")
                     return None, "navidrome"
                 return client, "navidrome"
+            elif active_server == "soulsync":
+                client = self._media_client('soulsync')
+                if not client:
+                    logger.error("SoulSync library client not provided to sync service")
+                    return None, "soulsync"
+                return client, "soulsync"
             else:  # Default to Plex
                 client = self._media_client('plex')
                 if profile_id and client:
@@ -292,63 +298,92 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
             
             media_client, server_type = self._get_active_media_client()
-            self._update_progress(playlist.name, f"Creating/updating {server_type.title()} playlist", "", 80, 5, 4,
-                                total_tracks=total_tracks,
-                                matched_tracks=len(matched_tracks),
-                                failed_tracks=len(unmatched_tracks))
-            
-            # Get the actual media server track objects
-            media_tracks = [r.plex_track for r in matched_tracks if r.plex_track] # plex_track is a generic name here
-            logger.info(f"Creating playlist with {len(media_tracks)} matched tracks")
+            unmatched_count = len(unmatched_tracks)
 
-            # Validate that all tracks have proper ratingKey attributes for playlist creation
-            valid_tracks = []
-            for i, track in enumerate(media_tracks):
-                if track and hasattr(track, 'ratingKey'):
-                    valid_tracks.append(track)
-                    logger.debug(f"Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
-                else:
-                    logger.warning(f"Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
-            
-            logger.info(f"Playlist validation: {len(valid_tracks)}/{len(media_tracks)} tracks are valid {server_type.title()} objects with ratingKeys")
-
-            # Deduplicate by ratingKey — media servers silently drop duplicates,
-            # so count should reflect what actually ends up in the playlist
-            seen_keys = set()
-            deduped_tracks = []
-            for t in valid_tracks:
-                if t.ratingKey not in seen_keys:
-                    seen_keys.add(t.ratingKey)
-                    deduped_tracks.append(t)
-            if len(deduped_tracks) < len(valid_tracks):
-                logger.info(f"Deduplicated {len(valid_tracks) - len(deduped_tracks)} duplicate ratingKeys ({len(valid_tracks)} → {len(deduped_tracks)} tracks)")
-
-            # Use the deduplicated tracks for the sync
-            plex_tracks = deduped_tracks
-            
-            # Use active media server for playlist sync
-            media_client, server_type = self._get_active_media_client()
-            if not media_client:
-                logger.error("No active media client available for playlist sync")
-                sync_success = False
-            else:
-                logger.info(
-                    f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
-                    f"(mode: {sync_mode})"
+            # SoulSync standalone has no server playlists — only library match +
+            # wishlist for missing files. Previously we fell through to Plex here,
+            # showed "Creating/updating Plex playlist", playlist write failed, and
+            # failed_tracks was computed as total - 0 synced (= entire playlist).
+            if server_type == 'soulsync':
+                self._update_progress(
+                    playlist.name,
+                    "Standalone: library check complete",
+                    "",
+                    80, 5, 4,
+                    total_tracks=total_tracks,
+                    matched_tracks=len(matched_tracks),
+                    failed_tracks=unmatched_count,
                 )
-                # sync_mode == 'append' preserves user-added tracks on the server
-                # playlist (CJFC discord report) — never deletes, only adds new
-                # ones via the per-server `append_to_playlist`. The sync UI
-                # hides the Sync button entirely on SoulSync standalone (which
-                # has no playlist methods), so every client that reaches this
-                # point implements both methods.
-                if sync_mode == 'append':
-                    sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                sync_success = True
+                synced_tracks = len(matched_tracks)
+                failed_tracks = unmatched_count
+                logger.info(
+                    f"Standalone playlist sync '{playlist.name}': "
+                    f"{len(matched_tracks)} in library, {unmatched_count} missing"
+                )
+            else:
+                self._update_progress(
+                    playlist.name,
+                    f"Creating/updating {server_type.title()} playlist",
+                    "",
+                    80, 5, 4,
+                    total_tracks=total_tracks,
+                    matched_tracks=len(matched_tracks),
+                    failed_tracks=unmatched_count,
+                )
+
+                # Get the actual media server track objects
+                media_tracks = [r.plex_track for r in matched_tracks if r.plex_track]
+                logger.info(f"Creating playlist with {len(media_tracks)} matched tracks")
+
+                # Validate that all tracks have proper ratingKey attributes for playlist creation
+                valid_tracks = []
+                for i, track in enumerate(media_tracks):
+                    if track and hasattr(track, 'ratingKey'):
+                        valid_tracks.append(track)
+                        logger.debug(f"Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
+                    else:
+                        logger.warning(
+                            f"Track {i+1} invalid for playlist: {track} "
+                            f"(type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})"
+                        )
+
+                logger.info(
+                    f"Playlist validation: {len(valid_tracks)}/{len(media_tracks)} tracks are valid "
+                    f"{server_type.title()} objects with ratingKeys"
+                )
+
+                # Deduplicate by ratingKey — media servers silently drop duplicates
+                seen_keys = set()
+                deduped_tracks = []
+                for t in valid_tracks:
+                    if t.ratingKey not in seen_keys:
+                        seen_keys.add(t.ratingKey)
+                        deduped_tracks.append(t)
+                if len(deduped_tracks) < len(valid_tracks):
+                    logger.info(
+                        f"Deduplicated {len(valid_tracks) - len(deduped_tracks)} duplicate ratingKeys "
+                        f"({len(valid_tracks)} → {len(deduped_tracks)} tracks)"
+                    )
+
+                plex_tracks = deduped_tracks
+
+                if not media_client:
+                    logger.error("No active media client available for playlist sync")
+                    sync_success = False
                 else:
-                    sync_success = media_client.update_playlist(playlist.name, valid_tracks)
-            
-            synced_tracks = len(plex_tracks) if sync_success else 0
-            failed_tracks = len(playlist.tracks) - synced_tracks - downloaded_tracks
+                    logger.info(
+                        f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
+                        f"(mode: {sync_mode})"
+                    )
+                    if sync_mode == 'append':
+                        sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                    else:
+                        sync_success = media_client.update_playlist(playlist.name, valid_tracks)
+
+                synced_tracks = len(plex_tracks) if sync_success else 0
+                # Not in library (for wishlist), not "total minus playlist size".
+                failed_tracks = unmatched_count
             
             self._update_progress(playlist.name, "Sync completed", "", 100, 5, 5,
                                 total_tracks=total_tracks,
@@ -357,8 +392,11 @@ class PlaylistSyncService:
 
             # Auto-add unmatched tracks to wishlist (skip in Wing It mode)
             wishlist_added_count = 0
-            if unmatched_tracks and getattr(self, '_skip_wishlist', False):
-                logger.info(f"[Wing It] Skipping wishlist for {len(unmatched_tracks)} unmatched tracks")
+            if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
+                logger.info(
+                    "Skipping sync-time wishlist for %s unmatched tracks (wing-it or organize-by-playlist)",
+                    len(unmatched_tracks),
+                )
                 unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
                 try:
@@ -548,20 +586,13 @@ class PlaylistSyncService:
                         server_track_id = cached['server_track_id']
                         db_track_check = cache_db.get_track_by_id(server_track_id)
                         if db_track_check:
-                            if server_type == "jellyfin":
-                                class JellyfinTrackFromCache:
+                            if server_type in ("jellyfin", "navidrome", "soulsync"):
+                                class DbTrackFromCache:
                                     def __init__(self, db_t):
                                         self.ratingKey = db_t.id
                                         self.title = db_t.title
                                         self.id = db_t.id
-                                actual_track = JellyfinTrackFromCache(db_track_check)
-                            elif server_type == "navidrome":
-                                class NavidromeTrackFromCache:
-                                    def __init__(self, db_t):
-                                        self.ratingKey = db_t.id
-                                        self.title = db_t.title
-                                        self.id = db_t.id
-                                actual_track = NavidromeTrackFromCache(db_track_check)
+                                actual_track = DbTrackFromCache(db_track_check)
                             else:
                                 try:
                                     actual_track = media_client.server.fetchItem(int(server_track_id))
@@ -586,17 +617,35 @@ class PlaylistSyncService:
 
                 artist_name = _artist_name(artist)
 
+                # YouTube/streaming sources arrive video-shaped: title
+                # "Artist - Song", artist "Official Artist"/"Artist - Topic"/
+                # "ArtistVEVO". Try the raw (title, artist) first, then a
+                # canonicalized variant so those still match the clean library
+                # metadata instead of being reported missing (#768).
+                from core.text.source_title import canonical_source_track
+                _attempts = [(original_title, artist_name)]
+                _canon_title, _canon_artist = canonical_source_track(original_title, artist_name)
+                if (_canon_title, _canon_artist) != (original_title, artist_name):
+                    _attempts.append((_canon_title, _canon_artist))
+
                 # Use the improved database check_track_exists method with server awareness
                 try:
                     db = MusicDatabase()
-                    artist_candidates = self._get_or_fetch_artist_candidates(
-                        candidate_pool, db, artist_name, active_server,
-                    )
-                    db_track, confidence = db.check_track_exists(
-                        original_title, artist_name,
-                        confidence_threshold=0.7, server_source=active_server,
-                        candidate_tracks=artist_candidates,
-                    )
+                    # Try every candidate form and keep the BEST — don't stop at
+                    # the first that clears the threshold, or a marginal raw
+                    # match could mask a stronger (correct) canonical one.
+                    db_track, confidence = None, 0.0
+                    for _try_title, _try_artist in _attempts:
+                        artist_candidates = self._get_or_fetch_artist_candidates(
+                            candidate_pool, db, _try_artist, active_server,
+                        )
+                        _cand_track, _cand_conf = db.check_track_exists(
+                            _try_title, _try_artist,
+                            confidence_threshold=0.7, server_source=active_server,
+                            candidate_tracks=artist_candidates,
+                        )
+                        if _cand_conf > confidence:
+                            db_track, confidence = _cand_track, _cand_conf
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
@@ -615,27 +664,19 @@ class PlaylistSyncService:
                         
                         # Fetch the actual track object from active media server using the database track ID
                         try:
-                            if server_type == "jellyfin":
-                                # For Jellyfin, create a track object from database info (Jellyfin doesn't have fetchItem)
-                                class JellyfinTrackFromDB:
-                                    def __init__(self, db_track):
-                                        self.ratingKey = db_track.id
-                                        self.title = db_track.title
-                                        self.id = db_track.id
-                                
-                                actual_track = JellyfinTrackFromDB(db_track)
-                                logger.debug(f"Created Jellyfin track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
-                                return actual_track, confidence
-                            elif server_type == "navidrome":
-                                # For Navidrome, create a track object from database info (similar to Jellyfin)
-                                class NavidromeTrackFromDB:
+                            if server_type in ("jellyfin", "navidrome", "soulsync"):
+                                # DB-backed servers — no remote fetchItem (SoulSync standalone included).
+                                class DbTrackFromDB:
                                     def __init__(self, db_track):
                                         self.ratingKey = db_track.id
                                         self.title = db_track.title
                                         self.id = db_track.id
 
-                                actual_track = NavidromeTrackFromDB(db_track)
-                                logger.debug(f"Created Navidrome track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
+                                actual_track = DbTrackFromDB(db_track)
+                                logger.debug(
+                                    f"Created {server_type} track object for '{db_track.title}' "
+                                    f"(ID: {actual_track.ratingKey})"
+                                )
                                 return actual_track, confidence
                             else:
                                 # For Plex, use the original fetchItem approach

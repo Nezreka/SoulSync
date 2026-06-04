@@ -202,7 +202,12 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
-    monkeypatch.setattr(import_pipeline, "record_soulsync_library_entry", lambda *args, **kwargs: None)
+    library_calls = []
+
+    def _record_library(context, artist_context, album_info):
+        library_calls.append((context, artist_context, album_info))
+
+    monkeypatch.setattr(import_pipeline, "record_soulsync_library_entry", _record_library)
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_retag_download", lambda *args, **kwargs: None)
 
@@ -221,6 +226,8 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     )
 
     assert seen["runtime"] is metadata_runtime
+    assert len(library_calls) == 1
+    assert library_calls[0][2]["album_name"] == "Album"
 
 
 # ---------------------------------------------------------------------------

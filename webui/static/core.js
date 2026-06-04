@@ -50,6 +50,7 @@ let _lastWatchlistScanStatus = null;
 let _lastMediaScanStatus = null;
 let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
+let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
 let sequentialSyncManager = null;
@@ -381,6 +382,10 @@ function initializeWebSocket() {
     }
 
     socket = io({
+        // Polling-first (Socket.IO default) then upgrade — most compatible behind
+        // reverse proxies that don't cleanly forward WebSocket upgrade headers
+        // (common in self-hosted setups). websocket-first shaves connect time when
+        // it works but silently breaks real-time updates where the proxy blocks WS.
         transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionAttempts: Infinity,
@@ -459,11 +464,24 @@ function initializeWebSocket() {
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
+    socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
     socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
+
+    // Forward enrichment status to the dashboard worker-orbs so the hub fires
+    // a pulse on each real item matched / error (additional listener — does not
+    // disturb the UI handlers above).
+    ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'spotify-enrichment',
+     'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
+     'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
+     'soulid', 'repair'].forEach((ch) => {
+        socket.on('enrichment:' + ch, (data) => {
+            if (window.workerOrbs && window.workerOrbs.onStatus) window.workerOrbs.onStatus(ch, data);
+        });
+    });
 
     // Phase 4 event listeners (tool progress)
     socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
@@ -521,6 +539,7 @@ function handleServiceStatusUpdate(data) {
     _isSoulsyncStandalone = isSoulsyncStandalone;
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
         if (btn.id === 'stats-sync-btn') return; // React stats page owns this control now.
+        if (btn.classList.contains('soulsync-standalone-action')) return;
         if (isSoulsyncStandalone) {
             btn.dataset.hiddenByStandalone = '1';
             btn.style.display = 'none';

@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict
 from core.imports.album import build_album_import_context, build_album_import_match_payload, resolve_album_artist_context
 from core.imports.context import get_import_context_artist, get_import_track_info, normalize_import_context
 from core.imports.filename import parse_filename_metadata
+from core.imports.pipeline import import_rejection_reason
 from core.imports.staging import (
     AUDIO_EXTENSIONS,
     get_import_suggestions_cache,
@@ -331,8 +332,17 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
 
             try:
                 runtime.post_process_matched_download(context_key, context, file_path)
-                processed += 1
-                runtime.logger.info("Import processed: %s. %s from %s", track_number, track_name, album_name)
+                # A quarantine/race-guard rejection returns normally (no
+                # exception) and leaves the file in ss_quarantine, NOT the
+                # library — so it must be reported as an error, not counted
+                # as a successful import (#764).
+                reject_reason = import_rejection_reason(context)
+                if reject_reason:
+                    errors.append(f"{track_name}: {reject_reason}")
+                    runtime.logger.warning("Import rejected: %s — %s", track_name, reject_reason)
+                else:
+                    processed += 1
+                    runtime.logger.info("Import processed: %s. %s from %s", track_number, track_name, album_name)
             except Exception as proc_err:
                 err_msg = f"{track_name}: {str(proc_err)}"
                 errors.append(err_msg)
@@ -422,6 +432,13 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
 
         context_key = f"import_single_{uuid.uuid4().hex[:8]}"
         runtime.post_process_matched_download(context_key, context, file_path)
+        # Quarantine/race-guard returns normally but the file is in
+        # ss_quarantine, not the library — report it as an error rather than
+        # "ok", else the UI shows a green "Done" for a file that vanished (#764).
+        reject_reason = import_rejection_reason(context)
+        if reject_reason:
+            runtime.logger.warning("Import single rejected: %s — %s", final_title, reject_reason)
+            return ("error", f"{final_title}: {reject_reason}")
         runtime.logger.info(
             "Import single processed: %s by %s (source=%s)",
             final_title,
