@@ -654,16 +654,17 @@
 
                 // Stress quickens the heartbeat (agitation) and blends the
                 // nucleus toward red — a calm green-purple hub means "all good".
-                const beatSpeed = 1.0 + energy * 1.8 + stress * 2.5;
+                const beatSpeed = 1.0 + energy * 1.4 + stress * 2.5;
                 const slow = 0.5 + 0.5 * Math.sin(time * beatSpeed);
-                const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (2 + energy * 2);
+                // Barely-there breathing — the nucleus is mostly steady
+                const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (0.6 + energy * 0.8);
                 const hr = Math.round(r + (235 - r) * stress);
                 const hg = Math.round(g + (60 - g) * stress);
                 const hb = Math.round(b + (60 - b) * stress);
 
-                // Wide ambient glow — brighter + wider with energy (cached sprite)
+                // Wide ambient glow — steady, only gently lifting with energy
                 const glowR = hubR * (4 + energy * 1.5);
-                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.18 + energy * 0.18 + slow * 0.12 + stress * 0.15);
+                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.16 + energy * 0.16 + slow * 0.04 + stress * 0.15);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -674,7 +675,7 @@
                     const dw = natW * fit;
                     const dh = natH * fit;
                     ctx.save();
-                    ctx.globalAlpha = Math.min(1, 0.85 + energy * 0.15 + slow * 0.1);
+                    ctx.globalAlpha = Math.min(1, 0.9 + energy * 0.1 + slow * 0.03);
                     ctx.drawImage(hubImage, orb.x - dw / 2, orb.y - dh / 2, dw, dh);
                     ctx.restore();
                 } else {
@@ -689,16 +690,16 @@
                     ctx.fill();
                 }
 
-                // Expanding heartbeat ring(s) — radiate faster + brighter with energy
-                const ringSpeed = 0.5 + energy * 0.9;
-                const rings = 1 + Math.round(energy * 2);        // 1..3 rings
-                for (let k = 0; k < rings; k++) {
-                    const ringPhase = (time * ringSpeed + k / rings) % 1;
-                    const ringR = hubR + ringPhase * hubR * 2.5;
+                // A single, very faint expanding ring — only when workers are
+                // actually busy, and barely visible so it reads as a soft halo,
+                // not a throbbing pulse.
+                if (energy > 0.02) {
+                    const ringPhase = (time * 0.35) % 1;
+                    const ringR = hubR + ringPhase * hubR * 1.4;
                     ctx.beginPath();
                     ctx.arc(orb.x, orb.y, ringR, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${(1 - ringPhase) * (0.25 + energy * 0.2)})`;
-                    ctx.lineWidth = 1.5;
+                    ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${(1 - ringPhase) * 0.08 * energy})`;
+                    ctx.lineWidth = 1;
                     ctx.stroke();
                 }
 
