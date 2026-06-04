@@ -11,23 +11,27 @@
 
     // ── Worker definitions with brand colors ──
     const WORKER_DEFS = [
-        { container: '.mb-button-container',              color: [186, 85, 211] },
-        { container: '.audiodb-button-container',          color: [0, 188, 212]  },
-        { container: '.deezer-button-container',           color: [162, 56, 255] },
-        { container: '.spotify-enrich-button-container',   color: [30, 215, 96]  },
-        { container: '.itunes-enrich-button-container',    color: [251, 91, 137] },
-        { container: '.lastfm-enrich-button-container',    color: [213, 16, 7]   },
-        { container: '.genius-enrich-button-container',    color: [255, 255, 100] },
-        { container: '.tidal-enrich-button-container',     color: [180, 180, 255] },
-        { container: '.qobuz-enrich-button-container',     color: [1, 112, 239]  },
-        { container: '.discogs-button-container',          color: [180, 180, 180] },
-        { container: '.amazon-enrich-button-container',    color: [255, 153, 0]  },
-        { container: '.similar-artists-enrich-button-container', color: [168, 85, 247] },
-        { container: '.hydrabase-button-container',        color: [200, 200, 200] },
-        { container: '.soulid-button-container',          color: [29, 185, 84], rainbow: true },
-        { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true },
+        { container: '.mb-button-container',              color: [186, 85, 211], id: 'musicbrainz' },
+        { container: '.audiodb-button-container',          color: [0, 188, 212],  id: 'audiodb' },
+        { container: '.deezer-button-container',           color: [162, 56, 255], id: 'deezer' },
+        { container: '.spotify-enrich-button-container',   color: [30, 215, 96],  id: 'spotify-enrichment' },
+        { container: '.itunes-enrich-button-container',    color: [251, 91, 137], id: 'itunes-enrichment' },
+        { container: '.lastfm-enrich-button-container',    color: [213, 16, 7],   id: 'lastfm-enrichment' },
+        { container: '.genius-enrich-button-container',    color: [255, 255, 100], id: 'genius-enrichment' },
+        { container: '.tidal-enrich-button-container',     color: [180, 180, 255], id: 'tidal-enrichment' },
+        { container: '.qobuz-enrich-button-container',     color: [1, 112, 239],  id: 'qobuz-enrichment' },
+        { container: '.discogs-button-container',          color: [180, 180, 180], id: 'discogs' },
+        { container: '.amazon-enrich-button-container',    color: [255, 153, 0],  id: 'amazon-enrichment' },
+        { container: '.similar-artists-enrich-button-container', color: [168, 85, 247], id: 'similar_artists' },
+        { container: '.hydrabase-button-container',        color: [200, 200, 200], id: 'hydrabase' },
+        { container: '.soulid-button-container',          color: [29, 185, 84], rainbow: true, id: 'soulid' },
+        { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true, id: 'repair' },
         { container: '.em-manage-btn',                     color: [168, 85, 247], hub: true },
     ];
+
+    const ERROR_COLOR = [255, 80, 80];   // pulses fired on real worker errors
+    const PULSE_CAP = 8;                  // max pulses queued per status update
+    const PULSE_DRAIN = 2;                // pulses released into flight per frame
 
     const ORB_RADIUS = 7;
     const ORB_DIAMETER = ORB_RADIUS * 2;
@@ -84,6 +88,7 @@
             orbs.push({
                 el,
                 btn: el.matches('button') ? el : el.querySelector('button'),
+                id: def.id || null,
                 color: def.color,
                 rainbow: def.rainbow || false,
                 hub: def.hub || false,
@@ -95,6 +100,11 @@
                 visible: true,
                 phase: Math.random() * Math.PI * 2,
                 active: false,
+                statusSeen: false,    // has a real WS status arrived for this worker?
+                lastProcessed: 0,     // cumulative matched+not_found seen last update
+                lastErrors: 0,        // cumulative error count seen last update
+                pendingWork: 0,       // brand-colour pulses queued to fly to the hub
+                pendingErr: 0,        // red pulses queued (real errors)
             });
         });
 
@@ -464,13 +474,30 @@
             updateExpanding(visibleOrbs, w, h);
         }
 
-        // Emit sparks from active orbs, plus pulses inbound to the hub
+        // Sparks (ambient aura while active) + inbound pulses to the hub.
+        // Pulses are event-driven: one per real item matched / error reported,
+        // drained a couple per frame so bursts stagger nicely up the spoke.
         for (const orb of visibleOrbs) {
-            if (orb.hub || !orb.active) continue;
-            if (Math.random() < SPARK_RATE) {
+            if (orb.hub) continue;
+
+            if (orb.active && Math.random() < SPARK_RATE) {
                 emitSpark(orb, orb.rainbow ? getRainbowColor(time) : null);
             }
-            if (hub && Math.random() < INFLOW_RATE) {
+
+            if (!hub) continue;
+
+            if (orb.statusSeen) {
+                let drained = 0;
+                while (orb.pendingWork > 0 && drained < PULSE_DRAIN) {
+                    emitInflow(orb, orb.rainbow ? getRainbowColor(time) : null);
+                    orb.pendingWork--; drained++;
+                }
+                while (orb.pendingErr > 0 && drained < PULSE_DRAIN) {
+                    emitInflow(orb, ERROR_COLOR);
+                    orb.pendingErr--; drained++;
+                }
+            } else if (orb.active && Math.random() < INFLOW_RATE) {
+                // No real status yet — keep the old ambient trickle as fallback
                 emitInflow(orb, orb.rainbow ? getRainbowColor(time) : null);
             }
         }
@@ -773,6 +800,39 @@
         return window._workerOrbsEnabled !== false;
     }
 
+    // ── Real telemetry → pulses ──
+    // Fed by the WebSocket enrichment status pushes (see core.js). We diff the
+    // cumulative counters between updates and queue one inbound pulse per real
+    // item processed (brand colour) or error (red). No status yet → the loop
+    // falls back to an ambient trickle so active orbs still animate.
+    function onStatus(id, data) {
+        if (!id || !data) return;
+        const orb = orbs.find(o => o.id === id);
+        if (!orb) return;
+
+        const s = data.stats || {};
+        const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+        // "processed" = every flavour of completed item across the worker zoo
+        const processed = num(s.matched) + num(s.not_found) + num(s.repaired)
+                        + num(s.synced) + num(s.scanned);
+        const errors = num(s.errors);
+
+        if (!orb.statusSeen) {
+            // First sample is just a baseline — don't dump the whole backlog
+            orb.statusSeen = true;
+            orb.lastProcessed = processed;
+            orb.lastErrors = errors;
+            return;
+        }
+
+        const dWork = processed - orb.lastProcessed;
+        const dErr = errors - orb.lastErrors;
+        orb.lastProcessed = processed;
+        orb.lastErrors = errors;
+        if (dWork > 0) orb.pendingWork = Math.min(PULSE_CAP, orb.pendingWork + dWork);
+        if (dErr > 0) orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
+    }
+
     function setPage(pageId) {
         const wasDashboard = onDashboard;
         onDashboard = (pageId === 'dashboard') && isEnabled();
@@ -803,7 +863,7 @@
         init();
         if (!dashboardHeader) return;
 
-        window.workerOrbs = { setPage };
+        window.workerOrbs = { setPage, onStatus };
 
         const activePage = document.querySelector('.page.active');
         if (activePage && activePage.id === 'dashboard-page' && isEnabled()) {
