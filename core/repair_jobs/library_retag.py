@@ -45,6 +45,26 @@ def _read_current_tags(file_path):
         return {}
 
 
+def _add_source_ids(db_data, source, album_source_id, source_track):
+    """Stamp the album/track source IDs onto the write payload so the canonical
+    writer embeds them too (Spotify / iTunes / MusicBrainz)."""
+    album_key = {'spotify': 'spotify_album_id', 'itunes': 'itunes_album_id',
+                 'musicbrainz': 'musicbrainz_release_id'}.get(source)
+    track_key = {'spotify': 'spotify_track_id', 'itunes': 'itunes_track_id',
+                 'musicbrainz': 'musicbrainz_recording_id'}.get(source)
+    if album_key and album_source_id:
+        db_data[album_key] = album_source_id
+    if track_key:
+        tid = None
+        for k in ('id', 'track_id', 'source_track_id'):
+            v = source_track.get(k) if isinstance(source_track, dict) else getattr(source_track, k, None)
+            if v:
+                tid = v
+                break
+        if tid:
+            db_data[track_key] = tid
+
+
 def _track_list(result):
     """Normalize a get_album_tracks result into a plain list of track items."""
     if result is None:
@@ -222,12 +242,14 @@ class LibraryRetagJob(RepairJob):
             # Include a track when its tags change, OR when there's a cover action
             # to apply to it (db_data may be empty — apply embeds art either way).
             if plan['changes'] or cover_action:
+                db_data = plan['db_data']
+                _add_source_ids(db_data, source, album_source_id, src)
                 track_plans.append({
                     'file_path': lib['file_path'],
                     'track_id': lib['id'],
                     'title': lib['title'],
                     'changes': plan['changes'],
-                    'db_data': plan['db_data'],
+                    'db_data': db_data,
                 })
 
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])

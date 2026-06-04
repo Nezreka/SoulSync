@@ -1122,6 +1122,60 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     return metadata
 
 
+def embed_known_source_ids(audio_file, metadata: dict) -> list:
+    """Embed ALREADY-KNOWN source IDs into a file's tags, no API re-fetch.
+
+    For the library re-tag / "Write Tags" paths: ``metadata`` carries flat id
+    keys already stored in the DB (``spotify_track_id``, ``spotify_album_id``,
+    ``itunes_track_id``, ``itunes_album_id``, ``musicbrainz_recording_id``,
+    ``musicbrainz_release_id``, …). Reuses the SAME canonical, format-specific,
+    Picard-compatible frame writer as the import post-process
+    (``_write_embedded_metadata``) so the frames never diverge — it just skips
+    the heavy multi-source re-search that ``embed_source_ids`` does.
+
+    The caller is responsible for saving the file. Returns the canonical tag
+    names written (for logging/diagnostics).
+    """
+    cfg = get_config_manager()
+    symbols = get_mutagen_symbols()
+    if not symbols or audio_file is None:
+        return []
+    try:
+        id_tags = _collect_source_ids(metadata, cfg)
+        # MusicBrainz ids aren't in _collect_source_ids (they come from the MB
+        # processor at import time); add them from the DB when present, using
+        # the canonical names the frame map already knows.
+        if cfg.get("musicbrainz.embed_tags", True) is not False:
+            if metadata.get("musicbrainz_recording_id"):
+                id_tags["MUSICBRAINZ_RECORDING_ID"] = metadata["musicbrainz_recording_id"]
+            if metadata.get("musicbrainz_release_id"):
+                id_tags["MUSICBRAINZ_RELEASE_ID"] = metadata["musicbrainz_release_id"]
+        if not id_tags:
+            return []
+        pp = _blank_post_process_state()
+        pp["id_tags"] = id_tags
+        _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)
+        return list(id_tags.keys())
+    except Exception as exc:
+        logger.debug("embed_known_source_ids failed: %s", exc)
+        return []
+
+
+def _blank_post_process_state() -> dict:
+    """A fully-defaulted post-process state so _write_embedded_metadata can run
+    with only id_tags set (every enrichment branch no-ops on the blanks)."""
+    return {
+        "id_tags": {}, "track_title": "", "artist_name": "", "batch_artist_name": None,
+        "metadata": {}, "recording_mbid": None, "artist_mbid": None, "release_mbid": "",
+        "mb_genres": [], "isrc": None, "deezer_bpm": None, "deezer_isrc": None,
+        "tidal_bpm": None, "hifi_bpm": None, "hifi_copyright": None, "audiodb_mood": None,
+        "audiodb_style": None, "audiodb_genre": None, "tidal_isrc": None,
+        "tidal_copyright": None, "hifi_isrc": None, "qobuz_isrc": None,
+        "qobuz_copyright": None, "qobuz_label": None, "lastfm_tags": [],
+        "lastfm_url": None, "genius_url": None, "release_year": None,
+    }
+
+
 def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None):
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
