@@ -3554,6 +3554,13 @@ const _RESULT_DISPLAY_MAP = {
         { key: 'wishlist_queued', label: 'Wishlist Queued' },
         { key: 'duration_seconds', label: 'Duration (s)' },
     ],
+    'sync_playlist': [
+        { key: 'matched_tracks', label: 'In Library' },
+        { key: 'failed_tracks', label: 'Missing' },
+        { key: 'wishlist_added_count', label: 'Added to Wishlist', hideZero: true },
+        { key: 'total_tracks', label: 'Total Tracks' },
+        { key: 'synced_tracks', label: 'On Server Playlist', hideZero: true },
+    ],
 };
 
 function _renderResultStats(resultJson, actionType) {

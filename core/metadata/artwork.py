@@ -363,7 +363,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
     if not symbols:
-        return
+        return False
 
     try:
         image_data = None
@@ -410,12 +410,12 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             art_url = metadata.get("album_art_url")
             if not art_url:
                 logger.warning("No album art URL available for embedding.")
-                return
+                return False
             image_data, mime_type = _fetch_art_bytes(art_url)
 
         if not image_data:
             logger.error("Failed to download album art data.")
-            return
+            return False
 
         if isinstance(audio_file.tags, symbols.ID3):
             audio_file.tags.add(symbols.APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=image_data))
@@ -434,8 +434,10 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             audio_file["covr"] = [symbols.MP4Cover(image_data, imageformat=fmt)]
 
         logger.info("Album art successfully embedded.")
+        return True
     except Exception as exc:
         logger.error("Error embedding album art: %s", exc)
+        return False
 
 
 def download_cover_art(album_info: dict, target_dir: str, context: dict = None):

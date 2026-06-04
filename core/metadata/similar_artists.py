@@ -269,10 +269,17 @@ def iter_musicmap_similar_artist_events(
 
     except requests.exceptions.RequestException as exc:
         logger.debug("Error fetching MusicMap for %s: %s", artist_name, exc)
+        # A 404 from MusicMap means the artist simply has no map page — that's a
+        # not-found, not a fetch failure. Surface the real HTTP status (when the
+        # exception carries a response) so callers classify it correctly instead
+        # of flattening every network-layer error to a 502 "error". Timeouts /
+        # connection errors carry no response → fall back to 502 (still an error).
+        resp = getattr(exc, 'response', None)
+        status_code = getattr(resp, 'status_code', None) or 502
         yield {
             'type': 'error',
             'error': f'Failed to fetch from MusicMap: {exc}',
-            'status_code': 502,
+            'status_code': status_code,
         }
     except ValueError as exc:
         status_code = 404 if 'Could not find artist map on MusicMap' in str(exc) else 400

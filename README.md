@@ -105,6 +105,21 @@ SoulSync bridges streaming services to your music library with automated discove
 - Catches wrong versions (live, remix, cover) even from streaming API sources
 - Fail-open design: verification errors never block downloads
 
+#### AcoustID API key
+
+AcoustID verification is opt-in. To enable it, request a free API key
+at <https://acoustid.org/new-application> and paste it into
+Settings → AcoustID. Without a key, downloads still complete but the
+verification step is skipped silently.
+
+If a track was previously tagged by AcoustID but the retag action in
+the AcoustID Scanner no longer changes anything, see issue #704 — the
+most common cause is that the file already carries a
+`MUSICBRAINZ_TRACKID` tag, which the retag step uses as a short-circuit
+and therefore never overwrites. Removing the cached
+`MUSICBRAINZ_TRACKID` (and the `ACOUSTID_ID` if present) from the file
+restores the retag.
+
 ### Metadata & Enrichment
 
 **10 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz

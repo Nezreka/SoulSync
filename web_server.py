@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.5"
+_SOULSYNC_BASE_VERSION = "2.6.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1084,6 +1084,8 @@ def _register_automation_handlers():
         get_watchlist_scan_state=lambda: watchlist_scan_state,
         run_playlist_discovery_worker=_run_playlist_discovery_worker,
         run_sync_task=_run_sync_task,
+        run_playlist_organize_download=_run_playlist_organize_download,
+        missing_download_executor=missing_download_executor,
         load_sync_status_file=_load_sync_status_file,
         get_deezer_client=_get_deezer_client,
         parse_youtube_playlist=parse_youtube_playlist,
@@ -4132,6 +4134,33 @@ def select_jellyfin_music_library():
     except Exception as e:
         logger.error(f"Error setting Jellyfin music library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/navidrome/cover/<cover_id>', methods=['GET'])
+def navidrome_cover(cover_id):
+    """Proxy a Navidrome (Subsonic) cover-art image to the browser.
+
+    The sync editor and other modals reference /api/navidrome/cover/<id>,
+    but no route served it — so every Navidrome cover came back blank (#766).
+    We build the authenticated getCoverArt URL server-side (keeping Subsonic
+    credentials off the client) and stream it through the shared image cache.
+    """
+    try:
+        client = media_server_engine.client('navidrome')
+        if not client:
+            return '', 404
+        url = client.build_cover_art_url(cover_id)
+        if not url:
+            return '', 404
+        from core.image_cache import get_image_cache
+        cached = get_image_cache().get_url(url)
+        response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+        max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
+        response.headers['Cache-Control'] = f'private, max-age={max_age}'
+        return response
+    except Exception as exc:
+        logger.debug("navidrome cover proxy failed for %s: %s", cover_id, exc)
+        return '', 502
+
 
 @app.route('/api/navidrome/music-folders', methods=['GET'])
 def get_navidrome_music_folders():
@@ -18185,23 +18214,11 @@ def get_server_playlist_tracks(playlist_id):
                                 pass
                     break
 
-        # Build combined view with two-pass matching (exact then fuzzy)
-        import re as _re
-        from difflib import SequenceMatcher
-
-        def _norm_title(t):
-            """Strip feat./ft., remaster, and edition qualifiers for comparison only."""
-            # feat./ft. — e.g. (feat. Artist), [ft. Artist]
-            t = _re.sub(r'\s*[\(\[](?:feat|ft)\.?[^\)\]]*[\)\]]', '', t, flags=_re.IGNORECASE)
-            # Remaster/Remastered — e.g. (2019 Remaster), (Remastered), (2019 Remastered Version)
-            t = _re.sub(r'\s*[\(\[](?:\d{4}\s+)?remaster(?:ed)?(?:\s+version)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
-            # Edition qualifiers — e.g. (Deluxe Edition), (Special Edition), [Anniversary Edition]
-            t = _re.sub(r'\s*[\(\[](?:deluxe|special|anniversary|legacy|expanded|limited)(?:\s+edition)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
-            return t.lower().strip()
-
-        combined = []
-        used_server_indices = set()
-        unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
+        # Reconcile source vs server playlist. Three-pass matcher lifted to
+        # core.sync.playlist_reconcile (pure + tested) — fixes #768 (YouTube
+        # "Artist - Title" sources now match, and source_track_id is echoed
+        # back so manual "Find & add" overrides persist).
+        from core.sync.playlist_reconcile import reconcile_playlist
 
         # Pass 0: User-confirmed match overrides from sync_match_cache.
         # When a user previously picked a local file via "Find & Add",
@@ -18218,92 +18235,7 @@ def get_server_playlist_tracks(playlist_id):
             lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
         )
 
-        # Pass 1: Exact title match (normalized — strips feat./ft. qualifiers)
-        for i, src in enumerate(source_tracks):
-            src_name = src.get('name', '')
-            src_artist = src.get('artist', '')
-            if not src_artist and src.get('artists'):
-                a = src['artists'][0] if src['artists'] else ''
-                src_artist = a.get('name', a) if isinstance(a, dict) else str(a)
-
-            src_entry = {
-                'name': src_name, 'artist': src_artist,
-                'album': src.get('album', ''), 'image_url': src.get('image_url', ''),
-                'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
-            }
-
-            # Override hit — paired by user, skip exact/fuzzy matching.
-            if i in _override_pairs:
-                j_override = _override_pairs[i]
-                used_server_indices.add(j_override)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': server_tracks[j_override],
-                    'match_status': 'matched',
-                    'confidence': 1.0,
-                    'override': True,
-                })
-                continue
-
-            src_norm = _norm_title(src_name)
-            best_idx = -1
-            for j, svr in enumerate(server_tracks):
-                if j in used_server_indices:
-                    continue
-                if _norm_title(svr['title']) == src_norm:
-                    best_idx = j
-                    break
-
-            if best_idx >= 0:
-                used_server_indices.add(best_idx)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': server_tracks[best_idx],
-                    'match_status': 'matched',
-                    'confidence': 1.0,
-                })
-            else:
-                idx = len(combined)
-                combined.append({
-                    'source_track': src_entry,
-                    'server_track': None,
-                    'match_status': 'missing',
-                    'confidence': 0.0,
-                })
-                unmatched_source.append((idx, src_entry))
-
-        # Pass 2: Fuzzy match on remaining unmatched source tracks (normalized keys)
-        for combo_idx, src_entry in unmatched_source:
-            src_key = f"{src_entry['artist']} {_norm_title(src_entry['name'])}".strip()
-            best_score = 0.0
-            best_j = -1
-            for j, svr in enumerate(server_tracks):
-                if j in used_server_indices:
-                    continue
-                svr_key = f"{svr['artist']} {_norm_title(svr['title'])}".strip().lower()
-                score = SequenceMatcher(None, src_key.lower(), svr_key).ratio()
-                if score > best_score and score >= 0.75:
-                    best_score = score
-                    best_j = j
-
-            if best_j >= 0:
-                used_server_indices.add(best_j)
-                combined[combo_idx] = {
-                    'source_track': src_entry,
-                    'server_track': server_tracks[best_j],
-                    'match_status': 'matched',
-                    'confidence': round(best_score, 3),
-                }
-
-        # Add server tracks that aren't in the source (extra tracks on server)
-        for j, svr in enumerate(server_tracks):
-            if j not in used_server_indices:
-                combined.append({
-                    'source_track': None,
-                    'server_track': svr,
-                    'match_status': 'extra',
-                    'confidence': 0.0,
-                })
+        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
         return jsonify({
             "success": True,
@@ -18490,6 +18422,18 @@ def server_playlist_add_track(playlist_id):
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
+            # Link, don't duplicate: matching an unmatched source to a track
+            # already in the playlist should only record the override, never
+            # append a second copy (#768).
+            if source_track_id:
+                try:
+                    _existing = {str(it.ratingKey) for it in raw_playlist.items()}
+                except Exception:
+                    _existing = set()
+                if str(track_id) in _existing:
+                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+                    return jsonify({"success": True, "message": "Track linked"})
+
             logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
 
             raw_playlist.addItems([new_item])
@@ -18515,24 +18459,30 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            from core.sync.playlist_edit import plan_playlist_add
             current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
-            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
-            track_ids.insert(pos, track_id)
-            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+            # Matching an unmatched source to a track already in the playlist
+            # is a LINK, not a second copy — don't duplicate it (#768).
+            plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
+            if plan['should_insert']:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
+                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
-            return jsonify({"success": True, "message": "Track added"})
+            return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            from core.sync.playlist_edit import plan_playlist_add
             current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
-            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
-            track_ids.insert(pos, track_id)
-            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
-            media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            # Matching an unmatched source to a track already in the playlist
+            # is a LINK, not a second copy — don't duplicate it (#768).
+            plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
+            if plan['should_insert']:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
+                media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
-            return jsonify({"success": True, "message": "Track added"})
+            return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
     except Exception as e:
@@ -18573,10 +18523,17 @@ def server_playlist_remove_track(playlist_id):
                 logger.warning(f"[ServerPlaylist] remove-track: playlist not found by id={playlist_id} or name='{playlist_name}'")
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
 
-            # Rebuild without the target track
+            # Rebuild without ONE copy of the target track — deleting one
+            # duplicate must not wipe every copy (#768).
             current_items = list(raw_playlist.items())
-            new_items = [item for item in current_items if str(item.ratingKey) != str(remove_track_id)]
-            if len(new_items) == len(current_items):
+            new_items = list(current_items)
+            _removed = False
+            for _i, _it in enumerate(new_items):
+                if str(_it.ratingKey) == str(remove_track_id):
+                    del new_items[_i]
+                    _removed = True
+                    break
+            if not _removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             raw_playlist.delete()
             if new_items:
@@ -18586,18 +18543,25 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            from core.sync.playlist_edit import remove_one_occurrence
             current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
-            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
-            if len(new_ids) == len(current_tracks):
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            # Remove ONE occurrence, not every copy — duplicates are the same
+            # track, so deleting one must not wipe them all (#768).
+            new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
+            if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
             media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
             return jsonify({"success": True, "message": "Track removed"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            from core.sync.playlist_edit import remove_one_occurrence
             current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
-            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
-            if len(new_ids) == len(current_tracks):
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            # Remove ONE occurrence, not every copy (#768).
+            new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
+            if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
             media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
@@ -18787,6 +18751,23 @@ def start_missing_tracks_process(playlist_id):
     # Log playlist folder mode if enabled
     if playlist_folder_mode:
         logger.info(f"[Playlist Folder] Enabled for playlist: '{playlist_name}'")
+
+    # Persist organize-by-playlist preference on the mirrored playlist row
+    try:
+        profile_id = get_current_profile_id()
+        db_pref = get_database()
+        mirrored_pl = db_pref.resolve_mirrored_playlist(
+            playlist_id,
+            profile_id=profile_id,
+            default_source='spotify',
+        )
+        if mirrored_pl and mirrored_pl.get('id'):
+            db_pref.set_mirrored_playlist_organize_by_playlist(
+                int(mirrored_pl['id']),
+                bool(playlist_folder_mode),
+            )
+    except Exception as pref_err:
+        logger.debug(f"[Playlist Folder] Could not persist mirrored preference: {pref_err}")
 
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
@@ -18998,7 +18979,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'last_synced': now.isoformat()
         }
         # Store match counts and track hash for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash'):
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash', 'mirror_tracks_hash'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -19189,11 +19170,12 @@ def get_playlist_tracks(playlist_id):
                     time.sleep(0.5)
         if results is None:
             # Both attempts failed (often a 403 on followed playlists) — fall back
-            # to the public embed scraper as a last resort (capped at ~100 tracks).
-            logger.warning(f"Playlist items unavailable after retry ({items_err}), trying public embed scraper")
+            # to the no-auth public path (full track list via anonymous token,
+            # embed scraper if that fails).
+            logger.warning(f"Playlist items unavailable after retry ({items_err}), trying public fetch")
             try:
-                from core.spotify_public_scraper import scrape_spotify_embed
-                embed_data = scrape_spotify_embed('playlist', playlist_id)
+                from core.spotify_public_scraper import fetch_spotify_public
+                embed_data = fetch_spotify_public('playlist', playlist_id)
                 if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
                     for t in embed_data['tracks']:
                         artists = t.get('artists', [])
@@ -22308,15 +22290,15 @@ def parse_spotify_public_endpoint():
         if not url:
             return jsonify({"error": "Spotify URL is required"}), 400
 
-        from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
+        from core.spotify_public_scraper import parse_spotify_url, fetch_spotify_public
 
         parsed = parse_spotify_url(url)
         if not parsed:
             return jsonify({"error": "Invalid Spotify URL. Please use a playlist or album link from open.spotify.com"}), 400
 
-        logger.info(f"Scraping public Spotify {parsed['type']}: {parsed['id']}")
+        logger.info(f"Fetching public Spotify {parsed['type']}: {parsed['id']}")
 
-        result = scrape_spotify_embed(parsed['type'], parsed['id'])
+        result = fetch_spotify_public(parsed['type'], parsed['id'])
 
         if 'error' in result:
             return jsonify(result), 400
@@ -23612,14 +23594,44 @@ def _build_sync_deps():
         update_and_save_sync_status=_update_and_save_sync_status,
         sync_states=sync_states,
         sync_lock=sync_lock,
+        process_wishlist_automatically=_process_wishlist_automatically,
+        run_playlist_organize_download=_run_playlist_organize_download,
+        is_wishlist_actually_processing=is_wishlist_actually_processing,
     )
 
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url='', sync_mode='replace'):
+def _run_sync_task(
+    playlist_id,
+    playlist_name,
+    tracks_json,
+    automation_id=None,
+    profile_id=1,
+    playlist_image_url='',
+    sync_mode='replace',
+    skip_wishlist_add=False,
+):
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
         sync_mode=sync_mode,
+        skip_wishlist_add=skip_wishlist_add,
+    )
+
+
+def _run_playlist_organize_download(mirrored_playlist_id, automation_id=None, profile_id=None):
+    """Start a playlist-folder missing-tracks batch for automation / pipeline."""
+    from core.playlists.organize_download import run_playlist_organize_download
+
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    return run_playlist_organize_download(
+        _automation_deps,
+        mirrored_playlist_id=int(mirrored_playlist_id),
+        profile_id=profile_id,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        record_sync_history_start=_record_sync_history_start,
+        detect_sync_source=_downloads_history.detect_sync_source,
     )
 
 
@@ -26275,6 +26287,17 @@ def get_discover_similar_artists():
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
 
+        # Explainability: resolve which of the user's OWN artists point to each
+        # recommendation, so the UI can show "because you have X, Y, Z".
+        try:
+            sources_by_name = database.get_recommendation_sources(
+                [a.similar_artist_name for a in similar_artists],
+                profile_id=get_current_profile_id(),
+            )
+        except Exception as e:
+            logger.debug("recommendation-sources lookup failed: %s", e)
+            sources_by_name = {}
+
         # Artists already filtered by source in SQL
         result_artists = []
         for artist in similar_artists:
@@ -26305,6 +26328,10 @@ def get_discover_similar_artists():
                 artist_data["genres"] = artist.genres[:3]
             if artist.popularity:
                 artist_data["popularity"] = artist.popularity
+            # "because you have X, Y, Z" — the artists of yours that point here
+            because = sources_by_name.get(artist.similar_artist_name)
+            if because:
+                artist_data["because"] = because
             result_artists.append(artist_data)
 
         logger.info(
@@ -28319,6 +28346,19 @@ def get_artist_map_genres():
 @app.route('/api/discover/artist-map/explore', methods=['GET'])
 def get_artist_map_explore():
     return _artists_map_get_artist_map_explore()
+
+
+@app.route('/api/discover/artist-map/perf', methods=['POST'])
+def log_artist_map_perf():
+    """Debug sink: the artist-map frontend POSTs its render timings here (toggled
+    with 'd' on the map) so they land in app.log — the on-canvas overlay text
+    can't be copied. Used to find the real drag/zoom bottleneck."""
+    try:
+        data = request.get_json(silent=True) or {}
+        logger.info("[ARTMAP-PERF] %s", json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        logger.debug("artist-map perf log failed: %s", e)
+    return ('', 204)
 
 
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
@@ -31664,6 +31704,55 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/mirrored-playlists/<int:playlist_id>/preferences', methods=['PATCH'])
+def update_mirrored_playlist_preferences_endpoint(playlist_id):
+    """Update per-playlist download preferences (e.g. organize by playlist folder)."""
+    try:
+        data = request.get_json() or {}
+        if 'organize_by_playlist' not in data:
+            return jsonify({"error": "organize_by_playlist is required"}), 400
+
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        enabled = bool(data.get('organize_by_playlist'))
+        ok = database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled)
+        if not ok:
+            return jsonify({"error": "Failed to update preferences"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist preferences: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/resolve', methods=['GET'])
+def resolve_mirrored_playlist_endpoint():
+    """Resolve mirrored playlist by numeric id or upstream source id (e.g. Spotify playlist id)."""
+    try:
+        playlist_ref = request.args.get('ref') or request.args.get('playlist_id')
+        source = request.args.get('source', 'spotify')
+        profile_id = get_current_profile_id()
+        if not playlist_ref:
+            return jsonify({"error": "ref or playlist_id query param required"}), 400
+
+        database = get_database()
+        playlist = database.resolve_mirrored_playlist(
+            playlist_ref,
+            profile_id=profile_id,
+            default_source=source,
+        )
+        if not playlist:
+            return jsonify({"found": False, "playlist": None})
+        return jsonify({"found": True, "playlist": playlist})
+    except Exception as e:
+        logger.error(f"Error resolving mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 def _playlist_pipeline_state_key(playlist_id):
     return f"mirrored_{int(playlist_id)}"
 
@@ -32911,6 +33000,27 @@ try:
 except Exception as e:
     logger.error(f"Amazon worker initialization failed: {e}")
     amazon_worker = None
+
+
+# --- Similar Artists Worker Initialization ---
+# Fills the similar_artists table for LIBRARY artists (the watchlist scanner only
+# covers watchlist artists). Runs by default (like the metadata workers); it
+# self-paces (~3s/artist) and backs off on MusicMap outages. Respects a saved
+# pause choice across restarts.
+similar_artists_worker = None
+try:
+    from core.similar_artists_worker import SimilarArtistsWorker
+    similar_artists_db = MusicDatabase()
+    similar_artists_worker = SimilarArtistsWorker(database=similar_artists_db)
+    similar_artists_worker.start()
+    if config_manager.get('similar_artists_enrichment_paused', False):
+        similar_artists_worker.pause()
+        logger.info("Similar Artists worker initialized (paused — restored from config)")
+    else:
+        logger.info("Similar Artists worker initialized and started")
+except Exception as e:
+    logger.error(f"Similar Artists worker initialization failed: {e}")
+    similar_artists_worker = None
 
 
 # ================================================================================================
@@ -34677,12 +34787,19 @@ _register_enrichment_services([
         worker_getter=lambda: amazon_worker,
         config_paused_key='amazon_enrichment_paused',
     ),
+    _EnrichmentService(
+        id='similar_artists', display_name='Similar Artists',
+        worker_getter=lambda: similar_artists_worker,
+        config_paused_key='similar_artists_enrichment_paused',
+    ),
 ])
 
 _configure_enrichment_api(
     config_set=lambda key, value: config_manager.set(key, value),
+    config_get=lambda key, default=None: config_manager.get(key, default),
     auto_paused_discard=lambda token: _download_auto_paused.discard(token),
     yield_override_add=lambda token: _download_yield_override.add(token),
+    db_getter=get_database,
 )
 
 app.register_blueprint(_create_enrichment_blueprint())
@@ -34757,6 +34874,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'amazon-enrichment': lambda: amazon_worker,
+        'similar_artists': lambda: similar_artists_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,
         'listening-stats': lambda: listening_stats_worker,

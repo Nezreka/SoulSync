@@ -27,6 +27,7 @@ async function loadDiscoverPage() {
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadRecommendedArtistsSection(),
         loadYourArtists(),
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
@@ -197,14 +198,10 @@ function displayDiscoverHeroArtist(artist) {
     }
 
     if (subtitleEl) {
-        // Show recommendation context based on occurrence count
-        let subtitle = '';
-        if (artist.occurrence_count > 1) {
-            subtitle = `Similar to ${artist.occurrence_count} artists in your watchlist`;
-        } else {
-            subtitle = 'Similar to an artist in your watchlist';
-        }
-        subtitleEl.textContent = subtitle;
+        // Prefer the real "because you have X, Y" names; fall back to a
+        // library-wide occurrence count (no longer watchlist-only).
+        subtitleEl.textContent = _recommendationReason(artist);
+        subtitleEl.title = _recommendationReasonTitle(artist);
     }
 
     // Build metadata section with popularity and genres
@@ -388,6 +385,30 @@ async function watchAllHeroArtists(btn) {
 let _recommendedArtistsCache = null;
 let _recommendedArtistsSource = null;
 
+// Builds the "because you have X, Y" explanation for a recommendation.
+// Prefers the real contributing artist names from the backend (the `because`
+// array); falls back to an occurrence count — which is now LIBRARY-wide, not
+// just watchlist, thanks to the similar-artists enrichment worker.
+function _recommendationReason(artist) {
+    const names = (artist && artist.because) || [];
+    if (names.length === 1) return `Because you have ${escapeHtml(names[0])}`;
+    if (names.length === 2) return `Because you have ${escapeHtml(names[0])} & ${escapeHtml(names[1])}`;
+    if (names.length >= 3) {
+        const shown = names.slice(0, 2).map(escapeHtml).join(', ');
+        return `Because you have ${shown} +${names.length - 2} more`;
+    }
+    const n = (artist && artist.occurrence_count) || 0;
+    return n > 1
+        ? `Similar to ${n} artists in your library`
+        : 'Similar to an artist in your library';
+}
+
+// Full contributing-artist list for a hover tooltip (when there are names).
+function _recommendationReasonTitle(artist) {
+    const names = (artist && artist.because) || [];
+    return names.length ? `In your library: ${names.join(', ')}` : '';
+}
+
 async function openRecommendedArtistsModal() {
     let modal = document.getElementById('recommended-artists-modal');
     if (!modal) {
@@ -553,9 +574,8 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
         const genreTags = (artist.genres || []).slice(0, 3).map(g =>
             `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
         ).join('');
-        const similarText = artist.occurrence_count > 1
-            ? `Similar to ${artist.occurrence_count} in your watchlist`
-            : 'Similar to an artist in your watchlist';
+        const similarText = _recommendationReason(artist);
+        const similarTitle = _recommendationReasonTitle(artist);
                 const artistSource = artist.source || source || _recommendedArtistsSource || '';
         return `
                             <div class="recommended-artist-card"
@@ -582,7 +602,7 @@ function renderRecommendedArtistsModal(modal, artists, source = null) {
                                     </div>
                                     <div class="recommended-card-info">
                                         <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                                        <span class="recommended-card-similarity">${similarText}</span>
+                                        <span class="recommended-card-similarity" title="${escapeHtml(similarTitle)}">${similarText}</span>
                                         <div class="recommended-card-genres">${genreTags}</div>
                                     </div>
                                 </a>
@@ -649,6 +669,113 @@ async function addAllRecommendedToWatchlist(btn) {
         btn.textContent = originalText;
         btn.disabled = false;
     }
+}
+
+// ── Recommended For You — first-class Discover section (carousel) ──
+// Reuses the recommended-card markup/CSS and the modal's watchlist + cache
+// machinery, so the inline carousel and the "View All" modal stay in sync.
+let _recommendedSectionCtrl = null;
+
+function _renderRecommendedMini(artist, source) {
+    const artistSource = artist.source || source || '';
+    const reason = _recommendationReason(artist);
+    const reasonTitle = _recommendationReasonTitle(artist);
+    const genreTags = (artist.genres || []).slice(0, 2).map(g =>
+        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+    ).join('');
+    const img = artist.image_url
+        ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
+                onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
+        : `<div class="recommended-card-image-fallback">🎤</div>`;
+    return `
+        <div class="recommended-artist-card recommended-card--carousel"
+             data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
+             data-artist-id="${artist.artist_id}"
+             data-artist-source="${escapeHtml(artistSource)}">
+            <button class="recommended-card-watchlist-btn"
+                    data-artist-id="${artist.artist_id}"
+                    data-artist-name="${escapeHtml(artist.artist_name)}">
+                Add to Watchlist
+            </button>
+            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+               style="display:block;text-decoration:none;color:inherit;">
+                <div class="recommended-card-image">${img}</div>
+                <div class="recommended-card-info">
+                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
+                    <span class="recommended-card-similarity" title="${escapeHtml(reasonTitle)}">${reason}</span>
+                    <div class="recommended-card-genres">${genreTags}</div>
+                </div>
+            </a>
+        </div>`;
+}
+
+// Progressively fill in images for the cards we actually rendered (the API
+// returns cached images only; the rest are fetched on demand — same endpoint
+// the modal uses).
+async function _enrichRecommendedCarouselCards(items, source) {
+    const idKey = source === 'spotify' ? 'spotify_artist_id'
+                : source === 'deezer' ? 'deezer_artist_id'
+                : 'itunes_artist_id';
+    const ids = items.filter(a => !a.image_url).map(a => a[idKey]).filter(Boolean);
+    if (!ids.length) return;
+    try {
+        const resp = await fetch('/api/discover/similar-artists/enrich', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_ids: ids, source }),
+        });
+        const data = await resp.json();
+        if (!data.success || !data.artists) return;
+        const carousel = document.getElementById('recommended-artists-carousel');
+        if (!carousel) return;
+        for (const [aid, info] of Object.entries(data.artists)) {
+            if (!info.image_url) continue;
+            const card = carousel.querySelector(`.recommended-artist-card[data-artist-id="${aid}"]`);
+            const imgContainer = card && card.querySelector('.recommended-card-image');
+            if (imgContainer) {
+                imgContainer.innerHTML = `<img src="${info.image_url}" alt="" loading="lazy"
+                    onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`;
+            }
+        }
+    } catch (e) { /* non-fatal — fallbacks stay */ }
+}
+
+async function loadRecommendedArtistsSection() {
+    if (!_recommendedSectionCtrl) {
+        _recommendedSectionCtrl = createDiscoverSectionController({
+            id: 'recommended-artists',
+            sectionEl: '#recommended-artists-section',
+            contentEl: '#recommended-artists-carousel',
+            fetchUrl: '/api/discover/similar-artists',
+            extractItems: (data) => data.artists || [],
+            isEmpty: (items) => items.length === 0,
+            hideWhenEmpty: true,
+            renderItems: (items, data) => {
+                const source = data.source || 'spotify';
+                // Prime the modal cache so "View All" opens instantly in sync
+                _recommendedArtistsCache = items;
+                _recommendedArtistsSource = source;
+                const shown = items.slice(0, 18);
+                return shown.map(a => _renderRecommendedMini(a, source)).join('');
+            },
+            onRendered: ({ data }) => {
+                const carousel = document.getElementById('recommended-artists-carousel');
+                if (carousel && !carousel._recoWired) {
+                    carousel._recoWired = true;
+                    carousel.addEventListener('click', function (e) {
+                        const btn = e.target.closest('.recommended-card-watchlist-btn');
+                        if (btn) { e.preventDefault(); e.stopPropagation(); toggleRecommendedWatchlist(btn); }
+                    });
+                }
+                const source = (data && data.source) || 'spotify';
+                _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source);
+            },
+            loadingMessage: 'Finding recommendations...',
+            emptyMessage: 'No recommendations yet — let the Similar Artists worker run',
+            errorMessage: 'Failed to load recommendations',
+        });
+    }
+    return _recommendedSectionCtrl.load();
 }
 
 function closeRecommendedArtistsModal() {
@@ -5004,7 +5131,686 @@ const _artMap = {
     dirty: true, // true = need to rebuild offscreen buffer
     WATCHLIST_R: 320,
     BUFFER: 8,
+    // Max offscreen-buffer dimension (px). The buffer renders the whole world,
+    // so on big/dense maps (e.g. 2000-node genre map) this was 10240 → a 76 MP
+    // canvas that took ~1s to rebuild and ~150ms to blit per frame (3 fps).
+    // Capping it far lower makes rebuild + blit cheap (and pushes more nodes
+    // under the LOD dot threshold). Only binds on large worlds — small maps
+    // stay crisp via the z*2 / 1.0 caps. Tunable.
+    MAX_BUFFER_PX: 4096,
+
+    // ── v2 live-animation engine ──────────────────────────────────────────
+    // Two-layer render: the offscreen buffer holds the STATIC far field (small
+    // bubbles, drawn once); a LIVE overlay redraws only the bubbles big enough
+    // to read on screen, every frame, so they can scale/bob/ripple. A node is
+    // "live" when its on-screen radius (radius*zoom) clears LIVE_PX; everything
+    // smaller stays baked in the buffer. This bounds per-frame work to what you
+    // can actually see, not the full 2000-node world.
+    LIVE_PX: 12,
+    // The rAF loop runs ONLY while something is animating (reveal/ripple) and
+    // idles otherwise, falling back to on-demand blits. _anim tracks it.
+    _anim: { running: false, raf: null, last: 0 },
+    _fieldAlpha: 1,   // global fade for the static far-field buffer (reveal)
+    _revealT0: 0,     // performance.now() when the current reveal began
+    _panelW: 320,     // right-side info panel width (reserved when framing islands)
 };
+
+// ── Genre-island layout (shared by watchlist / genre / explore) ───────────
+// Every map groups its artists into genre "islands" floating on the water:
+// each island is a FILLED disc of album covers (packed centre-out, no empty
+// donut hole), with a floating genre title above it and a per-genre accent hue.
+// Islands are spread by a golden spiral + push-apart with generous spacing.
+
+// A cached circular "gloss" sprite — a soft top-left specular highlight that,
+// drawn over each bubble, makes it read as a glassy orb. One radial gradient,
+// rendered once; per-bubble it's just a cheap drawImage (no per-frame gradient).
+function _artMapGlossSprite() {
+    if (_artMap._gloss) return _artMap._gloss;
+    const S = 128;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const cx = c.getContext('2d');
+    cx.beginPath(); cx.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2); cx.clip();
+    const g = cx.createRadialGradient(S * 0.34, S * 0.28, S * 0.02, S * 0.5, S * 0.5, S * 0.62);
+    g.addColorStop(0, 'rgba(255,255,255,0.40)');
+    g.addColorStop(0.32, 'rgba(255,255,255,0.10)');
+    g.addColorStop(0.6, 'rgba(255,255,255,0.0)');
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, S, S);
+    // A faint inner-bottom shade for roundness
+    const g2 = cx.createRadialGradient(S * 0.5, S * 0.78, S * 0.05, S * 0.5, S * 0.5, S * 0.7);
+    g2.addColorStop(0, 'rgba(0,0,0,0.18)');
+    g2.addColorStop(0.5, 'rgba(0,0,0,0.0)');
+    cx.fillStyle = g2;
+    cx.fillRect(0, 0, S, S);
+    _artMap._gloss = c;
+    return c;
+}
+
+// A cached soft radial "halo" sprite per genre hue — drawn behind the focused
+// island so it reads as a glowing place on the water. Cached per hue (≤ a few),
+// so it's just a drawImage per frame, never a per-frame gradient.
+function _artMapHaloSprite(hue) {
+    _artMap._halos = _artMap._halos || {};
+    if (_artMap._halos[hue]) return _artMap._halos[hue];
+    const S = 256;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, `hsla(${hue},75%,55%,0.22)`);
+    g.addColorStop(0.45, `hsla(${hue},75%,50%,0.08)`);
+    g.addColorStop(1, `hsla(${hue},75%,50%,0)`);
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, S, S);
+    _artMap._halos[hue] = c;
+    return c;
+}
+
+// Deterministic hue (0–360) from a genre name, so each island has a stable tint.
+function _artMapGenreHue(name) {
+    let h = 0;
+    const s = (name || '').toLowerCase();
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+}
+
+// Pack members into a filled disc, centre outward. Returns relative offsets and
+// the disc radius. Most-popular members land nearest the centre.
+function _artMapPackDisc(members, nodeR, gap) {
+    const placements = [];
+    if (!members.length) return { placements, islandR: nodeR };
+    placements.push({ node: members[0], dx: 0, dy: 0 });
+    let idx = 1, ring = 1, ringDist = nodeR * 2 + gap;
+    const step = nodeR * 2 + gap;
+    while (idx < members.length) {
+        const circ = 2 * Math.PI * ringDist;
+        const cap = Math.max(1, Math.floor(circ / step));
+        const cnt = Math.min(cap, members.length - idx);
+        const aStep = (2 * Math.PI) / cnt;
+        const off = ring * 2.399963; // golden offset per ring → no spokes
+        for (let i = 0; i < cnt; i++) {
+            const a = off + i * aStep;
+            placements.push({ node: members[idx + i], dx: Math.cos(a) * ringDist, dy: Math.sin(a) * ringDist });
+        }
+        idx += cnt;
+        ringDist += step;
+        ring++;
+    }
+    return { placements, islandR: ringDist };
+}
+
+// Group flat nodes by primary genre into {name, count, nodes[]}, largest first.
+// Nodes with no genre fall into "Other". Focal nodes (watchlist/center) keep
+// their flag so the layout can size them up.
+function _artMapGroupByGenre(nodes, maxIslands = 14) {
+    const byGenre = {};
+    for (const n of nodes) {
+        const g = (n.genres && n.genres.length) ? String(n.genres[0]) : 'Other';
+        const key = g.replace(/\b\w/g, c => c.toUpperCase());
+        (byGenre[key] = byGenre[key] || []).push(n);
+    }
+    let groups = Object.keys(byGenre).map(name => ({ name, nodes: byGenre[name], count: byGenre[name].length }));
+    groups.sort((a, b) => b.count - a.count);
+    if (groups.length > maxIslands) {
+        // Fold the long tail of tiny genres into one "Other" island.
+        const head = groups.slice(0, maxIslands - 1);
+        const tail = groups.slice(maxIslands - 1);
+        const tailNodes = tail.flatMap(g => g.nodes);
+        head.push({ name: 'Other', nodes: tailNodes, count: tailNodes.length });
+        groups = head;
+    }
+    return groups;
+}
+
+// Lay out islands → fills _artMap.placed and _artMap._islands. groups is an
+// array of {name, count, nodes[]} where each node has name/image_url/genres/ids.
+function _artMapLayoutIslands(groups, opts = {}) {
+    _artMap.placed = [];
+    _artMap._islands = [];
+    const nodeR = opts.nodeR || (_artMap.WATCHLIST_R * 0.22);
+    const gap = opts.gap || (_artMap.BUFFER * 2.2);
+    const cap = opts.maxPerIsland || 300;
+    let pid = 0;
+
+    const islands = groups.map(g => {
+        const members = g.nodes.slice()
+            .sort((a, b) => (b._focal ? 1 : 0) - (a._focal ? 1 : 0) || (b.popularity || 0) - (a.popularity || 0))
+            .slice(0, cap);
+        const { placements, islandR } = _artMapPackDisc(members, nodeR, gap);
+        return { name: g.name, count: g.count != null ? g.count : members.length, placements, islandR, hue: _artMapGenreHue(g.name) };
+    });
+
+    // Golden-spiral seed placement
+    islands.forEach((isl, i) => {
+        if (i === 0) { isl.cx = 0; isl.cy = 0; }
+        else { const a = i * 2.399963; const r = isl.islandR * Math.sqrt(i) * 1.05; isl.cx = Math.cos(a) * r; isl.cy = Math.sin(a) * r; }
+    });
+    // Push apart — generous water between islands
+    for (let pass = 0; pass < 160; pass++) {
+        let moved = false;
+        for (let i = 0; i < islands.length; i++) {
+            for (let j = i + 1; j < islands.length; j++) {
+                const dx = islands[j].cx - islands[i].cx, dy = islands[j].cy - islands[i].cy;
+                const dist = Math.hypot(dx, dy) || 1;
+                const minD = islands[i].islandR + islands[j].islandR + nodeR * 3.5;
+                if (dist < minD) {
+                    const push = (minD - dist) / 2 + 1;
+                    islands[i].cx -= dx / dist * push; islands[i].cy -= dy / dist * push;
+                    islands[j].cx += dx / dist * push; islands[j].cy += dy / dist * push;
+                    moved = true;
+                }
+            }
+        }
+        if (!moved) break;
+    }
+
+    for (const isl of islands) {
+        // Floating genre title above the island
+        _artMap.placed.push({
+            id: `label_${isl.name}`, name: isl.name, x: isl.cx, y: isl.cy - isl.islandR - nodeR * 1.4,
+            radius: Math.max(nodeR * 1.3, isl.islandR * 0.16), opacity: 1,
+            type: 'genre_label', _isLabel: true, _count: isl.count, _hue: isl.hue, image_url: '',
+        });
+        for (const p of isl.placements) {
+            const n = p.node;
+            _artMap.placed.push({
+                id: pid++, _origId: n.id, name: n.name,
+                x: isl.cx + p.dx, y: isl.cy + p.dy,
+                radius: nodeR * (n._focal ? 1.45 : 1), opacity: 1,
+                type: n.type || 'similar',
+                image_url: n.image_url || '', genres: n.genres || [],
+                spotify_id: n.spotify_id || '', itunes_id: n.itunes_id || '',
+                deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
+                musicbrainz_id: n.musicbrainz_id || '',
+                popularity: n.popularity || 0, _hue: isl.hue, _island: isl.name,
+                // Ambient buoyancy — phase varies by position so bubbles bob in a
+                // gentle wave (not in unison); amplitude in world units.
+                _bobPhase: (isl.cx + p.dx + isl.cy + p.dy) * 0.0022,
+                _bobAmp: nodeR * 0.12,
+            });
+        }
+        _artMap._islands.push({ name: isl.name, cx: isl.cx, cy: isl.cy, r: isl.islandR, hue: isl.hue, count: isl.count });
+    }
+
+    _artMap._nodeById = {};
+    _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
+}
+
+// Remap edges that used original node ids to the new placed-node ids.
+function _artMapRemapEdges(edges) {
+    const map = {};
+    for (const n of _artMap.placed) if (n._origId != null && map[n._origId] == null) map[n._origId] = n.id;
+    const out = [];
+    for (const e of (edges || [])) {
+        const s = map[e.source], t = map[e.target];
+        if (s != null && t != null && s !== t) out.push({ source: s, target: t, weight: e.weight || 1 });
+    }
+    return out;
+}
+
+// Auto-zoom/pan so all placed nodes fit the viewport with a margin.
+function _artMapFitToContent(marginPx = 120) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of _artMap.placed) {
+        minX = Math.min(minX, n.x - n.radius); maxX = Math.max(maxX, n.x + n.radius);
+        minY = Math.min(minY, n.y - n.radius); maxY = Math.max(maxY, n.y + n.radius);
+    }
+    if (!isFinite(minX)) return;
+    const usableW = Math.max(200, _artMap.width - _artMapReservedW());
+    const mapW = maxX - minX + marginPx * 2, mapH = maxY - minY + marginPx * 2;
+    _artMap.zoom = Math.min(usableW / mapW, _artMap.height / mapH, 1);
+    _artMap.offsetX = usableW / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+    _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+}
+
+// ── One-island-at-a-time view (genre + watchlist) ─────────────────────────
+// Big maps spread thousands of artists thin; fitting them all makes every cover
+// tiny. Instead we frame ONE island filling the view (big crisp covers, live
+// layer + bob viable on ~hundreds of bubbles) and navigate between them. Only
+// the focused island is visible, so the buffer covers a small region at high
+// res and the whole-world-buffer "small version" problem disappears.
+
+function _artMapFocusIsland(idx, opts = {}) {
+    const islands = _artMap._islands || [];
+    if (!islands.length) return;
+    idx = Math.max(0, Math.min(islands.length - 1, idx));
+    _artMap._focusIdx = idx;
+    const isl = islands[idx];
+
+    // Show only this island's bubbles; hide everything else (and the in-world
+    // titles — the nav bar already names the genre) so the frame is just this
+    // island's covers.
+    for (const n of _artMap.placed) {
+        n.opacity = (!n._isLabel && n._island === isl.name) ? 1 : 0;
+    }
+
+    // Frame the island in the space LEFT of the info panel (~80% of it).
+    const usableW = Math.max(200, _artMap.width - _artMapReservedW());
+    const span = (isl.r * 2.3) + 120;
+    const z = Math.min(usableW / span, _artMap.height / span, 1.2);
+    _artMap.zoom = z;
+    _artMap.offsetX = usableW / 2 - isl.cx * z;
+    _artMap.offsetY = _artMap.height / 2 - isl.cy * z;
+
+    _artMapUpdateIslandNav();
+    _artMapRefreshPanel();
+
+    if (opts.bloom !== false) {
+        _artMapBloomIsland(isl);
+    } else {
+        _artMap.dirty = true;
+        _artMapRender();
+    }
+}
+
+// Bloom one island's bubbles (drop-in-water) + a ripple. Reuses the reveal loop.
+function _artMapBloomIsland(isl) {
+    const t0 = performance.now();
+    _artMap._revealing = true;
+    _artMap._ambient = true;
+    for (const n of _artMap.placed) {
+        if ((n.opacity || 0) < 0.01) continue;
+        n.aScale = 0; n.aAlpha = 0;
+        let radial = 0;
+        if (isl.r > 0) radial = Math.min(1, Math.hypot(n.x - isl.cx, n.y - isl.cy) / isl.r);
+        // Continuous radial stagger + deterministic per-bubble jitter so they
+        // surface organically rather than in visible rings/segments.
+        const jitter = ((Math.abs((n.id | 0) * 1103515245 + 12345) % 1000) / 1000) * 200;
+        n._revealAt = t0 + radial * 300 + jitter;
+        n._revealDur = 560;
+        n._riseAmp = (n.radius || 20) * 1.15; // bubbles rise up into place (surfacing)
+        n._revealRise = n._riseAmp;
+    }
+    _artMap._ripples = [{ cx: isl.cx, cy: isl.cy, hue: isl.hue, maxR: isl.r * 1.45, t0, dur: 1100 }];
+    _artMapStartLoop();
+}
+
+// Step to the prev/next island (wraps).
+function _artMapIslandNav(dir) {
+    const islands = _artMap._islands || [];
+    if (islands.length < 2) return;
+    let idx = (_artMap._focusIdx || 0) + dir;
+    if (idx < 0) idx = islands.length - 1;
+    if (idx >= islands.length) idx = 0;
+    _artMapFocusIsland(idx, { bloom: true });
+}
+
+// Build/update the bottom nav bar (prev / genre name + i/N / next). Inline-styled
+// so it doesn't depend on CSS that might not exist.
+function _artMapUpdateIslandNav() {
+    const islands = _artMap._islands || [];
+    let nav = document.getElementById('artmap-island-nav');
+    if (!_artMap._oneIsland || islands.length < 1) { if (nav) nav.remove(); return; }
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+    if (!nav) {
+        nav = document.createElement('div');
+        nav.id = 'artmap-island-nav';
+        container.appendChild(nav);
+    }
+    // Position top-left, clearing the genre sidebar (when shown) and the toolbar
+    // (measured — the toolbar wraps taller on mobile).
+    const sb = document.getElementById('artmap-genre-sidebar');
+    const sbW = (sb && sb.style.display !== 'none') ? (sb.offsetWidth || 0) : 0;
+    const tb = document.querySelector('.artist-map-toolbar');
+    const top = (tb ? tb.offsetHeight : 56) + 10;
+    nav.style.cssText = `position:absolute;top:${top}px;left:${sbW + 16}px;display:flex;align-items:center;gap:12px;padding:7px 12px;background:rgba(16,12,28,0.82);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:14px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,0.45);user-select:none;max-width:calc(100vw - ${sbW + 32}px);`;
+    const idx = _artMap._focusIdx || 0;
+    const isl = islands[idx];
+    const btn = 'width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;';
+    nav.innerHTML = `
+        <button style="${btn}" onclick="_artMapIslandNav(-1)" title="Previous genre (←)">&#9664;</button>
+        <div style="text-align:center;min-width:120px;cursor:pointer;" onclick="_artMapToggleIslandMenu(event)" title="Jump to a genre">
+            <div style="font-weight:700;font-size:13px;letter-spacing:0.04em;color:hsl(${isl.hue},80%,80%);">${escapeHtml((isl.name || '').toUpperCase())} &#9662;</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:1px;">${isl.count} artists &middot; ${idx + 1} / ${islands.length}</div>
+        </div>
+        <button style="${btn}" onclick="_artMapIslandNav(1)" title="Next genre (→)">&#9654;</button>
+    `;
+    // Re-anchor an open menu (or leave it closed).
+    const menu = document.getElementById('artmap-island-menu');
+    if (menu) menu.remove();
+}
+
+// Quick-jump dropdown: list every genre island; click to jump straight to it.
+function _artMapToggleIslandMenu(ev) {
+    if (ev) ev.stopPropagation();
+    const existing = document.getElementById('artmap-island-menu');
+    if (existing) { existing.remove(); return; }
+    const islands = _artMap._islands || [];
+    const nav = document.getElementById('artmap-island-nav');
+    if (!nav || !islands.length) return;
+    const menu = document.createElement('div');
+    menu.id = 'artmap-island-menu';
+    menu.style.cssText = `position:absolute;top:${nav.offsetTop + nav.offsetHeight + 6}px;left:${nav.offsetLeft}px;min-width:${Math.max(180, nav.offsetWidth)}px;max-height:50vh;overflow-y:auto;background:rgba(16,12,28,0.96);backdrop-filter:blur(10px);border:1px solid rgba(168,85,247,0.25);border-radius:12px;z-index:31;box-shadow:0 8px 28px rgba(0,0,0,0.5);padding:6px;`;
+    const cur = _artMap._focusIdx || 0;
+    menu.innerHTML = islands.map((isl, i) => `
+        <div onclick="_artMapJumpIsland(${i})" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;${i === cur ? 'background:rgba(168,85,247,0.18);' : ''}"
+             onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='${i === cur ? 'rgba(168,85,247,0.18)' : 'transparent'}'">
+            <span style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#fff;">
+                <span style="width:9px;height:9px;border-radius:50%;background:hsl(${isl.hue},75%,62%);flex:none;"></span>
+                ${escapeHtml(isl.name)}
+            </span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.45);">${isl.count}</span>
+        </div>`).join('');
+    nav.parentElement.appendChild(menu);
+    // Close on next outside click.
+    setTimeout(() => {
+        const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+        document.addEventListener('mousedown', close);
+    }, 0);
+}
+
+function _artMapJumpIsland(i) {
+    const menu = document.getElementById('artmap-island-menu');
+    if (menu) menu.remove();
+    _artMapFocusIsland(i, { bloom: true });
+}
+
+// ── Right-side info panel ──────────────────────────────────────────────────
+// A polished detail panel: a discovery dashboard + current-view coverage at the
+// top, a clickable top-artists list, and a rich artist card when you hover/click
+// a bubble. On desktop it's a right sidebar; on mobile it's a bottom sheet that
+// slides up on tap and doesn't steal map width.
+
+function _artMapIsMobile() {
+    return (window.innerWidth || document.documentElement.clientWidth || 9999) <= 760;
+}
+
+// Horizontal space the panel reserves when framing islands — none on mobile
+// (the bottom sheet overlays instead of sitting beside the map).
+function _artMapReservedW() {
+    return _artMapIsMobile() ? 0 : _artMap._panelW;
+}
+
+function _artMapNodeBest(n) {
+    const map = [['spotify_id', 'spotify'], ['itunes_id', 'itunes'], ['deezer_id', 'deezer'], ['discogs_id', 'discogs'], ['musicbrainz_id', 'musicbrainz']];
+    for (const [k, s] of map) if (n && n[k]) return { id: n[k], source: s };
+    return { id: '', source: '' };
+}
+
+function _artMapConnCount(n) {
+    let c = 0;
+    for (const e of (_artMap.edges || [])) if (e.source === n.id || e.target === n.id) c++;
+    return c;
+}
+
+// ── Watchlist state for the panel card ──
+function _artMapIsWatched(n) {
+    if (!n) return false;
+    if (n.type === 'watchlist') return true;
+    const best = _artMapNodeBest(n);
+    return !!(best.id && _artMap._watchSet && _artMap._watchSet.has(best.id));
+}
+
+// The watchlist button's markup, reflecting current state (filled star + "On
+// watchlist" when watched, outline + "Watchlist" when not).
+function _artMapWatchBtnHtml(n) {
+    const watched = _artMapIsWatched(n);
+    const idArg = typeof n.id === 'number' ? n.id : `'${n.id}'`;
+    return `<button id="artmap-card-watch" onclick="_artMapToggleWatch(${idArg})"
+        style="flex:1;background:${watched ? 'rgba(192,132,252,0.3)' : 'rgba(192,132,252,0.12)'};border:1px solid rgba(192,132,252,${watched ? '0.55' : '0.35'});color:#e9d5ff;border-radius:10px;padding:9px;font-size:12px;font-weight:600;cursor:pointer;">${watched ? '&#9733; On watchlist' : '&#9734; Watchlist'}</button>`;
+}
+
+function _artMapRenderWatchBtn(n) {
+    const b = document.getElementById('artmap-card-watch');
+    if (b) b.outerHTML = _artMapWatchBtnHtml(n); // inline onclick survives outerHTML swap
+}
+
+// Toggle watchlist membership for a node, updating the cache + button in place.
+async function _artMapToggleWatch(id) {
+    const n = (_artMap._nodeById || {})[id];
+    if (!n) return;
+    const best = _artMapNodeBest(n);
+    if (!best.id) { showToast('No source id for this artist', 'error'); return; }
+    _artMap._watchSet = _artMap._watchSet || new Set();
+    const watched = _artMapIsWatched(n);
+    try {
+        const resp = await fetch(watched ? '/api/watchlist/remove' : '/api/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(watched ? { artist_id: best.id } : { artist_id: best.id, artist_name: n.name, source: best.source }),
+        });
+        if (!resp.ok) { showToast('Failed to update watchlist', 'error'); return; }
+        if (watched) {
+            _artMap._watchSet.delete(best.id);
+            if (n.type === 'watchlist') n.type = 'similar';
+        } else {
+            _artMap._watchSet.add(best.id);
+        }
+        showToast(watched ? `Removed ${n.name} from watchlist` : `Added ${n.name} to watchlist`, watched ? 'info' : 'success');
+        _artMapRenderWatchBtn(n);
+    } catch (e) {
+        showToast('Failed to update watchlist', 'error');
+    }
+}
+
+// Lazily confirm watchlist membership from the server, then refresh the button.
+function _artMapCheckWatched(n) {
+    const best = _artMapNodeBest(n);
+    _artMap._watchSet = _artMap._watchSet || new Set();
+    _artMap._watchChecked = _artMap._watchChecked || new Set();
+    if (!best.id || _artMap._watchChecked.has(best.id)) return;
+    fetch('/api/watchlist/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist_id: best.id }),
+    }).then(r => r.json()).then(d => {
+        _artMap._watchChecked.add(best.id);
+        if (d && d.success) {
+            if (d.is_watching) _artMap._watchSet.add(best.id); else _artMap._watchSet.delete(best.id);
+            if (_artMap._panelArtistId === n.id) _artMapRenderWatchBtn(n);
+        }
+    }).catch(() => { });
+}
+
+function _artMapEnsurePanel() {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return null;
+    let p = document.getElementById('artmap-info-panel');
+    if (!p) {
+        p = document.createElement('div');
+        p.id = 'artmap-info-panel';
+        p.innerHTML = `<div id="artmap-panel-grip"></div>`
+            + `<div id="artmap-panel-head" style="padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,0.06);"></div>`
+            + `<div id="artmap-panel-body" style="flex:1;overflow-y:auto;padding:12px 14px;-webkit-overflow-scrolling:touch;"></div>`;
+        container.appendChild(p);
+    }
+    const base = `background:linear-gradient(180deg,rgba(20,15,34,0.95),rgba(11,8,20,0.97));backdrop-filter:blur(16px);`
+        + `z-index:22;display:flex;flex-direction:column;color:#fff;overflow:hidden;font-size:13px;`;
+    const grip = document.getElementById('artmap-panel-grip');
+    if (_artMapIsMobile()) {
+        // Bottom sheet — overlays the map, slides up/down, doesn't steal width.
+        const open = !!_artMap._panelOpen;
+        p.style.cssText = base + `position:absolute;left:0;right:0;bottom:0;width:auto;max-height:62%;`
+            + `border-top:1px solid rgba(168,85,247,0.25);border-radius:18px 18px 0 0;`
+            + `box-shadow:0 -10px 36px rgba(0,0,0,0.5);transition:transform 0.28s cubic-bezier(.4,0,.2,1);`
+            + `transform:translateY(${open ? '0' : '100%'});`;
+        if (grip) grip.style.cssText = `flex:none;height:22px;display:flex;align-items:center;justify-content:center;cursor:grab;`
+            + `position:relative;` ;
+        if (grip && !grip.dataset.wired) {
+            grip.dataset.wired = '1';
+            grip.onclick = () => _artMapTogglePanelSheet(false);
+            grip.innerHTML = `<span style="width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.25);"></span>`;
+        }
+    } else {
+        // Right sidebar — below the toolbar so it never covers the navbar.
+        const tb = container.querySelector('.artist-map-toolbar');
+        const top = tb ? tb.offsetHeight : 56;
+        p.style.cssText = base + `position:absolute;top:${top}px;right:0;width:${_artMap._panelW}px;height:calc(100% - ${top}px);`
+            + `border-left:1px solid rgba(168,85,247,0.18);box-shadow:-10px 0 36px rgba(0,0,0,0.45);transform:none;`;
+        if (grip) grip.style.display = 'none';
+    }
+    return p;
+}
+
+// Mobile bottom-sheet open/close.
+function _artMapTogglePanelSheet(open) {
+    _artMap._panelOpen = open;
+    const p = document.getElementById('artmap-info-panel');
+    if (p && _artMapIsMobile()) p.style.transform = `translateY(${open ? '0' : '100%'})`;
+    _artMapEnsureStatsFab();
+}
+
+// A floating button (mobile only) to open the panel to the dashboard/top list.
+function _artMapEnsureStatsFab() {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+    let fab = document.getElementById('artmap-stats-fab');
+    if (!_artMapIsMobile()) { if (fab) fab.remove(); return; }
+    if (!fab) {
+        fab = document.createElement('button');
+        fab.id = 'artmap-stats-fab';
+        fab.innerHTML = '&#9776;';
+        fab.title = 'View stats & artists';
+        fab.style.cssText = `position:absolute;right:14px;bottom:14px;width:46px;height:46px;border-radius:50%;`
+            + `background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;color:#fff;font-size:18px;`
+            + `box-shadow:0 6px 20px rgba(0,0,0,0.5);z-index:21;cursor:pointer;`;
+        fab.onclick = () => { _artMap._panelArtistId = null; _artMapRefreshPanel(); _artMapTogglePanelSheet(true); };
+        container.appendChild(fab);
+    }
+    fab.style.display = _artMap._panelOpen ? 'none' : 'flex';
+}
+
+function _artMapClosePanel() {
+    const p = document.getElementById('artmap-info-panel');
+    if (p) p.remove();
+    const fab = document.getElementById('artmap-stats-fab');
+    if (fab) fab.remove();
+    _artMap._panelArtistId = null;
+    _artMap._panelOpen = false;
+}
+
+// Stat tile helper
+function _miniStat(label, value, hue) {
+    return `<div style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 6px;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:${hue != null ? `hsl(${hue},80%,80%)` : '#fff'};line-height:1;">${value}</div>
+        <div style="font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin-top:4px;">${label}</div>
+    </div>`;
+}
+
+// Build the panel header (dashboard) + body (top-artists list) for the view.
+function _artMapRefreshPanel() {
+    const p = _artMapEnsurePanel();
+    if (!p) return;
+    _artMapEnsureStatsFab();
+    const head = document.getElementById('artmap-panel-head');
+    const body = document.getElementById('artmap-panel-body');
+    if (!head || !body) return;
+
+    const nodes = (_artMap.placed || []).filter(n => !n._isLabel);
+    const total = nodes.length;
+    const watch = nodes.filter(n => n.type === 'watchlist' || n.type === 'center').length;
+    const islands = _artMap._islands || [];
+    const oneIsland = _artMap._oneIsland;
+    const isl = oneIsland && islands.length ? islands[_artMap._focusIdx || 0] : null;
+
+    // Scope (current island vs whole map)
+    const scope = isl ? nodes.filter(n => n._island === isl.name) : nodes;
+    const scopeTotal = isl ? isl.count : total;
+    const scopeWatch = scope.filter(n => n.type === 'watchlist' || n.type === 'center').length;
+    const cov = scopeTotal ? Math.round((scopeWatch / scopeTotal) * 100) : 0;
+    const hue = isl ? isl.hue : 270;
+
+    const title = _artMap._mapTitle || 'Artist Map';
+    head.innerHTML = `
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">${title}</div>
+        ${isl ? `<div style="font-size:19px;font-weight:800;color:hsl(${hue},82%,80%);margin-top:2px;">${escapeHtml(isl.name)}</div>` : `<div style="font-size:19px;font-weight:800;margin-top:2px;">Overview</div>`}
+        <div style="display:flex;gap:8px;margin-top:12px;">
+            ${_miniStat('Artists', scopeTotal, hue)}
+            ${_miniStat('Watchlist', scopeWatch)}
+            ${_miniStat(isl ? 'Genre' : 'Genres', isl ? '1' : (islands.length || 1))}
+        </div>
+        <div style="margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:4px;">
+                <span>On your watchlist</span><span>${scopeWatch}/${scopeTotal}</span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+                <div style="height:100%;width:${cov}%;background:linear-gradient(90deg,hsl(${hue},80%,60%),hsl(${(hue + 40) % 360},80%,62%));border-radius:3px;"></div>
+            </div>
+        </div>`;
+
+    // Body: top artists (by popularity) in the current scope.
+    _artMap._panelArtistId = null;
+    const top = scope.slice().sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 14);
+    body.innerHTML = `
+        <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:2px 2px 8px;">Top artists</div>
+        ${top.map((n, i) => `
+            <div onclick="_artMapPanelArtistById(${typeof n.id === 'number' ? n.id : `'${n.id}'`})"
+                 style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:9px;cursor:pointer;"
+                 onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+                <span style="width:18px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);">${i + 1}</span>
+                <span style="width:30px;height:30px;border-radius:50%;flex:none;overflow:hidden;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;">
+                    ${n.image_url ? `<img src="${escapeHtml(n.image_url)}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.style.display='none'">` : '&#9835;'}
+                </span>
+                <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(n.name)}</span>
+                ${n.type === 'watchlist' ? '<span style="color:#c084fc;font-size:11px;">&#9733;</span>' : ''}
+            </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
+}
+
+// Show a rich artist card in the body (hover/click); pass null to restore the list.
+function _artMapPanelArtist(node) {
+    const body = document.getElementById('artmap-panel-body');
+    if (!body) return;
+    if (!node) { if (_artMap._panelArtistId != null) _artMapRefreshPanel(); return; }
+    if (_artMap._panelArtistId === node.id) return; // already showing
+    _artMap._panelArtistId = node.id;
+
+    const hue = node._hue == null ? 270 : node._hue;
+    const conn = _artMapConnCount(node);
+    const pop = Math.max(0, Math.min(100, Math.round(node.popularity || 0)));
+    const genres = (node.genres || []).slice(0, 5);
+    const best = _artMapNodeBest(node);
+    const typeLabel = (node.type === 'watchlist' || node.type === 'center') ? 'On watchlist' : 'Discovered';
+    const bmp = _artMap.images[node.id];
+
+    body.innerHTML = `
+        <button onclick="_artMapPanelArtist(null)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:12px;">&#8592; Top artists</button>
+        <div style="text-align:center;">
+            <div style="width:120px;height:120px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid hsl(${hue},80%,65%);box-shadow:0 8px 28px hsla(${hue},80%,40%,0.4);background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${bmp ? `<canvas id="artmap-card-canvas" width="120" height="120" style="width:120px;height:120px;"></canvas>`
+                    : (node.image_url ? `<img src="${escapeHtml(node.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '<span style="font-size:36px;opacity:0.5;">&#9835;</span>')}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(node.name)}</div>
+            <div style="font-size:11px;color:hsl(${hue},70%,72%);margin-top:3px;">${typeLabel}</div>
+        </div>
+        ${genres.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;">
+            ${genres.map(g => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:hsla(${hue},60%,55%,0.16);border:1px solid hsla(${hue},60%,60%,0.3);color:hsl(${hue},70%,82%);">${escapeHtml(g)}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            ${_miniStat('Popularity', pop, hue)}
+            ${_miniStat('Connections', conn)}
+        </div>
+        <div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pop}%;background:linear-gradient(90deg,hsl(${hue},80%,60%),hsl(${(hue + 40) % 360},80%,62%));"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            <button onclick="artMapExploreArtist('${escapeForInlineJs(node.name)}')" style="background:linear-gradient(90deg,hsl(${hue},70%,52%),hsl(${(hue + 30) % 360},70%,54%));border:none;color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">Explore from here &rarr;</button>
+            <div style="display:flex;gap:8px;">
+                <button onclick="openYourArtistInfoModal_direct(_artMap._nodeById[${typeof node.id === 'number' ? node.id : `'${node.id}'`}])" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;cursor:pointer;">Details</button>
+                ${_artMapWatchBtnHtml(node)}
+            </div>
+            ${best.id ? `<a href="${buildArtistDetailPath(best.id, best.source)}" style="text-align:center;color:rgba(255,255,255,0.55);font-size:11.5px;text-decoration:none;padding:4px;">Open artist page</a>` : ''}
+        </div>`;
+
+    if (bmp) {
+        const c = document.getElementById('artmap-card-canvas');
+        if (c) { try { c.getContext('2d').drawImage(bmp, 0, 0, 120, 120); } catch (e) { /* ignore */ } }
+    }
+
+    // Confirm watchlist membership from the server (refreshes the button if it
+    // differs from the optimistic guess).
+    _artMapCheckWatched(node);
+
+    // On mobile, sliding the bottom sheet up reveals the card.
+    if (_artMapIsMobile()) _artMapTogglePanelSheet(true);
+}
+
+// Top-list / external entry: show a node's card by id (also ripples it on the map).
+function _artMapPanelArtistById(id) {
+    const n = (_artMap._nodeById || {})[id];
+    if (!n) return;
+    _artMapPanelArtist(n);
+    _artMapEmitRipple(n.x, n.y, n._hue);
+}
 
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
@@ -5021,7 +5827,8 @@ async function openArtistMap() {
     _artMap.canvas = canvas;
     _artMap.ctx = canvas.getContext('2d');
     _artMap.width = container.clientWidth;
-    _artMap.height = container.clientHeight - 50;
+    const _wtb = container.querySelector('.artist-map-toolbar');
+    _artMap.height = container.clientHeight - (_wtb ? _wtb.offsetHeight : 50);
     canvas.width = _artMap.width * window.devicePixelRatio;
     canvas.height = _artMap.height * window.devicePixelRatio;
     canvas.style.width = _artMap.width + 'px';
@@ -5052,141 +5859,16 @@ async function openArtistMap() {
         document.getElementById('artist-map-stats').textContent =
             `${data.watchlist_count} watchlist · ${data.similar_count} similar`;
 
-        _artMap.edges = data.edges;
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        // ── PHASE 1: Place watchlist artists with guaranteed no-overlap ──
-        const wNodes = data.nodes.filter(n => n.type === 'watchlist');
-        // Minimum center-to-center distance between watchlist nodes
-        const minCenterDist = WR * 3.5; // WR*2 for radii + WR*1.5 gap — similar artists fill the gaps via spiral packing
-
-        // Place watchlist nodes in a spiral — deterministic, guaranteed spacing
-        wNodes.forEach((n, i) => {
-            n.radius = WR;
-            n.opacity = 0;
-            if (i === 0) {
-                n.x = 0; n.y = 0;
-            } else {
-                // Golden angle spiral for even distribution
-                const angle = i * 2.399963; // golden angle in radians
-                const r = minCenterDist * Math.sqrt(i) * 0.7;
-                n.x = Math.cos(angle) * r;
-                n.y = Math.sin(angle) * r;
-            }
-        });
-
-        // Post-process: push apart any watchlist nodes that ended up too close
-        for (let pass = 0; pass < 50; pass++) {
-            let moved = false;
-            for (let i = 0; i < wNodes.length; i++) {
-                for (let j = i + 1; j < wNodes.length; j++) {
-                    const dx = wNodes[j].x - wNodes[i].x;
-                    const dy = wNodes[j].y - wNodes[i].y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    if (dist < minCenterDist) {
-                        const push = (minCenterDist - dist) / 2 + 1;
-                        const nx = (dx / dist) * push;
-                        const ny = (dy / dist) * push;
-                        wNodes[i].x -= nx; wNodes[i].y -= ny;
-                        wNodes[j].x += nx; wNodes[j].y += ny;
-                        moved = true;
-                    }
-                }
-            }
-            if (!moved) break;
-        }
-
-        wNodes.forEach(n => { _artMap.placed.push(n); });
-
-        // ── PHASE 2: Place similar artists around their source watchlist nodes ──
-        const sNodes = data.nodes.filter(n => n.type === 'similar');
-        sNodes.forEach(n => {
-            const occ = n.occurrence || 1;
-            const rank = n.rank || 5;
-            // Bigger overall: min 25% of WR, max 55%, scaled by relevance
-            n.radius = Math.min(WR * 0.55, Math.max(WR * 0.25, WR * 0.2 + occ * WR * 0.06 + (10 - rank) * WR * 0.025));
-        });
-        sNodes.sort((a, b) => b.radius - a.radius);
-
-        // Build edge lookup: target_id → source node (O(1) instead of .find())
-        const edgeMap = {};
-        _artMap.edges.forEach(e => { edgeMap[e.target] = e.source; });
-        const nodeById = {};
-        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
-
-        // Spatial grid for fast collision detection
-        // Cell size must cover the largest possible bubble diameter + buffer
-        const CELL = WR * 2 + BUF * 2;
-        const grid = {};
-        function _gridKey(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
-        function _gridAdd(n) {
-            const k = _gridKey(n.x, n.y);
-            if (!grid[k]) grid[k] = [];
-            grid[k].push(n);
-        }
-        function _gridCheck(x, y, r) {
-            const cx = Math.floor(x / CELL);
-            const cy = Math.floor(y / CELL);
-            // Search wider radius to catch large watchlist bubbles
-            for (let dx = -3; dx <= 3; dx++) {
-                for (let dy = -3; dy <= 3; dy++) {
-                    const cell = grid[`${cx + dx},${cy + dy}`];
-                    if (!cell) continue;
-                    for (const p of cell) {
-                        const ddx = x - p.x, ddy = y - p.y;
-                        const minD = r + p.radius + BUF;
-                        if (ddx * ddx + ddy * ddy < minD * minD) return true;
-                    }
-                }
-            }
-            return false;
-        }
-        // Add watchlist nodes to grid
-        _artMap.placed.forEach(n => _gridAdd(n));
-
-        // Place similar nodes with spatial grid collision
-        for (const sn of sNodes) {
-            const srcId = edgeMap[sn.id];
-            const src = srcId != null ? nodeById[srcId] : null;
-            const cx = src ? src.x : 0;
-            const cy = src ? src.y : 0;
-            const startDist = (src ? src.radius : WR) + sn.radius + BUF;
-
-            let placed = false;
-            for (let dist = startDist; dist < startDist + WR * 3; dist += sn.radius * 0.5) {
-                const steps = Math.max(8, Math.floor(dist * 0.1));
-                const off = Math.random() * Math.PI * 2;
-                for (let a = 0; a < steps; a++) {
-                    const angle = off + (a / steps) * Math.PI * 2;
-                    const tx = cx + Math.cos(angle) * dist;
-                    const ty = cy + Math.sin(angle) * dist;
-                    if (!_gridCheck(tx, ty, sn.radius)) {
-                        sn.x = tx; sn.y = ty; sn.opacity = 0;
-                        _artMap.placed.push(sn);
-                        nodeById[sn.id] = sn;
-                        _gridAdd(sn);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        }
-
-        // Auto-zoom to fit all nodes
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200;
-        const mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        // Group every watchlist + similar artist into genre islands. Watchlist
+        // artists are focal (sit centre-most + sized up). The discovery edges
+        // (watchlist → similar) are remapped to the new node ids so the hover
+        // constellation still shows who's related across islands.
+        const rawNodes = data.nodes.map(n => ({ ...n, _focal: n.type === 'watchlist' }));
+        const groups = _artMapGroupByGenre(rawNodes);
+        _artMapLayoutIslands(groups);
+        _artMap.edges = _artMapRemapEdges(data.edges);
+        _artMap._oneIsland = true; // focus one genre island at a time
+        _artMap._mapTitle = 'Watchlist Map';
 
         // Setup interaction
         _artMapSetupInteraction(canvas);
@@ -5207,48 +5889,17 @@ async function openArtistMap() {
         setTimeout(async () => {
             _artMap.placed.forEach(n => { n.opacity = 1; });
 
-            // Load images in parallel using createImageBitmap (non-blocking)
-            const loadingText = container.querySelector('.artist-map-loading-text');
-            const imgNodes = _artMap.placed.filter(n => n.image_url);
-            let loaded = 0;
-
-            if (loadingText) loadingText.textContent = `Loading ${imgNodes.length} artist images...`;
-
-            // Batch image loading — 20 concurrent fetches
-            const CONCURRENT = 20;
-            let idx = 0;
-
-            async function loadNextBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    if (_artMap.images[n.id]) { loaded++; continue; }
-                    batch.push(
-                        _artMapLoadImage(n.image_url)
-                            .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                            .finally(() => {
-                                loaded++;
-                                if (loadingText && loaded % 50 === 0) {
-                                    loadingText.textContent = `Loading images... ${loaded}/${imgNodes.length}`;
-                                }
-                            })
-                    );
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadNextBatch();
-            }
-
-            await loadNextBatch();
-
-            // Build buffer and render
-            if (loadingText) loadingText.textContent = 'Rendering map...';
-            await new Promise(r => setTimeout(r, 20)); // let text update render
-
+            // Paint NOW — the map is fully interactive (pan/zoom/hover/click)
+            // before a single image is fetched. The reveal animation blooms the
+            // bubbles in (far field fades, near bubbles pop outward); images then
+            // stream in behind it and sharpen in place. No blocking on N fetches.
             _artMap.dirty = true;
-            _artMapRender();
 
             const le = document.getElementById('artist-map-loading');
             if (le) le.remove();
+
+            _artMapFocusIsland(0, { bloom: true }); // frame + bloom the first genre island
+            _artMapStreamImages(_artMap.placed);
         }, 50);
 
     } catch (err) {
@@ -5316,6 +5967,14 @@ function closeArtistMap() {
     const sidebar = document.getElementById('artmap-genre-sidebar');
     if (sidebar) sidebar.style.display = 'none';
     if (_artMap.animFrame) cancelAnimationFrame(_artMap.animFrame);
+    // Stop the ambient buoyancy loop so it doesn't run with the map hidden.
+    _artMap._ambient = false;
+    _artMap._anim.running = false;
+    if (_artMap._anim.raf) { cancelAnimationFrame(_artMap._anim.raf); _artMap._anim.raf = null; }
+    _artMap._oneIsland = false;
+    const navEl = document.getElementById('artmap-island-nav');
+    if (navEl) navEl.remove();
+    _artMapClosePanel();
     if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
     _artMapHideContextMenu();
 
@@ -5348,7 +6007,7 @@ function _artMapRebuildBuffer() {
     const bh = maxY - minY;
     // Scale based on zoom — higher zoom = higher res buffer, capped for memory
     const z = _artMap.zoom || 0.1;
-    const scale = Math.min(z * 2, 1.0, 10240 / Math.max(bw, bh));
+    const scale = Math.min(z * 2, 1.0, _artMap.MAX_BUFFER_PX / Math.max(bw, bh));
 
     if (!_artMap.offscreen) _artMap.offscreen = document.createElement('canvas');
     const oc = _artMap.offscreen;
@@ -5358,6 +6017,24 @@ function _artMapRebuildBuffer() {
     _artMap._bufferScale = scale;
     _artMap._bufferMinX = minX;
     _artMap._bufferMinY = minY;
+    // Freeze the live/buffer partition to this build's zoom (see _artMapIsLiveSize).
+    _artMap._liveBuildZoom = _artMap.zoom;
+    _artMap._drawAlphaMul = 1; // buffer bakes at full alpha; the blit applies the reveal fade
+
+    // If more bubbles would be "live" than the live layer can draw, bake them ALL
+    // into the buffer (set the overflow flag BEFORE the draw loop so the live-size
+    // check below returns false and nothing is skipped). This is what prevents the
+    // genre-overview "small/sparse" render: the live layer caps out, so let the
+    // buffer own the whole crowd; live + bob only kick in once zoomed in.
+    const bz = _artMap.zoom;
+    let liveN = 0;
+    for (const n of visible) { if (!n._isLabel && (n.radius || 0) * bz >= _artMap.LIVE_PX) liveN++; }
+    // In one-island mode the buffer already covers just the focused island at
+    // high resolution, so let the BUFFER own any non-trivial crowd (one cheap
+    // crisp blit, no per-frame redraw → no lag). The live layer + bob/shove only
+    // take over for small views (zoomed-in subsets, explore) where redrawing a
+    // handful of bubbles each frame is cheap.
+    _artMap._liveOverflow = liveN > 140;
 
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
@@ -5393,108 +6070,8 @@ function _artMapRebuildBuffer() {
             else if (pass === 2 && !n._isLabel && (n.type === 'watchlist' || n.type === 'center' || n.ring === 1)) { /* draw */ }
             else continue;
             if (hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
-            const op = n.opacity || 0;
-            if (op < 0.01) continue;
-            const r = n.radius;
-            const isW = n.type === 'watchlist' || n.type === 'center';
-            octx.globalAlpha = op;
-
-            // Genre label node — transparent circle with large text
-            if (n._isLabel) {
-                octx.globalAlpha = 0.6;
-                octx.beginPath();
-                octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-                octx.fillStyle = 'rgba(138,43,226,0.04)';
-                octx.fill();
-                octx.strokeStyle = 'rgba(138,43,226,0.08)';
-                octx.lineWidth = 1;
-                octx.stroke();
-                const labelSize = Math.max(12, n.radius * 0.25);
-                octx.font = `800 ${labelSize}px system-ui`;
-                octx.textAlign = 'center';
-                octx.textBaseline = 'middle';
-                octx.fillStyle = 'rgba(138,43,226,0.35)';
-                octx.fillText(n.name, n.x, n.y - labelSize * 0.3);
-                octx.font = `500 ${labelSize * 0.5}px system-ui`;
-                octx.fillStyle = 'rgba(255,255,255,0.15)';
-                octx.fillText(`${n._count || 0} artists`, n.x, n.y + labelSize * 0.5);
-                octx.globalAlpha = 1;
-                continue;
-            }
-
-            // Render quality based on node size in buffer pixels
-            const rScaled = r * scale;
-            const isSmall = rScaled < 8;
-            const isTiny = rScaled < 3;
-
-            // Tiny nodes: just a colored dot (no clip, no image, no text)
-            if (isTiny) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-                octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
-                octx.fill();
-                continue;
-            }
-
-            // Small nodes: filled circle + border, no image clip
-            if (isSmall) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-                const img = _artMap.images[n.id];
-                if (img) {
-                    octx.save(); octx.clip();
-                    octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-                    octx.restore();
-                } else {
-                    octx.fillStyle = isW ? '#1a0a30' : '#141420';
-                    octx.fill();
-                }
-                octx.strokeStyle = isW ? 'rgba(138,43,226,0.3)' : 'rgba(255,255,255,0.06)';
-                octx.lineWidth = isW ? 1.5 : 0.5;
-                octx.stroke();
-                continue;
-            }
-
-            // Full quality: glow + clip + image + text
-            if (isW) {
-                octx.beginPath();
-                octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
-                octx.strokeStyle = 'rgba(138,43,226,0.25)';
-                octx.lineWidth = 5;
-                octx.stroke();
-            }
-
-            octx.save();
-            octx.beginPath();
-            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-            octx.closePath();
-            octx.clip();
-
-            const img = _artMap.images[n.id];
-            if (img) {
-                octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-                octx.fillStyle = 'rgba(0,0,0,0.45)';
-                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
-            } else {
-                octx.fillStyle = isW ? '#1a0a30' : '#141420';
-                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
-            }
-            octx.restore();
-
-            octx.beginPath();
-            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
-            octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
-            octx.lineWidth = isW ? 2 : 0.5;
-            octx.stroke();
-
-            const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
-            octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
-            octx.textAlign = 'center';
-            octx.textBaseline = 'middle';
-            octx.fillStyle = '#fff';
-            const maxC = isW ? 20 : 12;
-            const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
-            octx.fillText(label, n.x, n.y);
+            if (_artMapIsLiveSize(n)) continue; // big enough to read → drawn live on the overlay
+            _artMapDrawNodeToBuffer(octx, n, scale);
         }
     }
 
@@ -5503,8 +6080,455 @@ function _artMapRebuildBuffer() {
     _artMap.dirty = false;
 }
 
+// Draw a SINGLE node into the offscreen buffer (in world coords; caller has
+// already applied the buffer's scale+translate). Shared by the full rebuild and
+// the incremental image compositor so the two can never drift visually.
+function _artMapDrawNodeToBuffer(octx, n, scale) {
+    const op = n.opacity || 0;
+    if (op < 0.01) return;
+    const r = n.radius;
+    const isW = n.type === 'watchlist' || n.type === 'center';
+    // Global fade multiplier (reveal). Lets the whole map fade in cleanly while
+    // each painter keeps its own per-element alpha.
+    const mul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
+    octx.globalAlpha = op * mul;
+
+    // Genre title — a clean floating label above its island (no big bubble).
+    if (n._isLabel) {
+        const hue = n._hue == null ? 270 : n._hue;
+        const titleSize = Math.max(13, n.radius * 0.42);
+        const name = (n.name || '').toUpperCase();
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        // Soft glow behind the title for legibility over the water.
+        octx.globalAlpha = mul;
+        octx.font = `800 ${titleSize}px system-ui, sans-serif`;
+        octx.shadowColor = `hsla(${hue},70%,12%,0.9)`;
+        octx.shadowBlur = titleSize * 0.6;
+        octx.fillStyle = `hsla(${hue},85%,82%,0.96)`;
+        octx.fillText(name, n.x, n.y);
+        octx.shadowBlur = 0;
+        // Count subtitle
+        octx.globalAlpha = 0.55 * mul;
+        octx.font = `600 ${titleSize * 0.42}px system-ui, sans-serif`;
+        octx.fillStyle = 'rgba(255,255,255,0.7)';
+        octx.fillText(`${n._count || 0} artists`, n.x, n.y + titleSize * 0.85);
+        octx.globalAlpha = 1;
+        return;
+    }
+
+    // On-screen size drives detail. Album art shows at nearly every size (the
+    // images are pre-masked to circles, so this is just a cheap drawImage — no
+    // per-frame clip) for a consistent "sea of covers" look. Only the very
+    // smallest fall back to a coloured dot.
+    const rScaled = r * scale;
+    const img = _artMap.images[n.id];
+
+    if (rScaled < 2.2) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
+        octx.fill();
+        return;
+    }
+
+    // Focal glow ring for watchlist/center bubbles
+    if (isW && rScaled >= 7) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+        octx.strokeStyle = 'rgba(138,43,226,0.25)';
+        octx.lineWidth = 5;
+        octx.stroke();
+    }
+
+    // Body — pre-masked circular image (no clip) or a placeholder disc.
+    if (img) {
+        octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+    } else {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        octx.fillStyle = isW ? '#1a0a30' : '#141420';
+        octx.fill();
+    }
+
+    // Glassy specular highlight (orb look) — only on bubbles big enough to read
+    // it; skipping the dense swarm halves per-frame drawImage cost when zoomed in.
+    if (rScaled >= 12) {
+        octx.drawImage(_artMapGlossSprite(), n.x - r, n.y - r, r * 2, r * 2);
+    }
+
+    const showLabel = rScaled >= 13;
+
+    // Darken art behind the label so the name stays legible.
+    if (showLabel && img) {
+        octx.beginPath();
+        octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        octx.fillStyle = 'rgba(0,0,0,0.42)';
+        octx.fill();
+    }
+
+    // Border — tinted with the island's genre hue so clusters read as a family.
+    octx.beginPath();
+    octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    if (isW) octx.strokeStyle = 'rgba(138,43,226,0.5)';
+    else if (n._hue != null) octx.strokeStyle = `hsla(${n._hue},70%,70%,0.22)`;
+    else octx.strokeStyle = 'rgba(255,255,255,0.10)';
+    octx.lineWidth = isW ? 2 : (rScaled >= 7 ? 1 : 0.5);
+    octx.stroke();
+
+    if (showLabel) {
+        const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
+        octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillStyle = '#fff';
+        const maxC = isW ? 20 : 12;
+        const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
+        octx.fillText(label, n.x, n.y);
+    }
+}
+
+// Composite ONE node into the EXISTING buffer without a full rebuild. This is
+// what makes image streaming cheap: when a bitmap arrives we redraw only that
+// node (in place, over its placeholder) instead of redrawing all ~1500 nodes.
+// Returns false if there's no buffer yet (or the node is hidden) so the caller
+// can fall back to a full rebuild. Zoom changes rebuild the buffer at a new
+// scale; this always reads the CURRENT buffer scale/origin, so it stays correct.
+function _artMapCompositeNode(n) {
+    const oc = _artMap.offscreen;
+    const scale = _artMap._bufferScale;
+    if (!oc || scale == null) return false;
+    if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) return false;
+    if ((n.opacity || 0) < 0.01) return false;
+    // Live-layer bubbles aren't in the buffer — they read their image fresh each
+    // frame, so just signal "blit" and let the overlay pick it up. Compositing
+    // them here would double-draw (buffer copy + live copy).
+    if (_artMapIsLiveSize(n)) return true;
+    const octx = oc.getContext('2d');
+    octx.save();
+    octx.scale(scale, scale);
+    octx.translate(-_artMap._bufferMinX, -_artMap._bufferMinY);
+    _artMapDrawNodeToBuffer(octx, n, scale);
+    octx.restore();
+    octx.globalAlpha = 1;
+    return true;
+}
+
+// A node renders on the live overlay when it's big enough on screen to read.
+// Labels stay baked in the static buffer (no per-frame motion needed in v2).
+// IMPORTANT: this uses the zoom the BUFFER WAS BUILT AT (_liveBuildZoom), not
+// the live zoom. The buffer only rebuilds ~300ms after zooming stops, so the
+// live/buffer split must stay frozen to whatever the (possibly stale) buffer
+// excluded — otherwise a bubble could fall out of both during an active zoom
+// and flicker. Both the buffer-exclude and the live-draw read this same value,
+// so the two sets are always exact complements.
+function _artMapIsLiveSize(n) {
+    if (n._isLabel) return false;
+    // When too many bubbles would be "live" at once (e.g. the genre overview),
+    // the live layer's cap can't draw them all and the buffer would exclude them
+    // → a sparse/half-rendered map. In that case treat NOTHING as live so the
+    // buffer bakes everything (full, correct render); the live layer + bob only
+    // take over once you've zoomed in to where few bubbles are big.
+    if (_artMap._liveOverflow) return false;
+    const z = _artMap._liveBuildZoom || _artMap.zoom;
+    return (n.radius || 0) * z >= _artMap.LIVE_PX;
+}
+
+// Draw the live overlay: every big/near bubble, in world space, honouring its
+// per-node animation transform (aScale for reveal/pop, opacity for fade). Kept
+// cheap by viewport culling + a hard cap; the static far field is already on
+// screen via the buffer blit.
+function _artMapDrawLiveLayer(ctx) {
+    const placed = _artMap.placed;
+    if (!placed || !placed.length) return;
+    const z = _artMap.zoom;
+    const ox = _artMap.offsetX, oy = _artMap.offsetY;
+    const w = _artMap.width, h = _artMap.height;
+    const margin = 80;
+
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(z, z);
+    _artMap._drawAlphaMul = 1;
+
+    // During the reveal the buffer is bypassed, so the live layer draws EVERY
+    // bubble (and the genre titles) so they can all bloom. Otherwise it draws
+    // only the big/near ones; the rest live in the static buffer.
+    const revealing = _artMap._revealing;
+    let drawn = 0;
+    const CAP = revealing ? 2200 : 600;
+    for (const n of placed) {
+        if (!revealing && !_artMapIsLiveSize(n)) continue;
+        if (_artMap._hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
+        // Viewport cull (screen space)
+        const sx = ox + n.x * z, sy = oy + n.y * z;
+        const rPx = (n.radius || 0) * z;
+        if (sx + rPx < -margin || sx - rPx > w + margin || sy + rPx < -margin || sy - rPx > h + margin) continue;
+        _artMapDrawLiveNode(ctx, n);
+        if (++drawn >= CAP) break;
+    }
+    _artMap._drawAlphaMul = 1;
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    // Count of non-label bubbles drawn live — drives whether the ambient loop
+    // keeps running (zoomed out = 0 = loop parks).
+    _artMap._liveCount = revealing ? 0 : drawn;
+}
+
+// Tactile hover-pop: redraw the hovered bubble slightly larger with its cover
+// + a bright hue ring, on top of everything. Works even when the bubble lives
+// in the static buffer (genre islands), so hover always feels responsive.
+// ctx is already in world space (translate(offset) + scale(zoom)).
+function _artMapDrawHoverPop(ctx, n) {
+    const r = n.radius;
+    const hue = n._hue == null ? 270 : n._hue;
+    const s = 1.16;
+    const img = _artMap.images[n.id];
+    ctx.save();
+    ctx.translate(n.x, n.y); ctx.scale(s, s); ctx.translate(-n.x, -n.y);
+    if (img) {
+        ctx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+    } else {
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a0a30'; ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(${hue},90%,78%,0.95)`;
+    ctx.lineWidth = 2.5 / s; ctx.stroke();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(n.x, n.y, r * s + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsla(${hue},85%,66%,0.45)`;
+    ctx.lineWidth = 3; ctx.stroke();
+}
+
+// Draw one live bubble with its animation transform. aScale scales about the
+// node centre; aAlpha fades it (folded into the global draw-alpha multiplier).
+// Reuses the shared node painter so the bubble is identical to its baked form
+// once settled.
+function _artMapDrawLiveNode(ctx, n) {
+    const sc = n.aScale == null ? 1 : n.aScale;
+    if (sc <= 0.001) return;
+    const baseMul = _artMap._drawAlphaMul == null ? 1 : _artMap._drawAlphaMul;
+    _artMap._drawAlphaMul = baseMul * (n.aAlpha == null ? 1 : n.aAlpha);
+    // Ambient buoyancy + ripple shove (steady state only — the reveal has its
+    // own motion). Both are world-space offsets applied about the node centre.
+    let ox = 0, oy = 0;
+    if (_artMap._revealing) {
+        if (n._revealRise) oy += n._revealRise; // surfacing rise during the bloom
+    } else {
+        if (n._bobAmp) oy += Math.sin((_artMap._now || 0) * 0.0016 + (n._bobPhase || 0)) * n._bobAmp;
+        const disp = _artMapNodeDisplacement(n);
+        if (disp) { ox += disp.dx; oy += disp.dy; }
+    }
+    if (sc !== 1 || ox || oy) {
+        ctx.save();
+        ctx.translate(n.x + ox, n.y + oy);
+        ctx.scale(sc, sc);
+        ctx.translate(-n.x, -n.y);
+        _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
+        ctx.restore();
+    } else {
+        _artMapDrawNodeToBuffer(ctx, n, _artMap.zoom);
+    }
+    _artMap._drawAlphaMul = baseMul;
+    ctx.globalAlpha = 1;
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────
+// Runs only while something is animating; idles otherwise. Each tick advances
+// the active animations (reveal field-fade + per-node pop), draws one frame,
+// and re-arms itself only if work remains — so a still map costs nothing.
+function _artMapStartLoop() {
+    const a = _artMap._anim;
+    if (a.running) return;
+    a.running = true;
+    a.last = performance.now();
+    const tick = (t) => {
+        if (!a.running) return;
+        _artMap._now = t;
+        const more = _artMapStepAnimations(t);
+        // Cap the whole animation loop at ~30fps. The reveal bloom, ripples and
+        // ambient bob all read fine at 30, and halving the redraws keeps the
+        // 1800-bubble genre map smooth instead of churning every frame. Always
+        // honour a pending buffer rebuild (dirty) so the throttle can't skip the
+        // frame that bakes the map after the reveal ends.
+        if (_artMap.dirty || (t - (a._lastDraw || 0)) >= 31) {
+            _artMapDraw(); // sets _artMap._liveCount
+            a._lastDraw = t;
+        }
+        const keep = more || (_artMap._ambient && _artMap._liveCount > 0 && !document.hidden);
+        if (keep) {
+            a.raf = requestAnimationFrame(tick);
+        } else {
+            a.running = false;
+            a.raf = null;
+        }
+    };
+    a.raf = requestAnimationFrame(tick);
+}
+
+// (Re)start the ambient loop if buoyancy is on and it isn't already running —
+// called after the reveal and on zoom/pan so bob resumes when bubbles appear.
+function _artMapEnsureAmbient() {
+    if (_artMap._ambient && !_artMap._anim.running && !document.hidden) _artMapStartLoop();
+}
+
+// Advance every active animation by absolute time t (ms). Returns true while
+// anything is still moving. Phase C: each bubble scales+fades in (ease-out)
+// once past its staggered start, and a water ripple expands from each island.
+function _artMapStepAnimations(t) {
+    let active = false;
+
+    const placed = _artMap.placed;
+    if (placed) {
+        for (const n of placed) {
+            if (n.aScale == null || n.aScale >= 1) continue;
+            if (t < n._revealAt) { active = true; continue; }
+            const p = Math.min(1, (t - n._revealAt) / (n._revealDur || 480));
+            if (p >= 1) { n.aScale = 1; n.aAlpha = 1; n._revealRise = 0; }
+            else {
+                // Scale eases in with a gentle overshoot (ease-out-back, subtle),
+                // alpha fades a touch faster, and the bubble rises up into place
+                // like it's surfacing through water — the remaining rise decays
+                // as (1-p)^3.
+                const c1 = 1.18, c3 = c1 + 1;
+                const back = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+                n.aScale = back;
+                n.aAlpha = Math.min(1, p * 1.6);
+                n._revealRise = Math.pow(1 - p, 3) * (n._riseAmp || 0);
+                active = true;
+            }
+        }
+    }
+
+    const rip = _artMap._ripples;
+    if (rip && rip.length) {
+        let anyAlive = false;
+        for (const r of rip) if (t < r.t0 + r.dur) anyAlive = true;
+        if (anyAlive) active = true; else _artMap._ripples = [];
+    }
+
+    // When the bloom finishes, leave reveal mode and bake everything into the
+    // static buffer (one rebuild) so steady-state goes back to the cheap path.
+    if (!active && _artMap._revealing) {
+        _artMap._revealing = false;
+        _artMap.dirty = true;
+        return true; // one more frame to do the rebuild + final blit
+    }
+    return active;
+}
+
+// Kick off the ripple-bloom reveal. Each island blooms in turn (staggered by
+// island order); within an island, bubbles fade+scale outward from the centre
+// like a drop hitting water, and a ripple ring expands from each island centre.
+// During the reveal the whole map renders on the live layer (the static buffer
+// is bypassed) so every bubble can animate; it bakes into the buffer at the end.
+function _artMapBeginReveal() {
+    const t0 = performance.now();
+    _artMap._revealT0 = t0;
+    _artMap._revealing = true;
+    _artMap._ambient = true; // keep the loop alive afterwards for buoyancy
+    _artMap._fieldAlpha = 1; // buffer is bypassed while revealing; live layer draws all
+
+    const islands = _artMap._islands || [];
+    const islByName = {};
+    islands.forEach((isl, i) => { isl._order = i; islByName[isl.name] = isl; });
+
+    const ISL_STAGGER = 145, RADIAL_MS = 430, NODE_DUR = 470;
+    for (const n of _artMap.placed) {
+        n.aScale = 0; n.aAlpha = 0;
+        const isl = islByName[n._island] || (n._isLabel ? islByName[n.name] : null);
+        const order = isl ? isl._order : 0;
+        let radial = 0;
+        if (isl && isl.r > 0) radial = Math.min(1, Math.hypot(n.x - isl.cx, n.y - isl.cy) / isl.r);
+        n._revealAt = t0 + order * ISL_STAGGER + radial * RADIAL_MS + (n._isLabel ? 90 : 0);
+        n._revealDur = NODE_DUR;
+    }
+
+    _artMap._ripples = islands.map(isl => ({
+        cx: isl.cx, cy: isl.cy, hue: isl.hue,
+        maxR: isl.r * 1.45, t0: t0 + isl._order * ISL_STAGGER, dur: 1150,
+    }));
+
+    _artMapStartLoop();
+}
+
+// Draw the expanding water-ripple rings (reveal + click). Cheap stroked arcs,
+// hue-tinted, fading as they grow. Drawn in world space with a screen-constant
+// line width.
+function _artMapDrawRipples(ctx) {
+    const rip = _artMap._ripples;
+    if (!rip || !rip.length) return;
+    const t = performance.now();
+    const z = _artMap.zoom;
+    ctx.save();
+    ctx.translate(_artMap.offsetX, _artMap.offsetY);
+    ctx.scale(z, z);
+    for (const r of rip) {
+        const p = (t - r.t0) / r.dur;
+        if (p < 0 || p > 1) continue;
+        const radius = r.maxR * (0.08 + 0.92 * (1 - Math.pow(1 - p, 2)));
+        const alpha = (1 - p) * 0.55;
+        ctx.beginPath();
+        ctx.arc(r.cx, r.cy, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${r.hue},85%,72%,${alpha})`;
+        ctx.lineWidth = (1.5 + 6 * (1 - p)) / z; // ~constant on screen
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+// Total world-space displacement on a node from all active "push" ripples — the
+// expanding wavefront shoves nearby bubbles radially outward, then they settle
+// back as the wave passes and decays. Returns null when nothing is pushing.
+function _artMapNodeDisplacement(n) {
+    const rip = _artMap._ripples;
+    if (!rip || !rip.length) return null;
+    const t = _artMap._now || performance.now();
+    let dx = 0, dy = 0;
+    for (const r of rip) {
+        if (!r.push) continue;
+        const p = (t - r.t0) / r.dur;
+        if (p < 0 || p > 1) continue;
+        const front = r.maxR * (0.08 + 0.92 * (1 - Math.pow(1 - p, 2)));
+        const ddx = n.x - r.cx, ddy = n.y - r.cy;
+        const d = Math.hypot(ddx, ddy) || 1;
+        const delta = d - front;
+        const width = r.width || (r.maxR * 0.2);
+        const env = Math.exp(-(delta * delta) / (2 * width * width)); // bump at the wavefront
+        const push = r.push * env * (1 - p);                          // decays over the ripple's life
+        if (push > 0.05) { dx += (ddx / d) * push; dy += (ddy / d) * push; }
+    }
+    return (dx || dy) ? { dx, dy } : null;
+}
+
+// Emit a water ripple at a world point — a fading ring plus a radial shove of
+// nearby bubbles. Used for click/tap feedback.
+function _artMapEmitRipple(wx, wy, hue) {
+    if (!_artMap._ripples) _artMap._ripples = [];
+    const WR = _artMap.WATCHLIST_R;
+    _artMap._ripples.push({
+        cx: wx, cy: wy, hue: hue == null ? 270 : hue,
+        maxR: WR * 2.6, t0: performance.now(), dur: 900,
+        push: WR * 0.22, width: WR * 0.6,
+    });
+    _artMapStartLoop(); // animate the ripple (guards against double-start)
+}
+
 function _artMapRender() {
+    // v2 perf: coalesce every render request into a single rAF, so a burst of
+    // mousemove/pan/animation calls never draws more than once per frame.
+    if (_artMap._rafPending) return;
+    _artMap._rafPending = requestAnimationFrame(() => {
+        _artMap._rafPending = null;
+        _artMapDraw();
+    });
+}
+
+function _artMapDraw() {
     /**Blit offscreen buffer to screen canvas with pan/zoom. Near-zero cost.**/
+    const _t0 = _artMap._perf ? performance.now() : 0;
+    if (!_artMap._anim.running) _artMap._now = performance.now(); // keep bob current on on-demand draws
     const ctx = _artMap.ctx;
     const w = _artMap.width;
     const h = _artMap.height;
@@ -5512,26 +6536,64 @@ function _artMapRender() {
     ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, w, h);
 
-    if (_artMap.dirty || !_artMap.offscreen) _artMapRebuildBuffer();
-    if (!_artMap.offscreen) return;
+    // Premium backdrop: a soft central glow fading to a dark vignette. The
+    // gradient is cached and only rebuilt on resize, so it's one cheap fillRect.
+    if (!_artMap._bgGrad || _artMap._bgW !== w || _artMap._bgH !== h) {
+        const g = ctx.createRadialGradient(w / 2, h * 0.42, Math.min(w, h) * 0.12,
+            w / 2, h / 2, Math.max(w, h) * 0.78);
+        g.addColorStop(0, 'rgba(46,34,78,0.40)');
+        g.addColorStop(0.5, 'rgba(16,12,28,0.0)');
+        g.addColorStop(1, 'rgba(0,0,0,0.55)');
+        _artMap._bgGrad = g; _artMap._bgW = w; _artMap._bgH = h;
+    }
+    ctx.fillStyle = _artMap._bgGrad;
+    ctx.fillRect(0, 0, w, h);
 
-    const oc = _artMap.offscreen;
-    const s = _artMap._bufferScale;
-    const mx = _artMap._bufferMinX;
-    const my = _artMap._bufferMinY;
     const z = _artMap.zoom;
 
-    // Blit offscreen buffer: the buffer was drawn with scale(s) + translate(-minX,-minY)
-    // So buffer pixel (bx,by) corresponds to world (bx/s + minX, by/s + minY)
-    // Screen position of world (wx,wy) = offsetX + wx*zoom, offsetY + wy*zoom
-    // Therefore buffer origin on screen = offsetX + minX*zoom, offsetY + minY*zoom
-    // And buffer is drawn at size (bufferWidth * zoom/s, bufferHeight * zoom/s)
-    ctx.drawImage(oc,
-        _artMap.offsetX + mx * z,
-        _artMap.offsetY + my * z,
-        oc.width * z / s,
-        oc.height * z / s
-    );
+    // Soft genre-hued halo behind the focused island (one-island mode) — gives
+    // the island a sense of place on the water. Cached sprite → one drawImage.
+    if (_artMap._oneIsland && _artMap._islands && _artMap._islands.length) {
+        const isl = _artMap._islands[_artMap._focusIdx || 0];
+        if (isl) {
+            const hr = (isl.r * 2.5) * z;
+            const hsx = _artMap.offsetX + isl.cx * z;
+            const hsy = _artMap.offsetY + isl.cy * z;
+            ctx.drawImage(_artMapHaloSprite(isl.hue), hsx - hr, hsy - hr, hr * 2, hr * 2);
+        }
+    }
+
+    // While the ripple-bloom reveal is running, bypass the static buffer
+    // entirely and let the live layer draw every bubble (so each can animate).
+    // The buffer is (re)built once when the reveal ends.
+    if (!_artMap._revealing) {
+        if (_artMap.dirty || !_artMap.offscreen) {
+            const _rt = _artMap._perf ? performance.now() : 0;
+            _artMapRebuildBuffer();
+            if (_artMap._perf) _artMap._rebuildMs = performance.now() - _rt;
+        }
+        if (_artMap.offscreen) {
+            const oc = _artMap.offscreen;
+            const s = _artMap._bufferScale;
+            const mx = _artMap._bufferMinX;
+            const my = _artMap._bufferMinY;
+            // Blit offscreen buffer (built with scale(s) + translate(-minX,-minY)).
+            const fieldAlpha = _artMap._fieldAlpha == null ? 1 : _artMap._fieldAlpha;
+            if (fieldAlpha < 0.999) ctx.globalAlpha = fieldAlpha;
+            ctx.drawImage(oc,
+                _artMap.offsetX + mx * z,
+                _artMap.offsetY + my * z,
+                oc.width * z / s,
+                oc.height * z / s
+            );
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // ── Live overlay layer: big/near bubbles every frame (during the reveal,
+    // ALL bubbles) so they can scale/bob/ripple. Viewport-culled + capped. ──
+    _artMapDrawLiveLayer(ctx);
+    _artMapDrawRipples(ctx);
 
     // ── Interactive overlay (drawn on main canvas, not buffer) ──
     const cFade = _artMap._constellationFade || 0;
@@ -5581,20 +6643,22 @@ function _artMapRender() {
                 ctx.globalAlpha = 1;
                 ctx.restore();
 
-                // Draw glowing connection lines
+                // Connection lines — build the path ONCE, then two cheap strokes
+                // (wide faint halo + crisp core) for a glow look without per-frame
+                // gradients or shadowBlur (those were the hover-lag culprits).
+                ctx.lineCap = 'round';
+                ctx.beginPath();
                 for (const cn of highlightNodes) {
                     if (cn === n) continue;
-                    ctx.beginPath();
                     ctx.moveTo(n.x, n.y);
                     ctx.lineTo(cn.x, cn.y);
-                    // Gradient line
-                    const lineGrad = ctx.createLinearGradient(n.x, n.y, cn.x, cn.y);
-                    lineGrad.addColorStop(0, `rgba(138,43,226,${0.5 * cFade})`);
-                    lineGrad.addColorStop(1, `rgba(138,43,226,${0.15 * cFade})`);
-                    ctx.strokeStyle = lineGrad;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
                 }
+                ctx.strokeStyle = `rgba(168,85,247,${0.18 * cFade})`;
+                ctx.lineWidth = 6;
+                ctx.stroke();
+                ctx.strokeStyle = `rgba(201,150,255,${0.6 * cFade})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
 
                 // Redraw highlighted nodes on top
                 ctx.globalAlpha = cFade;
@@ -5612,23 +6676,21 @@ function _artMapRender() {
                         ctx.stroke();
                     }
 
-                    // Circle + image
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
-                    ctx.closePath();
-                    ctx.clip();
-
+                    // Circle + image — pre-masked, so no per-frame clip (that was
+                    // the hover-lag culprit once the ambient loop forced redraws).
                     const img = _artMap.images[hn.id];
                     if (img) {
                         ctx.drawImage(img, hn.x - r, hn.y - r, r * 2, r * 2);
-                        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                        ctx.beginPath();
+                        ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(0,0,0,0.35)'; // keep the name legible over art
+                        ctx.fill();
                     } else {
+                        ctx.beginPath();
+                        ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
                         ctx.fillStyle = isW ? '#1a0a30' : '#141420';
-                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                        ctx.fill();
                     }
-                    ctx.restore();
 
                     // Border
                     ctx.beginPath();
@@ -5649,70 +6711,118 @@ function _artMapRender() {
                 }
                 ctx.globalAlpha = 1;
             } else {
-                // Single node, no connections
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-                ctx.lineWidth = 3;
-                ctx.stroke();
+                // Single node, no connections — pop the hovered bubble.
+                _artMapDrawHoverPop(ctx, n);
             }
 
             ctx.restore();
         } // end if(n)
     } else if (_artMap.hoveredNode && !_artMap._constellationActive) {
-        // Pre-constellation: just show a simple highlight ring (instant, no delay)
-        const n = _artMap.hoveredNode;
+        // Pre-constellation: instant tactile pop on the hovered bubble.
         ctx.save();
         ctx.translate(_artMap.offsetX, _artMap.offsetY);
         ctx.scale(z, z);
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.radius + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        _artMapDrawHoverPop(ctx, _artMap.hoveredNode);
         ctx.restore();
     }
 
-    // Click ripple animation
-    if (_artMap._ripple) {
-        const rip = _artMap._ripple;
-        const elapsed = performance.now() - rip.start;
-        const progress = elapsed / 400; // 400ms duration
-        if (progress < 1) {
-            ctx.save();
-            ctx.translate(_artMap.offsetX, _artMap.offsetY);
-            ctx.scale(z, z);
-            const ripR = rip.radius + rip.radius * progress * 0.5;
-            ctx.beginPath();
-            ctx.arc(rip.x, rip.y, ripR, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(138,43,226,${0.5 * (1 - progress)})`;
-            ctx.lineWidth = 3 * (1 - progress);
-            ctx.stroke();
-            ctx.restore();
-            requestAnimationFrame(() => _artMapRender());
-        } else {
-            _artMap._ripple = null;
-        }
-    }
+    if (_artMap._perf) _artMapDrawPerf(ctx, _t0);
 }
 
+// Toggle with 'd' on the map. Shows where frame time goes so we optimise the
+// real bottleneck (buffer rebuild on zoom vs. blit on pan) instead of guessing.
+function _artMapDrawPerf(ctx, t0) {
+    const drawMs = performance.now() - t0;
+    const now = performance.now();
+    const dt = _artMap._lastPerfTs ? now - _artMap._lastPerfTs : 0;
+    _artMap._lastPerfTs = now;
+    const fps = dt > 0 ? Math.round(1000 / dt) : 0;
+    const oc = _artMap.offscreen;
+
+    // Ship the numbers to app.log (~1.5/s) so they can be read server-side —
+    // the on-canvas text below can't be copied, especially mid-lag.
+    if (!_artMap._perfPostTs || now - _artMap._perfPostTs > 700) {
+        _artMap._perfPostTs = now;
+        try {
+            fetch('/api/discover/artist-map/perf', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nodes: _artMap.placed.length, edges: (_artMap.edges || []).length,
+                    buffer: oc ? oc.width + 'x' + oc.height : '-',
+                    scale: +(_artMap._bufferScale || 0).toFixed(3),
+                    zoom: +_artMap.zoom.toFixed(3),
+                    rebuildMs: +(_artMap._rebuildMs || 0).toFixed(1),
+                    drawMs: +drawMs.toFixed(1), fps,
+                }),
+            }).catch(() => { });
+        } catch (e) { /* ignore */ }
+    }
+
+    const lines = [
+        `nodes ${_artMap.placed.length}   edges ${(_artMap.edges || []).length}`,
+        `buffer ${oc ? oc.width + '×' + oc.height : '—'}   scale ${(_artMap._bufferScale || 0).toFixed(3)}`,
+        `zoom ${_artMap.zoom.toFixed(3)}`,
+        `rebuild ${(_artMap._rebuildMs || 0).toFixed(1)}ms   draw ${drawMs.toFixed(1)}ms`,
+        `~${fps} fps (while interacting)`,
+    ];
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // device pixels, ignore dpr scale
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const pad = 8, lh = 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(10, 10, 270, lines.length * lh + pad * 2);
+    ctx.fillStyle = '#7CFC00';
+    lines.forEach((l, i) => ctx.fillText(l, 10 + pad, 10 + pad + i * lh));
+    ctx.restore();
+}
+
+// Toolbar search: query the metadata source for ANY artist (like the discover
+// page) and launch an exploration on click — not just filter the current map.
 function artMapSearch(query) {
     const results = document.getElementById('artist-map-search-results');
     if (!results) return;
-    if (!query || query.length < 2) { results.style.display = 'none'; return; }
+    const q = (query || '').trim();
+    if (q.length < 2) { results.style.display = 'none'; results.innerHTML = ''; return; }
 
-    const q = query.toLowerCase();
-    const matches = _artMap.placed.filter(n => (n.opacity || 0) > 0.5 && n.name.toLowerCase().includes(q)).slice(0, 8);
+    clearTimeout(_artMap._searchTimer);
+    _artMap._searchTimer = setTimeout(async () => {
+        const myToken = (_artMap._searchToken = (_artMap._searchToken || 0) + 1);
+        results.style.display = 'block';
+        results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">Searching…</div>';
+        try {
+            const resp = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(q)}`);
+            const data = await resp.json();
+            if (myToken !== _artMap._searchToken) return; // superseded by a newer keystroke
+            const artists = (data && data.success && Array.isArray(data.artists)) ? data.artists : [];
+            if (!artists.length) {
+                results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">No artists found</div>';
+                return;
+            }
+            results.innerHTML = artists.slice(0, 8).map(a =>
+                `<div class="artist-map-search-item" onclick="artMapExploreArtist('${escapeForInlineJs(a.name)}')">
+                    <span class="artist-map-search-type similar">○</span>
+                    ${escapeHtml(a.name)}
+                    <span class="artist-map-search-go">Explore &rarr;</span>
+                </div>`
+            ).join('');
+        } catch (e) {
+            if (myToken === _artMap._searchToken) {
+                results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">Search failed — try again</div>';
+            }
+        }
+    }, 300);
+}
 
-    if (!matches.length) { results.style.display = 'none'; return; }
-
-    results.style.display = 'block';
-    results.innerHTML = matches.map(n =>
-        `<div class="artist-map-search-item" onclick="artMapZoomToNode(${n.id})">
-            <span class="artist-map-search-type ${n.type}">${n.type === 'watchlist' ? '★' : '○'}</span>
-            ${escapeHtml(n.name)}
-        </div>`
-    ).join('');
+// Launch the explorer for a searched artist (closes the dropdown first).
+function artMapExploreArtist(name) {
+    const results = document.getElementById('artist-map-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const input = document.getElementById('artist-map-search');
+    if (input) input.value = '';
+    _artMap._skipSectionToggle = true;
+    _openArtistMapExplorerWithName(name);
 }
 
 function artMapZoomToNode(nodeId) {
@@ -5736,26 +6846,47 @@ function artMapZoomToNode(nodeId) {
 function _artMapShowTooltip(e, node) {
     const tip = document.getElementById('artist-map-tooltip');
     if (!tip) return;
-    if (!node) { tip.style.display = 'none'; return; }
+    if (!node) { tip.style.display = 'none'; _artMap._tipNodeId = null; return; }
 
-    const img = node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>';
-    const genres = (node.genres || []).slice(0, 3);
-    const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
-    const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
-
-    tip.innerHTML = `
-        <div class="artmap-tip-row">
-            ${img}
-            <div class="artmap-tip-info">
-                <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
-                ${typeLabel}
-                ${genreHTML}
+    // v2 perf: only rebuild the tooltip's innerHTML (and reload its image) when
+    // the hovered artist actually changes — a plain mousemove just repositions.
+    if (_artMap._tipNodeId !== node.id) {
+        _artMap._tipNodeId = node.id;
+        // Prefer the already-decoded (pre-masked) bitmap — instant, and it can't
+        // churn-blank while sweeping across dense zoomed-in bubbles the way a
+        // fresh <img src> reload does. Fall back to the URL, then a glyph.
+        const bmp = _artMap.images[node.id];
+        const img = bmp
+            ? '<canvas class="artmap-tip-img" width="88" height="88"></canvas>'
+            : (node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
+        const genres = (node.genres || []).slice(0, 3);
+        const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
+        const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
+        // Real connection count from the map's edges (cheap; only on hover change).
+        let conn = 0;
+        const edges = _artMap.edges || [];
+        for (const ed of edges) { if (ed.source === node.id || ed.target === node.id) conn++; }
+        const connHTML = conn ? `<div class="artmap-tip-conn">${conn} connection${conn === 1 ? '' : 's'}</div>` : '';
+        tip.innerHTML = `
+            <div class="artmap-tip-row">
+                ${img}
+                <div class="artmap-tip-info">
+                    <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
+                    ${typeLabel}
+                    ${connHTML}
+                    ${genreHTML}
+                </div>
             </div>
-        </div>
-    `;
-    tip.style.display = 'block';
+        `;
+        tip.style.display = 'block';
+        // Paint the cached bitmap into the tooltip canvas (instant, no reload).
+        if (bmp) {
+            const c = tip.querySelector('canvas.artmap-tip-img');
+            if (c) { try { c.getContext('2d').drawImage(bmp, 0, 0, 88, 88); } catch (e) { /* ignore */ } }
+        }
+    }
 
-    // Position — keep on screen
+    // Position — keep on screen (cheap; runs every move)
     const x = Math.min(e.clientX + 16, window.innerWidth - tip.offsetWidth - 10);
     const y = Math.min(e.clientY - 10, window.innerHeight - tip.offsetHeight - 10);
     tip.style.left = x + 'px';
@@ -5916,10 +7047,13 @@ async function _openGenreMapWithSelection(selectedGenre) {
     }
     container.style.display = 'flex';
 
-    // Show + populate genre sidebar
+    // Show + populate genre sidebar (hidden on mobile — the top-left quick-jump
+    // nav handles genre switching there, and there's no room for a sidebar).
     const sidebar = document.getElementById('artmap-genre-sidebar');
     const genreListData = window._artMapGenreList || window._artMapGenreData;
-    if (sidebar && genreListData?.genres) {
+    if (sidebar && _artMapIsMobile()) {
+        sidebar.style.display = 'none';
+    } else if (sidebar && genreListData?.genres) {
         sidebar.style.display = 'flex';
         const list = document.getElementById('artmap-genre-sidebar-list');
         if (list) {
@@ -5998,185 +7132,31 @@ async function _openGenreMapWithSelection(selectedGenre) {
         document.getElementById('artist-map-stats').innerHTML =
             `<span class="artmap-genre-change" onclick="event.stopPropagation(); _changeGenre()" title="Change genre">${escapeHtml(selectedGenre)} ▾</span> · ${genres.length} genre${genres.length > 1 ? 's' : ''} · ${totalArtists} artists`;
 
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        const maxPerGenre = 500;
-        const nodeR = WR * 0.2;
-
-        // Calculate actual cluster radius for each genre based on ring count
-        function getClusterRadius(artistCount) {
-            const count = Math.min(artistCount, maxPerGenre);
-            let ringDist = WR + nodeR * 2 + BUF;
-            let placed = 0;
-            while (placed < count) {
-                const circ = 2 * Math.PI * ringDist;
-                const inRing = Math.max(1, Math.floor(circ / (nodeR * 2 + BUF)));
-                placed += Math.min(inRing, count - placed);
-                ringDist += nodeR * 2 + BUF;
-            }
-            return ringDist;
-        }
-
-        // Pre-compute cluster radii
-        genres.forEach(g => { g._clusterR = getClusterRadius(g.artist_ids.length); });
-
-        // Golden spiral placement
-        genres.forEach((g, i) => {
-            if (i === 0) { g._cx = 0; g._cy = 0; }
-            else {
-                const angle = i * 2.399963;
-                const r = g._clusterR * Math.sqrt(i) * 0.9;
-                g._cx = Math.cos(angle) * r;
-                g._cy = Math.sin(angle) * r;
-            }
-        });
-
-        // Push apart using actual cluster radii — no overlap possible
-        for (let pass = 0; pass < 80; pass++) {
-            let moved = false;
-            for (let i = 0; i < genres.length; i++) {
-                for (let j = i + 1; j < genres.length; j++) {
-                    const dx = genres[j]._cx - genres[i]._cx;
-                    const dy = genres[j]._cy - genres[i]._cy;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const minDist = genres[i]._clusterR + genres[j]._clusterR + BUF * 4;
-                    if (dist < minDist) {
-                        const push = (minDist - dist) / 2 + 1;
-                        genres[i]._cx -= (dx / dist) * push; genres[i]._cy -= (dy / dist) * push;
-                        genres[j]._cx += (dx / dist) * push; genres[j]._cy += (dy / dist) * push;
-                        moved = true;
-                    }
-                }
-            }
-            if (!moved) break;
-        }
-
-        let placedCount = 0;
-
-        // Place genre labels as big watchlist-style bubbles
-        for (const g of genres) {
-            _artMap.placed.push({
-                id: `genre_${g.name}`, name: g.name.toUpperCase(),
-                x: g._cx, y: g._cy, radius: WR, opacity: 1,
-                type: 'genre_label', image_url: '', genres: [g.name],
-                _isLabel: true, _count: g.count
-            });
-        }
-
-        // Place artists in concentric rings — deterministic O(1) per node, handles 10K+ instantly
-        let genreIdx = 0;
-
-        async function placeGenreArtists() {
-            for (; genreIdx < genres.length; genreIdx++) {
-                const genre = genres[genreIdx];
-                const artists = genre.artist_ids.slice(0, maxPerGenre);
-                const sorted = artists.map(nid => data.nodes[nid]).filter(Boolean).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-
-                let ringDist = WR + nodeR * 2 + BUF;
-                let ringNum = 0;
-                let placed = 0;
-
-                while (placed < sorted.length) {
-                    const circumference = 2 * Math.PI * ringDist;
-                    const nodesInRing = Math.max(1, Math.floor(circumference / (nodeR * 2 + BUF)));
-                    const count = Math.min(nodesInRing, sorted.length - placed);
-                    const angleStep = (2 * Math.PI) / nodesInRing;
-                    const angleOffset = ringNum * 0.618;
-
-                    for (let i = 0; i < count; i++) {
-                        const n = sorted[placed + i];
-                        if (!n) continue;
-                        const isW = n.type === 'watchlist' || n.type === 'center';
-                        const r = isW ? nodeR * 1.5 : nodeR;
-                        const angle = angleOffset + i * angleStep;
-
-                        _artMap.placed.push({
-                            id: placedCount + 1000, _origId: n.id, name: n.name,
-                            x: genre._cx + Math.cos(angle) * ringDist,
-                            y: genre._cy + Math.sin(angle) * ringDist,
-                            radius: r, opacity: 1,
-                            type: isW ? 'watchlist' : 'similar',
-                            image_url: n.image_url || '', genres: n.genres || [],
-                            spotify_id: n.spotify_id || '', itunes_id: n.itunes_id || '',
-                            deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
-                        });
-                        placedCount++;
-                    }
-                    placed += count;
-                    ringDist += nodeR * 2 + BUF;
-                    ringNum++;
-                }
-
-                if (loadingText) loadingText.textContent = `Placing artists... ${genreIdx + 1}/${genres.length} genres (${placedCount} placed)`;
-                if (genreIdx % 5 === 0) await new Promise(r => setTimeout(r, 0));
-            }
-        }
-        await placeGenreArtists();
-
-        // Build edges: connect artists that appear in multiple genre clusters
+        // Build genre-island groups from the selected + related genres and lay
+        // them out as filled-disc islands on the water (shared engine).
+        const groups = genres.map(g => ({
+            name: g.name,
+            count: g.count,
+            nodes: (g.artist_ids || []).map(nid => data.nodes[nid]).filter(Boolean),
+        }));
+        _artMapLayoutIslands(groups);
         _artMap.edges = [];
-        const artistNodes = {};
-        _artMap.placed.forEach(n => {
-            if (n._origId != null) {
-                if (!artistNodes[n._origId]) artistNodes[n._origId] = [];
-                artistNodes[n._origId].push(n.id);
-            }
-        });
-        Object.values(artistNodes).forEach(ids => {
-            if (ids.length > 1) {
-                for (let i = 0; i < ids.length - 1; i++) {
-                    _artMap.edges.push({ source: ids[i], target: ids[i + 1], weight: 5 });
-                }
-            }
-        });
-
-        _artMap._nodeById = {};
-        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
-
-        // Auto-zoom
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        _artMap._oneIsland = true; // focus one genre island at a time
+        _artMap._mapTitle = 'Genre Map';
+        const placedCount = _artMap.placed.filter(n => !n._isLabel).length;
 
         _artMapSetupInteraction(canvas);
 
         // Load images + render
         if (loadingText) loadingText.textContent = `Rendering ${placedCount} artists...`;
 
-        setTimeout(async () => {
-            const imgNodes = _artMap.placed.filter(n => n.image_url && !n._isLabel);
-            let loaded = 0;
-            const CONCURRENT = 20;
-            let idx = 0;
-            async function loadBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url)
-                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                        .finally(() => { loaded++; }));
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadBatch();
-            }
-            await loadBatch();
-            _artMap.dirty = true;
-            _artMapRender();
-            const le = document.getElementById('artist-map-loading');
-            if (le) le.remove();
-        }, 50);
+        const le = document.getElementById('artist-map-loading');
+        if (le) le.remove();
 
-        _artMap.dirty = true;
-        _artMapRender();
+        _artMapFocusIsland(0, { bloom: true }); // frame + bloom the selected genre island
+
+        // Stream images in throttled waves — interactive immediately, sharpens in place.
+        _artMapStreamImages(_artMap.placed.filter(n => !n._isLabel));
 
     } catch (err) {
         console.error('Genre map error:', err);
@@ -6218,7 +7198,8 @@ async function _openArtistMapExplorerWithName(name) {
     _artMap.canvas = canvas;
     _artMap.ctx = canvas.getContext('2d');
     _artMap.width = container.clientWidth;
-    _artMap.height = container.clientHeight - 50;
+    const _wtb = container.querySelector('.artist-map-toolbar');
+    _artMap.height = container.clientHeight - (_wtb ? _wtb.offsetHeight : 50);
     canvas.width = _artMap.width * window.devicePixelRatio;
     canvas.height = _artMap.height * window.devicePixelRatio;
     canvas.style.width = _artMap.width + 'px';
@@ -6262,116 +7243,19 @@ async function _openArtistMapExplorerWithName(name) {
         document.getElementById('artist-map-stats').textContent =
             `${data.center} · ${ring1Count} similar · ${ring2Count} extended`;
 
-        _artMap.edges = data.edges;
-        const WR = _artMap.WATCHLIST_R;
-        const BUF = _artMap.BUFFER;
-
-        // Layout: center node at origin, ring 1 in circle around it, ring 2 around ring 1
-        const centerNode = data.nodes[0];
-        centerNode.x = 0; centerNode.y = 0;
-        centerNode.radius = WR * 1.2; // Extra large center
-        centerNode.opacity = 1;
-        centerNode.type = 'center';
-        _artMap.placed.push(centerNode);
-
-        const CELL = WR * 2 + BUF * 2;
-        const grid = {};
-        function _gk(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
-        function _ga(n) { const k = _gk(n.x, n.y); if (!grid[k]) grid[k] = []; grid[k].push(n); }
-        function _gc(x, y, r) {
-            const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
-            for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
-                const cell = grid[`${cx + dx},${cy + dy}`];
-                if (!cell) continue;
-                for (const p of cell) {
-                    const ddx = x - p.x, ddy = y - p.y;
-                    if (ddx * ddx + ddy * ddy < (r + p.radius + BUF) * (r + p.radius + BUF)) return true;
-                }
-            }
-            return false;
-        }
-        _ga(centerNode);
-
-        // Place ring 1 in a circle
-        const ring1 = data.nodes.filter(n => n.ring === 1);
-        const ring1Dist = WR * 2.5;
-        ring1.forEach((n, i) => {
-            const angle = (i / ring1.length) * Math.PI * 2;
-            const rank = n.rank || 5;
-            n.radius = WR * 0.4 + (10 - rank) * WR * 0.03;
-            n.opacity = 1;
-
-            // Find non-colliding position near ideal
-            let placed = false;
-            for (let dist = ring1Dist; dist < ring1Dist + WR * 3; dist += n.radius * 0.5) {
-                for (let ao = 0; ao < 6; ao++) {
-                    const a = angle + (ao * 0.1 * (ao % 2 ? 1 : -1));
-                    const tx = Math.cos(a) * dist;
-                    const ty = Math.sin(a) * dist;
-                    if (!_gc(tx, ty, n.radius)) {
-                        n.x = tx; n.y = ty;
-                        _artMap.placed.push(n);
-                        _ga(n);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        });
-
-        // Place ring 2 around their ring 1 sources
-        const ring2 = data.nodes.filter(n => n.ring === 2);
-        const nodeById = {};
-        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
-
-        ring2.forEach(n => {
-            // Find the ring 1 node that connects to this
-            const edge = data.edges.find(e => e.target === n.id);
-            const src = edge ? nodeById[edge.source] : null;
-            const cx = src ? src.x : 0;
-            const cy = src ? src.y : 0;
-
-            n.radius = WR * 0.2 + (n.popularity || 0) / 100 * WR * 0.1;
-            n.opacity = 1;
-
-            const startDist = (src ? src.radius : WR) + n.radius + BUF;
-            let placed = false;
-            for (let dist = startDist; dist < startDist + WR * 2; dist += n.radius * 0.5) {
-                const steps = Math.max(8, Math.floor(dist * 0.08));
-                const off = Math.random() * Math.PI * 2;
-                for (let a = 0; a < steps; a++) {
-                    const angle = off + (a / steps) * Math.PI * 2;
-                    const tx = cx + Math.cos(angle) * dist;
-                    const ty = cy + Math.sin(angle) * dist;
-                    if (!_gc(tx, ty, n.radius)) {
-                        n.x = tx; n.y = ty;
-                        _artMap.placed.push(n);
-                        _ga(n);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (placed) break;
-            }
-        });
-
-        // Build node lookup for edges
-        _artMap._nodeById = {};
-        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
-
-        // Auto-zoom
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        _artMap.placed.forEach(n => {
-            minX = Math.min(minX, n.x - n.radius);
-            maxX = Math.max(maxX, n.x + n.radius);
-            minY = Math.min(minY, n.y - n.radius);
-            maxY = Math.max(maxY, n.y + n.radius);
-        });
-        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
-        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
-        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
-        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+        // Group the center + all discovered artists into genre islands. The
+        // center artist is focal. Discovery edges (center → similar → extended)
+        // are remapped so the hover constellation still traces how you got from
+        // one artist to another across the islands.
+        const rawNodes = data.nodes.map(n => ({ ...n, _focal: n.ring === 0 || n.type === 'center' }));
+        const groups = _artMapGroupByGenre(rawNodes);
+        _artMapLayoutIslands(groups);
+        _artMap.edges = _artMapRemapEdges(data.edges);
+        _artMap._oneIsland = false; // explore stays multi-island (it's small)
+        _artMap._mapTitle = 'Explore: ' + (data.center || name);
+        _artMapUpdateIslandNav(); // tear down any leftover nav from a prior map
+        _artMapFitToContent();
+        _artMapRefreshPanel();
 
         _artMapSetupInteraction(canvas);
 
@@ -6379,31 +7263,14 @@ async function _openArtistMapExplorerWithName(name) {
         const loadingText = container.querySelector('.artist-map-loading-text');
         if (loadingText) loadingText.textContent = `Loading ${_artMap.placed.length} artists...`;
 
-        setTimeout(async () => {
-            const imgNodes = _artMap.placed.filter(n => n.image_url);
-            let loaded = 0;
-            const CONCURRENT = 20;
-            let idx = 0;
-            async function loadBatch() {
-                const batch = [];
-                while (idx < imgNodes.length && batch.length < CONCURRENT) {
-                    const n = imgNodes[idx++];
-                    batch.push(_artMapLoadImage(n.image_url)
-                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                        .finally(() => { loaded++; }));
-                }
-                if (batch.length) await Promise.all(batch);
-                if (idx < imgNodes.length) return loadBatch();
-            }
-            await loadBatch();
-            _artMap.dirty = true;
-            _artMapRender();
-            const le = document.getElementById('artist-map-loading');
-            if (le) le.remove();
-        }, 50);
+        const le = document.getElementById('artist-map-loading');
+        if (le) le.remove();
 
         _artMap.dirty = true;
-        _artMapRender();
+        _artMapBeginReveal();
+
+        // Stream images in throttled waves — interactive immediately, sharpens in place.
+        _artMapStreamImages(_artMap.placed);
 
     } catch (err) {
         console.error('Artist explorer error:', err);
@@ -6413,14 +7280,22 @@ async function _openArtistMapExplorerWithName(name) {
 }
 
 function _showArtistMapSearchPrompt() {
+    // Search the metadata source and make the user PICK a real artist, rather
+    // than exploring whatever loose text they typed. Resolves with the chosen
+    // artist's resolved name (which the explorer hands to /artist-map/explore),
+    // or null if cancelled.
     return new Promise(resolve => {
         const existing = document.getElementById('artmap-search-prompt');
         if (existing) existing.remove();
 
-        const overlay = document.createElement('div');
+        let done = false;
+        let overlay;
+        const finish = (val) => { if (done) return; done = true; if (overlay) overlay.remove(); resolve(val); };
+
+        overlay = document.createElement('div');
         overlay.id = 'artmap-search-prompt';
         overlay.className = 'modal-overlay';
-        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+        overlay.onclick = (e) => { if (e.target === overlay) finish(null); };
 
         overlay.innerHTML = `
             <div class="artmap-search-prompt-modal">
@@ -6431,32 +7306,79 @@ function _showArtistMapSearchPrompt() {
                     </svg>
                     <div>
                         <h3>Artist Explorer</h3>
-                        <p>Enter an artist to explore their connections</p>
+                        <p>Search and pick an artist to explore</p>
                     </div>
                 </div>
-                <input type="text" id="artmap-explore-input" class="artmap-explore-input" placeholder="Artist name..." autofocus>
+                <div class="artmap-explore-search-wrap">
+                    <input type="text" id="artmap-explore-input" class="artmap-explore-input"
+                           placeholder="Search artists…" autocomplete="off" autofocus>
+                    <div class="artmap-explore-spinner" id="artmap-explore-spinner" style="display:none">
+                        <div class="watch-all-loading-spinner"></div>
+                    </div>
+                </div>
+                <div class="artmap-explore-results" id="artmap-explore-results"></div>
                 <div class="artmap-search-prompt-actions">
-                    <button class="btn btn--sm btn--secondary ya-header-btn" onclick="document.getElementById('artmap-search-prompt').remove()">Cancel</button>
-                    <button class="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn" id="artmap-explore-go">
-                        <span>Explore</span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-                    </button>
+                    <button class="btn btn--sm btn--secondary ya-header-btn" id="artmap-explore-cancel">Cancel</button>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
 
         const input = overlay.querySelector('#artmap-explore-input');
-        const goBtn = overlay.querySelector('#artmap-explore-go');
+        const results = overlay.querySelector('#artmap-explore-results');
+        const spinner = overlay.querySelector('#artmap-explore-spinner');
+        overlay.querySelector('#artmap-explore-cancel').onclick = () => finish(null);
 
-        const submit = () => {
-            const val = input.value.trim();
-            overlay.remove();
-            resolve(val || null);
+        const renderResults = (artists) => {
+            results.innerHTML = '';
+            if (!artists.length) {
+                results.innerHTML = '<div class="artmap-explore-empty">No artists found</div>';
+                return;
+            }
+            artists.forEach(a => {
+                const img = a.image_url || '/static/placeholder-album.png';
+                const row = document.createElement('div');
+                row.className = 'artmap-explore-result';
+                row.innerHTML = `
+                    <img src="${escapeHtml(img)}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
+                    <span class="artmap-explore-result-name">${escapeHtml(a.name)}</span>
+                    <span class="artmap-explore-result-go">Explore &rarr;</span>`;
+                row.onclick = () => finish(a.name);   // pick the resolved artist, not raw text
+                results.appendChild(row);
+            });
         };
 
-        goBtn.onclick = submit;
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+        let timer = null;
+        let token = 0;
+        const doSearch = () => {
+            const q = input.value.trim();
+            if (!q) { results.innerHTML = ''; spinner.style.display = 'none'; clearTimeout(timer); return; }
+            clearTimeout(timer);
+            timer = setTimeout(async () => {
+                const myToken = ++token;
+                spinner.style.display = 'flex';
+                try {
+                    const resp = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(q)}`);
+                    const data = await resp.json();
+                    if (myToken !== token) return;  // a newer keystroke superseded this
+                    renderResults((data && data.success && Array.isArray(data.artists)) ? data.artists : []);
+                } catch (e) {
+                    if (myToken === token) results.innerHTML = '<div class="artmap-explore-empty">Search failed — try again</div>';
+                } finally {
+                    if (myToken === token) spinner.style.display = 'none';
+                }
+            }, 350);
+        };
+
+        input.addEventListener('input', doSearch);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const first = results.querySelector('.artmap-explore-result');
+                if (first) first.click();        // Enter = pick top match, never raw text
+            } else if (e.key === 'Escape') {
+                finish(null);
+            }
+        });
         setTimeout(() => input.focus(), 50);
     });
 }
@@ -6470,18 +7392,129 @@ function artMapToggleSimilar() {
     showToast(_artMap._hideSimilar ? 'Showing watchlist only' : 'Showing all artists', 'info', 1500);
 }
 
-function _artMapLoadImage(url) {
+// Artist images come in at up to 1000×1000. Nodes are drawn tiny, so holding
+// full-res bitmaps is pointless and ruinous: ~1500 nodes × 1000² × 4 bytes ≈ 6 GB
+// of decoded image memory → GC/GPU thrash that locks the browser even though the
+// per-frame draw is cheap. Decode straight to a small avatar (~128px) so the
+// whole map's images fit in ~100 MB instead of gigabytes.
+// Decode to a sensible avatar size for how big the node actually draws — crisp
+// where it matters (focal/watchlist nodes), light for the swarm of small ones —
+// so total image memory stays ~150-250 MB instead of multiple GB.
+function _artMapImgPx(px) {
+    return Math.min(384, Math.max(112, Math.round(px || 144)));
+}
+function _artMapDecodeSmall(blob, px) {
+    if (!blob) return Promise.resolve(null);
+    const d = _artMapImgPx(px);
+    try {
+        return createImageBitmap(blob, {
+            resizeWidth: d, resizeHeight: d, resizeQuality: 'high',
+        }).then(_artMapCircleMask)
+          .catch(() => createImageBitmap(blob).then(_artMapCircleMask).catch(() => null));
+    } catch (e) {
+        return createImageBitmap(blob).then(_artMapCircleMask).catch(() => null);
+    }
+}
+
+// Pre-mask a decoded bitmap into a CIRCLE once, at load time, returning a
+// canvas. The whole map then draws bubbles with a plain drawImage (the canvas
+// is already round) instead of a per-frame ctx.clip() per bubble — clipping is
+// one of the most expensive canvas ops and, at hundreds of visible bubbles per
+// frame, was the live-layer stutter. Done once here, it's free forever after.
+function _artMapCircleMask(src) {
+    if (!src) return null;
+    const w = src.width || 0;
+    if (!w) return src;
+    try {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = w;
+        const cx = c.getContext('2d');
+        cx.beginPath();
+        cx.arc(w / 2, w / 2, w / 2, 0, Math.PI * 2);
+        cx.closePath();
+        cx.clip();
+        cx.drawImage(src, 0, 0, w, w);
+        if (src.close) src.close(); // free the ImageBitmap; we keep the canvas
+        return c;
+    } catch (e) {
+        return src; // fall back to the raw bitmap (draw path still clips defensively)
+    }
+}
+
+function _artMapLoadImage(url, px) {
     // Try direct CORS fetch first (zero server load, works for Spotify/iTunes/Discogs)
     return fetch(url, { mode: 'cors' })
         .then(r => r.ok ? r.blob() : Promise.reject('not ok'))
-        .then(b => createImageBitmap(b))
+        .then(b => _artMapDecodeSmall(b, px))
         .catch(() => {
             // Fallback: server proxy for CDNs without CORS headers
             return fetch('/api/image-proxy?url=' + encodeURIComponent(url))
                 .then(r => r.ok ? r.blob() : null)
-                .then(b => b ? createImageBitmap(b) : null)
+                .then(b => _artMapDecodeSmall(b, px))
                 .catch(() => null);
         });
+}
+
+// Target avatar px for a node, based on its world radius (≈ its on-screen size
+// at full zoom). Focal/watchlist nodes get a big crisp avatar; small ones stay
+// light. Used by every map's image loader.
+function _artMapNodeImgPx(n) {
+    const isFocal = n.type === 'watchlist' || n.type === 'center' || n.ring === 1;
+    return _artMapImgPx(isFocal ? Math.max(256, (n.radius || 0) * 1.4) : (n.radius || 0) * 1.6);
+}
+
+// Stream node images in the background WITHOUT blocking the first paint. The map
+// is drawn immediately with placeholder circles and stays fully interactive
+// (click/hover/pan) while images fill in. Redraws are throttled into ~waves so
+// 1000s of arrivals don't trigger 1000s of buffer rebuilds. A load token makes
+// opening another map cancel this stream (stale bitmaps are dropped). Focal
+// nodes are fetched first so what you're looking at sharpens soonest.
+function _artMapStreamImages(imgNodes, concurrent = 24) {
+    const token = (_artMap._loadToken = (_artMap._loadToken || 0) + 1);
+    // Focal/large nodes first — the user's eye lands there.
+    const queue = imgNodes.filter(n => n.image_url).slice().sort((a, b) => (b.radius || 0) - (a.radius || 0));
+    let idx = 0, inFlight = 0, redrawPending = false;
+
+    // Throttled FULL rebuild as images arrive. The per-map buffer is now small
+    // (one focused island / a small explore map), so a full rebuild is cheap and
+    // — unlike the per-node composite — is guaranteed to pick up every cached
+    // image. This is what makes streamed art appear on its own instead of only
+    // after a manual zoom forced a rebuild.
+    const scheduleRedraw = () => {
+        if (redrawPending || token !== _artMap._loadToken) return;
+        redrawPending = true;
+        setTimeout(() => {
+            redrawPending = false;
+            if (token !== _artMap._loadToken) return;
+            _artMap.dirty = true;
+            _artMapRender();
+            _artMapEnsureAmbient();
+        }, 200);
+    };
+
+    function pump() {
+        if (token !== _artMap._loadToken) return; // a newer map took over
+        while (inFlight < concurrent && idx < queue.length) {
+            const n = queue[idx++];
+            if (_artMap.images[n.id]) continue;
+            inFlight++;
+            _artMapLoadImage(n.image_url, _artMapNodeImgPx(n))
+                .then(bmp => {
+                    if (bmp && token === _artMap._loadToken) {
+                        _artMap.images[n.id] = bmp;
+                        // Hidden bubbles (other islands in one-island mode): just
+                        // cache the image for when you navigate there — don't
+                        // redraw for something off-screen.
+                        if ((n.opacity || 0) < 0.01) return;
+                        // Throttled full rebuild — reliably bakes newly-arrived art
+                        // into the (small) buffer. No manual zoom needed.
+                        scheduleRedraw();
+                    }
+                })
+                .finally(() => { inFlight--; pump(); });
+        }
+    }
+    pump();
 }
 
 function _artMapHideContextMenu() {
@@ -6493,6 +7526,11 @@ function _artMapSetupInteraction(canvas) {
     // Prevent stacking listeners on repeated opens
     if (canvas._artMapListenersAttached) return;
     canvas._artMapListenersAttached = true;
+
+    // Pause ambient buoyancy when the tab is hidden; resume on return.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) _artMapEnsureAmbient();
+    });
 
     let isPanning = false, panStartX = 0, panStartY = 0;
 
@@ -6508,9 +7546,11 @@ function _artMapSetupInteraction(canvas) {
         _artMap.offsetY = my - (my - _artMap.offsetY) * (newZoom / _artMap.zoom);
         _artMap.zoom = newZoom;
         _artMapRender(); // fast blit
-        // Debounce hi-res rebuild after zoom settles
+        _artMapEnsureAmbient(); // resume buoyancy if we zoomed bubbles into view
+        // Debounce hi-res rebuild after zoom settles; then resume buoyancy (the
+        // rebuild may have flipped the live/overflow partition).
         clearTimeout(_artMap._zoomRebuild);
-        _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); }, 300);
+        _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); _artMapEnsureAmbient(); }, 300);
     }, { passive: false });
 
     let clickStart = null;
@@ -6524,6 +7564,7 @@ function _artMapSetupInteraction(canvas) {
         else if (e.key === '-') { artMapZoom(0.7); e.preventDefault(); }
         else if (e.key === '0') { artMapFitToView(); e.preventDefault(); }
         else if (e.key === 'f' || e.key === 'F') { artMapFitToView(); e.preventDefault(); }
+        else if (e.key === 'd' || e.key === 'D') { _artMap._perf = !_artMap._perf; _artMapRender(); e.preventDefault(); }
         else if (e.key === 's' || e.key === 'S') {
             const input = document.getElementById('artist-map-search');
             if (input) { input.focus(); e.preventDefault(); }
@@ -6534,6 +7575,8 @@ function _artMapSetupInteraction(canvas) {
             _artMap.dirty = true;
             _artMapRender();
         }
+        else if (_artMap._oneIsland && e.key === 'ArrowLeft') { _artMapIslandNav(-1); e.preventDefault(); }
+        else if (_artMap._oneIsland && e.key === 'ArrowRight') { _artMapIslandNav(1); e.preventDefault(); }
     }
     window.addEventListener('keydown', _artMapKeyHandler);
     _artMap._keyHandler = _artMapKeyHandler;
@@ -6601,6 +7644,18 @@ function _artMapSetupInteraction(canvas) {
             canvas.style.cursor = _artMap.hoveredNode ? 'pointer' : 'grab';
             _artMapShowTooltip(e, _artMap.hoveredNode);
             if (prev !== _artMap.hoveredNode) {
+                // Debounce the side-panel card: only swap to a bubble you've
+                // settled on for ~0.8s, so sweeping toward the panel doesn't keep
+                // changing the card on bubbles you pass over en route.
+                clearTimeout(_artMap._panelTimer);
+                if (_artMap.hoveredNode) {
+                    const target = _artMap.hoveredNode;
+                    _artMap._panelTimer = setTimeout(() => {
+                        if (_artMap.hoveredNode === target) _artMapPanelArtist(target);
+                    }, 800);
+                }
+            }
+            if (prev !== _artMap.hoveredNode) {
                 // Reset constellation highlight timer
                 clearTimeout(_artMap._constellationTimer);
                 if (_artMap._constellationActive) {
@@ -6608,7 +7663,8 @@ function _artMapSetupInteraction(canvas) {
                     _artMapAnimateConstellation(); // fade out
                 }
                 if (_artMap.hoveredNode) {
-                    // Delay constellation effect by 800ms of sustained hover
+                    // Snappy sustained-hover delay before the constellation lights up
+                    // (was 800ms, which felt like nothing happened).
                     _artMap._constellationTimer = setTimeout(() => {
                         if (_artMap.hoveredNode) {
                             _artMap._constellationActive = true;
@@ -6616,7 +7672,7 @@ function _artMapSetupInteraction(canvas) {
                             _artMap._constellationCache = null;
                             _artMapAnimateConstellation();
                         }
-                    }, 800);
+                    }, 220);
                 }
                 _artMapRender();
             }
@@ -6629,15 +7685,15 @@ function _artMapSetupInteraction(canvas) {
         isPanning = false;
 
         if (!wasDrag && clickStart) {
-            // It was a click — find the node under cursor
+            // A click is a deliberate select — ripple it and pin its card in the
+            // side panel immediately (bypassing the hover debounce). The card's
+            // Details button opens the full modal; click no longer auto-opens it.
             const { nx, ny } = _artMapScreenToWorld(e, canvas);
             const node = _artMapHitTest(nx, ny);
+            _artMapEmitRipple(node ? node.x : nx, node ? node.y : ny, node ? node._hue : null);
             if (node) {
-                _artMap._ripple = { x: node.x, y: node.y, radius: node.radius, start: performance.now() };
-                _artMapRender();
-                if (node.spotify_id || node.itunes_id || node.deezer_id) {
-                    setTimeout(() => openYourArtistInfoModal_direct(node), 200);
-                }
+                clearTimeout(_artMap._panelTimer);
+                _artMapPanelArtist(node);
             }
         }
 
@@ -6699,24 +7755,43 @@ function _artMapSetupInteraction(canvas) {
             const wx = (t.clientX - rect.left - _artMap.offsetX) / _artMap.zoom;
             const wy = (t.clientY - rect.top - _artMap.offsetY) / _artMap.zoom;
             const node = _artMapHitTest(wx, wy);
-            if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
-                openYourArtistInfoModal_direct(node);
+            const moved = Math.abs(t.clientX - (lastTouches[0].clientX)) > 8 || Math.abs(t.clientY - (lastTouches[0].clientY)) > 8;
+            if (!moved) {
+                _artMapEmitRipple(node ? node.x : wx, node ? node.y : wy, node ? node._hue : null);
+                if (node) _artMapPanelArtist(node); // tap selects → card in the bottom sheet
             }
         }
         lastTouches = null;
     }, { passive: false });
 
-    // Handle resize
+    // Handle resize / orientation change — debounced, and re-frames for the new
+    // breakpoint (mobile bottom-sheet ⇄ desktop sidebar).
     window.addEventListener('resize', () => {
         const container = document.getElementById('artist-map-container');
         if (!container || container.style.display === 'none') return;
-        _artMap.width = container.clientWidth;
-        _artMap.height = container.clientHeight - 50;
-        canvas.width = _artMap.width * window.devicePixelRatio;
-        canvas.height = _artMap.height * window.devicePixelRatio;
-        canvas.style.width = _artMap.width + 'px';
-        canvas.style.height = _artMap.height + 'px';
-        _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        clearTimeout(_artMap._resizeTimer);
+        _artMap._resizeTimer = setTimeout(() => {
+            if (container.style.display === 'none') return;
+            const sb = document.getElementById('artmap-genre-sidebar');
+            const sbW = (sb && sb.style.display !== 'none') ? (sb.offsetWidth || 0) : 0;
+            const tb = container.querySelector('.artist-map-toolbar');
+            _artMap.width = Math.max(120, container.clientWidth - sbW);
+            _artMap.height = Math.max(120, container.clientHeight - (tb ? tb.offsetHeight : 50));
+            canvas.width = _artMap.width * window.devicePixelRatio;   // resets ctx transform
+            canvas.height = _artMap.height * window.devicePixelRatio;
+            canvas.style.width = _artMap.width + 'px';
+            canvas.style.height = _artMap.height + 'px';
+            _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            _artMapEnsurePanel(); // re-style sidebar ⇄ bottom sheet
+            if (_artMap._oneIsland && (_artMap._islands || []).length) {
+                _artMapFocusIsland(_artMap._focusIdx || 0, { bloom: false });
+            } else {
+                _artMapFitToContent();
+                _artMapRefreshPanel();
+            }
+            _artMap.dirty = true;
+            _artMapRender();
+        }, 160);
     });
 }
 
@@ -6732,16 +7807,21 @@ function _artMapScreenToWorld(e, canvas) {
 }
 
 function _artMapHitTest(wx, wy) {
-    // Check watchlist first (drawn on top), then similar
-    const sorted = [..._artMap.placed].sort((a, b) =>
-        (b.type === 'watchlist' ? 1 : 0) - (a.type === 'watchlist' ? 1 : 0));
-    for (const n of sorted) {
+    // Single O(N) pass, no per-move sort, no allocation. Watchlist nodes draw on
+    // top so they win ties; otherwise the first node whose circle contains the
+    // point wins. (A spatial grid was tried and reverted — it exploded building
+    // cells for large-radius genre cluster nodes. A flat scan of even thousands
+    // of nodes is sub-millisecond and can't lock up.)
+    let similarHit = null;
+    for (const n of _artMap.placed) {
         if ((n.opacity || 0) < 0.3) continue;
-        const dx = wx - n.x;
-        const dy = wy - n.y;
-        if (dx * dx + dy * dy <= n.radius * n.radius) return n;
+        const dx = wx - n.x, dy = wy - n.y;
+        if (dx * dx + dy * dy <= n.radius * n.radius) {
+            if (n.type === 'watchlist') return n;
+            if (!similarHit) similarHit = n;
+        }
     }
-    return null;
+    return similarHit;
 }
 
 async function openYourArtistInfoModal_direct(node) {

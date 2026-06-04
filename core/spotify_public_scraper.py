@@ -9,7 +9,8 @@ import logging
 import hashlib
 import requests
 
-logger = logging.getLogger(__name__)
+# 'soulsync.*' so these lines land in app.log (the bare module name isn't captured).
+logger = logging.getLogger('soulsync.spotify_public')
 
 
 def parse_spotify_url(url: str) -> dict:
@@ -82,10 +83,18 @@ def scrape_spotify_embed(spotify_type: str, spotify_id: str) -> dict:
         logger.error(f"Failed to fetch Spotify embed: {e}")
         return {'error': f'Failed to fetch Spotify page: {str(e)}'}
 
+    return parse_embed_html(response.text, spotify_type, spotify_id)
+
+
+def parse_embed_html(html: str, spotify_type: str, spotify_id: str) -> dict:
+    """Parse a Spotify embed page's ``__NEXT_DATA__`` into the standard result
+    shape. Shared by the embed scraper and the full public fetch, which pulls
+    the name + first-page tracks from the same embed page it reads the token
+    from (so it needs no extra metadata request)."""
     # Extract __NEXT_DATA__ JSON
     match = re.search(
         r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-        response.text
+        html
     )
     if not match:
         logger.error("No __NEXT_DATA__ found in Spotify embed response")
@@ -151,3 +160,31 @@ def scrape_spotify_embed(spotify_type: str, spotify_id: str) -> dict:
 
     logger.info(f"Scraped Spotify {spotify_type}: {result['name']} ({len(tracks)} tracks)")
     return result
+
+
+def fetch_spotify_public(spotify_type: str, spotify_id: str) -> dict:
+    """Fetch a public Spotify link, preferring the FULL track list.
+
+    Playlists are pulled via the anonymous public-API path
+    (``spotify_public_api.fetch_public_playlist_full``), which paginates past
+    the embed widget's ~100-track cap. On ANY failure — or for albums, which
+    the embed already returns whole — this falls back to ``scrape_spotify_embed``
+    (today's behaviour). Same return shape either way, so callers don't care
+    which path produced the data.
+    """
+    if spotify_type == 'playlist':
+        try:
+            from core.spotify_public_api import fetch_public_playlist_full
+            result = fetch_public_playlist_full(spotify_id)
+            if result and result.get('tracks'):
+                logger.info(
+                    f"Spotify public API (full): {result.get('name')} "
+                    f"({len(result['tracks'])} tracks)"
+                )
+                return result
+        except Exception as e:
+            logger.info(
+                f"Spotify public full fetch failed ({e}); "
+                f"falling back to embed scraper (≤100 tracks)"
+            )
+    return scrape_spotify_embed(spotify_type, spotify_id)

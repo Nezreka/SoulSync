@@ -418,8 +418,20 @@ def _coerce_int(value: Any, default: int = 1) -> int:
     return coerced if coerced > 0 else default
 
 
-def build_final_path_for_track(context, artist_context, album_info, file_ext):
-    """Shared path builder used by both post-processing and verification."""
+def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
+    """Shared path builder used by both post-processing and verification.
+
+    ``create_dirs`` gates the directory-creation side effects. The download
+    import flow leaves it True (it's about to write the file there). The
+    library-reorganize PREVIEW passes False so a dry run can compute the exact
+    destination path WITHOUT physically creating the folder — fixes #767 (dry
+    run was leaving empty destination folders behind)."""
+    _real_makedirs = os.makedirs
+
+    def _ensure_dir(path, **_kw):
+        if create_dirs:
+            _real_makedirs(path, exist_ok=True)
+
     transfer_dir = docker_resolve_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"))
     context = normalize_import_context(context)
     track_info = get_import_track_info(context)
@@ -440,7 +452,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
         original_dir = os.path.dirname(original_path)
         original_stem = os.path.splitext(os.path.basename(original_path))[0]
         final_path = os.path.join(original_dir, original_stem + file_ext)
-        os.makedirs(original_dir, exist_ok=True)
+        _ensure_dir(original_dir, exist_ok=True)
         logger.info("[Enhance] Using original file location: %s", final_path)
         return final_path, True
 
@@ -477,12 +489,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
         folder_path, filename_base = get_file_path_from_template(template_context, "playlist_path")
         if folder_path and filename_base:
             final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
 
         playlist_name_sanitized = sanitize_filename(playlist_name)
         playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
-        os.makedirs(playlist_dir, exist_ok=True)
+        _ensure_dir(playlist_dir, exist_ok=True)
         artist_name_sanitized = sanitize_filename(template_context["artist"])
         track_name_sanitized = sanitize_filename(track_name)
         new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
@@ -579,10 +591,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
             if total_discs > 1 and not user_controls_disc:
                 disc_folder = f"{disc_label} {disc_number}"
                 final_path = os.path.join(transfer_dir, folder_path, disc_folder, filename_base + file_ext)
-                os.makedirs(os.path.join(transfer_dir, folder_path, disc_folder), exist_ok=True)
+                _ensure_dir(os.path.join(transfer_dir, folder_path, disc_folder), exist_ok=True)
             else:
                 final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-                os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+                _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
 
         artist_name_sanitized = sanitize_filename(template_context["albumartist"])
@@ -592,7 +604,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
         album_dir = os.path.join(artist_dir, album_folder_name)
         if total_discs > 1:
             album_dir = os.path.join(album_dir, f"{disc_label} {disc_number}")
-        os.makedirs(album_dir, exist_ok=True)
+        _ensure_dir(album_dir, exist_ok=True)
         final_track_name_sanitized = sanitize_filename(clean_track_name)
         new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
         return os.path.join(album_dir, new_filename), True
@@ -629,10 +641,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
     if filename_base:
         if folder_path:
             final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
         else:
             final_path = os.path.join(transfer_dir, filename_base + file_ext)
-            os.makedirs(transfer_dir, exist_ok=True)
+            _ensure_dir(transfer_dir, exist_ok=True)
         return final_path, True
 
     artist_name_sanitized = sanitize_filename(template_context["artist"])
@@ -640,6 +652,6 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
     artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
     single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
     single_dir = os.path.join(artist_dir, single_folder_name)
-    os.makedirs(single_dir, exist_ok=True)
+    _ensure_dir(single_dir, exist_ok=True)
     new_filename = f"{final_track_name_sanitized}{file_ext}"
     return os.path.join(single_dir, new_filename), True

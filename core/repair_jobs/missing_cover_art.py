@@ -1,11 +1,42 @@
 """Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
+import os
+import re
+
+from core.metadata.art_apply import album_has_art_on_disk
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
+
+# Stopwords dropped before comparing album/artist names so trivial words
+# ("the", "and") don't make two different names look like a match.
+_NAME_STOPWORDS = {'the', 'a', 'an', 'and', 'of', 'feat', 'ft', 'featuring'}
+
+
+def _norm_name(value) -> str:
+    """Lowercase, strip bracketed qualifiers (Deluxe/Remaster/feat.) and
+    punctuation so names can be compared on their significant words."""
+    s = (value or '').lower()
+    s = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', s)          # drop (...) [...] qualifiers
+    s = re.sub(r'\b(?:feat|ft|featuring)\b.*', ' ', s)  # drop trailing "feat. X"
+    s = re.sub(r'[^a-z0-9]+', ' ', s)
+    return ' '.join(s.split())
+
+
+def _name_tokens(value) -> set:
+    return set(_norm_name(value).split()) - _NAME_STOPWORDS
+
+
+def _names_match(a, b) -> bool:
+    """True when two names share all the significant words of the shorter one
+    (so "Album" matches "Album (Deluxe)", but unrelated titles don't)."""
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
 
 
 @register_job
@@ -59,6 +90,12 @@ class MissingCoverArtJob(RepairJob):
                 "al.spotify_album_id",
                 "al.thumb_url",
                 "ar.thumb_url",
+                # A representative local track path, so we can check whether the
+                # album actually has art ON DISK (embedded / cover.jpg) — not just
+                # whether the DB row has a thumb_url.
+                ("(SELECT t.file_path FROM tracks t WHERE t.album_id = al.id "
+                 "AND t.file_path IS NOT NULL AND t.file_path != '' "
+                 "ORDER BY t.disc_number, t.track_number LIMIT 1) AS rep_path"),
             ]
             column_map = [
                 ("itunes_album_id", "al.itunes_album_id"),
@@ -72,12 +109,14 @@ class MissingCoverArtJob(RepairJob):
                     column_index[alias] = len(select_cols)
                     select_cols.append(f"{column} AS {alias}")
 
+            # Scan every titled album — we decide per-album whether art is
+            # missing in the DB OR on disk (the file/cover.jpg). The on-disk
+            # check is cheap-first (a sidecar stat before opening any audio).
             cursor.execute(f"""
                 SELECT {', '.join(select_cols)}
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE (al.thumb_url IS NULL OR al.thumb_url = '')
-                  AND al.title IS NOT NULL AND al.title != ''
+                WHERE al.title IS NOT NULL AND al.title != ''
             """)
             albums = cursor.fetchall()
         except Exception as e:
@@ -103,7 +142,7 @@ class MissingCoverArtJob(RepairJob):
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist_name, spotify_album_id, _, artist_thumb = row[:6]
+            album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
             source_album_ids = {
                 'spotify': spotify_album_id,
                 'itunes': row[column_index['itunes_album_id']] if 'itunes_album_id' in column_index else None,
@@ -112,6 +151,14 @@ class MissingCoverArtJob(RepairJob):
                 'hydrabase': row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None,
             }
             result.scanned += 1
+
+            # Art can be missing in the DB (no thumb_url) and/or on disk (no
+            # embedded art and no cover.jpg). Skip albums that already have both.
+            db_missing = not (str(album_thumb).strip() if album_thumb else '')
+            disk_missing = bool(rep_path) and not album_has_art_on_disk(rep_path)
+            if not db_missing and not disk_missing:
+                result.skipped += 1
+                continue
 
             if context.report_progress:
                 context.report_progress(
@@ -154,6 +201,12 @@ class MissingCoverArtJob(RepairJob):
                                 'found_artwork_url': artwork_url,
                                 'spotify_album_id': spotify_album_id,
                                 'artist_thumb_url': artist_thumb or None,
+                                # Where the files live + what was missing, so the
+                                # apply can embed into the audio + write cover.jpg.
+                                'album_folder': os.path.dirname(rep_path) if rep_path else None,
+                                'db_missing': db_missing,
+                                'disk_missing': disk_missing,
+                                'musicbrainz_release_id': None,
                             }
                         )
                         if inserted:
@@ -192,18 +245,69 @@ class MissingCoverArtJob(RepairJob):
                     return artwork_url
 
             if query and hasattr(client, 'search_albums'):
-                results = client.search_albums(query, limit=1)
-                if results:
-                    artwork_url = self._extract_artwork_url(results[0])
+                # Pull a few results and only accept one whose title AND artist
+                # actually match this album. The old code grabbed results[0]'s
+                # artwork unconditionally, so a loose full-text search returning
+                # the wrong album gave the wrong cover.
+                results = client.search_albums(query, limit=5) or []
+                for res in results:
+                    if not self._result_matches(res, title, artist_name):
+                        continue
+                    artwork_url = self._extract_artwork_url(res)
                     if artwork_url:
                         return artwork_url
-                    candidate_id = self._extract_album_id(results[0])
+                    candidate_id = self._extract_album_id(res)
                     if candidate_id:
                         album_data = self._get_album_for_source(source, client, candidate_id)
-                        return self._extract_artwork_url(album_data)
+                        artwork_url = self._extract_artwork_url(album_data)
+                        if artwork_url:
+                            return artwork_url
         except Exception as e:
             logger.debug("%s art lookup failed for '%s': %s", source.capitalize(), title, e)
         return None
+
+    @staticmethod
+    def _result_title_artist(item):
+        """Pull (title, artist) from a search result that may be a dict or an
+        Album-like object, across the various source clients."""
+        if item is None:
+            return '', ''
+        if isinstance(item, dict):
+            title = item.get('title') or item.get('name') or item.get('album') or ''
+            artist = item.get('artist') or item.get('artist_name') or ''
+            if not artist:
+                artists = item.get('artists') or []
+                if isinstance(artists, list) and artists:
+                    a0 = artists[0]
+                    artist = a0.get('name', '') if isinstance(a0, dict) else str(a0)
+        else:
+            title = getattr(item, 'title', None) or getattr(item, 'name', None) or getattr(item, 'album', None) or ''
+            artist = getattr(item, 'artist', None) or getattr(item, 'artist_name', None) or ''
+            if not artist:
+                arts = getattr(item, 'artists', None) or []
+                if isinstance(arts, list) and arts:
+                    a0 = arts[0]
+                    artist = a0.get('name', '') if isinstance(a0, dict) else str(a0)
+        return str(title or ''), str(artist or '')
+
+    @classmethod
+    def _result_matches(cls, result, album_title, album_artist) -> bool:
+        """Reject a search result unless it confidently matches the album.
+
+        Title must match; if both the result and the album carry an artist, the
+        artist must match too (the strongest guard against wrong covers). When
+        the result has no artist to compare, require an exact title match.
+        """
+        r_title, r_artist = cls._result_title_artist(result)
+        # Title may carry extra qualifiers (Deluxe/Remaster) → allow subset.
+        if not _names_match(r_title, album_title):
+            return False
+        # Artist is the strong guard, so require its significant words to match
+        # EXACTLY (not subset) — "Different Artist" must NOT match "Artist".
+        if r_artist and album_artist:
+            return _name_tokens(r_artist) == _name_tokens(album_artist)
+        # No artist on the result → require an exact title match instead.
+        return _norm_name(r_title) == _norm_name(album_title)
 
     @staticmethod
     def _get_album_for_source(source, client, album_id):
@@ -248,10 +352,11 @@ class MissingCoverArtJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # Upper bound: every titled album is examined (the per-album DB/disk
+            # art check decides which actually need filling).
             cursor.execute("""
                 SELECT COUNT(*) FROM albums
-                WHERE (thumb_url IS NULL OR thumb_url = '')
-                  AND title IS NOT NULL AND title != ''
+                WHERE title IS NOT NULL AND title != ''
             """)
             row = cursor.fetchone()
             return row[0] if row else 0
