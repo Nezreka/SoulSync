@@ -53,27 +53,31 @@ def file_has_embedded_art(file_path: str) -> bool:
     if not symbols:
         return False
     try:
-        audio = symbols.File(file_path)
-        if audio is None:
-            return False
-        # FLAC / Ogg expose picture blocks directly.
-        if getattr(audio, "pictures", None):
-            return True
-        tags = getattr(audio, "tags", None)
-        if isinstance(audio, symbols.MP4):
-            return bool(audio.get("covr"))
-        if tags is None:
-            return False
-        with contextlib.suppress(Exception):
-            if isinstance(tags, symbols.ID3):
-                return bool(tags.getall("APIC"))
-        with contextlib.suppress(Exception):
-            if "metadata_block_picture" in tags:
-                return True
-        return False
+        return _audio_has_art(symbols.File(file_path), symbols)
     except Exception as exc:
         logger.debug("art presence check failed for %s: %s", file_path, exc)
         return False
+
+
+def _audio_has_art(audio, symbols) -> bool:
+    """True if an already-open mutagen object carries embedded cover art."""
+    if audio is None:
+        return False
+    # FLAC / Ogg expose picture blocks directly.
+    if getattr(audio, "pictures", None):
+        return True
+    if isinstance(audio, symbols.MP4):
+        return bool(audio.get("covr"))
+    tags = getattr(audio, "tags", None)
+    if tags is None:
+        return False
+    with contextlib.suppress(Exception):
+        if isinstance(tags, symbols.ID3):
+            return bool(tags.getall("APIC"))
+    with contextlib.suppress(Exception):
+        if "metadata_block_picture" in tags:
+            return True
+    return False
 
 
 def album_has_art_on_disk(rep_file_path: str) -> bool:
@@ -121,6 +125,12 @@ def apply_art_to_album_files(
         try:
             audio = symbols.File(fp)
             if audio is None:
+                result["skipped"] += 1
+                continue
+            # Purely additive: never touch a file that already has art. Embedding
+            # again would APPEND a duplicate picture on FLAC (add_picture doesn't
+            # replace), so leave already-arted files alone.
+            if _audio_has_art(audio, symbols):
                 result["skipped"] += 1
                 continue
             # ID3 needs a tag container before APIC can be added.
