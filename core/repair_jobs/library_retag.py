@@ -45,7 +45,33 @@ def _read_current_tags(file_path):
         return {}
 
 
-def apply_track_plans(track_plans, cover_action=None, cover_url=None) -> dict:
+def _run_full_enrich(file_path, full_meta) -> bool:
+    """'full' depth: run the same multi-source enrichment a fresh download gets
+    (MusicBrainz/Deezer/AudioDB/Tidal/… via embed_source_ids), ADDITIVELY — it
+    adds rich frames without clearing existing tags. Slow + API-heavy per track.
+    """
+    if not full_meta:
+        return False
+    try:
+        from core.metadata.common import get_mutagen_symbols
+        from core.metadata.source import embed_source_ids
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return False
+        audio = symbols.File(file_path)
+        if audio is None:
+            return False
+        if getattr(audio, 'tags', None) is None and hasattr(audio, 'add_tags'):
+            audio.add_tags()
+        embed_source_ids(audio, full_meta, context=None, runtime=None)
+        audio.save()
+        return True
+    except Exception as e:
+        logger.warning("full enrich failed for %s: %s", file_path, e)
+        return False
+
+
+def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False) -> dict:
     """Write each plan's tags in place (+ optionally embed/refresh cover art),
     reusing tag_writer.write_tags_to_file. ``file_path`` on each plan must be a
     real, reachable path (caller resolves Docker paths). Shared by the dry-run=
@@ -76,6 +102,8 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None) -> dict:
             if res.get('success'):
                 result['written'] += 1
                 last_dir = _os.path.dirname(fp)
+                if full and tp.get('full_meta'):
+                    _run_full_enrich(fp, tp['full_meta'])
             else:
                 result['failed'] += 1
         except Exception as e:
@@ -114,6 +142,34 @@ def _add_source_ids(db_data, source, album_source_id, source_track):
             db_data[track_key] = tid
 
 
+_FULL_META_ID_KEYS = (
+    'spotify_album_id', 'spotify_track_id',
+    'itunes_album_id', 'itunes_track_id',
+    'musicbrainz_release_id', 'musicbrainz_recording_id',
+    'deezer_id',
+)
+
+
+def _build_full_meta(db_data, src, album_title, artist_name, lib_title):
+    """Metadata dict for the 'full' depth enrichment cascade. Carries the matched
+    source's ids so embed_source_ids resolves the right entity instead of guessing
+    by name."""
+    src_title = None
+    for k in ('name', 'title', 'track_name'):
+        v = src.get(k) if isinstance(src, dict) else getattr(src, k, None)
+        if v:
+            src_title = v
+            break
+    meta = {
+        'title': src_title or lib_title,
+        'album': album_title,
+        'album_artist': artist_name,
+        'artist': artist_name,
+    }
+    meta.update({k: db_data[k] for k in _FULL_META_ID_KEYS if db_data.get(k)})
+    return meta
+
+
 def _track_list(result):
     """Normalize a get_album_tracks result into a plain list of track items."""
     if result is None:
@@ -144,6 +200,10 @@ class LibraryRetagJob(RepairJob):
         'comes from. Each finding lists every tag that would change (old -> new) per '
         'track so you can review before applying — nothing is written until you do.\n\n'
         'Settings:\n'
+        '- Depth: "light" writes the core tags + the matched source\'s ids (fast, '
+        'additive). "full" also runs the same multi-source enrichment a fresh '
+        'download gets (MusicBrainz / Deezer / AudioDB / Tidal / etc. — BPM, ISRC, '
+        'lyrics, moods, …); much richer but slower and API-heavy on a big library.\n'
         '- Dry run (default ON): only create findings to review; nothing is written. '
         'Turn it off to auto-apply on scan.\n'
         '- Mode: "overwrite" rewrites every field the source provides; "fill_missing" '
@@ -156,14 +216,16 @@ class LibraryRetagJob(RepairJob):
     default_interval_hours = 168
     default_settings = {
         'dry_run': True,
+        'depth': 'light',
         'mode': MODE_OVERWRITE,
         'cover_art': 'replace',
-        'source': '',
+        'source': 'auto',
     }
     setting_options = {
+        'depth': ['light', 'full'],
         'mode': [MODE_OVERWRITE, MODE_FILL_MISSING],
         'cover_art': ['replace', 'fill_missing', 'skip'],
-        'source': ['', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
+        'source': ['auto', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
     }
     auto_fix = True
 
@@ -186,6 +248,7 @@ class LibraryRetagJob(RepairJob):
         mode = settings.get('mode', MODE_OVERWRITE)
         cover_mode = settings.get('cover_art', 'replace')
         dry_run = settings.get('dry_run', True)
+        depth = settings.get('depth', 'light')
         source_order = self._source_order(settings)
         if not source_order:
             logger.warning("Library re-tag: no usable metadata sources configured")
@@ -233,7 +296,7 @@ class LibraryRetagJob(RepairJob):
 
             try:
                 self._scan_album(context, result, album_id, album_title, artist_name,
-                                 source, album_source_id, mode, cover_mode, dry_run)
+                                 source, album_source_id, mode, cover_mode, dry_run, depth)
             except Exception as e:
                 logger.debug("Library re-tag: album %s failed: %s", album_id, e)
                 result.errors += 1
@@ -245,7 +308,7 @@ class LibraryRetagJob(RepairJob):
         return result
 
     def _scan_album(self, context, result, album_id, album_title, artist_name,
-                    source, album_source_id, mode, cover_mode, dry_run=True):
+                    source, album_source_id, mode, cover_mode, dry_run=True, depth='light'):
         # Local tracks for this album.
         with context.db._get_connection() as conn:
             cur = conn.cursor()
@@ -297,13 +360,17 @@ class LibraryRetagJob(RepairJob):
             if plan['changes'] or cover_action:
                 db_data = plan['db_data']
                 _add_source_ids(db_data, source, album_source_id, src)
-                track_plans.append({
+                tp = {
                     'file_path': lib['file_path'],
                     'track_id': lib['id'],
                     'title': lib['title'],
                     'changes': plan['changes'],
                     'db_data': db_data,
-                })
+                }
+                if depth == 'full':
+                    tp['full_meta'] = _build_full_meta(
+                        db_data, src, album_title, artist_name, lib['title'])
+                track_plans.append(tp)
 
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])
         if not tag_change_tracks and not cover_action:
@@ -313,7 +380,7 @@ class LibraryRetagJob(RepairJob):
         # Not dry-run: apply the tags in place now (the track paths were already
         # isfile-checked above) and count it as an auto-fix — no finding.
         if not dry_run:
-            res = apply_track_plans(track_plans, cover_action, cover_url)
+            res = apply_track_plans(track_plans, cover_action, cover_url, full=(depth == 'full'))
             if res['written'] or res['cover_written']:
                 result.auto_fixed += 1
             else:
@@ -326,6 +393,8 @@ class LibraryRetagJob(RepairJob):
             summary_bits.append(f"{tag_change_tracks} track(s), {total_changes} tag change(s)")
         if cover_action:
             summary_bits.append(f"cover art ({cover_action})")
+        if depth == 'full':
+            summary_bits.append("full multi-source enrichment")
         desc = (f'Album "{album_title}" by {artist_name or "Unknown"} would be re-tagged from '
                 f'{source} ({", ".join(summary_bits)}).')
         if unmatched:
@@ -347,6 +416,7 @@ class LibraryRetagJob(RepairJob):
                     'artist': artist_name,
                     'source': source,
                     'album_source_id': album_source_id,
+                    'depth': depth,
                     'mode': mode,
                     'cover_mode': cover_mode,
                     'cover_url': cover_url,

@@ -1375,10 +1375,14 @@ class RepairWorker:
                 continue
             rp = _resolve_file_path(raw, self.transfer_folder, download_folder,
                                     config_manager=self._config_manager) or raw
-            resolved_plans.append({'file_path': rp, 'db_data': t.get('db_data') or {}})
+            plan = {'file_path': rp, 'db_data': t.get('db_data') or {}}
+            if t.get('full_meta'):
+                plan['full_meta'] = t['full_meta']
+            resolved_plans.append(plan)
 
         from core.repair_jobs.library_retag import apply_track_plans
-        res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'))
+        res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
+                                full=(details.get('depth') == 'full'))
 
         if res['written'] == 0 and not res['cover_written']:
             return {'success': False,

@@ -111,6 +111,74 @@ def test_scan_dry_run_off_auto_applies_no_finding(tmp_path, monkeypatch):
     assert writes and writes[0]['title'] == 'Real Title'   # actually wrote
 
 
+def test_scan_full_depth_attaches_full_meta_to_finding(tmp_path, monkeypatch):
+    """depth=full: each track plan carries a full_meta dict (title/album/artist +
+    source ids) for the enrichment cascade, and details record the depth."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'skip', 'source': 'spotify', 'depth': 'full'})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    d = ctx.findings[0]['details']
+    assert d['depth'] == 'full'
+    fm = d['tracks'][0]['full_meta']
+    assert fm['title'] == 'Real Title'
+    assert fm['album'] == 'Real Album'
+    assert fm['album_artist'] == 'Real Artist'
+    assert fm['spotify_album_id'] == 'sp_alb'
+    assert fm['spotify_track_id'] == 'sp_trk'
+
+
+def test_scan_full_depth_auto_apply_runs_enrich(tmp_path, monkeypatch):
+    """depth=full + dry_run off: after the light write, the full enrichment
+    cascade runs once per written track."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'skip', 'source': 'spotify',
+                          'depth': 'full', 'dry_run': False})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    monkeypatch.setattr('core.tag_writer.write_tags_to_file',
+                        lambda fp, db_data, **k: {'success': True})
+    enriched = []
+    monkeypatch.setattr(lr, '_run_full_enrich',
+                        lambda fp, meta: enriched.append((fp, meta)) or True)
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.auto_fixed == 1
+    assert len(enriched) == 1
+    assert enriched[0][1]['spotify_track_id'] == 'sp_trk'
+
+
+def test_scan_light_depth_does_not_run_enrich(tmp_path, monkeypatch):
+    """depth=light (default): no full_meta, enrichment cascade never invoked."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'skip', 'source': 'spotify',
+                          'dry_run': False})  # depth defaults to light
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    monkeypatch.setattr('core.tag_writer.write_tags_to_file',
+                        lambda fp, db_data, **k: {'success': True})
+    enriched = []
+    monkeypatch.setattr(lr, '_run_full_enrich',
+                        lambda fp, meta: enriched.append(fp) or True)
+
+    lr.LibraryRetagJob().scan(ctx)
+    assert enriched == []
+
+
 def test_scan_skips_album_already_correct(tmp_path, monkeypatch):
     track = tmp_path / 'track.flac'; track.write_bytes(b'')
     conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Real Title')
