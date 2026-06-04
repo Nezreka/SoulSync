@@ -18574,8 +18574,12 @@ def mlm_save():
         db = get_database()
         profile_id = get_current_profile_id()
         # Validate library track exists before saving
-        if not db.api_get_tracks_by_ids([library_track_id]):
+        _lib_rows = db.api_get_tracks_by_ids([library_track_id])
+        if not _lib_rows:
             return jsonify({"success": False, "error": "Library track not found — it may have been removed"}), 400
+        # Store the file path so this match re-resolves after a rescan re-keys
+        # the track (#787) — same durability the Find & Add path gets.
+        _lib_file_path = (_lib_rows[0].get('file_path') or '') if _lib_rows else ''
         ok = mlm.save_match(
             db, profile_id, source, source_track_id, library_track_id,
             source_title=data.get('source_title', ''),
@@ -18583,6 +18587,7 @@ def mlm_save():
             source_album=data.get('source_album', ''),
             source_context_json=data.get('source_context_json', ''),
             server_source=data.get('server_source', ''),
+            library_file_path=_lib_file_path,
         )
         if not ok:
             return jsonify({"success": False, "error": "Failed to save match"}), 500
