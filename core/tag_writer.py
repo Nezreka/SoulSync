@@ -294,6 +294,24 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                                  year, genre_str, track_num, total_tracks,
                                  disc_num, bpm, artists_list=artists_list)
 
+        # Embed already-known source IDs (Spotify / iTunes / MusicBrainz) from
+        # db_data, reusing the canonical import-time frame writer — no API
+        # re-fetch. Only fires when db_data carries id keys, so the plain
+        # "write the core tags" callers are unaffected.
+        _src_meta = {k: db_data[k] for k in (
+            'source', 'source_track_id', 'source_album_id', 'source_artist_id',
+            'spotify_track_id', 'spotify_album_id', 'spotify_artist_id',
+            'itunes_track_id', 'itunes_album_id', 'itunes_artist_id',
+            'musicbrainz_recording_id', 'musicbrainz_release_id',
+        ) if db_data.get(k)}
+        if _src_meta:
+            try:
+                from core.metadata.source import embed_known_source_ids
+                if embed_known_source_ids(audio, _src_meta):
+                    written.append('source_ids')
+            except Exception as e:
+                logger.debug("source-id embed skipped for %s: %s", file_path, e)
+
         # Embed cover art if requested
         if embed_cover:
             art_ok = False

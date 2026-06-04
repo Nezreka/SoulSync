@@ -9336,6 +9336,13 @@ def _build_library_tag_db_data(track_data, album_genres=None):
         if artists_list:
             db_data['artists_list'] = artists_list
 
+    # Carry the known source IDs through so they get embedded too (the writer
+    # only acts on the ones present). These come from t.* on the track row.
+    for _k in ('spotify_track_id', 'itunes_track_id', 'musicbrainz_recording_id'):
+        _v = track_data.get(_k)
+        if _v:
+            db_data[_k] = _v
+
     return db_data
 
 
