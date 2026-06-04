@@ -192,6 +192,14 @@ class NavidromeClient(MediaServerClient):
         """Get available music folders from Navidrome."""
         if not self.ensure_connection():
             return []
+        return self._fetch_music_folders()
+
+    def _fetch_music_folders(self) -> list:
+        """Fetch + parse the Navidrome music folders. Assumes the connection is
+        already established (base_url/username set) and does NOT call
+        ensure_connection — so it is safe to call from inside _setup_client's
+        restore step without re-entering the connection guard (which would
+        otherwise bail with _is_connecting=True and return an empty list)."""
         try:
             response = self._make_request('getMusicFolders')
             if not response:
@@ -278,7 +286,11 @@ class NavidromeClient(MediaServerClient):
                     db = MusicDatabase()
                     saved_folder = db.get_preference('navidrome_music_folder')
                     if saved_folder:
-                        folders = self.get_music_folders()
+                        # Use the non-reentrant fetch: we're still inside
+                        # ensure_connection() here (_is_connecting=True), so the
+                        # public get_music_folders() would re-enter the guard and
+                        # return [], silently dropping the saved selection.
+                        folders = self._fetch_music_folders()
                         for folder in folders:
                             if folder['title'] == saved_folder:
                                 self.music_folder_id = folder['key']
