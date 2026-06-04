@@ -9298,6 +9298,70 @@ class MusicDatabase:
             logger.error(f"Error getting top similar artists: {e}")
             return []
 
+    def get_recommendation_sources(
+        self,
+        similar_artist_names: List[str],
+        profile_id: int = 1,
+        max_per: int = 6,
+    ) -> Dict[str, List[str]]:
+        """The 'because you have X, Y, Z' explanation behind each recommendation.
+
+        For each name in ``similar_artist_names``, return the display names of the
+        user's OWN artists (library or watchlist) that list it as a similar
+        artist. ``similar_artists.source_artist_id`` is a polymorphic provider id
+        (the spotify / itunes / deezer / musicbrainz id of one of the user's
+        artists), so we resolve it back to a name by matching against every
+        provider-id column on ``artists`` and ``watchlist_artists``.
+
+        Returns ``{similar_artist_name: [source_name, ...]}`` — deduped,
+        name-sorted, capped at ``max_per`` per recommendation. Names with no
+        resolvable source are omitted from the dict.
+        """
+        names = [n for n in (similar_artist_names or []) if n]
+        if not names:
+            return {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in names)
+                cursor.execute(f"""
+                    SELECT sa.similar_artist_name AS rec_name,
+                           COALESCE(a.name, wa.artist_name) AS source_name
+                    FROM similar_artists sa
+                    LEFT JOIN artists a ON (
+                        (a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id = sa.source_artist_id)
+                        OR (a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id = sa.source_artist_id)
+                        OR (a.deezer_id IS NOT NULL AND a.deezer_id = sa.source_artist_id)
+                        OR (a.musicbrainz_id IS NOT NULL AND a.musicbrainz_id = sa.source_artist_id)
+                    )
+                    LEFT JOIN watchlist_artists wa ON (
+                        wa.profile_id = ? AND (
+                            (wa.spotify_artist_id IS NOT NULL AND wa.spotify_artist_id = sa.source_artist_id)
+                            OR (wa.itunes_artist_id IS NOT NULL AND wa.itunes_artist_id = sa.source_artist_id)
+                            OR (wa.deezer_artist_id IS NOT NULL AND wa.deezer_artist_id = sa.source_artist_id)
+                            OR (wa.musicbrainz_artist_id IS NOT NULL AND wa.musicbrainz_artist_id = sa.source_artist_id)
+                        )
+                    )
+                    WHERE sa.profile_id = ? AND sa.similar_artist_name IN ({placeholders})
+                """, (profile_id, profile_id, *names))
+
+                # Collect distinct source names per recommendation, preserving
+                # nothing-special order then sorting for a deterministic result.
+                buckets: Dict[str, set] = {}
+                for row in cursor.fetchall():
+                    src = row['source_name']
+                    if not src:
+                        continue
+                    buckets.setdefault(row['rec_name'], set()).add(src)
+
+                return {
+                    rec: sorted(srcs, key=lambda s: s.lower())[:max_per]
+                    for rec, srcs in buckets.items()
+                }
+        except Exception as e:
+            logger.error(f"Error resolving recommendation sources: {e}")
+            return {}
+
     def mark_artists_featured(self, artist_names: List[str]):
         """Update last_featured timestamp for artists shown in the hero slider"""
         if not artist_names:
