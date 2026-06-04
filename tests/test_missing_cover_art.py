@@ -59,7 +59,10 @@ class _FakeClient:
         self.search_calls.append((query, limit))
         if self.search_image is None:
             return []
-        return [SimpleNamespace(id='search-album', image_url=self.search_image)]
+        # Real source clients return album results carrying title + artist;
+        # the filler now validates those before trusting the artwork.
+        return [SimpleNamespace(id='search-album', image_url=self.search_image,
+                                title='Album', artist='Artist')]
 
 
 def _make_db(album_row):
@@ -165,7 +168,68 @@ def test_missing_cover_art_uses_primary_when_prefer_unset(monkeypatch):
     result = mca.MissingCoverArtJob().scan(context)
 
     assert result.findings_created == 1
-    assert discogs_client.search_calls == [('Artist Album', 1)]
+    assert discogs_client.search_calls == [('Artist Album', 5)]
     assert spotify_client.search_calls == []
     assert itunes_client.search_calls == []
     assert context.findings[0]['details']['found_artwork_url'] == 'https://img/discogs-search'
+
+
+# ── Stricter matching (issue: new sources returning WRONG cover art) ──
+
+class _SearchClient:
+    """search_albums returns whatever results it's given (title/artist/image)."""
+    def __init__(self, results):
+        self._results = results
+        self.search_calls = []
+
+    def get_album(self, album_id, include_tracks=False):
+        return None
+
+    def search_albums(self, query, limit=1):
+        self.search_calls.append((query, limit))
+        return list(self._results)
+
+
+def test_search_rejects_wrong_artist_result(monkeypatch):
+    """A result with the right-ish title but a DIFFERENT artist must be rejected
+    (this is what produced wrong covers from the new sources)."""
+    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
+    context = _make_context(conn)
+    client = _SearchClient([SimpleNamespace(id='x', image_url='https://img/wrong',
+                                            title='Album', artist='Different Artist')])
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'discogs')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client if s == 'discogs' else None)
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 0          # wrong-artist art not accepted
+    assert context.findings == []
+
+
+def test_search_skips_wrong_result_and_takes_matching_one(monkeypatch):
+    """Given several results, take the first that actually matches title+artist."""
+    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))
+    context = _make_context(conn)
+    client = _SearchClient([
+        SimpleNamespace(id='a', image_url='https://img/wrong', title='Other Record', artist='Someone'),
+        SimpleNamespace(id='b', image_url='https://img/right', title='Album', artist='Artist'),
+    ])
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'discogs')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client if s == 'discogs' else None)
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1
+    assert context.findings[0]['details']['found_artwork_url'] == 'https://img/right'
+
+
+def test_result_matches_unit():
+    m = mca.MissingCoverArtJob._result_matches
+    # exact + deluxe variant + featuring all accepted when artist matches
+    assert m({'title': 'Album', 'artist': 'Artist'}, 'Album', 'Artist')
+    assert m({'title': 'Album (Deluxe Edition)', 'artist': 'Artist'}, 'Album', 'Artist')
+    assert m({'title': 'Album', 'artist': 'The Artist'}, 'Album', 'Artist')   # stopword 'the'
+    # wrong artist / wrong title rejected
+    assert not m({'title': 'Album', 'artist': 'Nope'}, 'Album', 'Artist')
+    assert not m({'title': 'Totally Other', 'artist': 'Artist'}, 'Album', 'Artist')
+    # no artist on result → require exact title
+    assert m({'title': 'Album'}, 'Album', 'Artist')
+    assert not m({'title': 'Album Deluxe'}, 'Album', 'Artist')
