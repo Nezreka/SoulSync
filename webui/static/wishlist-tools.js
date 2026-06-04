@@ -7495,35 +7495,27 @@ async function initializeToolsPage() {
 }
 
 async function loadDashboardData() {
-    // Initial load of wishlist count
-    await updateWishlistCount();
-
-    // Start periodic refresh of wishlist count (every 10 seconds)
+    // Start periodic refreshers up front (independent of the initial loads).
     stopWishlistCountPolling(); // Ensure no duplicates
     wishlistCountInterval = setInterval(updateWishlistCount, 10000);
-
-    // Initial load of service status, system statistics, and library status
-    await fetchAndUpdateServiceStatus();
-    await fetchAndUpdateSystemStats();
-    await fetchAndUpdateDbStats();
-
-    // Service status is already polled globally (line 311)
-    // System stats polling kept here (dashboard-specific)
-    setInterval(fetchAndUpdateSystemStats, 10000);
-
-    // Initial load of activity feed
-    await fetchAndUpdateActivityFeed();
-
-    // Start periodic refresh of activity feed (every 2 seconds for responsiveness)
-    setInterval(fetchAndUpdateActivityFeed, 2000);
-
-    // Start periodic toast checking (every 3 seconds)
+    setInterval(fetchAndUpdateSystemStats, 10000);   // dashboard-specific (service status polled globally)
+    setInterval(fetchAndUpdateActivityFeed, 2000);   // responsive activity feed
     setInterval(checkForActivityToasts, 3000);
 
-    // Check for any active download processes that need rehydration
-    await checkForActiveProcesses();
+    // Fire all independent initial loads in parallel instead of sequentially.
+    // Sequential awaits meant 6 back-to-back round-trips, each triggering its own
+    // reflow — the layout kept shifting for ~1-2s, which made the page feel
+    // unscrollable. Concurrent loads collapse that into a single settle.
+    await Promise.all([
+        updateWishlistCount(),
+        fetchAndUpdateServiceStatus(),
+        fetchAndUpdateSystemStats(),
+        fetchAndUpdateDbStats(),
+        fetchAndUpdateActivityFeed(),
+        checkForActiveProcesses(),
+    ]);
 
-    // Populate the Active Downloads dashboard section with any existing downloads
+    // Render existing downloads once active processes are known.
     updateDashboardDownloads();
 
     // Automatic wishlist processing now runs server-side
