@@ -1277,27 +1277,84 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
-        """Update album thumbnail URL from the found artwork."""
+        """Apply found artwork: update the DB thumbnail AND embed art into the
+        album's audio files + write cover.jpg (using the post-processing
+        standard, so the user's album_art_order preference is honored)."""
         artwork_url = details.get('found_artwork_url')
         if not artwork_url:
             return {'success': False, 'error': 'No artwork URL found in finding details'}
         album_id = details.get('album_id') or entity_id
         if not album_id:
             return {'success': False, 'error': 'No album ID associated with this finding'}
+
         conn = None
+        track_paths = []
+        album_title = details.get('album_title')
+        artist_name = details.get('artist')
+        mbid = details.get('musicbrainz_release_id')
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                            (artwork_url, album_id))
             conn.commit()
-            if cursor.rowcount > 0:
-                return {'success': True, 'action': 'applied_cover_art',
-                        'message': 'Applied cover art to album'}
-            return {'success': False, 'error': 'Album not found in database'}
+            if cursor.rowcount == 0:
+                return {'success': False, 'error': 'Album not found in database'}
+
+            # Pull album metadata + local track paths so we can write art to disk.
+            cursor.execute("""
+                SELECT al.title, ar.name, al.musicbrainz_release_id
+                FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
+                WHERE al.id = ?
+            """, (album_id,))
+            meta_row = cursor.fetchone()
+            if meta_row:
+                album_title = album_title or meta_row[0]
+                artist_name = artist_name or meta_row[1]
+                mbid = mbid or meta_row[2]
+            cursor.execute("""
+                SELECT file_path FROM tracks
+                WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
+            """, (album_id,))
+            track_paths = [r[0] for r in cursor.fetchall()]
         finally:
             if conn:
                 conn.close()
+
+        # Resolve container/host path mismatches, keep only files that exist.
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = []
+        for p in track_paths:
+            rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
+            if os.path.isfile(rp):
+                resolved.append(rp)
+
+        if not resolved:
+            # Media-server-only album (no local files): DB thumbnail is all we can set.
+            return {'success': True, 'action': 'applied_cover_art',
+                    'message': 'Applied cover art to album (database only — no local files found)'}
+
+        from core.metadata.art_apply import apply_art_to_album_files
+        metadata = {
+            'artist': artist_name, 'album_artist': artist_name,
+            'album': album_title, 'album_art_url': artwork_url,
+            'musicbrainz_release_id': mbid,
+        }
+        album_info = {
+            'album_name': album_title, 'album_image_url': artwork_url,
+            'musicbrainz_release_id': mbid,
+        }
+        folder = details.get('album_folder') or os.path.dirname(resolved[0])
+        art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
+
+        embedded = art_result.get('embedded', 0)
+        msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
+        if art_result.get('cover_written'):
+            msg += ' + wrote cover.jpg'
+        if embedded == 0 and not art_result.get('cover_written'):
+            # DB updated but nothing reached disk (e.g. read-only mount).
+            msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
+        return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
