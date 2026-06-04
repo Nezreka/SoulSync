@@ -23,6 +23,11 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
         audioPlayer.addEventListener('canplay', onAudioCanPlay);
+        // Universal: once the visualizer routes this element through
+        // npAudioContext, the element is silent while that context is
+        // suspended. The 'play' event fires on EVERY playback start (every
+        // code path, incl. ones that bypass setPlayingState), so resume here.
+        audioPlayer.addEventListener('play', npEnsureAudioContextRunning);
 
         // Set initial volume — restore the saved level (Spotify-style), else 70%.
         const _savedVol = npLoadSavedVolume();
@@ -304,10 +309,6 @@ function setPlayingState(playing) {
     // Sidebar audio visualizer
     if (playing) {
         npInitVisualizer();
-        // npInitVisualizer only runs its setup once; the element stays routed
-        // through npAudioContext, so resume it on EVERY play start or playback
-        // is silent when the context has been suspended (autoplay / tab blur).
-        npEnsureAudioContextRunning();
         startSidebarVisualizer();
     } else {
         stopSidebarVisualizer();
