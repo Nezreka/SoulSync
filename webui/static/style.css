@@ -64905,6 +64905,7 @@ body.reduce-effects .dash-card::after {
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.55));
     box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
 }
+.em-manage-btn-logo { width: 22px; height: 22px; object-fit: contain; display: block; }
 .em-manage-btn-label { background: linear-gradient(90deg, #fff, rgba(255,255,255,0.85)); -webkit-background-clip: text; background-clip: text; }
 
 .enrichment-manager-modal {
