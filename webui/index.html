@@ -6516,37 +6516,6 @@
                             </div>
                         </div>
 
-                        <div class="tool-card" id="metadata-updater-card">
-                            <div class="tool-card-header">
-                                <h4 class="tool-card-title">Metadata Updater</h4>
-                                <button class="tool-help-button" data-tool="metadata-updater"
-                                    title="Learn more about this tool">?</button>
-                            </div>
-                            <p class="metadata-updater-description tool-card-info">Updates artist photos, genres,
-                                and album art from Spotify.</p>
-                            <div class="tool-card-controls">
-                                <select id="metadata-refresh-interval">
-                                    <option value="180">6 months</option>
-                                    <option value="90">3 months</option>
-                                    <option value="30" selected>1 month</option>
-                                    <option value="14">2 weeks</option>
-                                    <option value="7">1 week</option>
-                                    <option value="0">Full refresh</option>
-                                </select>
-                                <button id="metadata-update-button">Begin Update</button>
-                            </div>
-                            <div class="tool-card-progress-section">
-                                <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not
-                                    running</p>
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;">
-                                    </div>
-                                </div>
-                                <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)
-                                </p>
-                            </div>
-                        </div>
-
                         <div class="tool-card" id="quality-scanner-card">
                             <div class="tool-card-header">
                                 <h4 class="tool-card-title">Quality Scanner</h4>
@@ -6667,6 +6636,37 @@
                     <div class="tools-section">
                         <h3 class="tools-section-title">Metadata &amp; Cache</h3>
                         <div class="tools-grid">
+                        <div class="tool-card" id="metadata-updater-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Metadata Updater</h4>
+                                <button class="tool-help-button" data-tool="metadata-updater"
+                                    title="Learn more about this tool">?</button>
+                            </div>
+                            <p class="metadata-updater-description tool-card-info">Updates artist photos, genres,
+                                and album art from Spotify.</p>
+                            <div class="tool-card-controls">
+                                <select id="metadata-refresh-interval">
+                                    <option value="180">6 months</option>
+                                    <option value="90">3 months</option>
+                                    <option value="30" selected>1 month</option>
+                                    <option value="14">2 weeks</option>
+                                    <option value="7">1 week</option>
+                                    <option value="0">Full refresh</option>
+                                </select>
+                                <button id="metadata-update-button">Begin Update</button>
+                            </div>
+                            <div class="tool-card-progress-section">
+                                <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not
+                                    running</p>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;">
+                                    </div>
+                                </div>
+                                <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)
+                                </p>
+                            </div>
+                        </div>
+
 
                         <div class="tool-card" id="discovery-pool-card">
                             <div class="tool-card-header">
@@ -6707,6 +6707,7 @@
                                 <button onclick="openManualLibraryMatchTool()">Open Library Match</button>
                             </div>
                         </div>
+                    </div></div>
 
                     <!-- ── Management ── -->
                     <div class="tools-section">
