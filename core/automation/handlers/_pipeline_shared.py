@@ -148,9 +148,45 @@ def run_sync_and_wishlist(
         log_type='success' if sync_errors == 0 else 'warning',
     )
 
+    organize_playlists = [pl for pl in playlists if pl.get('organize_by_playlist')]
+    organize_started = 0
+    if organize_playlists and hasattr(deps, 'run_playlist_organize_download'):
+        for pl in organize_playlists:
+            pl_id = pl.get('id')
+            if not pl_id:
+                continue
+            pl_name = pl.get('name', '')
+            try:
+                org_result = deps.run_playlist_organize_download(
+                    mirrored_playlist_id=int(pl_id),
+                    automation_id=automation_id,
+                )
+                if org_result.get('status') == 'started':
+                    organize_started += 1
+                    deps.update_progress(
+                        automation_id,
+                        log_line=f'Organize download started for "{pl_name}"',
+                        log_type='success',
+                    )
+                elif org_result.get('status') == 'skipped':
+                    deps.update_progress(
+                        automation_id,
+                        log_line=f'Organize download skipped for "{pl_name}": {org_result.get("reason", "")}',
+                        log_type='skip',
+                    )
+            except Exception as org_err:  # noqa: BLE001
+                deps.update_progress(
+                    automation_id,
+                    log_line=f'Organize download error for "{pl_name}": {org_err}',
+                    log_type='warning',
+                )
+
+    all_organize = bool(playlists) and len(organize_playlists) == len(playlists)
+    effective_skip_wishlist = skip_wishlist or all_organize
+
     wishlist_queued = run_wishlist_phase(
         deps, automation_id,
-        skip=skip_wishlist,
+        skip=effective_skip_wishlist,
         progress_pct=progress_end + 1,
         wishlist_phase_label=wishlist_phase_label,
         wishlist_phase_start_log=wishlist_phase_start_log,
@@ -161,6 +197,7 @@ def run_sync_and_wishlist(
         'skipped': total_skipped,
         'errors': sync_errors,
         'wishlist_queued': wishlist_queued,
+        'organize_downloads_started': organize_started,
     }
 
 
