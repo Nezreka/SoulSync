@@ -304,6 +304,10 @@ function setPlayingState(playing) {
     // Sidebar audio visualizer
     if (playing) {
         npInitVisualizer();
+        // npInitVisualizer only runs its setup once; the element stays routed
+        // through npAudioContext, so resume it on EVERY play start or playback
+        // is silent when the context has been suspended (autoplay / tab blur).
+        npEnsureAudioContextRunning();
         startSidebarVisualizer();
     } else {
         stopSidebarVisualizer();
@@ -2661,6 +2665,20 @@ function getNpAlbumArtUrl() {
 // WEB AUDIO VISUALIZER
 // ===============================
 
+// Once createMediaElementSource() captures the <audio> element, ALL of its
+// output is routed through this AudioContext — so if the context is suspended
+// (browsers create it suspended under the autoplay policy, and we init it from
+// an async play().then callback that's outside the gesture), the track plays
+// but no sound reaches the speakers. Resuming must happen on every play start,
+// not only when the visualizer loop runs. Safe to call anytime.
+function npEnsureAudioContextRunning() {
+    try {
+        if (npAudioContext && npAudioContext.state === 'suspended') {
+            npAudioContext.resume().catch(() => {});
+        }
+    } catch (_) { /* no-op */ }
+}
+
 function npInitVisualizer() {
     if (npVizInitialized || !audioPlayer) return;
     try {
@@ -2676,6 +2694,9 @@ function npInitVisualizer() {
             npAnalyser.connect(npAudioContext.destination);
         }
         npVizInitialized = true;
+        // Freshly created contexts start suspended — resume so the rerouted
+        // element is actually audible (this is the no-sound-on-play bug).
+        npEnsureAudioContextRunning();
     } catch (e) {
         console.warn('Web Audio visualizer init failed, using CSS fallback:', e.message);
         // Mark as CSS fallback
