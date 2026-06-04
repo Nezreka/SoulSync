@@ -3573,6 +3573,51 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: "Artist Map, Reimagined",
+        description: "the Discover artist map got a full rework — it now reads like a living constellation of your library instead of a flat blob. Explore one genre island at a time, watch bubbles bloom into place, and open a side panel with everything about the artist under your cursor.",
+        features: [
+            "one-island-at-a-time genre view so dense libraries stay readable",
+            "bubbles surface up into place with live, streamed cover art",
+            "right-side info panel: live watchlist state, library coverage, top artists, and an artist card",
+            "API-backed toolbar search + genre quick-jump",
+            "fully mobile responsive — bottom-sheet panel, full-width map, reflow on resize",
+        ],
+        usage_note: "Discover → Artist Map",
+    },
+    {
+        title: "Recommendations That Explain Themselves",
+        description: "SoulSync now builds a library-wide similar-artists graph (a new MusicMap enrichment worker, matched to your real metadata sources) and turns it into recommendations that actually tell you WHY — \"Because you have X & Y\" — promoted into a first-class section on Discover instead of a buried button.",
+        features: [
+            "new Similar Artists enrichment worker with its own dashboard orb, runs across your whole library",
+            "every stored similar is matched to a real metadata source, so it's actually usable",
+            "recommendations show the artists in YOUR library that point to each suggestion",
+            "new \"Recommended For You\" carousel on the Discover page, add to watchlist in one click",
+        ],
+        usage_note: "Discover → Recommended For You",
+    },
+    {
+        title: "Cover Art Filler That Actually Fills Your Files",
+        description: "the Cover Art Filler used to only check the database and only update a database thumbnail. Now it finds albums missing art ON DISK and, when you apply it, embeds the artwork into your audio files and writes a cover.jpg — using the same path the importer uses, so your preferred cover-art source order is honored.",
+        features: [
+            "detects albums with no embedded art and no cover.jpg, even when the database had a URL",
+            "applying art embeds it into the files + writes cover.jpg (not just a DB thumbnail)",
+            "purely additive — never rewrites your existing tags, skips files that already have art",
+            "stricter matching so the new sources stop attaching the wrong cover (title AND artist must match)",
+        ],
+        usage_note: "Dashboard → Manage Workers → Cover Art Filler",
+    },
+    {
+        title: "Recent Fixes & Performance (2.6.6)",
+        description: "a round of fixes and a WebUI speed-up that landed alongside the headline features.",
+        features: [
+            "qBittorrent 5.2.0 / 5.2.1 now connects — it changed its login to return HTTP 204 and SoulSync was rejecting it (no more whitelist workaround needed)",
+            "Organize by playlist (#780): library registration, wishlist after failed downloads, filesystem-aware Download Missing, and stale-cache fixes",
+            "faster navigation + smoother scrolling (#783): press-to-navigate, canvases pause during scroll, parallel dashboard load, plus a new Reduce Visual Effects mode",
+            "dashboard mobile responsiveness + a subtle living-nucleus on the Manage Workers hub",
+        ],
+        usage_note: "browse the What's New panel for the full 2.6.6 changelog",
+    },
+    {
         title: "iTunes / Apple Music Link Import",
         description: "new iTunes Link tab on the Sync page. paste an Apple Music album, track, or playlist URL and SoulSync pulls the tracklist, runs it through discovery, and lets you sync or download like any other link source.",
         features: [
