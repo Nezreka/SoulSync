@@ -119,6 +119,22 @@ def test_apply_embeds_into_each_file_and_writes_cover(tmp_path, monkeypatch):
     assert res['cover_written'] is True
 
 
+def test_apply_skips_files_that_already_have_art(tmp_path, monkeypatch):
+    """Purely additive: a file that already has art is left untouched (no
+    duplicate FLAC picture, no re-embed)."""
+    f1 = tmp_path / '01.flac'; f1.write_bytes(b'')
+    audio = SimpleNamespace(pictures=['existing'], tags=None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    embed_calls = []
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda a, m: embed_calls.append(m) or True)
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
+
+    res = aa.apply_art_to_album_files([str(f1)], {'album': 'B'}, {'album_name': 'B'}, folder=str(tmp_path))
+    assert res['embedded'] == 0
+    assert res['skipped'] == 1
+    assert embed_calls == []      # never re-embedded → no duplicate picture
+
+
 def test_apply_counts_failures_without_raising(tmp_path, monkeypatch):
     f1 = tmp_path / '01.flac'; f1.write_bytes(b'')
     audio = SimpleNamespace(tags=object(), save=lambda: (_ for _ in ()).throw(OSError('read-only')))
