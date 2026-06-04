@@ -20,7 +20,7 @@ from typing import Any, List, Optional
 import requests as http_requests
 
 from config.settings import config_manager
-from core.torrent_clients.base import TorrentStatus
+from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.deluge")
@@ -67,7 +67,7 @@ class DelugeAdapter:
         self._load_config()
 
     def _load_config(self) -> None:
-        self._url = (config_manager.get('torrent_client.url', '') or '').rstrip('/')
+        self._url = normalize_client_url(config_manager.get('torrent_client.url', ''))
         # Deluge's WebUI auth uses a single password, not username+password.
         # We accept whichever field the user filled in — keeps the UI uniform.
         self._password = (
