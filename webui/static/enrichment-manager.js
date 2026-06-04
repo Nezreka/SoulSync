@@ -149,7 +149,7 @@ async function openEnrichmentManager(workerId) {
             <div class="enrichment-manager-modal" role="dialog" aria-modal="true"
                  aria-label="Manage Enrichment Workers" tabindex="-1">
                 <div class="em-topbar">
-                    <div class="em-topbar-icon"><span>🧬</span></div>
+                    <div class="em-topbar-icon"><img src="/static/trans2.png" alt="SoulSync" class="em-topbar-logo"></div>
                     <div class="em-topbar-titles">
                         <h3 class="em-topbar-title">Enrichment Workers</h3>
                         <div class="em-topbar-sub">Match your library across every metadata source</div>

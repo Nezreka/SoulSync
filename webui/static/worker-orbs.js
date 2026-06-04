@@ -83,6 +83,7 @@
 
             orbs.push({
                 el,
+                btn: el.matches('button') ? el : el.querySelector('button'),
                 color: def.color,
                 rainbow: def.rainbow || false,
                 hub: def.hub || false,
@@ -161,6 +162,44 @@
         ];
     }
 
+    // ── Glow sprite cache ──
+    // Radial gradients are the expensive part of canvas glows. Bake one soft
+    // glow sprite per colour into an offscreen canvas and blit it with
+    // drawImage — a single cheap GPU copy instead of allocating a gradient
+    // every frame. Colours are quantised to 8-step buckets to bound the cache
+    // (the tint shift is imperceptible in a glow, and keeps the rainbow path
+    // from minting a new sprite every frame).
+    const GLOW_SIZE = 64;
+    const _glowCache = new Map();
+
+    function getGlowSprite(r, g, b) {
+        const qr = r & ~7, qg = g & ~7, qb = b & ~7;
+        const key = (qr << 16) | (qg << 8) | qb;
+        let spr = _glowCache.get(key);
+        if (spr) return spr;
+
+        spr = document.createElement('canvas');
+        spr.width = spr.height = GLOW_SIZE;
+        const gctx = spr.getContext('2d');
+        const c = GLOW_SIZE / 2;
+        const grad = gctx.createRadialGradient(c, c, 0, c, c, c);
+        grad.addColorStop(0, `rgba(${qr}, ${qg}, ${qb}, 1)`);
+        grad.addColorStop(1, `rgba(${qr}, ${qg}, ${qb}, 0)`);
+        gctx.fillStyle = grad;
+        gctx.fillRect(0, 0, GLOW_SIZE, GLOW_SIZE);
+
+        _glowCache.set(key, spr);
+        return spr;
+    }
+
+    // Blit a cached glow of the given radius/alpha centred at (x, y)
+    function drawGlow(ctx, x, y, radius, r, g, b, alpha) {
+        if (alpha <= 0 || radius <= 0) return;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(getGlowSprite(r, g, b), x - radius, y - radius, radius * 2, radius * 2);
+        ctx.globalAlpha = 1;
+    }
+
     // ── Spark system ──
 
     function emitSpark(orb, colorOverride) {
@@ -199,14 +238,8 @@
             const alpha = s.life * 0.6;
             const radius = s.radius * s.life;
 
-            // Spark glow
-            const glow = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, radius * 3);
-            glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.4})`);
-            glow.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, radius * 3, 0, Math.PI * 2);
-            ctx.fillStyle = glow;
-            ctx.fill();
+            // Spark glow (cached sprite)
+            drawGlow(ctx, s.x, s.y, radius * 3, r, g, b, alpha * 0.4);
 
             // Spark core
             ctx.beginPath();
@@ -248,13 +281,7 @@
             const alpha = 0.55 * (1 - Math.abs(p.t - 0.5) * 0.6); // fade in/out at the ends
             const radius = 2.2;
 
-            const glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
-            glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
-            glow.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.beginPath();
-            ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
-            ctx.fillStyle = glow;
-            ctx.fill();
+            drawGlow(ctx, x, y, radius * 3, r, g, b, alpha * 0.5);
 
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -420,12 +447,11 @@
             return;
         }
 
-        // Check active state every 30 frames
+        // Check active state every 30 frames (button ref is cached at init)
         if (frameCount % 30 === 0) {
             orbs.forEach(orb => {
                 orb.visible = orb.el.offsetParent !== null;
-                const btn = orb.el.querySelector('button');
-                orb.active = btn ? btn.classList.contains('active') : false;
+                orb.active = orb.btn ? orb.btn.classList.contains('active') : false;
             });
         }
 
@@ -580,15 +606,9 @@
                 const slow = 0.5 + 0.5 * Math.sin(time * beatSpeed);
                 const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (2 + energy * 2);
 
-                // Wide ambient glow — brighter + wider with energy
+                // Wide ambient glow — brighter + wider with energy (cached sprite)
                 const glowR = hubR * (4 + energy * 1.5);
-                const halo = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, glowR);
-                halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.18 + energy * 0.18 + slow * 0.12})`);
-                halo.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.beginPath();
-                ctx.arc(orb.x, orb.y, glowR, 0, Math.PI * 2);
-                ctx.fillStyle = halo;
-                ctx.fill();
+                drawGlow(ctx, orb.x, orb.y, glowR, r, g, b, 0.18 + energy * 0.18 + slow * 0.12);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -650,13 +670,7 @@
             const glowAlpha = orb.active
                 ? (0.25 + pulse * 0.2) * activeMult
                 : (0.06 + pulse * 0.03) * activeMult;
-            const glow = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, glowRadius);
-            glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${glowAlpha})`);
-            glow.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.beginPath();
-            ctx.arc(orb.x, orb.y, glowRadius, 0, Math.PI * 2);
-            ctx.fillStyle = glow;
-            ctx.fill();
+            drawGlow(ctx, orb.x, orb.y, glowRadius, r, g, b, glowAlpha);
 
             // Core
             const coreAlpha = orb.active
