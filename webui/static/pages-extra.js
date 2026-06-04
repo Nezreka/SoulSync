@@ -1066,18 +1066,24 @@ function explorerFitToView() {
     });
 }
 
-// Scroll wheel zoom (no modifier needed inside viewport)
-document.addEventListener('wheel', (e) => {
+// Scroll wheel zoom (no modifier needed inside viewport).
+// IMPORTANT: attach to the viewport element, NOT document. A non-passive wheel
+// listener on document disables the browser's compositor (async) scrolling for
+// the ENTIRE app — every wheel/trackpad scroll then runs through the main thread.
+// Scoping it to the viewport keeps zoom working while the rest of the app keeps
+// smooth compositor scrolling.
+(function attachExplorerWheelZoom() {
     const viewport = document.getElementById('explorer-viewport');
-    if (!viewport || !viewport.contains(e.target)) return;
-    // Check if we're on the explorer page
-    const page = document.getElementById('playlist-explorer-page');
-    if (!page || !page.classList.contains('active')) return;
+    if (!viewport) return;
+    viewport.addEventListener('wheel', (e) => {
+        const page = document.getElementById('playlist-explorer-page');
+        if (!page || !page.classList.contains('active')) return;
 
-    e.preventDefault();
-    const step = e.deltaY > 0 ? -0.08 : 0.08;
-    explorerZoom(step);
-}, { passive: false });
+        e.preventDefault();
+        const step = e.deltaY > 0 ? -0.08 : 0.08;
+        explorerZoom(step);
+    }, { passive: false });
+})();
 
 // Middle-click / right-click drag to pan
 document.addEventListener('mousedown', (e) => {
