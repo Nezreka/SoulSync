@@ -36,6 +36,8 @@
     const EXPAND_STAGGER = 35;
     const MAX_SPARKS = 60;       // global spark pool cap
     const SPARK_RATE = 0.12;     // chance per frame per active orb to emit
+    const MAX_INFLOWS = 48;      // hub inbound-pulse pool cap
+    const INFLOW_RATE = 0.05;    // chance per frame per active orb to send a pulse inward
 
     let dashboardHeader = null;
     let headerActions = null;
@@ -43,6 +45,7 @@
     let ctx = null;
     let orbs = [];
     let sparks = [];             // particle emissions from active orbs
+    let inflows = [];            // pulses traveling from active orbs into the hub
     let state = 'idle';
     let animFrame = null;
     let onDashboard = false;
@@ -203,6 +206,53 @@
         }
     }
 
+    // ── Inbound pulses (active worker → hub) ──
+    // Each carries an active worker's color into the nucleus, so the hub
+    // visibly "collects" the output of whatever is running.
+
+    function emitInflow(orb, color) {
+        if (inflows.length >= MAX_INFLOWS) return;
+        inflows.push({
+            orb,                        // source orb (positions resolved live)
+            color: color || orb.color,
+            t: 0,                       // 0 at source → 1 at hub
+            speed: 0.012 + Math.random() * 0.01,
+        });
+    }
+
+    function updateInflows() {
+        for (let i = inflows.length - 1; i >= 0; i--) {
+            inflows[i].t += inflows[i].speed;
+            if (inflows[i].t >= 1) inflows.splice(i, 1);
+        }
+    }
+
+    function drawInflows(ctx, hub) {
+        if (!hub) return;
+        for (const p of inflows) {
+            const [r, g, b] = p.color;
+            // Ease toward hub so pulses accelerate as they arrive
+            const e = p.t * p.t;
+            const x = p.orb.x + (hub.x - p.orb.x) * e;
+            const y = p.orb.y + (hub.y - p.orb.y) * e;
+            const alpha = 0.55 * (1 - Math.abs(p.t - 0.5) * 0.6); // fade in/out at the ends
+            const radius = 2.2;
+
+            const glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
+            glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
+            glow.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.beginPath();
+            ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            ctx.fill();
+        }
+    }
+
     // ── State machine ──
 
     function enterOrbState() {
@@ -259,6 +309,7 @@
         canvas.style.opacity = '1';
         resizeCanvas();
         computeHomes();
+        inflows = [];   // drop in-flight pulses; positions are about to jump
         orbs.forEach(orb => {
             orb.x = orb.homeX;
             orb.y = orb.homeY;
@@ -369,6 +420,7 @@
         }
 
         const visibleOrbs = orbs.filter(o => o.visible);
+        const hub = visibleOrbs.find(o => o.hub);
 
         if (state === 'orbs' || state === 'collapsing') {
             updatePhysics(visibleOrbs, w, h);
@@ -376,19 +428,25 @@
             updateExpanding(visibleOrbs, w, h);
         }
 
-        // Emit sparks from active orbs
+        // Emit sparks from active orbs, plus pulses inbound to the hub
         for (const orb of visibleOrbs) {
-            if (orb.active && Math.random() < SPARK_RATE) {
+            if (orb.hub || !orb.active) continue;
+            if (Math.random() < SPARK_RATE) {
                 emitSpark(orb, orb.rainbow ? getRainbowColor(time) : null);
+            }
+            if (hub && Math.random() < INFLOW_RATE) {
+                emitInflow(orb, orb.rainbow ? getRainbowColor(time) : null);
             }
         }
         updateSparks();
+        updateInflows();
 
         // Draw
         ctx.clearRect(0, 0, w, h);
 
         drawConnections(ctx, visibleOrbs, time);
         drawSparks(ctx);
+        drawInflows(ctx, hub);
         drawOrbs(ctx, visibleOrbs, time);
     }
 
@@ -421,9 +479,16 @@
             const gy = cy - orb.y;
             const gDist = Math.sqrt(gx * gx + gy * gy);
             if (gDist > 1) {
-                const gStrength = 0.003;
+                const gStrength = 0.004;
                 orb.vx += (gx / gDist) * gStrength;
                 orb.vy += (gy / gDist) * gStrength;
+
+                // Orbital rotation — a tangential nudge (perpendicular to the
+                // pull home) so the cluster slowly revolves around the nucleus
+                // like electrons round an atom. Stronger when the orb is active.
+                const tStrength = orb.active ? 0.008 : 0.005;
+                orb.vx += (-gy / gDist) * tStrength;
+                orb.vy += (gx / gDist) * tStrength;
             }
 
             // Damping
@@ -493,15 +558,22 @@
         for (const orb of visible) {
             const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
 
-            // ── The hub: a larger, brighter nucleus with a slow, breathing pulse ──
+            // ── The hub: an energy-reactive nucleus ──
+            // Calm + dim when nothing's running; bigger, brighter and faster
+            // the more workers are active. The animation reads as a gauge.
             if (orb.hub) {
-                const slow = 0.5 + 0.5 * Math.sin(time * 1.1);   // calm heartbeat
-                const hubR = (ORB_RADIUS + 5) + slow * 2;
+                const workers = visible.filter(o => !o.hub);
+                const activeCount = workers.filter(o => o.active).length;
+                const energy = workers.length ? activeCount / workers.length : 0; // 0..1
 
-                // Wide ambient glow
-                const glowR = hubR * 4.5;
+                const beatSpeed = 1.0 + energy * 1.8;            // faster heartbeat when busy
+                const slow = 0.5 + 0.5 * Math.sin(time * beatSpeed);
+                const hubR = (ORB_RADIUS + 3 + energy * 4) + slow * (2 + energy * 2);
+
+                // Wide ambient glow — brighter + wider with energy
+                const glowR = hubR * (4 + energy * 1.5);
                 const halo = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, glowR);
-                halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.28 + slow * 0.12})`);
+                halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.18 + energy * 0.18 + slow * 0.12})`);
                 halo.addColorStop(1, 'rgba(0,0,0,0)');
                 ctx.beginPath();
                 ctx.arc(orb.x, orb.y, glowR, 0, Math.PI * 2);
@@ -511,23 +583,27 @@
                 // Solid bright core
                 ctx.beginPath();
                 ctx.arc(orb.x, orb.y, hubR, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.9})`;
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.8 + energy * 0.15})`;
                 ctx.fill();
 
-                // Bright inner highlight
+                // Bright inner highlight — hotter when energized
                 ctx.beginPath();
                 ctx.arc(orb.x, orb.y, hubR * 0.5, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + slow * 0.2})`;
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + energy * 0.25 + slow * 0.2})`;
                 ctx.fill();
 
-                // Expanding heartbeat ring
-                const ringPhase = (time * 0.6) % 1;
-                const ringR = hubR + ringPhase * hubR * 2.5;
-                ctx.beginPath();
-                ctx.arc(orb.x, orb.y, ringR, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - ringPhase) * 0.35})`;
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
+                // Expanding heartbeat ring(s) — radiate faster + brighter with energy
+                const ringSpeed = 0.5 + energy * 0.9;
+                const rings = 1 + Math.round(energy * 2);        // 1..3 rings
+                for (let k = 0; k < rings; k++) {
+                    const ringPhase = (time * ringSpeed + k / rings) % 1;
+                    const ringR = hubR + ringPhase * hubR * 2.5;
+                    ctx.beginPath();
+                    ctx.arc(orb.x, orb.y, ringR, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - ringPhase) * (0.25 + energy * 0.2)})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
                 continue;
             }
 
