@@ -40,7 +40,6 @@ from core.imports.side_effects import (
     emit_track_downloaded,
     record_download_provenance,
     record_library_history_download,
-    record_retag_download,
     record_soulsync_library_entry,
 )
 from core.wishlist.resolution import check_and_remove_from_wishlist
@@ -891,13 +890,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         record_library_history_download(context)
         record_download_provenance(context)
         record_soulsync_library_entry(context, artist_context, album_info)
-
-        try:
-            if not playlist_folder_mode:
-                completed_path = context.get('_final_processed_path', final_path)
-                record_retag_download(context, artist_context, album_info, completed_path)
-        except Exception as retag_err:
-            logger.error(f"[Post-Process] Retag data capture failed (non-fatal): {retag_err}")
 
         try:
             completed_path = context.get('_final_processed_path', final_path)

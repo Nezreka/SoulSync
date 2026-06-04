@@ -862,19 +862,6 @@ duplicate_cleaner_state = {
 duplicate_cleaner_lock = threading.Lock()
 duplicate_cleaner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DuplicateCleaner")
 
-# Retag Tool Globals
-retag_state = {
-    "status": "idle",
-    "phase": "Ready",
-    "progress": 0,
-    "current_track": "",
-    "total_tracks": 0,
-    "processed": 0,
-    "error_message": "",
-}
-retag_lock = threading.Lock()
-retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWorker")
-
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
 # Shared task/batch state now lives in core.runtime_state.
@@ -1709,7 +1696,6 @@ def _shutdown_runtime_components():
         (db_update_executor, "db update executor"),
         (quality_scanner_executor, "quality scanner executor"),
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
-        (retag_executor, "retag executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
         (album_bundle_executor, "album bundle executor"),
@@ -14274,45 +14260,6 @@ _download_retry_attempts = {}  # {context_key: {'count': N, 'first_attempt': tim
 _download_retry_max = 10  # Max retries before giving up (10 seconds with 1s poll interval)
 _download_retry_lock = threading.Lock()
 
-# Retag worker logic lives in core/library/retag.py.
-from core.library import retag as _library_retag
-
-
-def _build_retag_deps():
-    """Build the RetagDeps bundle from web_server.py globals on each call."""
-    from database.music_database import get_database as _get_db
-
-    def _get_state():
-        return retag_state
-
-    def _set_state(value):
-        global retag_state
-        retag_state = value
-
-    from core.metadata.lyrics import generate_lrc_file as _generate_lrc_file
-
-    return _library_retag.RetagDeps(
-        config_manager=config_manager,
-        retag_lock=retag_lock,
-        spotify_client=spotify_client,
-        get_audio_quality_string=_get_audio_quality_string,
-        enhance_file_metadata=_enhance_file_metadata,
-        build_final_path_for_track=_build_final_path_for_track,
-        safe_move_file=_safe_move_file,
-        cleanup_empty_directories=_cleanup_empty_directories,
-        download_cover_art=_download_cover_art,
-        docker_resolve_path=docker_resolve_path,
-        _get_retag_state=_get_state,
-        _set_retag_state=_set_state,
-        get_database=_get_db,
-        generate_lrc_file=_generate_lrc_file,
-    )
-
-
-def _execute_retag(group_id, album_id):
-    return _library_retag.execute_retag(group_id, album_id, _build_retag_deps())
-
-
 def _automatic_wishlist_cleanup_after_db_update():
     """Automatic wishlist cleanup that runs after database updates."""
     return _cleanup_wishlist_after_db_update(logger=logger)
@@ -16460,115 +16407,6 @@ def stop_duplicate_cleaner():
 # ===============================
 # == RETAG TOOL ENDPOINTS      ==
 # ===============================
-
-@app.route('/api/retag/stats', methods=['GET'])
-def get_retag_stats():
-    """Get retag tool statistics for the dashboard card."""
-    from database.music_database import get_database
-    db = get_database()
-    stats = db.get_retag_stats()
-    return jsonify({"success": True, **stats})
-
-@app.route('/api/retag/groups', methods=['GET'])
-def get_retag_groups():
-    """Get all retag groups sorted by artist name."""
-    from database.music_database import get_database
-    db = get_database()
-    groups = db.get_retag_groups()
-    return jsonify({"success": True, "groups": groups})
-
-@app.route('/api/retag/groups/<int:group_id>/tracks', methods=['GET'])
-def get_retag_group_tracks(group_id):
-    """Get tracks for a specific retag group."""
-    from database.music_database import get_database
-    db = get_database()
-    tracks = db.get_retag_tracks(group_id)
-    return jsonify({"success": True, "tracks": tracks})
-
-@app.route('/api/retag/search', methods=['GET'])
-def search_retag_albums():
-    """Search for albums to use for retagging (uses Spotify/iTunes fallback)."""
-    query = request.args.get('q', '').strip()
-    if not query:
-        return jsonify({"success": False, "error": "Query parameter 'q' is required"}), 400
-
-    limit = min(int(request.args.get('limit', 12)), 50)
-    try:
-        results = spotify_client.search_albums(query, limit=limit)
-        albums = []
-        for a in results:
-            albums.append({
-                'id': str(a.id),
-                'name': a.name,
-                'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
-                'release_date': a.release_date or '',
-                'total_tracks': a.total_tracks,
-                'image_url': a.image_url,
-                'album_type': a.album_type or 'album'
-            })
-        return jsonify({"success": True, "albums": albums})
-    except Exception as e:
-        logger.error(f"[Retag] Album search error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/retag/execute', methods=['POST'])
-def execute_retag():
-    """Start a retag operation for a group with a new album match."""
-    data = request.get_json()
-    if not data:
-        return jsonify({"success": False, "error": "JSON body required"}), 400
-
-    group_id = data.get('group_id')
-    album_id = data.get('album_id')
-    if not group_id or not album_id:
-        return jsonify({"success": False, "error": "group_id and album_id are required"}), 400
-
-    with retag_lock:
-        if retag_state["status"] == "running":
-            return jsonify({"success": False, "error": "A retag operation is already running"}), 409
-
-    retag_executor.submit(_execute_retag, group_id, str(album_id))
-    return jsonify({"success": True, "message": "Retag operation started"})
-
-@app.route('/api/retag/status', methods=['GET'])
-def get_retag_status():
-    """Get the current retag operation status."""
-    with retag_lock:
-        return jsonify(dict(retag_state))
-
-@app.route('/api/retag/groups/<int:group_id>', methods=['DELETE'])
-def delete_retag_group(group_id):
-    """Delete a retag group (files are NOT deleted)."""
-    from database.music_database import get_database
-    db = get_database()
-    success = db.delete_retag_group(group_id)
-    if success:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "error": "Group not found"}), 404
-
-@app.route('/api/retag/groups/delete-batch', methods=['POST'])
-def delete_retag_groups_batch():
-    """Delete multiple retag groups at once."""
-    from database.music_database import get_database
-    data = request.get_json() or {}
-    group_ids = data.get('group_ids', [])
-    if not group_ids:
-        return jsonify({"success": False, "error": "No group IDs provided"}), 400
-    db = get_database()
-    removed = 0
-    for gid in group_ids:
-        if db.delete_retag_group(int(gid)):
-            removed += 1
-    return jsonify({"success": True, "removed": removed})
-
-@app.route('/api/retag/groups/clear-all', methods=['POST'])
-def clear_all_retag_groups():
-    """Delete all retag groups."""
-    from database.music_database import get_database
-    db = get_database()
-    count = db.delete_all_retag_groups()
-    return jsonify({"success": True, "removed": count})
 
 # ===============================
 # == DOWNLOAD MISSING TRACKS   ==
@@ -34968,12 +34806,6 @@ def _emit_tool_progress_loop():
                 socketio.emit('tool:duplicate-cleaner', state_copy)
         except Exception as e:
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
-        # Retag
-        try:
-            with retag_lock:
-                socketio.emit('tool:retag', dict(retag_state))
-        except Exception as e:
-            logger.debug(f"Error emitting retag status: {e}")
         # DB Update
         try:
             with db_update_lock:
