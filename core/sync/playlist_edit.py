@@ -71,4 +71,42 @@ def remove_one_occurrence(
     return ids, False
 
 
-__all__ = ["plan_playlist_add", "remove_one_occurrence"]
+def plan_playlist_reconcile(
+    current_ids: List[str],
+    desired_ids: List[str],
+) -> dict:
+    """Plan an in-place reconcile of a server playlist toward a desired tracklist.
+
+    Used by ``sync_mode='reconcile'`` (#792): instead of deleting + recreating
+    the playlist (which destroys its custom image, description, and identity),
+    the caller keeps the existing playlist object and applies only the delta —
+    adding the tracks that are missing and removing the ones no longer in the
+    source. Pure, no I/O.
+
+    Returns ``{'add': [...], 'remove': [...]}`` (both lists of string ids):
+      - ``add``    — desired ids not currently present, in desired order.
+      - ``remove`` — current ids no longer desired (each occurrence kept once;
+                     duplicates of a still-desired id are left for the caller's
+                     dedupe to handle, never mass-removed).
+
+    Order-preserving and duplicate-safe: a desired id already present is not
+    re-added; a current id that's still desired is not removed even if it
+    appears more than once.
+    """
+    desired = [str(t) for t in desired_ids]
+    current = [str(t) for t in current_ids]
+    current_set = set(current)
+    desired_set = set(desired)
+    add = [d for d in desired if d not in current_set]
+    # Preserve order of removal as it appears in the current list; one entry per
+    # id (the caller maps ids back to concrete playlist entries to delete).
+    seen_remove = set()
+    remove = []
+    for c in current:
+        if c not in desired_set and c not in seen_remove:
+            seen_remove.add(c)
+            remove.append(c)
+    return {"add": add, "remove": remove}
+
+
+__all__ = ["plan_playlist_add", "remove_one_occurrence", "plan_playlist_reconcile"]

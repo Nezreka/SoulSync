@@ -6113,6 +6113,18 @@
                                 <h3>Playlist Sync Settings</h3>
 
                                 <div class="form-group">
+                                    <label>Sync mode:</label>
+                                    <select id="playlist-sync-mode" class="form-select">
+                                        <option value="replace">Replace — recreate the playlist each sync (default)</option>
+                                        <option value="reconcile">Reconcile — edit in place, keep image &amp; description</option>
+                                        <option value="append">Append — only add new tracks, never remove</option>
+                                    </select>
+                                    <div class="help-text">
+                                        "Replace" deletes and recreates the server playlist every sync, which wipes its custom image/description. "Reconcile" updates the same playlist in place (adds new tracks, removes ones no longer in the source) so your custom image and description survive. "Append" only ever adds.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="create-backup" checked>
                                         Create playlist backups before sync
