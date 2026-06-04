@@ -1097,10 +1097,20 @@ function playlistTrackCacheIsStale(playlistId, playlist) {
     if (!cached) {
         return false;
     }
-    const expected = playlist?.track_count;
-    if (expected != null && Number(expected) !== cached.length) {
-        return true;
+    // Compare the upstream snapshot id (changes whenever the playlist's contents
+    // change). This avoids the false-positive from comparing raw track_count to
+    // the cached/filtered track list — playlists with local or unavailable
+    // tracks report a higher track_count than the id-bearing tracks we cache,
+    // which made every open look "stale" and refetch + re-mirror needlessly.
+    const currentSnap = playlist?.snapshot_id;
+    const cachedSnap = (typeof playlistTrackSnapshotCache !== 'undefined')
+        ? playlistTrackSnapshotCache[playlistId]
+        : undefined;
+    if (currentSnap && cachedSnap != null && cachedSnap !== '') {
+        return String(currentSnap) !== String(cachedSnap);
     }
+    // No reliable snapshot to compare (e.g. sources without snapshots) — don't
+    // force a refetch here; explicit invalidation on refresh handles real changes.
     return false;
 }
 
@@ -1144,6 +1154,7 @@ function isPlaylistDownloadProcessStale(playlistId, playlistMeta) {
 function invalidatePlaylistTrackCache(playlistId = null) {
     if (playlistId) {
         delete playlistTrackCache[playlistId];
+        if (typeof playlistTrackSnapshotCache !== 'undefined') delete playlistTrackSnapshotCache[playlistId];
         if (currentModalPlaylistId === playlistId) {
             currentPlaylistTracks = [];
         }
@@ -1151,6 +1162,7 @@ function invalidatePlaylistTrackCache(playlistId = null) {
         return;
     }
     playlistTrackCache = {};
+    if (typeof playlistTrackSnapshotCache !== 'undefined') playlistTrackSnapshotCache = {};
     currentPlaylistTracks = [];
     const ids = new Set();
     if (typeof spotifyPlaylists !== 'undefined' && Array.isArray(spotifyPlaylists)) {
@@ -1195,11 +1207,6 @@ function mirrorPlaylistTracksForSource(source, sourcePlaylistId, fullPlaylist) {
     });
 }
 
-/** @deprecated Use mirrorPlaylistTracksForSource */
-function mirrorSpotifyPlaylistTracks(playlistId, fullPlaylist) {
-    mirrorPlaylistTracksForSource('spotify', playlistId, fullPlaylist);
-}
-
 async function fetchAndCachePlaylistTracks(cacheKey, fetchUrl, mirrorSource, mirrorSourceId) {
     const response = await fetch(fetchUrl);
     const fullPlaylist = await response.json();
@@ -1207,6 +1214,9 @@ async function fetchAndCachePlaylistTracks(cacheKey, fetchUrl, mirrorSource, mir
         throw new Error(fullPlaylist.error);
     }
     playlistTrackCache[cacheKey] = fullPlaylist.tracks;
+    // Remember the upstream snapshot so staleness can compare against a stable
+    // signal instead of raw track_count vs the filtered track list.
+    playlistTrackSnapshotCache[cacheKey] = fullPlaylist.snapshot_id || '';
     mirrorPlaylistTracksForSource(mirrorSource, mirrorSourceId, fullPlaylist);
     return fullPlaylist;
 }

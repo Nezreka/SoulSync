@@ -50,6 +50,7 @@ let _lastWatchlistScanStatus = null;
 let _lastMediaScanStatus = null;
 let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
+let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
 let sequentialSyncManager = null;
