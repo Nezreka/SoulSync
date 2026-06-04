@@ -2455,6 +2455,9 @@ async function startMissingTracksProcess(playlistId) {
         const playlistFolderMode = typeof isPlaylistOrganizeEnabled === 'function'
             ? isPlaylistOrganizeEnabled(playlistId)
             : (document.getElementById(`playlist-folder-mode-${playlistId}`)?.checked ?? false);
+        const keepPlaylistFolderCopies = typeof isPlaylistKeepFolderCopiesEnabled === 'function'
+            ? isPlaylistKeepFolderCopiesEnabled(playlistId)
+            : (document.getElementById(`playlist-keep-copies-mode-${playlistId}`)?.checked ?? false);
 
         // Hide the force download toggle during processing
         const forceToggleContainer = forceDownloadCheckbox ? forceDownloadCheckbox.closest('.force-download-toggle-container') : null;
@@ -2513,8 +2516,12 @@ async function startMissingTracksProcess(playlistId) {
             requestBody.playlist_name = process.playlist.name;
             // Add playlist folder mode flag for sync page playlists
             requestBody.playlist_folder_mode = playlistFolderMode;
+            requestBody.keep_playlist_folder_copies = playlistFolderMode && keepPlaylistFolderCopies;
             if (playlistFolderMode) {
                 console.log(`📁 [Playlist Folder] Enabled for playlist: ${process.playlist.name}`);
+                if (keepPlaylistFolderCopies) {
+                    console.log(`📁 [Playlist Folder] Keep folder copies enabled`);
+                }
             }
         }
 
@@ -4621,40 +4628,31 @@ function startSequentialSync() {
         return;
     }
 
-    // Validate selection
+    const bulkConfig = typeof getActiveSyncBulkConfig === 'function' ? getActiveSyncBulkConfig() : null;
+    if (!bulkConfig) {
+        showToast('Bulk sync is not available on this tab', 'error');
+        return;
+    }
+
     if (selectedPlaylists.size === 0) {
         showToast('No playlists selected for sync', 'error');
         return;
     }
 
-    // Get playlist order from DOM to maintain display order
-    const playlistCards = document.querySelectorAll('.playlist-card');
-    const orderedPlaylistIds = [];
+    const orderedPlaylistIds = typeof getOrderedSelectedPlaylistIds === 'function'
+        ? getOrderedSelectedPlaylistIds()
+        : [];
 
-    playlistCards.forEach(card => {
-        const playlistId = card.dataset.playlistId;
-        if (selectedPlaylists.has(playlistId)) {
-            orderedPlaylistIds.push(playlistId);
-        }
-    });
+    if (!orderedPlaylistIds.length) {
+        showToast('No playlists selected for sync', 'error');
+        return;
+    }
 
-    console.log(`🚀 Starting sequential sync for ${orderedPlaylistIds.length} playlists`);
+    console.log(`🚀 Starting sequential sync for ${orderedPlaylistIds.length} playlists (${activeSyncSelectionSource})`);
 
-    // Show sidebar for sync progress
     showSyncSidebar();
-
-    // Start sequential sync
-    sequentialSyncManager.start(orderedPlaylistIds);
-
-    // Disable playlist selection during sync
+    sequentialSyncManager.start(orderedPlaylistIds, bulkConfig);
     disablePlaylistSelection(true);
-}
-
-function disablePlaylistSelection(disabled) {
-    const checkboxes = document.querySelectorAll('.playlist-checkbox');
-    checkboxes.forEach(checkbox => {
-        checkbox.disabled = disabled;
-    });
 }
 
 function hasActiveOperations() {

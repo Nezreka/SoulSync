@@ -12124,19 +12124,45 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1.3;
 }
 
+.auto-sync-organize-toggles {
+    margin-top: 6px;
+}
+
 .auto-sync-organize-toggle {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 6px;
     font-size: 11px;
     color: rgba(255, 255, 255, 0.72);
     cursor: pointer;
     user-select: none;
 }
 
+.auto-sync-organize-subtoggle {
+    margin-top: 4px;
+    margin-left: 14px;
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.auto-sync-organize-subtoggle.is-disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
 .auto-sync-organize-toggle input {
     margin: 0;
+}
+
+.playlist-organize-pref-group .playlist-organize-subtoggle {
+    display: block;
+    margin-top: 6px;
+    margin-left: 18px;
+    opacity: 0.85;
+}
+
+.playlist-organize-pref-group .playlist-organize-subtoggle.is-disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 .auto-sync-scheduled-timing {

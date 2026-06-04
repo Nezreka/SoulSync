@@ -125,6 +125,7 @@ def run_playlist_organize_download(
             'force_download_all': False,
             'ignore_manual_matches': False,
             'playlist_folder_mode': True,
+            'keep_playlist_folder_copies': bool(pl.get('keep_playlist_folder_copies')),
             'is_album_download': False,
             'album_context': None,
             'artist_context': None,

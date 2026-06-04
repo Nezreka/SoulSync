@@ -344,6 +344,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         batch_profile_id = 1
         batch_source = 'spotify'
         batch_playlist_folder_mode = False
+        batch_keep_playlist_folder_copies = False
         batch_playlist_name = 'Unknown Playlist'
         batch_playlist_id = playlist_id
         batch_source_playlist_ref = ''
@@ -357,6 +358,9 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 batch_profile_id = download_batches[batch_id].get('profile_id', 1) or 1
                 batch_source = download_batches[batch_id].get('batch_source', 'spotify') or 'spotify'
                 batch_playlist_folder_mode = download_batches[batch_id].get('playlist_folder_mode', False)
+                batch_keep_playlist_folder_copies = download_batches[batch_id].get(
+                    'keep_playlist_folder_copies', False
+                )
                 batch_playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
                 batch_playlist_id = download_batches[batch_id].get('playlist_id', playlist_id)
                 batch_source_playlist_ref = (
@@ -367,13 +371,22 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             resolve_playlist_folder_mode_for_batch,
             track_exists_in_playlist_folder_from_track_data,
         )
-        effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
-            db,
-            playlist_id=str(batch_playlist_id),
-            playlist_name=batch_playlist_name,
-            batch_playlist_folder_mode=batch_playlist_folder_mode,
-            profile_id=batch_profile_id,
-            source=batch_source,
+        effective_playlist_folder_mode, effective_playlist_name, keep_playlist_folder_copies = (
+            resolve_playlist_folder_mode_for_batch(
+                db,
+                playlist_id=str(batch_playlist_id),
+                playlist_name=batch_playlist_name,
+                batch_playlist_folder_mode=batch_playlist_folder_mode,
+                batch_keep_playlist_folder_copies=batch_keep_playlist_folder_copies,
+                profile_id=batch_profile_id,
+                source=batch_source,
+                active_server=active_server or '',
+            )
+        )
+        skip_library_match_for_playlist_folder = (
+            effective_playlist_folder_mode
+            and keep_playlist_folder_copies
+            and not force_download_all
         )
         if effective_playlist_folder_mode and not batch_playlist_folder_mode:
             with tasks_lock:
@@ -456,28 +469,38 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
             _stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
+            _in_playlist_folder = (
+                effective_playlist_folder_mode
+                and track_exists_in_playlist_folder_from_track_data(
+                    effective_playlist_name,
+                    track_data,
+                )
+            )
             if not ignore_manual_matches and _stid and _mlm.get_match_for_track(
                 db, batch_profile_id, track_data, default_source=batch_source
             ):
-                logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
-                try:
-                    deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
-                except Exception as _wl_err:
-                    logger.debug(f"[Manual Match] Wishlist removal attempt failed: {_wl_err}")
-                analysis_results.append({
-                    'track_index': track_index,
-                    'track': track_data,
-                    'found': True,
-                    'confidence': 1.0,
-                    'match_reason': 'manual_library_match',
-                })
-                continue
+                if skip_library_match_for_playlist_folder and not _in_playlist_folder:
+                    logger.info(
+                        f"[Playlist Folder Copies] '{track_name}' in library but missing from "
+                        f"'{effective_playlist_name}' folder — will download copy"
+                    )
+                else:
+                    logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
+                    try:
+                        deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
+                    except Exception as _wl_err:
+                        logger.debug(f"[Manual Match] Wishlist removal attempt failed: {_wl_err}")
+                    analysis_results.append({
+                        'track_index': track_index,
+                        'track': track_data,
+                        'found': True,
+                        'confidence': 1.0,
+                        'match_reason': 'manual_library_match',
+                    })
+                    continue
 
             if effective_playlist_folder_mode and not force_download_all:
-                if track_exists_in_playlist_folder_from_track_data(
-                    effective_playlist_name,
-                    track_data,
-                ):
+                if _in_playlist_folder:
                     logger.info(
                         f"[Playlist Folder] '{track_name}' already on disk in playlist folder — skipping download"
                     )
@@ -497,6 +520,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             # Skip database check if force download is enabled
             if force_download_all:
                 logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
+                found, confidence = False, 0.0
+            elif skip_library_match_for_playlist_folder:
                 found, confidence = False, 0.0
             elif album_tracks_map:
                 # Album-scoped matching: check against known album tracks first

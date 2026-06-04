@@ -1495,7 +1495,8 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
         : 'spotify';
     await applyMirroredOrganizePreference(virtualPlaylistId, orgSource);
     if (options.forcePlaylistFolder) {
-        syncPlaylistOrganizeCheckboxes(virtualPlaylistId, true);
+        const defaultKeep = typeof isSoulsyncStandaloneMode === 'function' && isSoulsyncStandaloneMode();
+        syncPlaylistOrganizeCheckboxes(virtualPlaylistId, true, defaultKeep);
         if (typeof setMirroredOrganizePreference === 'function') {
             await setMirroredOrganizePreference(virtualPlaylistId, true, orgSource);
         }

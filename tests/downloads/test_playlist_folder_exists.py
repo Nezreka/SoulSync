@@ -7,6 +7,7 @@ import pytest
 
 from core.downloads.playlist_folder import (
     candidate_playlist_folder_paths,
+    effective_keep_playlist_folder_copies,
     resolve_playlist_folder_mode_for_batch,
     track_exists_in_playlist_folder,
 )
@@ -66,7 +67,7 @@ def test_resolve_playlist_folder_mode_from_mirrored():
         'name': 'Rekordbox Set',
         'organize_by_playlist': True,
     })
-    enabled, name = resolve_playlist_folder_mode_for_batch(
+    enabled, name, keep = resolve_playlist_folder_mode_for_batch(
         db,
         playlist_id='37i9dQZF1',
         playlist_name='Other Name',
@@ -74,11 +75,12 @@ def test_resolve_playlist_folder_mode_from_mirrored():
     )
     assert enabled is True
     assert name == 'Rekordbox Set'
+    assert keep is False
 
 
 def test_resolve_playlist_folder_mode_batch_flag():
     db = _FakeDB()
-    enabled, name = resolve_playlist_folder_mode_for_batch(
+    enabled, name, keep = resolve_playlist_folder_mode_for_batch(
         db,
         playlist_id='1',
         playlist_name='Batch Name',
@@ -86,3 +88,44 @@ def test_resolve_playlist_folder_mode_batch_flag():
     )
     assert enabled is True
     assert name == 'Batch Name'
+    assert keep is False
+
+
+def test_resolve_playlist_folder_keep_copies_from_mirrored():
+    db = _FakeDB(mirrored={
+        'id': 5,
+        'name': 'USB Set',
+        'organize_by_playlist': True,
+        'keep_playlist_folder_copies': True,
+    })
+    enabled, name, keep = resolve_playlist_folder_mode_for_batch(
+        db,
+        playlist_id='37i9dQZF1',
+        playlist_name='Other',
+        batch_playlist_folder_mode=False,
+        active_server='soulsync',
+    )
+    assert enabled is True
+    assert name == 'USB Set'
+    assert keep is True
+
+
+def test_standalone_defaults_keep_copies_when_organize_without_explicit_keep():
+    mirrored = {
+        'id': 5,
+        'name': 'USB Set',
+        'organize_by_playlist': True,
+        'keep_playlist_folder_copies': False,
+        'keep_playlist_folder_copies_opt_out': False,
+    }
+    assert effective_keep_playlist_folder_copies(mirrored, 'soulsync') is True
+    assert effective_keep_playlist_folder_copies(mirrored, 'plex') is False
+
+
+def test_standalone_keep_copies_opt_out_honored():
+    mirrored = {
+        'organize_by_playlist': True,
+        'keep_playlist_folder_copies': False,
+        'keep_playlist_folder_copies_opt_out': True,
+    }
+    assert effective_keep_playlist_folder_copies(mirrored, 'soulsync') is False

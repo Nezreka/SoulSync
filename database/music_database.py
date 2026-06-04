@@ -575,6 +575,7 @@ class MusicDatabase:
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
+            self._add_mirrored_playlist_keep_copies_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1124,6 +1125,24 @@ class MusicDatabase:
                 logger.info("Added organize_by_playlist column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_keep_copies_column(self, cursor):
+        """Per-playlist copy in each playlist folder even when track exists in library."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'keep_playlist_folder_copies' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN keep_playlist_folder_copies INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added keep_playlist_folder_copies column to mirrored_playlists table")
+            if 'keep_playlist_folder_copies_opt_out' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN keep_playlist_folder_copies_opt_out INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added keep_playlist_folder_copies_opt_out column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding keep_playlist_folder_copies column to mirrored_playlists: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -12470,6 +12489,11 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        pl['keep_playlist_folder_copies'] = bool(pl.get('keep_playlist_folder_copies', 0))
+        pl['keep_playlist_folder_copies_opt_out'] = bool(pl.get('keep_playlist_folder_copies_opt_out', 0))
+        if not pl['organize_by_playlist']:
+            pl['keep_playlist_folder_copies'] = False
+            pl['keep_playlist_folder_copies_opt_out'] = False
         return pl
 
     def get_mirrored_playlist_by_source(
@@ -12529,21 +12553,56 @@ class MusicDatabase:
         enabled: bool,
     ) -> bool:
         """Persist whether downloads for this playlist use playlist-folder layout."""
+        return self.set_mirrored_playlist_preferences(
+            playlist_id,
+            organize_by_playlist=enabled,
+        )
+
+    def set_mirrored_playlist_preferences(
+        self,
+        playlist_id: int,
+        *,
+        organize_by_playlist: Optional[bool] = None,
+        keep_playlist_folder_copies: Optional[bool] = None,
+    ) -> bool:
+        """Update mirrored-playlist download layout preferences."""
         try:
+            current = self.get_mirrored_playlist(playlist_id)
+            if not current:
+                return False
+            organize = (
+                bool(organize_by_playlist)
+                if organize_by_playlist is not None
+                else bool(current.get('organize_by_playlist'))
+            )
+            keep = (
+                bool(keep_playlist_folder_copies)
+                if keep_playlist_folder_copies is not None
+                else bool(current.get('keep_playlist_folder_copies'))
+            )
+            opt_out = bool(current.get('keep_playlist_folder_copies_opt_out'))
+            if keep_playlist_folder_copies is not None:
+                opt_out = not keep
+            if not organize:
+                keep = False
+                opt_out = False
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
                     UPDATE mirrored_playlists
-                    SET organize_by_playlist = ?, updated_at = CURRENT_TIMESTAMP
+                    SET organize_by_playlist = ?,
+                        keep_playlist_folder_copies = ?,
+                        keep_playlist_folder_copies_opt_out = ?,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (1 if enabled else 0, playlist_id),
+                    (1 if organize else 0, 1 if keep else 0, 1 if opt_out else 0, playlist_id),
                 )
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
-            logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            logger.error(f"Error updating mirrored playlist preferences for {playlist_id}: {e}")
             return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:

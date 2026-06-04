@@ -82,6 +82,35 @@ def track_exists_in_playlist_folder(
     return False
 
 
+def is_soulsync_standalone_server(active_server: str) -> bool:
+    return (active_server or '').strip().lower() == 'soulsync'
+
+
+def effective_keep_playlist_folder_copies(
+    mirrored: Optional[Dict[str, Any]],
+    active_server: str,
+    *,
+    batch_keep: bool = False,
+) -> bool:
+    """True when per-playlist folder copies should be kept for this batch.
+
+    In SoulSync standalone mode, mirrored playlists with organize-by-playlist
+    default to keeping copies unless the user explicitly opted out.
+    """
+    if batch_keep:
+        return True
+    if not mirrored:
+        return False
+    if mirrored.get('keep_playlist_folder_copies'):
+        return True
+    if mirrored.get('keep_playlist_folder_copies_opt_out'):
+        return False
+    return (
+        is_soulsync_standalone_server(active_server)
+        and bool(mirrored.get('organize_by_playlist'))
+    )
+
+
 def track_exists_in_playlist_folder_from_track_data(
     playlist_name: str,
     track_data: Dict[str, Any],
@@ -100,28 +129,41 @@ def resolve_playlist_folder_mode_for_batch(
     playlist_id: str,
     playlist_name: str,
     batch_playlist_folder_mode: bool,
+    batch_keep_playlist_folder_copies: bool = False,
     profile_id: int = 1,
     source: str = 'spotify',
-) -> tuple[bool, str]:
-    """Merge batch flag with persisted mirrored-playlist preference."""
-    if batch_playlist_folder_mode:
-        return True, playlist_name
+    active_server: str = '',
+) -> tuple[bool, str, bool]:
+    """Merge batch flags with persisted mirrored-playlist preferences.
 
-    if not hasattr(db, 'resolve_mirrored_playlist'):
-        return False, playlist_name
+    Returns ``(folder_mode, effective_playlist_name, keep_folder_copies)``.
+    """
+    mirrored = None
+    if hasattr(db, 'resolve_mirrored_playlist'):
+        mirrored = db.resolve_mirrored_playlist(
+            playlist_id, profile_id=profile_id, default_source=source or 'spotify'
+        )
 
-    # Pass the batch's source so numeric upstream ids (e.g. Deezer) resolve by
-    # source instead of colliding with the mirrored-playlists primary key.
-    mirrored = db.resolve_mirrored_playlist(
-        playlist_id, profile_id=profile_id, default_source=source or 'spotify'
+    keep = effective_keep_playlist_folder_copies(
+        mirrored,
+        active_server,
+        batch_keep=batch_keep_playlist_folder_copies,
     )
+
+    if batch_playlist_folder_mode:
+        name = (mirrored.get('name') if mirrored else None) or playlist_name
+        return True, name, keep
+
     if mirrored and mirrored.get('organize_by_playlist'):
-        return True, mirrored.get('name') or playlist_name
-    return False, playlist_name
+        return True, mirrored.get('name') or playlist_name, keep
+
+    return False, playlist_name, False
 
 
 __all__ = [
     'candidate_playlist_folder_paths',
+    'effective_keep_playlist_folder_copies',
+    'is_soulsync_standalone_server',
     'track_exists_in_playlist_folder',
     'track_exists_in_playlist_folder_from_track_data',
     'resolve_playlist_folder_mode_for_batch',
