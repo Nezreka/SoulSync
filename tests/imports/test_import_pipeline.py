@@ -209,7 +209,6 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
 
     monkeypatch.setattr(import_pipeline, "record_soulsync_library_entry", _record_library)
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda *args, **kwargs: None)
-    monkeypatch.setattr(import_pipeline, "record_retag_download", lambda *args, **kwargs: None)
 
     context = {
         "track_info": {"_playlist_folder_mode": True, "_playlist_name": "Playlist"},

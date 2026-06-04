@@ -487,7 +487,6 @@ function initializeWebSocket() {
     socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
     socket.on('tool:quality-scanner', (data) => updateQualityScanProgressFromData(data));
     socket.on('tool:duplicate-cleaner', (data) => updateDuplicateCleanProgressFromData(data));
-    socket.on('tool:retag', (data) => updateRetagStatusFromData(data));
     socket.on('tool:db-update', (data) => updateDbProgressFromData(data));
     socket.on('tool:metadata', (data) => updateMetadataStatusFromData(data));
     socket.on('tool:logs', (data) => updateLogsFromData(data));
