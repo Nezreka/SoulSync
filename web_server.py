@@ -26238,6 +26238,17 @@ def get_discover_similar_artists():
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
 
+        # Explainability: resolve which of the user's OWN artists point to each
+        # recommendation, so the UI can show "because you have X, Y, Z".
+        try:
+            sources_by_name = database.get_recommendation_sources(
+                [a.similar_artist_name for a in similar_artists],
+                profile_id=get_current_profile_id(),
+            )
+        except Exception as e:
+            logger.debug("recommendation-sources lookup failed: %s", e)
+            sources_by_name = {}
+
         # Artists already filtered by source in SQL
         result_artists = []
         for artist in similar_artists:
@@ -26268,6 +26279,10 @@ def get_discover_similar_artists():
                 artist_data["genres"] = artist.genres[:3]
             if artist.popularity:
                 artist_data["popularity"] = artist.popularity
+            # "because you have X, Y, Z" — the artists of yours that point here
+            because = sources_by_name.get(artist.similar_artist_name)
+            if because:
+                artist_data["because"] = because
             result_artists.append(artist_data)
 
         logger.info(
