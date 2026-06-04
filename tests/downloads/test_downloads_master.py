@@ -1119,6 +1119,37 @@ def test_playlist_folder_mode_propagates(monkeypatch):
     assert info['_playlist_name'] == 'My Mix'
 
 
+def test_wishlist_source_info_organize_by_playlist_enables_folder_mode(monkeypatch):
+    """Wishlist requeue honors organize_by_playlist saved from the download modal."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    deps = _build_deps()
+    _seed_batch('Bwlf')
+    tracks = [{
+        'name': 'Song One',
+        'artists': [{'name': 'Artist One'}],
+        'source_info': {
+            'playlist_id': '37i9dQZF1DX0XUsuxWHRQd',
+            'playlist_name': 'Daily Mix',
+            'organize_by_playlist': True,
+            'playlist_source': 'spotify',
+        },
+        'spotify_data': {
+            'album': {'id': 'album-1', 'name': 'Album One'},
+            'artists': [{'name': 'Artist One'}],
+        },
+    }]
+
+    mw.run_full_missing_tracks_process('Bwlf', 'wishlist', tracks, deps)
+
+    task_id = download_batches['Bwlf']['queue'][0]
+    info = download_tasks[task_id]['track_info']
+    assert info['_playlist_folder_mode'] is True
+    assert info['_playlist_name'] == 'Daily Mix'
+    assert '_is_explicit_album_download' not in info
+
+
 # ---------------------------------------------------------------------------
 # Hand-off to monitor + start_next_batch
 # ---------------------------------------------------------------------------

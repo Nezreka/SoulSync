@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.downloads.file_finder import AUDIO_EXTENSIONS
 from core.imports.paths import (
@@ -75,10 +76,34 @@ def track_exists_in_playlist_folder(
     artist: str,
     title: str,
 ) -> bool:
-    """Return True if any audio file exists at the playlist-folder path for this track."""
-    for path in candidate_playlist_folder_paths(playlist_name, artist, title):
+    """Return True if any audio file exists at the playlist-folder path for this track.
+
+    Uses a case-insensitive fallback scan of the playlist directory so that
+    provider-casing differences (e.g. "HUGEL" vs "hugel") don't cause the same
+    file to be downloaded twice under a differently-cased filename.
+    """
+    candidates = candidate_playlist_folder_paths(playlist_name, artist, title)
+    for path in candidates:
         if os.path.isfile(path):
             return True
+
+    # Case-insensitive fallback: list the playlist directory and compare basenames
+    # after lowercasing.  On Linux (case-sensitive fs) a file written as
+    # "HUGEL - Song.flac" is invisible to an exact match for "hugel - Song.flac".
+    checked_dirs: set = set()
+    for path in candidates:
+        parent = os.path.dirname(path)
+        if parent in checked_dirs or not os.path.isdir(parent):
+            continue
+        checked_dirs.add(parent)
+        target_lower = os.path.basename(path).lower()
+        try:
+            for fname in os.listdir(parent):
+                if fname.lower() == target_lower:
+                    return True
+        except OSError:
+            pass
+
     return False
 
 
@@ -121,6 +146,58 @@ def track_exists_in_playlist_folder_from_track_data(
     if not artist:
         artist = str(track_data.get('artist_name', '') or '').strip()
     return track_exists_in_playlist_folder(playlist_name, artist, title)
+
+
+def resolve_wishlist_track_playlist_folder_mode(
+    wl_source: Any,
+    db: Any,
+    *,
+    profile_id: int = 1,
+    default_playlist_name: str = 'Unknown Playlist',
+) -> Tuple[bool, str]:
+    """Resolve playlist-folder layout for a single wishlist track.
+
+    Honors ``organize_by_playlist`` stored when the row was added from a download
+    modal, then falls back to the mirrored-playlist row (using ``playlist_source``
+    or ``source`` for upstream lookup).
+    """
+    if isinstance(wl_source, str):
+        try:
+            wl_source = json.loads(wl_source)
+        except (json.JSONDecodeError, TypeError):
+            wl_source = {}
+    if not isinstance(wl_source, dict):
+        return False, default_playlist_name
+
+    playlist_name = wl_source.get('playlist_name') or default_playlist_name
+
+    if wl_source.get('organize_by_playlist'):
+        return True, playlist_name
+
+    wl_pl_ref = wl_source.get('playlist_id')
+    wl_pl_source = (
+        wl_source.get('source')
+        or wl_source.get('playlist_source')
+        or 'spotify'
+    )
+    if not wl_pl_ref or not hasattr(db, 'resolve_mirrored_playlist'):
+        return False, playlist_name
+
+    refs_to_try: List[Tuple[str, str]] = [(str(wl_pl_ref).strip(), wl_pl_source)]
+    ui_ref = wl_source.get('ui_playlist_ref')
+    if ui_ref and str(ui_ref).strip() != str(wl_pl_ref).strip():
+        refs_to_try.append((str(ui_ref).strip(), wl_pl_source))
+
+    for ref, src in refs_to_try:
+        if not ref:
+            continue
+        mirrored = db.resolve_mirrored_playlist(
+            ref, profile_id=profile_id, default_source=src or 'spotify'
+        )
+        if mirrored and mirrored.get('organize_by_playlist'):
+            return True, playlist_name or mirrored.get('name') or default_playlist_name
+
+    return False, playlist_name
 
 
 def resolve_playlist_folder_mode_for_batch(
@@ -166,5 +243,6 @@ __all__ = [
     'is_soulsync_standalone_server',
     'track_exists_in_playlist_folder',
     'track_exists_in_playlist_folder_from_track_data',
+    'resolve_wishlist_track_playlist_folder_mode',
     'resolve_playlist_folder_mode_for_batch',
 ]

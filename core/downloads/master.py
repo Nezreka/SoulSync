@@ -369,6 +369,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
         from core.downloads.playlist_folder import (
             resolve_playlist_folder_mode_for_batch,
+            resolve_wishlist_track_playlist_folder_mode,
             track_exists_in_playlist_folder_from_track_data,
         )
         effective_playlist_folder_mode, effective_playlist_name, keep_playlist_folder_copies = (
@@ -514,6 +515,38 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         'found': True,
                         'confidence': 1.0,
                         'match_reason': 'playlist_folder_file',
+                    })
+                    continue
+
+            # For wishlist tracks, check per-track playlist-folder existence regardless
+            # of force_download_all.  Wishlist batches have force_download_all=True so
+            # the batch-level check above is skipped, but a file already on disk in the
+            # playlist folder must not be downloaded again (causes casing duplicates when
+            # the provider returns a differently-cased artist name on a subsequent run).
+            if playlist_id == 'wishlist':
+                _wl_pl_folder, _wl_pl_name = resolve_wishlist_track_playlist_folder_mode(
+                    track_data.get('source_info'),
+                    db,
+                    profile_id=batch_profile_id,
+                    default_playlist_name=batch_playlist_name,
+                )
+                if _wl_pl_folder and track_exists_in_playlist_folder_from_track_data(
+                    _wl_pl_name, track_data
+                ):
+                    logger.info(
+                        f"[Wishlist Folder] '{track_name}' already in playlist folder "
+                        f"'{_wl_pl_name}' — skipping re-download"
+                    )
+                    try:
+                        deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
+                    except Exception as _wl_err:
+                        logger.debug(f"[Wishlist Folder] Wishlist removal failed: {_wl_err}")
+                    analysis_results.append({
+                        'track_index': track_index,
+                        'track': track_data,
+                        'found': True,
+                        'confidence': 1.0,
+                        'match_reason': 'wishlist_playlist_folder_file',
                     })
                     continue
 
@@ -987,6 +1020,18 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
 
+                wishlist_track_pl_folder = False
+                wishlist_track_pl_name = batch_playlist_name
+                if playlist_id == 'wishlist':
+                    wishlist_track_pl_folder, wishlist_track_pl_name = (
+                        resolve_wishlist_track_playlist_folder_mode(
+                            track_info.get('source_info'),
+                            db,
+                            profile_id=batch_profile_id,
+                            default_playlist_name=batch_playlist_name,
+                        )
+                    )
+
                 # Add explicit album context to track_info for artist album downloads
                 if batch_is_album and batch_album_context and batch_artist_context:
                     track_info['_explicit_album_context'] = batch_album_context
@@ -1012,8 +1057,11 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         s_album = {'name': s_album}  # Normalize string album to dict
                     s_artists = spotify_data.get('artists', [])
 
-                    # We need at least an album name and artist
-                    if s_album and isinstance(s_album, dict) and s_album.get('name'):
+                    # Album grouping for library paths — skip when playlist-folder layout applies.
+                    if (
+                        s_album and isinstance(s_album, dict) and s_album.get('name')
+                        and not wishlist_track_pl_folder
+                    ):
                         # Use pre-computed album-level artist for folder consistency.
                         # All tracks from the same album get the same artist context,
                         # preventing folder splits on collab albums (KPOP Demon Hunters, etc.)
@@ -1060,25 +1108,9 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 # tracks tied to a mirrored playlist with organize_by_playlist enabled.
                 task_pl_folder_mode = batch_playlist_folder_mode
                 task_pl_name = batch_playlist_name
-                if not task_pl_folder_mode and playlist_id == 'wishlist':
-                    wl_source = track_info.get('source_info') or {}
-                    if isinstance(wl_source, str):
-                        try:
-                            wl_source = json.loads(wl_source)
-                        except (json.JSONDecodeError, TypeError):
-                            wl_source = {}
-                    wl_pl_ref = wl_source.get('playlist_id')
-                    wl_pl_name = wl_source.get('playlist_name')
-                    wl_pl_source = wl_source.get('source') or 'spotify'
-                    if wl_pl_ref and hasattr(db, 'resolve_mirrored_playlist'):
-                        wl_mirrored = db.resolve_mirrored_playlist(
-                            wl_pl_ref,
-                            profile_id=batch_profile_id,
-                            default_source=wl_pl_source,
-                        )
-                        if wl_mirrored and wl_mirrored.get('organize_by_playlist'):
-                            task_pl_folder_mode = True
-                            task_pl_name = wl_pl_name or wl_mirrored.get('name') or batch_playlist_name
+                if not task_pl_folder_mode and playlist_id == 'wishlist' and wishlist_track_pl_folder:
+                    task_pl_folder_mode = True
+                    task_pl_name = wishlist_track_pl_name
                 if task_pl_folder_mode:
                     track_info['_playlist_folder_mode'] = True
                     track_info['_playlist_name'] = task_pl_name

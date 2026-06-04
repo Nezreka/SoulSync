@@ -18810,6 +18810,7 @@ def start_missing_tracks_process(playlist_id):
             'force_download_all': force_download_all,  # Pass the force flag to the batch
             'ignore_manual_matches': ignore_manual_matches,
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
+            'organize_by_playlist': bool(playlist_folder_mode),
             'keep_playlist_folder_copies': keep_playlist_folder_copies and playlist_folder_mode,
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,

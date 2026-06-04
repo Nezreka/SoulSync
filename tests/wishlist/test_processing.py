@@ -193,6 +193,39 @@ def test_build_wishlist_source_context_uses_source_playlist_ref_for_organize_bat
     assert context["organize_by_playlist"] is True
 
 
+def test_build_wishlist_source_context_playlist_folder_mode_sets_organize():
+    """Batches that only carry ``playlist_folder_mode`` (e.g. Download Missing UI)
+    must produce a context with ``organize_by_playlist`` so the wishlist requeue
+    routing logic picks up the playlist-folder flag even without an explicit
+    ``organize_by_playlist`` key on the batch."""
+    batch = {
+        "playlist_name": "Chill Vibes",
+        "playlist_id": "spId99",
+        "playlist_folder_mode": True,
+        "batch_source": "spotify",
+    }
+
+    context = processing.build_wishlist_source_context(batch)
+
+    assert context["organize_by_playlist"] is True
+    assert context["playlist_id"] == "spId99"
+    assert context.get("source") == "spotify"
+
+
+def test_build_wishlist_source_context_no_organize_when_folder_mode_off():
+    """When ``playlist_folder_mode`` is False and ``organize_by_playlist`` is
+    absent the flag must NOT appear in the resulting context."""
+    batch = {
+        "playlist_name": "Workout",
+        "playlist_id": "spId00",
+        "playlist_folder_mode": False,
+    }
+
+    context = processing.build_wishlist_source_context(batch)
+
+    assert "organize_by_playlist" not in context
+
+
 def test_build_wishlist_source_context_preserves_album_context_for_album_batches():
     """Album batches must carry album_context/artist_context through to the
     wishlist row so a later requeue has authoritative routing data instead

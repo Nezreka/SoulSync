@@ -981,6 +981,15 @@ function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
     if (ref.startsWith('deezer_arl_')) {
         return 'deezer';
     }
+    if (ref.startsWith('tidal_')) {
+        return 'tidal';
+    }
+    if (ref.startsWith('youtube_')) {
+        return 'youtube';
+    }
+    if (ref.startsWith('qobuz_')) {
+        return 'qobuz';
+    }
     return 'spotify';
 }
 
@@ -1202,16 +1211,26 @@ async function onPlaylistKeepCopiesPreferenceChange(playlistRef, enabled, source
     }
 }
 
-function onDownloadMissingOrganizeToggle(playlistId, enabled) {
+async function onDownloadMissingOrganizeToggle(playlistId, enabled) {
     syncPlaylistOrganizeCheckboxes(playlistId, enabled, enabled && isSoulsyncStandaloneMode());
+    const source = playlistOrganizeSourceForRef(playlistId);
+    const ok = await setMirroredOrganizePreference(playlistId, enabled, source);
+    if (!ok) {
+        showToast('Could not save playlist folder preference (mirror this playlist first)', 'warning');
+    }
 }
 
-function onDownloadMissingKeepCopiesToggle(playlistId, enabled) {
+async function onDownloadMissingKeepCopiesToggle(playlistId, enabled) {
     const organizeCb = document.getElementById(`playlist-folder-mode-${playlistId}`);
     if (organizeCb && !organizeCb.checked) {
         organizeCb.checked = true;
     }
     syncPlaylistOrganizeCheckboxes(playlistId, true, enabled);
+    const source = playlistOrganizeSourceForRef(playlistId);
+    const ok = await setMirroredKeepCopiesPreference(playlistId, enabled, source);
+    if (!ok) {
+        showToast('Could not save keep folder copies preference (mirror this playlist first)', 'warning');
+    }
 }
 
 async function applyMirroredOrganizePreference(playlistRef, source = null) {
