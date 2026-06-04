@@ -133,6 +133,13 @@ body {
     z-index: 0;
 }
 
+/* In performance mode the aura loses its blur + animation, leaving two hard
+   static circles — hide them entirely instead. */
+body.reduce-effects .sidebar::before,
+body.reduce-effects .sidebar::after {
+    display: none !important;
+}
+
 @keyframes sidebar-orb-1 {
     0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
     25% { transform: translate(30px, 80px) scale(1.2); opacity: 1; }
@@ -388,7 +395,7 @@ body {
     gap: 14px;
     text-decoration: none;
     padding: 0 16px;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.1s ease, border-color 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease, color 0.1s ease;
     font-family: 'SF Pro Text', -apple-system, sans-serif;
     font-size: 12px;
     font-weight: 500;
@@ -408,14 +415,14 @@ body {
     border-radius: 0 3px 3px 0;
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
     box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
-    transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: height 0.12s ease;
 }
 
 .nav-button.active::before {
     height: 60%;
 }
 
-.nav-button:hover {
+body:not(.reduce-effects) .nav-button:hover {
     background: linear-gradient(135deg,
             rgba(255, 255, 255, 0.06) 0%,
             rgba(255, 255, 255, 0.03) 100%);
@@ -426,20 +433,32 @@ body {
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+.nav-button:active:not(.active) {
+    background: linear-gradient(135deg,
+            rgba(var(--accent-rgb), 0.14) 0%,
+            rgba(var(--accent-rgb), 0.10) 50%,
+            rgba(var(--accent-rgb), 0.06) 100%);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    box-shadow:
+        0 4px 16px rgba(var(--accent-rgb), 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: none;
+}
+
 .nav-button.active {
     background: linear-gradient(135deg,
             rgba(var(--accent-rgb), 0.14) 0%,
             rgba(var(--accent-rgb), 0.10) 50%,
             rgba(var(--accent-rgb), 0.06) 100%);
     border: 1px solid rgba(var(--accent-rgb), 0.2);
-    transform: translateX(6px);
     box-shadow:
         0 4px 16px rgba(var(--accent-rgb), 0.2),
         0 2px 8px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-.nav-button.active:hover {
+body:not(.reduce-effects) .nav-button.active:hover {
     background: linear-gradient(135deg,
             rgba(var(--accent-rgb), 0.20) 0%,
             rgba(var(--accent-rgb), 0.16) 50%,
@@ -466,7 +485,7 @@ body {
             rgba(255, 255, 255, 0.03) 100%);
     border: 1px solid rgba(255, 255, 255, 0.05);
     color: rgba(255, 255, 255, 0.7);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease, box-shadow 0.1s ease;
     box-shadow:
         0 2px 4px rgba(0, 0, 0, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -476,7 +495,7 @@ body {
     width: 22px;
     height: 22px;
     pointer-events: none;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 0.1s ease, opacity 0.1s ease;
     color: rgba(var(--accent-rgb), 0.7);
 }
 
@@ -4925,6 +4944,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(70, 70, 76, 0.5);
     margin-bottom: 8px;
     padding: 16px;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 88px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -20446,6 +20467,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* Wishlist Delete Buttons */
 .wishlist-track-item {
     position: relative;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 64px;
 }
 
 .wishlist-delete-btn {
@@ -26482,6 +26505,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0;
     cursor: pointer;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 240px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -33658,6 +33683,10 @@ div.artist-hero-badge {
 .discover-section {
     margin-bottom: 50px;
     padding: 0 20px;
+    /* Skip layout/paint of off-screen shelves so entering Discover and scrolling
+       stays cheap. 'auto' lets the browser remember real size after first render. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 340px;
 }
 
 .discover-section-header {
@@ -58725,17 +58754,23 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 }
 .blacklist-entry-remove:hover { background: rgba(239, 83, 80, 0.12); color: #ef5350; }
 
-/* ── Reduce Visual Effects ── Disables GPU-heavy properties globally */
+/* ── Reduce Visual Effects ── Full performance mode: disables GPU-heavy
+   properties and halts decorative animation globally. */
 body.reduce-effects *,
 body.reduce-effects *::before,
 body.reduce-effects *::after {
-    animation-duration: 0s !important;
-    animation-delay: 0s !important;
+    animation: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     box-shadow: none !important;
+    filter: none !important;
+}
+
+/* Kill the background particle canvas entirely in performance mode */
+body.reduce-effects #page-particles-canvas {
+    display: none !important;
 }
 
 /* ============================================

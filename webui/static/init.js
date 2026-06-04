@@ -1,6 +1,18 @@
 // INITIALIZATION
 // ===============================
 let navigationEpoch = 0;
+let _optimisticNavPageId = null;
+
+// Schedule heavy per-page init during browser idle time so navigation paints and
+// the page becomes scrollable first. timeout caps the delay so content still loads
+// promptly. Falls back to a macrotask in browsers without requestIdleCallback.
+function _scheduleHeavyInit(fn) {
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(fn, { timeout: 200 });
+    } else {
+        setTimeout(fn, 0);
+    }
+}
 
 function notifyPageWillChange(nextPageId) {
     const fromPageId = typeof currentPage === 'string' ? currentPage : null;
@@ -175,13 +187,35 @@ function applyReduceEffects(enabled) {
     } else {
         document.body.classList.remove('reduce-effects');
     }
+    window._reduceEffectsActive = enabled;
     localStorage.setItem('soulsync-reduce-effects', enabled ? '1' : '0');
+
+    // Reduce Visual Effects is a full performance switch: also halt the canvas
+    // animation loops (particles + worker orbs), not just CSS effects.
+    const pcanvas = document.getElementById('page-particles-canvas');
+    if (enabled) {
+        if (window.pageParticles) window.pageParticles.stop();
+        if (pcanvas) pcanvas.style.display = 'none';
+        if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
+    } else {
+        // Restore only what the user's own toggles still allow.
+        const activePage = document.querySelector('.page.active');
+        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        if (window._particlesEnabled !== false) {
+            if (pcanvas) pcanvas.style.display = '';
+            if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
+        }
+        if (window._workerOrbsEnabled !== false && window.workerOrbs && activeId) {
+            window.workerOrbs.setPage(activeId);
+        }
+    }
 }
 
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
 (function () {
     if (localStorage.getItem('soulsync-reduce-effects') === '1') {
         document.body.classList.add('reduce-effects');
+        window._reduceEffectsActive = true;
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
@@ -2314,6 +2348,15 @@ function navigateToPage(pageId, options = {}) {
         if (route?.kind === 'react') {
             showReactHost(pageId);
             setActivePageChrome(pageId);
+        } else if (route?.kind === 'legacy' && pageId !== 'artist-detail') {
+            // Show legacy page immediately — don't wait for TanStack Router's async cycle
+            showLegacyPage(pageId);
+            setActivePageChrome(pageId);
+            _optimisticNavPageId = pageId;
+            // Defer data loading until the browser is idle, so the page paints AND
+            // becomes scrollable before heavy sync init (settings form wiring, etc.)
+            // runs. Falls back to a macrotask where requestIdleCallback is missing.
+            _scheduleHeavyInit(() => loadPageData(pageId));
         }
         return router.navigateToPage(pageId, {
             replace: options.replace === true,
@@ -2413,12 +2456,20 @@ async function loadPageData(pageId) {
                 initExplorer();
                 break;
             case 'settings':
-                initializeSettings();
-                switchSettingsTab('connections');
-                await loadSettingsData();
-                await loadQualityProfile();
-                loadApiKeys();
-                loadBlacklistCount();
+                // Suppress auto-save while the form is being populated, so opening
+                // Settings no longer fires a spurious full save (4 POSTs + backend
+                // service re-init) on every visit.
+                window._suppressSettingsAutoSave = true;
+                try {
+                    initializeSettings();
+                    switchSettingsTab('connections');
+                    await loadSettingsData();
+                    await loadQualityProfile();
+                    loadApiKeys();
+                    loadBlacklistCount();
+                } finally {
+                    window._suppressSettingsAutoSave = false;
+                }
                 break;
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
