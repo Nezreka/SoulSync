@@ -620,7 +620,13 @@ class ConfigManager:
                 "embed_tags": True
             },
             "playlist_sync": {
-                "create_backup": True
+                "create_backup": True,
+                # How a re-sync writes to the server playlist:
+                #   replace   — delete + recreate (default; today's behavior)
+                #   reconcile — edit in place (add/remove delta), preserving the
+                #               playlist's custom image, description, and identity (#792)
+                #   append    — only add new tracks, never remove
+                "mode": "replace"
             },
             "settings": {
                 "audio_quality": "flac"

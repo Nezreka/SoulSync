@@ -4401,12 +4401,15 @@ async function startPlaylistSync(playlistId, syncModeOverride = null) {
     let syncMode = syncModeOverride;
     if (!syncMode) {
         const modeSelect = document.getElementById(`sync-mode-${playlistId}`);
-        syncMode = (modeSelect && modeSelect.value) || 'replace';
+        // Empty value = "use the Settings default" — send nothing so the
+        // backend falls back to playlist_sync.mode (#792). Don't hardcode
+        // 'replace' here or it shadows the global setting.
+        syncMode = (modeSelect && modeSelect.value) || '';
     }
-    if (syncMode !== 'replace' && syncMode !== 'append') {
-        syncMode = 'replace';
+    if (syncMode && !['replace', 'reconcile', 'append'].includes(syncMode)) {
+        syncMode = '';
     }
-    console.log(`🚀 [${new Date().toTimeString().split(' ')[0]}] Starting sync for playlist: ${playlistId} (mode: ${syncMode})`);
+    console.log(`🚀 [${new Date().toTimeString().split(' ')[0]}] Starting sync for playlist: ${playlistId} (mode: ${syncMode || 'default(setting)'})`);
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
         console.error(`❌ Could not find playlist data for ID: ${playlistId}`);

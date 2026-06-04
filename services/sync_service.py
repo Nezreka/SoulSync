@@ -195,6 +195,26 @@ class PlaylistSyncService:
                 failed_tracks=failed_tracks
             ))
     
+    def _reconcile_or_replace(self, client, playlist_name: str, tracks) -> bool:
+        """Reconcile mode (#792): edit the playlist in place (add/remove delta,
+        preserving its image + description + identity). If the client lacks
+        reconcile or it fails, fall back to the destructive replace so the sync
+        still succeeds — logged loudly so a failing in-place edit is diagnosable.
+        """
+        fn = getattr(client, 'reconcile_playlist', None)
+        if fn is None:
+            return client.update_playlist(playlist_name, tracks)
+        try:
+            if fn(playlist_name, tracks):
+                return True
+            logger.warning(
+                "Reconcile sync failed for '%s' — falling back to replace "
+                "(playlist will be recreated this once)", playlist_name)
+        except Exception as e:
+            logger.warning(
+                "Reconcile sync errored for '%s' (%s) — falling back to replace", playlist_name, e)
+        return client.update_playlist(playlist_name, tracks)
+
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
         self._active_profile_id = profile_id
         # Check if THIS specific playlist is already syncing
@@ -378,6 +398,8 @@ class PlaylistSyncService:
                     )
                     if sync_mode == 'append':
                         sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                    elif sync_mode == 'reconcile':
+                        sync_success = self._reconcile_or_replace(media_client, playlist.name, valid_tracks)
                     else:
                         sync_success = media_client.update_playlist(playlist.name, valid_tracks)
 

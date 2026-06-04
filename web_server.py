@@ -21053,10 +21053,17 @@ def _get_source_playlist_states(states, error_label, info_log_label=None):
 def _submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_image_url):
     """Submit a sync to the shared executor (closes over sync_executor /
     _run_sync_task / get_current_profile_id so the lifted start_sync helper
-    stays free of those globals)."""
+    stays free of those globals).
+
+    Used by ALL per-source discovery syncs (Spotify-Public/Tidal/Deezer/Qobuz/
+    YouTube/iTunes-link/ListenBrainz/Beatport). These have no per-request mode
+    selector, so honor the configured default (Settings > Playlist sync mode) —
+    otherwise they always ran 'replace' regardless of the setting (#792)."""
+    from core.sync.playlist_edit import normalize_sync_mode
+    _mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
     return sync_executor.submit(
         _run_sync_task, sync_playlist_id, playlist_name, spotify_tracks,
-        None, get_current_profile_id(), playlist_image_url,
+        None, get_current_profile_id(), playlist_image_url, _mode,
     )
 
 
@@ -23546,9 +23553,11 @@ def start_playlist_sync():
     # playlist — only adds tracks that aren't there yet. Per-server clients
     # implement append via native add APIs (Plex addItems, Jellyfin POST
     # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
-    sync_mode = data.get('sync_mode', 'replace')
-    if sync_mode not in ('replace', 'append'):
-        sync_mode = 'replace'
+    # Per-request sync_mode wins; otherwise use the configured default
+    # (Settings > Playlist sync mode). Default 'replace' keeps today's behavior.
+    from core.sync.playlist_edit import normalize_sync_mode
+    sync_mode = normalize_sync_mode(data.get('sync_mode'),
+                                    config_manager.get('playlist_sync.mode', 'replace'))
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
