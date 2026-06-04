@@ -18,7 +18,7 @@ from typing import List, Optional
 import requests as http_requests
 
 from config.settings import config_manager
-from core.torrent_clients.base import TorrentStatus
+from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.transmission")
@@ -57,7 +57,7 @@ class TransmissionAdapter:
         self._load_config()
 
     def _load_config(self) -> None:
-        url = (config_manager.get('torrent_client.url', '') or '').rstrip('/')
+        url = normalize_client_url(config_manager.get('torrent_client.url', ''))
         # Transmission's RPC endpoint is always /transmission/rpc — if the
         # user pasted a bare host URL, append it. If they pasted the full
         # /transmission/rpc URL, leave it.
