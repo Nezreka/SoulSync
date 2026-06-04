@@ -1836,6 +1836,9 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
                     source_track_id: srcTrack.source_track_id || '',
                     source_title: srcTrack.name || '',
                     source_artist: srcTrack.artist || '',
+                    // Provider of the source track, so the durable manual match
+                    // (#787) records the right source. Retrieval is source-agnostic.
+                    source: srcTrack.source || _serverEditorState.mirroredPlaylist?.source || '',
                 })
             });
         }

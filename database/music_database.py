@@ -4621,21 +4621,29 @@ class MusicDatabase:
                     CREATE INDEX IF NOT EXISTS idx_mltm_lib_track
                     ON manual_library_track_matches (library_track_id)
                 """)
+                # Stable re-resolution key: a library rescan can drop/re-key
+                # tracks (esp. Jellyfin/Navidrome GUIDs), leaving library_track_id
+                # dangling. Storing the file path lets us re-find the current
+                # track id after a scan so manual matches survive it.
+                cursor.execute("PRAGMA table_info(manual_library_track_matches)")
+                _mltm_cols = {r[1] for r in cursor.fetchall()}
+                if 'library_file_path' not in _mltm_cols:
+                    cursor.execute("ALTER TABLE manual_library_track_matches ADD COLUMN library_file_path TEXT")
         except Exception as e:
             logger.error(f"Error creating manual_library_track_matches table: {e}")
 
     def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
                                    library_track_id: str, **meta) -> bool:
         """Insert or replace a manual match. meta keys: source_title, source_artist,
-        source_album, source_context_json, server_source."""
+        source_album, source_context_json, server_source, library_file_path."""
         try:
             with self._get_connection() as conn:
                 conn.execute("""
                     INSERT INTO manual_library_track_matches
                         (profile_id, source, source_track_id, library_track_id,
                          source_title, source_artist, source_album,
-                         source_context_json, server_source, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_context_json, server_source, library_file_path, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source, source_track_id, server_source)
                     DO UPDATE SET
                         library_track_id = excluded.library_track_id,
@@ -4643,17 +4651,45 @@ class MusicDatabase:
                         source_artist = excluded.source_artist,
                         source_album = excluded.source_album,
                         source_context_json = excluded.source_context_json,
+                        library_file_path = excluded.library_file_path,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     profile_id, source, source_track_id, library_track_id,
                     meta.get('source_title'), meta.get('source_artist'),
                     meta.get('source_album'), meta.get('source_context_json'),
-                    meta.get('server_source', ''),
+                    meta.get('server_source', ''), meta.get('library_file_path'),
                 ))
                 return True
         except Exception as e:
             logger.error(f"save_manual_library_match error: {e}")
             return False
+
+    def find_track_id_by_file_path(self, file_path: str) -> Optional[str]:
+        """Return the current tracks.id for a file path, or None.
+
+        Used to re-resolve a manual match whose stored library_track_id went
+        stale after a rescan re-keyed the track. Exact path first, then a
+        basename fallback (handles server-vs-local path differences)."""
+        if not file_path:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
+            row = cursor.fetchone()
+            if row:
+                return str(row[0])
+            import os as _os
+            fname = _os.path.basename(str(file_path).replace('\\', '/'))
+            if fname:
+                cursor.execute("SELECT id FROM tracks WHERE file_path LIKE ? LIMIT 1", (f"%{fname}",))
+                row = cursor.fetchone()
+                if row:
+                    return str(row[0])
+            return None
+        except Exception as e:
+            logger.error(f"find_track_id_by_file_path error: {e}")
+            return None
 
     def get_manual_library_match(self, profile_id: int, source: str,
                                   source_track_id: str, server_source: str = '') -> Optional[Dict[str, Any]]:

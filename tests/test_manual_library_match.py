@@ -90,6 +90,34 @@ def test_save_upserts_existing(db):
     assert row["source_title"] == "Updated"
 
 
+def test_save_persists_library_file_path(db):
+    """#787 durability: the file path is stored so a manual match can be
+    re-resolved after a rescan re-keys the track."""
+    ok = db.save_manual_library_match(1, "spotify", "track-abc", 42,
+                                       library_file_path="/music/Artist/Album/01.flac")
+    assert ok is True
+    row = db.get_manual_library_match(1, "spotify", "track-abc")
+    assert row["library_file_path"] == "/music/Artist/Album/01.flac"
+
+
+def test_find_track_id_by_file_path(db):
+    """Re-resolution primitive: locate the current tracks.id for a file path
+    (exact, then basename fallback)."""
+    with db._get_connection() as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?, ?, ?, ?, ?)",
+            ("7777", 1, 1, "Track", "/music/Artist/Album/01.flac"),
+        )
+    # Exact path
+    assert db.find_track_id_by_file_path("/music/Artist/Album/01.flac") == "7777"
+    # Basename fallback (server vs local path shape)
+    assert db.find_track_id_by_file_path("/different/root/01.flac") == "7777"
+    # Unknown file → None
+    assert db.find_track_id_by_file_path("/music/nope.flac") is None
+    assert db.find_track_id_by_file_path("") is None
+
+
 def test_delete_by_id(db):
     db.save_manual_library_match(1, "spotify", "track-abc", 42)
     row = db.get_manual_library_match(1, "spotify", "track-abc")

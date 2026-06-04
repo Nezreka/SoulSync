@@ -18072,13 +18072,26 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_match_overrides
+        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
-        _override_pairs = resolve_match_overrides(
-            source_tracks,
-            server_tracks,
-            lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
-        )
+        # Set of server track ids currently in this playlist — used to validate
+        # a re-resolved durable match actually exists before pairing it.
+        _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
+        _ov_profile = get_current_profile_id()
+
+        def _override_lookup(src_id):
+            # 1) Fast override cache (cleared on every rescan).
+            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
+            if cached.get('server_track_id'):
+                return cached['server_track_id']
+            # 2) Durable manual library match — survives a rescan (#787), so a
+            #    Find & Add / manual match keeps pairing after a DB scan. Re-
+            #    resolves a stale id via the stored file path when needed.
+            return resolve_durable_match_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            )
+
+        _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
@@ -18194,26 +18207,54 @@ def server_playlist_replace_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist):
-    """Wrap match-override persistence with the active DB. No-op when
-    source_track_id is missing (e.g. add to a non-mirrored playlist)."""
+def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist, source='spotify'):
+    """Persist a Find & Add selection two ways. No-op when source_track_id is
+    missing (e.g. add to a non-mirrored playlist).
+
+    1. ``sync_match_cache`` override — fast auto-match on the next sync, but
+       wiped on every library rescan.
+    2. A DURABLE manual library match (#787) — survives a rescan, so the
+       source→library pairing sticks in the sync display AND the download loop
+       stops re-fetching it. This is the unification the issue asked for:
+       Find & Add now also records a manual library match (one-way; the manual
+       match tool has no playlist to act on, so it doesn't reverse-create)."""
     if not source_track_id:
         return
+    db = get_database()
     try:
         from core.sync.match_overrides import record_manual_match
         ok = record_manual_match(
-            get_database(),
+            db,
             source_track_id=source_track_id,
             server_source=server_source,
             server_track_id=server_track_id,
-            server_track_title=server_track_title,
             source_title=source_title,
             source_artist=source_artist,
+            server_track_title=server_track_title,
         )
         if ok:
             logger.info(f"[ServerPlaylist] Persisted Find & Add override: {source_track_id} → {server_track_id} ({server_source})")
     except Exception as e:
         logger.warning(f"[ServerPlaylist] Failed to persist Find & Add override: {e}")
+
+    # Durable manual library match — survives a rescan (the override above does not).
+    try:
+        from core.library import manual_library_match as _mlm
+        file_path = ''
+        try:
+            _rows = db.api_get_tracks_by_ids([server_track_id])
+            if _rows:
+                file_path = _rows[0].get('file_path', '') or ''
+        except Exception as _fp_err:
+            logger.debug(f"[ServerPlaylist] file_path lookup for manual match failed: {_fp_err}")
+        _mlm.save_match(
+            db, get_current_profile_id(), (source or 'spotify'), str(source_track_id), str(server_track_id),
+            source_title=source_title, source_artist=source_artist,
+            server_source=server_source, library_file_path=file_path,
+        )
+        logger.info(f"[ServerPlaylist] Recorded durable manual library match: {source_track_id} → {server_track_id}")
+    except Exception as e:
+        logger.warning(f"[ServerPlaylist] Failed to record durable manual match: {e}")
 
 
 @app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
@@ -18236,6 +18277,9 @@ def server_playlist_add_track(playlist_id):
         source_title = data.get('source_title') or ''
         source_artist = data.get('source_artist') or ''
         server_track_title = data.get('server_track_title') or ''
+        # Provider of the source track (spotify/deezer/...) for the durable
+        # manual match. Retrieval is source-agnostic, so this is metadata.
+        source_provider = data.get('source') or 'spotify'
 
         if not track_id:
             return jsonify({"success": False, "error": "track_id required"}), 400
@@ -18276,7 +18320,7 @@ def server_playlist_add_track(playlist_id):
                 except Exception:
                     _existing = set()
                 if str(track_id) in _existing:
-                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
                     return jsonify({"success": True, "message": "Track linked"})
 
             logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
@@ -18300,7 +18344,7 @@ def server_playlist_add_track(playlist_id):
 
             new_id = str(raw_playlist.ratingKey)
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
@@ -18313,7 +18357,7 @@ def server_playlist_add_track(playlist_id):
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
                 media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -18326,7 +18370,7 @@ def server_playlist_add_track(playlist_id):
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
                 media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
