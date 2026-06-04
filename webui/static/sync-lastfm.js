@@ -102,18 +102,20 @@ function renderLastfmSyncPlaylists() {
         `;
     }).join('');
 
-    container.querySelectorAll('.lastfm-playlist-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const mbid = card.dataset.lbMbid;
-            const title = card.dataset.lbTitle;
-            // Reuses the LB Sync-tab click handler — Last.fm radios are
-            // stored in the same table + matched by the same discovery
-            // worker, so the click flow is byte-identical.
-            if (typeof handleListenBrainzSyncCardClick === 'function') {
-                handleListenBrainzSyncCardClick(mbid, title);
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'lastfm-sync',
+            '#lastfm-sync-playlist-container',
+            '.lastfm-playlist-card',
+            card => card.dataset.lbMbid,
+            mbid => {
+                const c = document.querySelector(`#lastfm-sync-card-${CSS.escape(mbid)}`);
+                if (typeof handleListenBrainzSyncCardClick === 'function') {
+                    handleListenBrainzSyncCardClick(mbid, c?.dataset.lbTitle || '');
+                }
             }
-        });
-    });
+        );
+    }
 
     // Reuse the shared refresh loop from sync-listenbrainz.js — it
     // already iterates Last.fm cards alongside LB cards.

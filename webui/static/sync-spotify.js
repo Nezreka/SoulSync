@@ -1199,10 +1199,14 @@ function createBeatportCardFromBackendState(chartInfo) {
         cardElement: document.getElementById(`beatport-card-${chartHash}`)
     };
 
-    // Add click handler
-    const card = document.getElementById(`beatport-card-${chartHash}`);
-    if (card) {
-        card.addEventListener('click', async () => await handleBeatportCardClick(chartHash));
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'beatport',
+            '#beatport-playlist-container',
+            '[id^="beatport-card-"]',
+            card => card.id.replace(/^beatport-card-/, ''),
+            chartHash => handleBeatportCardClick(chartHash)
+        );
     }
 
     console.log(`🃏 Created Beatport card from backend state: ${chartInfo.name} (${phase})`);
@@ -1357,7 +1361,7 @@ function createYouTubeCardFromBackendState(playlistInfo) {
 
     // Create card HTML (using EXACT same structure as createYouTubeCard)
     const cardHtml = `
-        <div class="youtube-playlist-card" id="youtube-card-${urlHash}" data-url="${playlistInfo.url}" onclick="handleYouTubeCardClick('${urlHash}')">
+        <div class="youtube-playlist-card" id="youtube-card-${urlHash}" data-url="${playlistInfo.url}">
             <div class="playlist-card-icon youtube-icon">▶</div>
             <div class="playlist-card-content">
                 <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
@@ -1387,6 +1391,16 @@ function createYouTubeCardFromBackendState(playlistInfo) {
         convertedSpotifyPlaylistId: playlistInfo.converted_spotify_playlist_id,
         backendSynced: true  // Flag to indicate this came from backend
     };
+
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'youtube',
+            '#youtube-playlist-container',
+            '.youtube-playlist-card[id^="youtube-card-"]',
+            c => c.id.replace(/^youtube-card-/, ''),
+            handleYouTubeCardClick
+        );
+    }
 
     console.log(`🃏 Created YouTube card from backend state: ${playlist.name} (${phase})`);
 }
@@ -1643,7 +1657,7 @@ function renderSpotifyPlaylists() {
 
         // This HTML structure creates the interactive playlist cards
         return `
-        <div class="playlist-card" data-playlist-id="${p.id}" onclick="togglePlaylistSelection(event)">
+        <div class="playlist-card" data-playlist-id="${p.id}">
             <div class="playlist-card-main">
                 <div class="playlist-card-content">
                     <div class="playlist-card-name">${escapeHtml(p.name)}</div>
@@ -1663,6 +1677,10 @@ function renderSpotifyPlaylists() {
         </div>
         `;
     }).join('');
+    if (typeof wirePlaylistCardSelection === 'function') {
+        wirePlaylistCardSelection('spotify', 'spotify-playlist-container');
+    }
+    if (typeof updateSyncActionsUI === 'function') updateSyncActionsUI();
 }
 
 function handleViewProgressClick(event, playlistId) {
@@ -1789,44 +1807,6 @@ async function cleanupDownloadProcess(playlistId) {
         updatePlaylistCardUI(playlistId);
     }
     updateRefreshButtonState(); // Now safe since hasActiveOperations() excludes wishlist
-}
-
-function togglePlaylistSelection(event) {
-    const card = event.currentTarget;
-    const playlistId = card.dataset.playlistId;
-
-    // Don't toggle if clicking the button
-    if (event.target.tagName === 'BUTTON') return;
-
-    const isSelected = !card.classList.contains('selected');
-    card.classList.toggle('selected', isSelected);
-
-    if (isSelected) {
-        selectedPlaylists.add(playlistId);
-    } else {
-        selectedPlaylists.delete(playlistId);
-    }
-    updateSyncActionsUI();
-}
-
-function updateSyncActionsUI() {
-    // If sequential sync is running, let the manager handle UI updates
-    if (sequentialSyncManager && sequentialSyncManager.isRunning) {
-        sequentialSyncManager.updateUI();
-        return;
-    }
-
-    const selectionInfo = document.getElementById('selection-info');
-    const startSyncBtn = document.getElementById('start-sync-btn');
-    const count = selectedPlaylists.size;
-
-    if (count === 0) {
-        if (selectionInfo) selectionInfo.textContent = 'Select playlists to sync';
-        if (startSyncBtn) startSyncBtn.disabled = true;
-    } else {
-        if (selectionInfo) selectionInfo.textContent = `${count} playlist${count > 1 ? 's' : ''} selected`;
-        if (startSyncBtn) startSyncBtn.disabled = false;
-    }
 }
 
 async function openPlaylistDetailsModal(event, playlistId) {

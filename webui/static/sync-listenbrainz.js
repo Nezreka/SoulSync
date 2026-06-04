@@ -139,13 +139,18 @@ function renderListenBrainzSyncPlaylists() {
     }).join('');
 
     // Wire click handlers.
-    container.querySelectorAll('.listenbrainz-playlist-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const mbid = card.dataset.lbMbid;
-            const title = card.dataset.lbTitle;
-            handleListenBrainzSyncCardClick(mbid, title);
-        });
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'listenbrainz-sync',
+            '#listenbrainz-sync-playlist-container',
+            '.listenbrainz-playlist-card',
+            card => card.dataset.lbMbid,
+            mbid => {
+                const c = document.querySelector(`#listenbrainz-sync-card-${CSS.escape(mbid)}`);
+                handleListenBrainzSyncCardClick(mbid, c?.dataset.lbTitle || '');
+            }
+        );
+    }
 
     // If the tab is currently visible, kick the refresh loop so cards
     // start showing live state immediately. ``_startLbSyncCardRefreshLoop``

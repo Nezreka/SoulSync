@@ -89,13 +89,15 @@ function renderTidalPlaylists() {
         return createTidalCard(p);
     }).join('');
 
-    // Add click handlers to cards
-    tidalPlaylists.forEach(p => {
-        const card = document.getElementById(`tidal-card-${p.id}`);
-        if (card) {
-            card.addEventListener('click', () => handleTidalCardClick(p.id));
-        }
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'tidal',
+            '#tidal-playlist-container',
+            '.tidal-playlist-card',
+            card => card.id.replace(/^tidal-card-/, ''),
+            handleTidalCardClick
+        );
+    }
 }
 
 function createTidalCard(playlist) {
@@ -1598,12 +1600,15 @@ function renderQobuzPlaylists() {
         return createQobuzCard(p);
     }).join('');
 
-    qobuzPlaylists.forEach(p => {
-        const card = document.getElementById(`qobuz-card-${p.id}`);
-        if (card) {
-            card.addEventListener('click', () => handleQobuzCardClick(p.id));
-        }
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'qobuz',
+            '#qobuz-playlist-container',
+            '.qobuz-playlist-card',
+            card => card.id.replace(/^qobuz-card-/, ''),
+            handleQobuzCardClick
+        );
+    }
 }
 
 function createQobuzCard(playlist) {
@@ -2523,6 +2528,11 @@ function renderDeezerArlPlaylists() {
         </div>
         `;
     }).join('');
+
+    if (typeof wirePlaylistCardSelection === 'function') {
+        wirePlaylistCardSelection('deezer', 'deezer-arl-playlist-container');
+    }
+    if (typeof updateSyncActionsUI === 'function') updateSyncActionsUI();
 }
 
 function handleDeezerArlViewProgressClick(event, playlistId) {
@@ -2800,13 +2810,15 @@ function renderDeezerPlaylists() {
         return createDeezerCard(p);
     }).join('');
 
-    // Add click handlers to cards
-    deezerPlaylists.forEach(p => {
-        const card = document.getElementById(`deezer-card-${p.id}`);
-        if (card) {
-            card.addEventListener('click', () => handleDeezerCardClick(p.id));
-        }
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'deezer-link',
+            '#deezer-playlist-container',
+            '.deezer-playlist-card',
+            card => card.id.replace(/^deezer-card-/, ''),
+            handleDeezerCardClick
+        );
+    }
 }
 
 function createDeezerCard(playlist) {
@@ -3726,6 +3738,12 @@ function initializeSyncPage() {
                 syncContentArea.style.gridTemplateColumns = '1fr';
             }
 
+            if (typeof onSyncTabChanged === 'function') {
+                onSyncTabChanged(tabId);
+            } else if (typeof updateSyncActionsUI === 'function') {
+                updateSyncActionsUI();
+            }
+
             // Auto-load Deezer ARL playlists on first tab activation
             if (tabId === 'deezer' && !deezerArlPlaylistsLoaded) {
                 // Check ARL status first
@@ -3809,6 +3827,11 @@ function initializeSyncPage() {
     const activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
     if (activeBeatportTab) {
         ensureBeatportContentLoaded();
+    }
+
+    const initialActiveSyncTab = document.querySelector('.sync-tab-button.active');
+    if (initialActiveSyncTab && typeof onSyncTabChanged === 'function') {
+        onSyncTabChanged(initialActiveSyncTab.dataset.tab);
     }
 
     // Logic for the Spotify refresh button
@@ -5128,9 +5151,14 @@ function addBeatportCardToContainer(chartData) {
     };
 
     // Add click handler
-    const card = document.getElementById(`beatport-card-${chartData.hash}`);
-    if (card) {
-        card.addEventListener('click', async () => await handleBeatportCardClick(chartData.hash));
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'beatport',
+            '#beatport-playlist-container',
+            '[id^="beatport-card-"]',
+            card => card.id.replace(/^beatport-card-/, ''),
+            chartHash => handleBeatportCardClick(chartHash)
+        );
     }
 
     console.log(`🃏 Created Beatport card: ${chartData.name}`);
@@ -6776,13 +6804,15 @@ function renderSpotifyPublicPlaylists() {
         return createSpotifyPublicCard(p);
     }).join('');
 
-    // Add click handlers to cards
-    spotifyPublicPlaylists.forEach(p => {
-        const card = document.getElementById(`spotify-public-card-${p.url_hash}`);
-        if (card) {
-            card.addEventListener('click', () => handleSpotifyPublicCardClick(p.url_hash));
-        }
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'spotify-public',
+            '#spotify-public-playlist-container',
+            '.spotify-public-card',
+            card => card.id.replace(/^spotify-public-card-/, ''),
+            handleSpotifyPublicCardClick
+        );
+    }
 }
 
 function createSpotifyPublicCard(playlist) {
@@ -7802,12 +7832,15 @@ function renderITunesLinkPlaylists() {
     }).join('');
 
     // Add click handlers to cards
-    itunesLinkPlaylists.forEach(p => {
-        const card = document.getElementById(`itunes-link-card-${p.url_hash}`);
-        if (card) {
-            card.addEventListener('click', () => handleITunesLinkCardClick(p.url_hash));
-        }
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'itunes-link',
+            '#itunes-link-playlist-container',
+            '.itunes-link-card',
+            card => card.id.replace(/^itunes-link-card-/, ''),
+            handleITunesLinkCardClick
+        );
+    }
 }
 
 function createITunesLinkCard(playlist) {
@@ -9018,15 +9051,15 @@ function updateYouTubeCardData(urlHash, playlistData) {
     state.playlist = playlistData;
     state.urlHash = urlHash;
 
-    // Add click handler for card and action button
-    const handleCardClick = () => handleYouTubeCardClick(urlHash);
-    const actionBtn = card.querySelector('.playlist-card-action-btn');
-
-    card.addEventListener('click', handleCardClick);
-    actionBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent card click
-        handleCardClick();
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'youtube',
+            '#youtube-playlist-container',
+            '.youtube-playlist-card[id^="youtube-card-"]',
+            c => c.id.replace(/^youtube-card-/, ''),
+            handleYouTubeCardClick
+        );
+    }
 
     console.log('🃏 Updated YouTube card data:', playlistData.name);
 }
