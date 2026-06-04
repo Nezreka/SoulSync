@@ -373,6 +373,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             playlist_name=batch_playlist_name,
             batch_playlist_folder_mode=batch_playlist_folder_mode,
             profile_id=batch_profile_id,
+            source=batch_source,
         )
         if effective_playlist_folder_mode and not batch_playlist_folder_mode:
             with tasks_lock:
@@ -1043,10 +1044,12 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             wl_source = {}
                     wl_pl_ref = wl_source.get('playlist_id')
                     wl_pl_name = wl_source.get('playlist_name')
+                    wl_pl_source = wl_source.get('source') or 'spotify'
                     if wl_pl_ref and hasattr(db, 'resolve_mirrored_playlist'):
                         wl_mirrored = db.resolve_mirrored_playlist(
                             wl_pl_ref,
                             profile_id=batch_profile_id,
+                            default_source=wl_pl_source,
                         )
                         if wl_mirrored and wl_mirrored.get('organize_by_playlist'):
                             task_pl_folder_mode = True
