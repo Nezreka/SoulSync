@@ -26,7 +26,7 @@
         { container: '.hydrabase-button-container',        color: [200, 200, 200] },
         { container: '.soulid-button-container',          color: [29, 185, 84], rainbow: true },
         { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true },
-        { container: '.em-manage-btn',                     color: [168, 85, 247] },
+        { container: '.em-manage-btn',                     color: [168, 85, 247], hub: true },
     ];
 
     const ORB_RADIUS = 7;
@@ -72,6 +72,7 @@
                 el,
                 color: def.color,
                 rainbow: def.rainbow || false,
+                hub: def.hub || false,
                 index: i,
                 x: 0, y: 0,
                 vx: (Math.random() - 0.5) * 0.6,
@@ -398,6 +399,18 @@
         const cy = h * 0.5;
 
         for (const orb of visible) {
+            // The hub is a nucleus — it settles at canvas center and stays put
+            // while every worker orb drifts around it. No jitter, strong pull home.
+            if (orb.hub) {
+                orb.vx += (cx - orb.x) * 0.02;
+                orb.vy += (cy - orb.y) * 0.02;
+                orb.vx *= 0.85;
+                orb.vy *= 0.85;
+                orb.x += orb.vx;
+                orb.y += orb.vy;
+                continue;
+            }
+
             // Active orbs drift faster
             const driftStrength = orb.active ? 0.04 : 0.02;
             orb.vx += (Math.random() - 0.5) * driftStrength;
@@ -479,6 +492,45 @@
     function drawOrbs(ctx, visible, time) {
         for (const orb of visible) {
             const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
+
+            // ── The hub: a larger, brighter nucleus with a slow, breathing pulse ──
+            if (orb.hub) {
+                const slow = 0.5 + 0.5 * Math.sin(time * 1.1);   // calm heartbeat
+                const hubR = (ORB_RADIUS + 5) + slow * 2;
+
+                // Wide ambient glow
+                const glowR = hubR * 4.5;
+                const halo = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, glowR);
+                halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.28 + slow * 0.12})`);
+                halo.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, glowR, 0, Math.PI * 2);
+                ctx.fillStyle = halo;
+                ctx.fill();
+
+                // Solid bright core
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, hubR, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.9})`;
+                ctx.fill();
+
+                // Bright inner highlight
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, hubR * 0.5, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + slow * 0.2})`;
+                ctx.fill();
+
+                // Expanding heartbeat ring
+                const ringPhase = (time * 0.6) % 1;
+                const ringR = hubR + ringPhase * hubR * 2.5;
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, ringR, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - ringPhase) * 0.35})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                continue;
+            }
+
             const pulse = 0.5 + 0.5 * Math.sin(time * 2 + orb.phase);
 
             // Active orbs are larger and breathe — size oscillates
@@ -549,9 +601,32 @@
     }
 
     function drawConnections(ctx, visible, time) {
+        // Hub spokes — the nucleus is wired to every worker orb, full length,
+        // so it always reads as the center that "manages" the cluster.
+        const hub = visible.find(o => o.hub);
+        if (hub) {
+            const [hr, hg, hb] = hub.color;
+            for (const orb of visible) {
+                if (orb === hub) continue;
+                const dx = hub.x - orb.x;
+                const dy = hub.y - orb.y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                // Gentle traveling pulse along each spoke
+                const flow = 0.5 + 0.5 * Math.sin(time * 2 - dist * 0.05);
+                const alpha = 0.10 + flow * 0.10 + (orb.active ? 0.06 : 0);
+                ctx.beginPath();
+                ctx.moveTo(hub.x, hub.y);
+                ctx.lineTo(orb.x, orb.y);
+                ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${alpha})`;
+                ctx.lineWidth = orb.active ? 1.0 : 0.6;
+                ctx.stroke();
+            }
+        }
+
         for (let i = 0; i < visible.length; i++) {
             for (let j = i + 1; j < visible.length; j++) {
                 const a = visible[i], b = visible[j];
+                if (a.hub || b.hub) continue; // hub spokes handled above
                 const dx = a.x - b.x;
                 const dy = a.y - b.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
