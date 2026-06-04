@@ -93,6 +93,18 @@ def _make_db(album_row):
         )
         """
     )
+    # The scan now joins a representative track path to check art on disk.
+    cursor.execute(
+        """
+        CREATE TABLE tracks (
+            id INTEGER PRIMARY KEY,
+            album_id INTEGER,
+            file_path TEXT,
+            disc_number INTEGER,
+            track_number INTEGER
+        )
+        """
+    )
     cursor.execute(
         "INSERT INTO artists (id, name, thumb_url) VALUES (?, ?, ?)",
         (1, 'Artist', 'https://artist/thumb'),

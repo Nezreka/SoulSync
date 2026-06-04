@@ -1,7 +1,9 @@
 """Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
+import os
 import re
 
+from core.metadata.art_apply import album_has_art_on_disk
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -88,6 +90,12 @@ class MissingCoverArtJob(RepairJob):
                 "al.spotify_album_id",
                 "al.thumb_url",
                 "ar.thumb_url",
+                # A representative local track path, so we can check whether the
+                # album actually has art ON DISK (embedded / cover.jpg) — not just
+                # whether the DB row has a thumb_url.
+                ("(SELECT t.file_path FROM tracks t WHERE t.album_id = al.id "
+                 "AND t.file_path IS NOT NULL AND t.file_path != '' "
+                 "ORDER BY t.disc_number, t.track_number LIMIT 1) AS rep_path"),
             ]
             column_map = [
                 ("itunes_album_id", "al.itunes_album_id"),
@@ -101,12 +109,14 @@ class MissingCoverArtJob(RepairJob):
                     column_index[alias] = len(select_cols)
                     select_cols.append(f"{column} AS {alias}")
 
+            # Scan every titled album — we decide per-album whether art is
+            # missing in the DB OR on disk (the file/cover.jpg). The on-disk
+            # check is cheap-first (a sidecar stat before opening any audio).
             cursor.execute(f"""
                 SELECT {', '.join(select_cols)}
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE (al.thumb_url IS NULL OR al.thumb_url = '')
-                  AND al.title IS NOT NULL AND al.title != ''
+                WHERE al.title IS NOT NULL AND al.title != ''
             """)
             albums = cursor.fetchall()
         except Exception as e:
@@ -132,7 +142,7 @@ class MissingCoverArtJob(RepairJob):
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist_name, spotify_album_id, _, artist_thumb = row[:6]
+            album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
             source_album_ids = {
                 'spotify': spotify_album_id,
                 'itunes': row[column_index['itunes_album_id']] if 'itunes_album_id' in column_index else None,
@@ -141,6 +151,14 @@ class MissingCoverArtJob(RepairJob):
                 'hydrabase': row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None,
             }
             result.scanned += 1
+
+            # Art can be missing in the DB (no thumb_url) and/or on disk (no
+            # embedded art and no cover.jpg). Skip albums that already have both.
+            db_missing = not (str(album_thumb).strip() if album_thumb else '')
+            disk_missing = bool(rep_path) and not album_has_art_on_disk(rep_path)
+            if not db_missing and not disk_missing:
+                result.skipped += 1
+                continue
 
             if context.report_progress:
                 context.report_progress(
@@ -183,6 +201,12 @@ class MissingCoverArtJob(RepairJob):
                                 'found_artwork_url': artwork_url,
                                 'spotify_album_id': spotify_album_id,
                                 'artist_thumb_url': artist_thumb or None,
+                                # Where the files live + what was missing, so the
+                                # apply can embed into the audio + write cover.jpg.
+                                'album_folder': os.path.dirname(rep_path) if rep_path else None,
+                                'db_missing': db_missing,
+                                'disk_missing': disk_missing,
+                                'musicbrainz_release_id': None,
                             }
                         )
                         if inserted:
@@ -328,10 +352,11 @@ class MissingCoverArtJob(RepairJob):
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            # Upper bound: every titled album is examined (the per-album DB/disk
+            # art check decides which actually need filling).
             cursor.execute("""
                 SELECT COUNT(*) FROM albums
-                WHERE (thumb_url IS NULL OR thumb_url = '')
-                  AND title IS NOT NULL AND title != ''
+                WHERE title IS NOT NULL AND title != ''
             """)
             row = cursor.fetchone()
             return row[0] if row else 0
