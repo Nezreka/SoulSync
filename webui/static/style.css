@@ -10156,10 +10156,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         padding: 16px;
     }
 
-    .header-actions {
+    /* Dashboard enrichment service buttons: worker-orbs is disabled on mobile,
+       so these render as real buttons. Spread the 44px icon buttons across the
+       full width in an even auto-fit grid (no ragged centered rows), and give
+       the wider "Manage Workers" pill its own full-width row. Scoped to the
+       dashboard so other pages' .header-actions (e.g. Settings) are untouched. */
+    #dashboard-page .header-actions {
         width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+        justify-items: center;
+        align-items: center;
+        gap: 12px 10px;
+    }
+
+    #dashboard-page .header-actions .em-manage-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        margin-left: 0;
         justify-content: center;
-        gap: 6px;
     }
 
     .header-quick-nav {
