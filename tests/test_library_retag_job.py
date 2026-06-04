@@ -111,6 +111,46 @@ def test_scan_dry_run_off_auto_applies_no_finding(tmp_path, monkeypatch):
     assert writes and writes[0]['title'] == 'Real Title'   # actually wrote
 
 
+def test_scan_prefers_configured_cover_art_source(tmp_path, monkeypatch):
+    """Sokhi's request: when cover-art sources are configured, the re-tag pulls
+    art from them (select_preferred_art_url) instead of the matched source's
+    album image — so changing sources + 'replace' re-downloads fresh covers."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'replace', 'source': 'spotify'})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    monkeypatch.setattr('core.metadata.art_lookup.select_preferred_art_url',
+                        lambda artist, album, meta, order, **k: 'http://itunes/big-cover.jpg')
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    d = ctx.findings[0]['details']
+    assert d['cover_url'] == 'http://itunes/big-cover.jpg'   # configured source won
+    assert d['cover_action'] == 'replace'
+
+
+def test_scan_falls_back_to_source_image_when_no_configured_art(tmp_path, monkeypatch):
+    """Non-breaking: with no configured cover-art order, keep using the matched
+    source's album image (select_preferred_art_url returns None)."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'replace', 'source': 'spotify'})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    monkeypatch.setattr('core.metadata.art_lookup.select_preferred_art_url',
+                        lambda *a, **k: None)
+
+    result = lr.LibraryRetagJob().scan(ctx)
+    d = ctx.findings[0]['details']
+    assert d['cover_url'] == 'http://art/cover.jpg'   # _ALBUM_META['image_url']
+
+
 def test_scan_full_depth_attaches_full_meta_to_finding(tmp_path, monkeypatch):
     """depth=full: each track plan carries a full_meta dict (title/album/artist +
     source ids) for the enrichment cascade, and details record the depth."""

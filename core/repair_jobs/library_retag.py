@@ -208,7 +208,11 @@ class LibraryRetagJob(RepairJob):
         'Turn it off to auto-apply on scan.\n'
         '- Mode: "overwrite" rewrites every field the source provides; "fill_missing" '
         'only fills blank tags (keeps your existing values).\n'
-        '- Cover art: replace / fill-missing / skip.\n'
+        '- Cover art: replace / fill-missing / skip. "replace" force-refreshes '
+        'art on every matched album (use this after changing your cover-art '
+        'sources to re-pull fresh covers). When you have configured cover-art '
+        'sources (Settings > metadata enhancement art order), the art is pulled '
+        'from those; otherwise it falls back to the matched source\'s album image.\n'
         '- Source: which matched source to pull from (default: your source priority).'
     )
     icon = 'repair-icon-retag'
@@ -338,6 +342,23 @@ class LibraryRetagJob(RepairJob):
             if v:
                 cover_url = v
                 break
+
+        # Honor the user's configured cover-art sources (the same
+        # `metadata_enhancement.album_art_order` the post-process embed uses), so
+        # changing those sources and re-tagging pulls fresh art FROM them rather
+        # than always using the matched metadata source's album image. Non-
+        # breaking: select_preferred_art_url returns None when no order is
+        # configured, so we keep the source image. Skipped when not embedding art.
+        if cover_mode != 'skip':
+            try:
+                from core.metadata.art_lookup import select_preferred_art_url
+                order = (context.config_manager.get('metadata_enhancement.album_art_order')
+                         if context.config_manager else None)
+                preferred = select_preferred_art_url(artist_name, album_title, album_meta, order)
+                if preferred:
+                    cover_url = preferred
+            except Exception as e:
+                logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
 
         # Cover action (album-level), independent of tag changes. Decided first
         # so cover-only albums (tags fine, art missing) still include their
