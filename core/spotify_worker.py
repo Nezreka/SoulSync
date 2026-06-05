@@ -186,8 +186,14 @@ class SpotifyWorker:
                     interruptible_sleep(self._stop_event, 1)
                     continue
 
-                # Rate limit guard — if globally rate limited, sleep until ban expires
-                if self.client.is_rate_limited():
+                # Rate limit guard — if globally rate limited, sleep until ban
+                # expires. EXCEPT: when Spotify Free is available it bridges the
+                # ban (is_spotify_metadata_available() is True via the no-creds
+                # source, and the client routes there), so we keep enriching
+                # instead of stalling. Purely additive: with Spotify Free off,
+                # is_spotify_metadata_available() is False during a ban and this
+                # sleeps exactly as before.
+                if self.client.is_rate_limited() and not self.client.is_spotify_metadata_available():
                     info = self.client.get_rate_limit_info()
                     remaining = info['remaining_seconds'] if info else 60
                     logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
