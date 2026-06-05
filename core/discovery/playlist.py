@@ -258,8 +258,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         for _q in (f"{_cq_artist} {_cq_title}", _cq_title):
                             if _q not in search_queries:
                                 search_queries.append(_q)
-                except Exception:
-                    pass
+                except Exception as _cq_err:
+                    logger.debug("canonical search-query add failed: %s", _cq_err)
 
                 # Step 3: Search and score
                 best_match = None
