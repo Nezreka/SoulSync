@@ -1039,22 +1039,16 @@
         gap: 16px;
     }
 
-    .artist-image-container {
-        width: 100px;
-        height: 100px;
-    }
-
     .artist-image,
     .artist-image-fallback {
         width: 100px;
         height: 100px;
     }
 
-    .artist-info h1,
-    .artist-name {
-        font-size: 24px !important;
-        white-space: normal;
+    .artist-hero-section .artist-name {
+        font-size: 1.6em;
         text-align: center;
+        display: block;
     }
 
     .artist-hero-badges {
@@ -1076,7 +1070,7 @@
     .artist-hero-bio {
         font-size: 12px;
         -webkit-line-clamp: 3;
-        max-height: 54px;
+        max-height: fit-content;
     }
 
     .artist-hero-numbers {
@@ -3308,5 +3302,121 @@
     .library-empty-search-cta {
         font-size: 12px;
         padding: 9px 12px;
+    }
+}
+
+/* ============================================================================
+   Mobile fixes (v2) — phone-only, all inside max-width:768px. Desktop untouched.
+   ============================================================================ */
+@media (max-width: 768px) {
+    /* Center the artist hero action buttons + match-status chips on phone
+       (moved here from the base rule so desktop stays left-aligned). */
+    .artist-hero-actions { justify-content: center; }
+    .enhanced-match-status-row { justify-content: center; }
+
+    /* #8 Page-container heroes carry desktop-sized padding/margins that waste
+       space and look off on a phone. Tighten them up. */
+    .tools-maintenance-hero,
+    .watchlist-artist-config-hero,
+    .watchlist-detail-hero,
+    .discover-hero {
+        padding: 14px 14px;
+        margin-bottom: 16px;
+    }
+
+    /* #9 Sync page header: title + the three action buttons (Auto-Sync / Library
+       Match / Sync History) don't fit side-by-side. Stack the header and let the
+       buttons wrap so all three are reachable. */
+    .sync-header-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .sync-header-row > div:last-child {
+        flex-wrap: wrap;
+    }
+    .sync-header-row .sync-history-btn {
+        flex: 1 1 auto;
+    }
+}
+
+@media (max-width: 768px) {
+    /* #6 Enhanced-view track table: a 6+ column table can't fit a phone and the
+       panel clips the overflow, so only the first column showed. Drop table
+       layout entirely and make each row a single flex line: play · title (takes
+       the space) · duration · the ⋯ actions button. Secondary columns hidden. */
+    .enhanced-track-table,
+    .enhanced-track-table thead,
+    .enhanced-track-table tbody,
+    .enhanced-track-table tr,
+    .enhanced-track-table td,
+    .enhanced-track-table th {
+        display: block;
+        width: auto;
+    }
+    .enhanced-track-table thead { display: none; }
+    .enhanced-track-table tr {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 6px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .enhanced-track-table td,
+    .enhanced-track-table th {
+        padding: 0;
+        border: none;
+        white-space: normal;
+    }
+    .enhanced-track-table .col-play {
+        flex: 0 0 auto;
+        width: auto;
+    }
+    .enhanced-track-table .col-title {
+        flex: 1 1 auto;
+        min-width: 0;
+        word-break: break-word;
+        font-size: 13px;
+    }
+    .enhanced-track-table .col-duration {
+        flex: 0 0 auto;
+        width: auto;
+        font-size: 11px;
+        opacity: 0.65;
+    }
+    .enhanced-track-table .col-mobile-actions {
+        display: block;
+        flex: 0 0 auto;
+        width: auto;
+        text-align: right;
+    }
+    /* Everything else folds into the ⋯ actions sheet — hide on the row. */
+    .enhanced-track-table .col-num,
+    .enhanced-track-table .col-disc,
+    .enhanced-track-table .col-format,
+    .enhanced-track-table .col-bitrate,
+    .enhanced-track-table .col-bpm,
+    .enhanced-track-table .col-path,
+    .enhanced-track-table .col-match,
+    .enhanced-track-table .col-queue,
+    .enhanced-track-table .col-writetag,
+    .enhanced-track-table .col-delete,
+    .enhanced-track-table .col-report,
+    .enhanced-track-table tr > th:first-child {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    /* #7 Mini media player: on desktop it's a 340px widget pinned bottom-right
+       (right:132px) — that overflows a phone and overlaps the bottom search.
+       Make it a full-width bar that sits just ABOVE the global search bar
+       (which is at bottom:16px, height:38px on mobile). */
+    .media-player {
+        left: 10px;
+        right: 10px;
+        width: auto;
+        bottom: 62px;
+        margin: 0;
     }
 }
