@@ -3474,3 +3474,45 @@
         width: 45%;
     }
 }
+
+@media (max-width: 768px) {
+    /* ── Downloads page (.adl-*) ──
+       Had ZERO mobile rules. Desktop is a two-column layout: the main list
+       (.adl-main, flex:1) + a fixed 366px batch panel with a left border that
+       scrolls independently. On a phone that doesn't fit — stack it. */
+    .adl-layout {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .adl-batch-panel {
+        width: 100%;
+        flex-shrink: 1;
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 14px 4px 0;
+        overflow-y: visible;        /* grows in the page flow instead of own scroll */
+    }
+
+    /* Header: title + controls sat in one row; stack so the pills get full width. */
+    .adl-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .adl-title { font-size: 1.3rem; }
+    .adl-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    /* Filter pills (All / Active / Queued / Completed / Failed) + count +
+       Cancel All / Clear Completed: wrap instead of overflowing off-screen. */
+    .adl-filter-pills {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    .adl-pill { padding: 6px 12px; }
+    /* Action buttons full-width-friendly so they're tappable. */
+    .adl-cancel-all-btn,
+    .adl-clear-btn { flex: 1 1 auto; }
+}
