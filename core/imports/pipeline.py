@@ -207,6 +207,19 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     f"{os.path.basename(existing_final)}"
                 )
                 return
+            # File was intentionally moved to quarantine by a concurrent/earlier
+            # post-process call — this is a stale duplicate dispatch, not a race.
+            # _mark_task_quarantined sets _quarantine_entry_id for every quarantine
+            # trigger (AcoustID, integrity, bit-depth).  The quarantine entry and
+            # its retry are already in flight; don't overwrite the task state with
+            # a spurious race-guard failure.
+            if context.get('_quarantine_entry_id'):
+                logger.debug(
+                    f"[Race Guard] Source gone but already quarantined (entry %s) — stale duplicate call, ignoring: "
+                    f"{os.path.basename(file_path)}",
+                    context['_quarantine_entry_id'],
+                )
+                return
             logger.error(
                 f"[Race Guard] Source file gone and no known destination — marking as failed: "
                 f"{os.path.basename(file_path)}"
