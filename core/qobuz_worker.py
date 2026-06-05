@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import accept_artist_match, interruptible_sleep
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("qobuz_worker")
@@ -423,14 +423,19 @@ class QobuzWorker:
 
         if result:
             result_name = result.get('name', '')
-            if self._name_matches(artist_name, result_name):
-                qobuz_artist_id = result.get('id')
-                if not qobuz_artist_id:
-                    self._mark_status('artist', artist_id, 'error')
-                    self.stats['errors'] += 1
-                    logger.warning(f"Qobuz search result for '{artist_name}' has no ID")
-                    return
-
+            qobuz_artist_id = result.get('id')
+            ok, reason = accept_artist_match(
+                self.db, 'qobuz_id', qobuz_artist_id, artist_id, artist_name, result_name,
+            )
+            if not ok:
+                self._mark_status('artist', artist_id, 'not_found')
+                self.stats['not_found'] += 1
+                logger.debug(f"Artist '{artist_name}' not matched: {reason}")
+            elif not qobuz_artist_id:
+                self._mark_status('artist', artist_id, 'error')
+                self.stats['errors'] += 1
+                logger.warning(f"Qobuz search result for '{artist_name}' has no ID")
+            else:
                 # Fetch full artist details
                 full_artist = None
                 try:
@@ -441,10 +446,6 @@ class QobuzWorker:
                 self._update_artist(artist_id, result, full_artist)
                 self.stats['matched'] += 1
                 logger.info(f"Matched artist '{artist_name}' -> Qobuz ID: {qobuz_artist_id}")
-            else:
-                self._mark_status('artist', artist_id, 'not_found')
-                self.stats['not_found'] += 1
-                logger.debug(f"Name mismatch for artist '{artist_name}' (got '{result_name}')")
         else:
             if _qobuz_is_rate_limited():
                 logger.warning(f"Rate limited while searching artist '{artist_name}', will retry")

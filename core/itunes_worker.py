@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("itunes_worker")
@@ -393,7 +393,11 @@ class iTunesWorker:
             return
 
         for artist_obj in results:
-            if self._name_matches(artist_name, artist_obj.name):
+            ok, reason = accept_artist_match(
+                self.db, 'itunes_artist_id', artist_obj.id, artist_id,
+                artist_name, artist_obj.name,
+            )
+            if ok:
                 if not self._is_itunes_id(artist_obj.id):
                     logger.warning(f"Rejecting non-iTunes ID '{artist_obj.id}' for artist '{artist_name}'")
                     self._mark_status('artist', artist_id, 'error')

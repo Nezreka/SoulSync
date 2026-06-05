@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.audiodb_client import AudioDBClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import accept_artist_match, interruptible_sleep
 
 logger = get_logger("audiodb_worker")
 
@@ -426,14 +426,18 @@ class AudioDBWorker:
                 result = self.client.search_artist(item_name)
                 if result:
                     result_name = result.get('strArtist', '')
-                    if self._name_matches(item_name, result_name):
+                    ok, reason = accept_artist_match(
+                        self.db, 'audiodb_id', result.get('idArtist'), item_id,
+                        item_name, result_name,
+                    )
+                    if ok:
                         self._update_artist(item_id, result)
                         self.stats['matched'] += 1
                         logger.info(f"Matched artist '{item_name}' -> AudioDB ID: {result.get('idArtist')}")
                     else:
                         self._mark_status('artist', item_id, 'not_found')
                         self.stats['not_found'] += 1
-                        logger.debug(f"Name mismatch for artist '{item_name}' (got '{result_name}')")
+                        logger.debug(f"Artist '{item_name}' not matched: {reason}")
                 else:
                     self._mark_status('artist', item_id, 'not_found')
                     self.stats['not_found'] += 1

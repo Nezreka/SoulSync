@@ -9,7 +9,12 @@ from datetime import datetime, date, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.spotify_client import SpotifyClient, SpotifyRateLimitError
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import (
+    ARTIST_NAME_MATCH_THRESHOLD,
+    interruptible_sleep,
+    set_album_api_track_count,
+    source_id_conflict,
+)
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("spotify_worker")
@@ -483,12 +488,14 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for artist '{artist_name}'")
             return
 
-        # Find best fuzzy match — score all candidates, pick highest above threshold
+        # Find best fuzzy match — score all candidates, pick highest above the
+        # (stricter, artist-specific) threshold so short-name false positives
+        # like "ODESZA"/"odessa" don't slip through.
         best_obj = None
         best_score = 0
         for artist_obj in results:
             score = self._name_similarity(artist_name, artist_obj.name)
-            if score >= self.name_similarity_threshold and score > best_score:
+            if score >= ARTIST_NAME_MATCH_THRESHOLD and score > best_score:
                 best_obj = artist_obj
                 best_score = score
 
@@ -497,6 +504,19 @@ class SpotifyWorker:
                 logger.warning(f"Rejecting non-Spotify ID '{best_obj.id}' for artist '{artist_name}' (iTunes fallback leak)")
                 self._mark_status('artist', artist_id, 'error')
                 self.stats['errors'] += 1
+                return
+            # Don't assign a Spotify id another (differently-named) artist
+            # already holds — prevents one id smeared across artists.
+            conflict = source_id_conflict(
+                self.db, 'spotify_artist_id', best_obj.id, artist_id, artist_name
+            )
+            if conflict:
+                self._mark_status('artist', artist_id, 'not_found')
+                self.stats['not_found'] += 1
+                logger.debug(
+                    f"Artist '{artist_name}' -> Spotify {best_obj.id} skipped: "
+                    f"already claimed by '{conflict}'"
+                )
                 return
             self._update_artist(artist_id, best_obj)
             self.stats['matched'] += 1
