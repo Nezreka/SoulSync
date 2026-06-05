@@ -347,6 +347,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
         batch_playlist_name = 'Unknown Playlist'
         batch_playlist_id = playlist_id
         batch_source_playlist_ref = ''
+        # Issue #797 — per-request "Skip AcoustID verification" toggle from
+        # the album-download modal. When set, every track in this batch
+        # bypasses the AcoustID quarantine gate (the user has chosen to
+        # trust the metadata over fingerprint disagreement — useful for
+        # non-English artists whose native-script metadata AcoustID can't
+        # reconcile with the romanized request).
+        batch_skip_acoustid = False
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
@@ -362,6 +369,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 batch_source_playlist_ref = (
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
+                batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
 
         from core.downloads.playlist_folder import (
             resolve_playlist_folder_mode_for_batch,
@@ -1030,6 +1038,14 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         track_info['_is_explicit_album_download'] = True
                         logger.info(f"[Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
 
+
+                # Issue #797 — propagate the batch-level "skip AcoustID"
+                # toggle onto each track so the per-track download context
+                # (built in core/downloads/candidates.py) can set the
+                # AcoustID quarantine bypass. Mirrors the _playlist_folder_mode
+                # threading pattern below.
+                if batch_skip_acoustid:
+                    track_info['_skip_acoustid'] = True
 
                 # Add playlist folder mode flag for sync page playlists and wishlist
                 # tracks tied to a mirrored playlist with organize_by_playlist enabled.

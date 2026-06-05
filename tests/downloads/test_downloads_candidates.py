@@ -461,6 +461,45 @@ def test_auto_search_pick_does_not_inject_acoustid_bypass():
     assert "_user_manual_pick" not in ctx
 
 
+def test_skip_acoustid_track_flag_injects_bypass():
+    """Issue #797: when the album-download request had the per-request
+    'Skip AcoustID verification' toggle on, the master worker stamps
+    `_skip_acoustid=True` onto each track's track_info. The candidates
+    helper must propagate that into the post-process context as
+    `_skip_quarantine_check='acoustid'` so AcoustID never quarantines
+    this request's files (e.g. correct downloads of non-English artists
+    whose native-script metadata AcoustID can't reconcile)."""
+    deps = _build_deps()
+    _seed_task("t_skip_aid", track_info={"_skip_acoustid": True})
+
+    candidates = [_Candidate(filename="skip.flac", confidence=0.99)]
+    track = _Track()
+
+    result = dc.attempt_download_with_candidates("t_skip_aid", candidates, track, batch_id="b1", deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::skip.flac"]
+    assert ctx["_skip_quarantine_check"] == "acoustid"
+    # It's the toggle path, NOT a manual pick.
+    assert "_user_manual_pick" not in ctx
+
+
+def test_no_skip_acoustid_flag_keeps_verification():
+    """Without the toggle (no `_skip_acoustid` on track_info), AcoustID
+    verification must still run — the bypass is opt-in per request."""
+    deps = _build_deps()
+    _seed_task("t_no_skip_aid", track_info={})  # no _skip_acoustid
+
+    candidates = [_Candidate(filename="verify.flac", confidence=0.99)]
+    track = _Track()
+
+    result = dc.attempt_download_with_candidates("t_no_skip_aid", candidates, track, batch_id="b1", deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::verify.flac"]
+    assert "_skip_quarantine_check" not in ctx
+
+
 def test_equal_confidence_candidates_prefer_better_peer_quality():
     """Equal-confidence Soulseek candidates use peer quality as the tiebreaker."""
     deps = _build_deps()

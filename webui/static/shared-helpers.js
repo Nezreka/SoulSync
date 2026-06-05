@@ -1483,6 +1483,10 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
                         </label>
+                        <label class="force-download-toggle" title="Skip the AcoustID fingerprint check for this request. Useful for non-English artists whose original-language metadata AcoustID can't match against the romanized request (issue #797).">
+                            <input type="checkbox" id="skip-acoustid-${virtualPlaylistId}">
+                            <span>Skip AcoustID verification</span>
+                        </label>
                         ${contextType === 'playlist' ? `
                         <label class="force-download-toggle">
                             <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">

@@ -17,6 +17,7 @@ from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
 from core.matching_engine import MusicMatchingEngine
 from core.matching.version_mismatch import is_acceptable_version_mismatch
+from core.matching.script_compat import is_cross_script_mismatch
 from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid.verification")
@@ -655,10 +656,32 @@ class AcoustIDVerification:
                 and title_sim >= 0.80
                 and artist_sim >= ARTIST_MATCH_THRESHOLD
             )
-            if language_script_skip or high_confidence_strong_match_skip:
+            # Issue #797 — the EXPECTED artist and the AcoustID-matched
+            # artist are written in different scripts (e.g. "Joe Hisaishi"
+            # vs "久石譲") yet the alias-aware comparison still confirmed
+            # them as the same artist (artist_sim >= threshold, bridged via
+            # MusicBrainz aliases). When the artist itself spans scripts the
+            # title almost always does too — and a romanized-vs-native title
+            # comparison is meaningless, so it can't be evidence the file is
+            # wrong. Trust the confirmed artist + the fingerprint (already
+            # >= MIN_ACOUSTID_SCORE to reach here) and SKIP rather than
+            # quarantine a correct download of a non-English artist.
+            #
+            # Deliberately narrow (the "tight" scope): keyed on the ARTIST
+            # spanning scripts AND being confirmed. A same-script artist
+            # with only a cross-script TITLE (romaji artist + kanji title)
+            # is NOT covered — that case keeps the stricter 0.95 floor
+            # above, preserving the #607 wrong-file protection.
+            cross_script_artist_skip = (
+                best_score >= MIN_ACOUSTID_SCORE
+                and artist_sim >= ARTIST_MATCH_THRESHOLD
+                and is_cross_script_mismatch(expected_artist_name, display_artist)
+            )
+            if (language_script_skip or high_confidence_strong_match_skip
+                    or cross_script_artist_skip):
                 reason = (
                     "likely same song in different language/script"
-                    if language_script_skip
+                    if (language_script_skip or cross_script_artist_skip)
                     else "title/artist match within tolerance"
                 )
                 msg = (
