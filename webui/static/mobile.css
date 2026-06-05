@@ -3420,3 +3420,36 @@
         margin: 0;
     }
 }
+
+@media (max-width: 768px) {
+    /* ── Now Playing modal — full responsive pass ──
+       Desktop is a two-column (art | controls) layout with heavy 40-48px
+       padding. Existing mobile rules made it full-screen + stacked the body but
+       left the panels' desktop padding and the controls/queue/lyrics untouched. */
+    .np-body {
+        padding: 24px 16px 28px;
+        gap: 20px;
+    }
+    .np-left,
+    .np-right {
+        width: 100%;
+    }
+    /* Album art scales with the screen instead of a fixed 220px. */
+    .np-album-art-container {
+        width: min(220px, 66vw);
+        height: auto;
+        aspect-ratio: 1 / 1;
+        margin: 0 auto;
+    }
+    .np-track-info { text-align: center; }
+    .np-action-buttons { justify-content: center; }
+    .np-util-row { justify-content: center; flex-wrap: wrap; }
+    /* Playback controls: tighten the gap so the row fits a phone. */
+    .np-controls-row { gap: 12px; justify-content: center; }
+    /* Queue + lyrics panels: drop the 40px desktop side padding that crushed
+       content on a narrow screen; give them a bit more vertical room. */
+    .np-queue-panel { padding: 0 16px 16px; }
+    .np-lyrics-panel { padding: 0 16px; }
+    .np-queue-body { max-height: 240px; }
+    .np-lyrics-body { max-height: 300px; }
+}
