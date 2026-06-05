@@ -278,10 +278,19 @@ class DeezerWorker:
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
 
-    def _verify_artist_id(self, item: Dict[str, Any], result_artist_id) -> bool:
+    def _verify_artist_id(self, item: Dict[str, Any], result_artist_id,
+                          result_artist_name: Optional[str] = None) -> bool:
         """Verify that the result's artist ID matches the parent artist's stored Deezer ID.
+
         If mismatched, the album/track search is more specific (uses artist+title),
-        so we trust it and correct the parent artist's deezer_id."""
+        so we trust it and correct the parent artist's deezer_id — BUT only when
+        the result's artist *name* actually matches our parent artist. Without
+        that guard, a collaboration or compilation track (e.g. a track our
+        library credits to Jorja Smith that lives on Kendrick Lamar's curated
+        "Black Panther" album) would search up to an album whose Deezer primary
+        artist is someone else (Kendrick), and we'd stamp that wrong Deezer ID
+        onto our artist — corrupting it (and causing duplicate ids shared across
+        unrelated artists)."""
         parent_deezer_id = item.get('artist_deezer_id')
         if not parent_deezer_id:
             return True
@@ -290,6 +299,20 @@ class DeezerWorker:
             return True
 
         if str(result_artist_id) != str(parent_deezer_id):
+            # Guard: only correct when the album/track's primary artist is the
+            # SAME artist by name. A mismatch means it's a collab/compilation,
+            # not a stale-id correction.
+            parent_name = item.get('artist') or ''
+            if (result_artist_name and parent_name
+                    and not self._name_matches(parent_name, result_artist_name)):
+                logger.info(
+                    f"Skipping artist-ID correction from {item['type']} "
+                    f"'{item['name']}': result artist '{result_artist_name}' "
+                    f"≠ parent '{parent_name}' (collab/compilation, not a "
+                    f"correction)"
+                )
+                return True
+
             logger.info(
                 f"Artist ID correction from {item['type']} '{item['name']}': "
                 f"updating parent artist Deezer ID from {parent_deezer_id} to {result_artist_id}"
@@ -430,7 +453,8 @@ class DeezerWorker:
                 # Verify artist ID
                 result_artist = result.get('artist', {})
                 result_artist_id = result_artist.get('id') if result_artist else None
-                self._verify_artist_id(item, result_artist_id)
+                result_artist_name = result_artist.get('name') if result_artist else None
+                self._verify_artist_id(item, result_artist_id, result_artist_name)
 
                 # Fetch full album details for label, genres, explicit
                 deezer_album_id = result.get('id')
@@ -481,7 +505,8 @@ class DeezerWorker:
                 # Verify artist ID
                 result_artist = result.get('artist', {})
                 result_artist_id = result_artist.get('id') if result_artist else None
-                self._verify_artist_id(item, result_artist_id)
+                result_artist_name = result_artist.get('name') if result_artist else None
+                self._verify_artist_id(item, result_artist_id, result_artist_name)
 
                 # Fetch full track details for BPM
                 deezer_track_id = result.get('id')
