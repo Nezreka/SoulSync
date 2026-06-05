@@ -270,6 +270,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
+        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = {
             'mbid': '60d2ea34-1912-425f-bf9c-fc544e4448cd', 'name': 'Hiroyuki Sawano',
@@ -300,6 +301,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
+        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = None
         worker.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
@@ -392,6 +394,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
+        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = {'mbid': 'mb-x', 'name': 'X'}
         worker.mb_service.fetch_artist_aliases.side_effect = Exception("boom")
