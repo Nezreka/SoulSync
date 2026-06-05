@@ -3516,3 +3516,15 @@
     .adl-cancel-all-btn,
     .adl-clear-btn { flex: 1 1 auto; }
 }
+
+@media (max-width: 768px) {
+    /* Sidebar visualizer is pinned at the (desktop) sidebar's right edge, so on
+       mobile it floats over the page content when the off-canvas sidebar drawer
+       is closed. Show it ONLY while the drawer is open. The .active/.viz-* rules
+       set display with 2-class specificity, so this 3-class + !important selector
+       is needed to beat them; when the drawer IS open it doesn't match, so the
+       visualizer's normal display rules take over again. */
+    .sidebar:not(.mobile-open) ~ .sidebar-visualizer {
+        display: none !important;
+    }
+}
