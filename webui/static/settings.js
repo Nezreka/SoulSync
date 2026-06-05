@@ -64,9 +64,13 @@ function syncMetadataSourceSelection(source) {
 
 function _isMetadataSourceSelectable(source) {
     if (source === 'spotify') {
-        // Selectable with real auth OR when Spotify Free (no-creds) is available.
-        return _lastStatusPayload?.spotify?.authenticated === true
-            || _lastStatusPayload?.spotify?.metadata_available === true;
+        // Official Spotify needs a connected session.
+        return _lastStatusPayload?.spotify?.authenticated === true;
+    }
+    if (source === 'spotify_free') {
+        // No-creds Spotify only needs the SpotipyFree package installed —
+        // selecting it IS the opt-in, so it must NOT depend on having selected it.
+        return _lastStatusPayload?.spotify?.free_installed === true;
     }
     if (source === 'discogs') {
         const token = document.getElementById('discogs-token');
@@ -1045,10 +1049,13 @@ async function loadSettingsData() {
         // Populate Discogs settings
         document.getElementById('discogs-token').value = settings.discogs?.token || '';
 
-        // Populate Metadata source setting
-        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'deezer';
-        const spotifyFreeToggle = document.getElementById('metadata-spotify-free');
-        if (spotifyFreeToggle) spotifyFreeToggle.checked = settings.metadata?.spotify_free === true;
+        // Populate Metadata source setting. 'Spotify Free' is stored as
+        // fallback_source='spotify' + spotify_free=true (so all downstream
+        // 'spotify' routing is unchanged) — map it back to the dropdown value.
+        const _fbSrc = settings.metadata?.fallback_source || 'deezer';
+        const _metaSel = (_fbSrc === 'spotify' && settings.metadata?.spotify_free === true)
+            ? 'spotify_free' : _fbSrc;
+        document.getElementById('metadata-fallback-source').value = _metaSel;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -2759,11 +2766,18 @@ async function saveSettings(quiet = false) {
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
     let metadataSource = metadataSourceSelect?.value || 'deezer';
     const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
+    const spotifyFreeInstalled = _lastStatusPayload?.spotify?.free_installed === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
         metadataSource = _metadataSourceFallback('spotify');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Spotify is disconnected, so the primary metadata source was switched.', 'warning');
+        }
+    } else if (metadataSource === 'spotify_free' && !spotifyFreeInstalled) {
+        metadataSource = _metadataSourceFallback('spotify_free');
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Spotify Free needs the SpotipyFree package installed.', 'warning');
         }
     } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
         metadataSource = _metadataSourceFallback('discogs');
@@ -2846,8 +2860,10 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: metadataSource,
-            spotify_free: document.getElementById('metadata-spotify-free')?.checked === true
+            // 'Spotify Free' is stored as the spotify source + a flag, so all
+            // downstream 'spotify' routing is unchanged.
+            fallback_source: metadataSource === 'spotify_free' ? 'spotify' : metadataSource,
+            spotify_free: metadataSource === 'spotify_free'
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,

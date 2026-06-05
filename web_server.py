@@ -2318,8 +2318,11 @@ def get_status():
                 if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
                     active_dl_count += 1
 
-        # Spotify Free: tell the UI whether Spotify metadata is available even
-        # without auth (so the Settings source selector can offer it).
+        # Spotify Free: tell the UI (a) whether Spotify metadata is currently
+        # available (auth or free), and (b) whether the SpotipyFree package is
+        # installed — the latter is what makes 'Spotify Free' selectable in the
+        # source dropdown (selecting it is the opt-in, so it can't depend on
+        # already having selected it).
         spotify_status = dict(metadata_status['spotify'])
         try:
             spotify_status['metadata_available'] = bool(
@@ -2327,6 +2330,11 @@ def get_status():
             )
         except Exception:
             spotify_status['metadata_available'] = bool(spotify_status.get('authenticated'))
+        try:
+            from core.spotify_free_metadata import spotify_free_installed
+            spotify_status['free_installed'] = spotify_free_installed()
+        except Exception:
+            spotify_status['free_installed'] = False
 
         status_data = {
             'metadata_source': metadata_status['metadata_source'],

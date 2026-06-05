@@ -133,3 +133,56 @@ def test_normalize_artist_skips_imageless_sources():
            'visuals': {'avatarImage': {'sources': [{'height': 1}, {'url': 'u'}]}}}
     out = normalize_artist(raw)
     assert out['images'] == [{'url': 'u', 'height': None, 'width': None}]
+
+
+# ---------------------------------------------------------------------------
+# SpotifyClient gate model — auto-bridge vs explicit opt-in vs no-surprise
+# (constructs the client via __new__ so no network/config init runs)
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch  # noqa: E402
+from core.spotify_client import SpotifyClient  # noqa: E402
+import core.spotify_free_metadata as _sfm  # noqa: E402
+
+
+def _gate(authed, has_creds, selected, installed, rate_limited):
+    c = SpotifyClient.__new__(SpotifyClient)
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=authed), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=rate_limited), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=installed):
+        cm.get_spotify_config.return_value = (
+            {'client_id': 'x', 'client_secret': 'y'} if has_creds else {})
+        cm.get.side_effect = lambda k, d=None: selected if k == 'metadata.spotify_free' else d
+        return c.is_spotify_metadata_available(), c._free_active()
+
+
+def test_connected_healthy_uses_official():
+    avail, free = _gate(authed=True, has_creds=True, selected=False, installed=True, rate_limited=False)
+    assert avail is True and free is False  # official; free never opens
+
+
+def test_connected_ratelimited_bridges_to_free():
+    avail, free = _gate(authed=False, has_creds=True, selected=False, installed=True, rate_limited=True)
+    assert avail is True and free is True   # auto-bridge, no toggle needed
+
+
+def test_no_auth_picked_spotify_free_serves():
+    avail, free = _gate(authed=False, has_creds=False, selected=True, installed=True, rate_limited=False)
+    assert avail is True and free is True
+
+
+def test_no_auth_not_opted_in_does_nothing():
+    # The key no-surprise guarantee: a user who never chose Spotify gets no free.
+    avail, free = _gate(authed=False, has_creds=False, selected=False, installed=True, rate_limited=False)
+    assert avail is False and free is False
+
+
+def test_selected_but_package_missing_is_graceful():
+    avail, free = _gate(authed=False, has_creds=False, selected=True, installed=False, rate_limited=False)
+    assert avail is False and free is False
+
+
+def test_connected_ratelimited_but_no_package_no_bridge():
+    avail, free = _gate(authed=False, has_creds=True, selected=False, installed=False, rate_limited=True)
+    assert avail is False and free is False
