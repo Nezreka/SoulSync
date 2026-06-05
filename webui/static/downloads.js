@@ -2451,6 +2451,11 @@ async function startMissingTracksProcess(playlistId) {
         const forceDownloadCheckbox = document.getElementById(`force-download-all-${playlistId}`);
         const forceDownloadAll = forceDownloadCheckbox ? forceDownloadCheckbox.checked : false;
 
+        // Issue #797 — per-request "Skip AcoustID verification" toggle. Absent
+        // checkbox (other call sites) → false, so behavior is unchanged there.
+        const skipAcoustidCheckbox = document.getElementById(`skip-acoustid-${playlistId}`);
+        const skipAcoustid = skipAcoustidCheckbox ? skipAcoustidCheckbox.checked : false;
+
         // Check if playlist folder mode toggle is enabled (only for sync page playlists)
         const playlistFolderMode = typeof isPlaylistOrganizeEnabled === 'function'
             ? isPlaylistOrganizeEnabled(playlistId)
@@ -2495,6 +2500,7 @@ async function startMissingTracksProcess(playlistId) {
             force_download_all: forceDownloadAll || isWingIt,
             ignore_manual_matches: forceDownloadAll,
             wing_it: isWingIt,
+            skip_acoustid: skipAcoustid,
         };
 
         // If this is an artist album download, use album name and include full context

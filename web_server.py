@@ -18707,6 +18707,10 @@ def start_missing_tracks_process(playlist_id):
     is_album_download = data.get('is_album_download', False)
     album_context = data.get('album_context', None)
     artist_context = data.get('artist_context', None)
+    # Issue #797 — per-request "Skip AcoustID verification" toggle from the
+    # album-download modal. Stored on the batch and propagated per-track by
+    # the master worker so AcoustID never quarantines this request's files.
+    skip_acoustid = bool(data.get('skip_acoustid', False))
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
@@ -18774,6 +18778,7 @@ def start_missing_tracks_process(playlist_id):
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,
+            'skip_acoustid': skip_acoustid,  # #797 per-request AcoustID bypass
             'batch_source': _downloads_history.detect_sync_source(playlist_id),
         }
 
