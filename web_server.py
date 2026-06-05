@@ -5607,6 +5607,7 @@ def start_sync():
 
 # Search route bodies live in core/search/* — these routes are thin handlers.
 from core.search import basic as _search_basic
+from core.search import by_id as _search_by_id
 from core.search import library_check as _search_library_check
 from core.search import orchestrator as _search_orchestrator
 from core.search import stream as _search_stream
@@ -5722,6 +5723,35 @@ def enhanced_search():
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/enhanced-search/by-id', methods=['POST'])
+def enhanced_search_by_id():
+    """Resolve a pasted metadata link/ID to a single album or track (#775).
+
+    Source-agnostic: a provider URL (Spotify/Apple/MusicBrainz/Deezer) or a
+    bare ID is looked up directly on the owning source via its get-by-id —
+    no fuzzy search, no scoring. Returns the same dropdown shape the normal
+    enhanced search renders, plus the resolving ``source`` so the frontend
+    can route downloads/imports through the existing flow.
+
+    Body: ``{"query": "<link or id>", "source": "<active source>"?}``. The
+    optional ``source`` only biases the fan-out for ambiguous bare numeric
+    IDs (Deezer vs iTunes).
+    """
+    data = request.get_json() or {}
+    raw = (data.get('query') or '').strip()
+    preferred = (data.get('source') or '').strip().lower() or None
+    if not raw:
+        return jsonify(_search_by_id._empty_result(''))
+
+    try:
+        deps = _build_search_deps()
+        result = _search_by_id.resolve_identifier(raw, deps, preferred_source=preferred)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Link/ID resolve error: {e}")
         return jsonify({"error": str(e)}), 500
 
 

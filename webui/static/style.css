@@ -36918,6 +36918,62 @@ div.artist-hero-badge {
     color: #fff;
 }
 
+/* Link / ID lookup row (#775) — paste a provider link/ID under the search bar */
+.enh-id-lookup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 4px 8px 4px 14px;
+    transition: all 0.3s ease;
+}
+
+.enh-id-lookup:focus-within {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.enh-id-lookup-icon {
+    font-size: 15px;
+    opacity: 0.55;
+}
+
+.enh-id-input {
+    flex-grow: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    color: #ffffff;
+    padding: 8px 0;
+}
+
+.enh-id-input::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.enh-id-btn {
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.enh-id-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+}
+
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;

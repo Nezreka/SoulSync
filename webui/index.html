@@ -2201,6 +2201,19 @@
                                     </div>
                                 </div>
 
+                                <!-- Link / ID lookup (#775): paste a provider link or
+                                     bare ID and resolve it directly on the owning source
+                                     (Spotify / Apple Music / MusicBrainz / Deezer) — no
+                                     fuzzy search. Results render in the dropdown below and
+                                     reuse the normal download/import flow. -->
+                                <div class="enh-id-lookup">
+                                    <span class="enh-id-lookup-icon">🔗</span>
+                                    <input type="text" id="enh-id-input" class="enh-id-input"
+                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link or ID"
+                                        autocomplete="off" spellcheck="false">
+                                    <button id="enh-id-btn" class="enh-id-btn" type="button">Look up</button>
+                                </div>
+
                                 <!-- Enhanced Search Dropdown (Overlay Panel) -->
                                 <div id="enhanced-dropdown" class="enhanced-dropdown hidden">
                                     <div class="enhanced-dropdown-content">
