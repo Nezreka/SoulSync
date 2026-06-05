@@ -35,7 +35,12 @@ from core.imports.context import (
 from core.imports.file_integrity import check_audio_integrity, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
-from core.imports.quarantine import entry_id_from_quarantined_filename
+from core.imports.quarantine import (
+    approve_quarantine_entry,
+    entry_id_from_quarantined_filename,
+    list_quarantine_entries,
+)
+from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
 from core.imports.side_effects import (
     emit_track_downloaded,
     record_download_provenance,
@@ -985,6 +990,53 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             post_process_locks.pop(context_key, None)
 
 
+def _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
+    """Opt-in last resort once AcoustID retries are exhausted: accept the best
+    quarantined version-mismatch candidate for this track instead of failing.
+
+    Delegates the decision + safety rules to
+    ``core.imports.version_mismatch_fallback`` (version-mismatch only, all the
+    same matched version, >= min_count, AcoustID-only bypass). Returns True when
+    a candidate was accepted and re-dispatched — the caller then skips marking
+    the task failed.
+    """
+    try:
+        download_path = docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        )
+        quarantine_dir = os.path.join(download_path, 'ss_quarantine')
+        restore_dir = os.path.join(download_path, 'Transfer')
+        expected_title = get_import_clean_title(context, default='')
+        expected_artist = get_import_clean_artist(context, default='')
+        if not expected_title or not expected_artist:
+            return False
+
+        def _reprocess(restored_path, ctx, tid, bid):
+            new_key = f"vmfallback_{tid}_{int(time.time())}"
+            threading.Thread(
+                target=lambda: post_process_matched_download_with_verification(
+                    new_key, ctx, restored_path, tid, bid, runtime, metadata_runtime
+                ),
+                daemon=True,
+            ).start()
+
+        return try_accept_version_mismatch_fallback(
+            quarantine_dir=quarantine_dir,
+            restore_dir=restore_dir,
+            expected_title=expected_title,
+            expected_artist=expected_artist,
+            task_id=task_id,
+            batch_id=batch_id,
+            config_get=config_manager.get,
+            list_entries=list_quarantine_entries,
+            approve_entry=approve_quarantine_entry,
+            reprocess=_reprocess,
+        )
+    except Exception as exc:
+        pp_logger.debug("[Version-Mismatch Fallback] skipped due to error: %s", exc)
+        return False
+
+
 def post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
 
@@ -1025,6 +1077,11 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                 logger.info(
                     f"AcoustID mismatch for task {task_id} — retrying next-best candidate: {failure_msg}"
                 )
+                return
+            # Retries exhausted. Opt-in last resort: if every quarantined
+            # candidate for this track failed the SAME version mismatch (e.g. all
+            # instrumental), accept the best one rather than leaving it missing.
+            if _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
                 return
             logger.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
             with tasks_lock:
