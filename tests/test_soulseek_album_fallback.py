@@ -83,7 +83,7 @@ def test_healthy_folder_does_not_fall_back():
     # True. Patch the atomic copy to echo the completed paths through.
     from pathlib import Path
     completed = [Path("/staged/01.flac"), Path("/staged/02.flac")]
-    with patch("core.soulseek_client.copy_audio_files_atomically", lambda files, dest: list(files)):
+    with patch("core.soulseek_client.copy_audio_files_atomically", lambda files, dest, **kw: list(files)):
         stub = _Stub(completed)
         with patch("core.soulseek_client.run_async", lambda x: x):
             result = SoulseekClient.download_album_to_staging(

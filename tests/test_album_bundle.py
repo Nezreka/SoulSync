@@ -360,6 +360,40 @@ def test_copy_audio_files_atomically_creates_staging_dir(tmp_path: Path) -> None
     assert staging.exists()
 
 
+def test_copy_audio_files_atomically_keeps_source_by_default(tmp_path: Path) -> None:
+    """Default (torrent/usenet): originals stay put (client keeps seeding)."""
+    src = tmp_path / 'a.flac'
+    src.write_bytes(b'a')
+    staging = tmp_path / 'staging'
+    out = copy_audio_files_atomically([src], staging)
+    assert len(out) == 1
+    assert src.exists()                       # source retained
+
+
+def test_copy_audio_files_atomically_removes_source_when_requested(tmp_path: Path) -> None:
+    """#796: Soulseek path removes slskd's completed files once staged so they
+    don't pile up in the download folder."""
+    src_a = tmp_path / 'a.flac'; src_a.write_bytes(b'a')
+    src_c = tmp_path / 'c.flac'; src_c.write_bytes(b'c')
+    staging = tmp_path / 'staging'
+    out = copy_audio_files_atomically([src_a, src_c], staging, remove_source=True)
+    assert len(out) == 2                      # both staged
+    assert not src_a.exists() and not src_c.exists()   # sources removed
+    assert sorted(Path(p).name for p in out) == ['a.flac', 'c.flac']
+
+
+def test_copy_audio_files_atomically_keeps_source_when_copy_fails(tmp_path: Path) -> None:
+    """Data safety: a source whose copy FAILS must never be deleted, even with
+    remove_source=True."""
+    src_ok = tmp_path / 'ok.flac'; src_ok.write_bytes(b'ok')
+    src_missing = tmp_path / 'gone.flac'      # never created -> copy fails
+    staging = tmp_path / 'staging'
+    out = copy_audio_files_atomically([src_ok, src_missing], staging, remove_source=True)
+    assert len(out) == 1                       # only ok staged
+    assert not src_ok.exists()                 # staged source removed
+    assert not src_missing.exists()            # never existed (and not created)
+
+
 # ---------------------------------------------------------------------------
 # Config-driven poll cadence
 # ---------------------------------------------------------------------------
