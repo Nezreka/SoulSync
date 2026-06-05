@@ -313,13 +313,29 @@ class TidalWorker:
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
 
-    def _verify_artist_id(self, item: Dict[str, Any], result_artist_id) -> bool:
-        """Verify/correct parent artist's Tidal ID based on album/track match"""
+    def _verify_artist_id(self, item: Dict[str, Any], result_artist_id,
+                          result_artist_name: Optional[str] = None) -> bool:
+        """Verify/correct parent artist's Tidal ID based on album/track match.
+
+        Only corrects when the result's artist *name* matches our parent artist —
+        otherwise a collaboration/compilation would stamp the wrong Tidal id onto
+        our artist. See the Deezer fix for the full write-up."""
         parent_tidal_id = item.get('artist_tidal_id')
         if not parent_tidal_id or not result_artist_id:
             return True
 
         if str(result_artist_id) != str(parent_tidal_id):
+            parent_name = item.get('artist') or ''
+            if (result_artist_name and parent_name
+                    and not self._name_matches(parent_name, result_artist_name)):
+                logger.info(
+                    f"Skipping artist-ID correction from {item['type']} "
+                    f"'{item['name']}': result artist '{result_artist_name}' "
+                    f"≠ parent '{parent_name}' (collab/compilation, not a "
+                    f"correction)"
+                )
+                return True
+
             logger.info(
                 f"Artist ID correction from {item['type']} '{item['name']}': "
                 f"updating parent artist Tidal ID from {parent_tidal_id} to {result_artist_id}"
@@ -479,7 +495,8 @@ class TidalWorker:
                 # Verify artist ID
                 result_artist = result.get('artist', {})
                 result_artist_id = result_artist.get('id') if result_artist else None
-                self._verify_artist_id(item, result_artist_id)
+                result_artist_name = result_artist.get('name') if result_artist else None
+                self._verify_artist_id(item, result_artist_id, result_artist_name)
 
                 # Fetch full album details
                 tidal_album_id = result.get('id')
@@ -533,7 +550,8 @@ class TidalWorker:
                 # Verify artist ID
                 result_artist = result.get('artist', {})
                 result_artist_id = result_artist.get('id') if result_artist else None
-                self._verify_artist_id(item, result_artist_id)
+                result_artist_name = result_artist.get('name') if result_artist else None
+                self._verify_artist_id(item, result_artist_id, result_artist_name)
 
                 # Fetch full track details
                 tidal_track_id = result.get('id')
