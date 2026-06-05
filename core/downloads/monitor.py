@@ -44,7 +44,36 @@ _RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 # worker reports a clean failure. This cap is a safety net against a pathological
 # quarantine→retry→quarantine loop (e.g. a source that keeps returning fresh
 # wrong files).
+#
+# Default (non-exhaustive) mode uses this single global cap. The opt-in
+# exhaustive mode (post_processing.retry_exhaustive) instead budgets retries
+# PER SOURCE — see requeue_quarantined_task_for_retry.
 MAX_QUARANTINE_RETRIES = 5
+
+# Absolute runaway guard for exhaustive mode. Per-source budgets are already
+# finite (query_count × retries_per_query, and Soulseek peers all collapse to
+# one 'soulseek' bucket), but this ceiling caps the TOTAL retries across every
+# source so a misbehaving source-resolution can never loop forever.
+MAX_TOTAL_QUARANTINE_RETRIES = 100
+
+# Streaming plugins report their source name as the download's "username"
+# (see download_orchestrator._streaming_sources). Soulseek uses the peer name
+# instead, so anything not in this set is bucketed under 'soulseek' for the
+# per-source retry budget.
+_STREAMING_SOURCE_NAMES = frozenset((
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
+))
+
+
+def _resolve_download_source(username):
+    """Map a download's username to its logical source for per-source budgeting.
+
+    Streaming sources use the source name as username; Soulseek uses the peer
+    name, so every Soulseek peer collapses to a single 'soulseek' bucket.
+    """
+    if username and username in _STREAMING_SOURCE_NAMES:
+        return username
+    return 'soulseek'
 
 
 def _download_id_key(download_id):
@@ -100,13 +129,63 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         if not username or not filename:
             return False
 
-        retry_count = task.get('quarantine_retry_count', 0)
-        if retry_count >= MAX_QUARANTINE_RETRIES:
-            logger.warning(
-                f"[Retry:{trigger}] Task {task_id} hit the quarantine-retry cap "
-                f"({MAX_QUARANTINE_RETRIES}) — giving up, marking failed"
-            )
-            return False
+        total_count = task.get('quarantine_retry_count', 0)
+
+        if config_manager.get('post_processing.retry_exhaustive', False):
+            # Exhaustive mode: a SEPARATE budget per source. The budget scales
+            # with the track's own query count (the worker generates a variable
+            # number of search queries per track) × the configured retries per
+            # query. Soulseek candidates are walked first (one per retry), then
+            # the worker's hybrid fallback moves to the next source — each source
+            # spending its own budget. The natural terminator (used_sources
+            # exhaustion → worker clean-fail) still ends most tracks well before
+            # any budget is reached; the budget is the per-source safety ceiling.
+            source = _resolve_download_source(username)
+            retries_per_query = config_manager.get('post_processing.retries_per_query', 5)
+            try:
+                retries_per_query = int(retries_per_query)
+            except (TypeError, ValueError):
+                retries_per_query = 5
+            if retries_per_query < 1:
+                retries_per_query = 1
+
+            query_count = task.get('query_count') or 1
+            if query_count < 1:
+                query_count = 1
+            budget = query_count * retries_per_query
+
+            counts = task.get('quarantine_retry_counts_by_source')
+            if not isinstance(counts, dict):
+                counts = {}
+            source_count = counts.get(source, 0)
+
+            if source_count >= budget:
+                logger.warning(
+                    f"[Retry:{trigger}] Task {task_id} exhausted its retry budget "
+                    f"for source '{source}' ({source_count}/{budget}) — giving up, "
+                    f"marking failed"
+                )
+                return False
+            if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
+                logger.warning(
+                    f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
+                    f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, marking "
+                    f"failed"
+                )
+                return False
+
+            counts[source] = source_count + 1
+            task['quarantine_retry_counts_by_source'] = counts
+            attempt_desc = f"source '{source}' {source_count + 1}/{budget}"
+        else:
+            # Default mode: a single global cap, conservative and predictable.
+            if total_count >= MAX_QUARANTINE_RETRIES:
+                logger.warning(
+                    f"[Retry:{trigger}] Task {task_id} hit the quarantine-retry cap "
+                    f"({MAX_QUARANTINE_RETRIES}) — giving up, marking failed"
+                )
+                return False
+            attempt_desc = f"{total_count + 1}/{MAX_QUARANTINE_RETRIES}"
 
         # Mark the quarantined source as used so the re-run won't pick it again.
         # Uses the same "{username}_{filename}" key the worker dedups against.
@@ -114,7 +193,7 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         used_sources.add(f"{username}_{filename}")
         task['used_sources'] = used_sources
 
-        task['quarantine_retry_count'] = retry_count + 1
+        task['quarantine_retry_count'] = total_count + 1
         # Drop the stale download identity + the prior attempt's quarantine link.
         task.pop('download_id', None)
         task.pop('username', None)
@@ -125,7 +204,7 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
 
     logger.info(
         f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "
-        f"(attempt {retry_count + 1}/{MAX_QUARANTINE_RETRIES})"
+        f"(attempt {attempt_desc})"
     )
     missing_download_executor.submit(_download_track_worker, task_id, batch_id)
     return True

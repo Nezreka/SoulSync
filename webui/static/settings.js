@@ -1168,6 +1168,9 @@ async function loadSettingsData() {
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
+        document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
+        document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
+        document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -2996,6 +2999,9 @@ async function saveSettings(quiet = false) {
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
+            retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
+            retry_exhaustive: document.getElementById('retry-exhaustive').checked,
+            retries_per_query: Math.max(1, parseInt(document.getElementById('retries-per-query').value, 10) || 5),
         },
         library: {
             music_paths: collectMusicPaths(),

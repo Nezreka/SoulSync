@@ -329,6 +329,20 @@ def _wire_retry_engine(monkeypatch):
     return submitted
 
 
+def _patch_config(monkeypatch, overrides):
+    """Override specific config keys for the monitor's config_manager reads."""
+    import core.downloads.monitor as monitor
+
+    real_get = monitor.config_manager.get
+
+    def fake_get(key, default=None):
+        if key in overrides:
+            return overrides[key]
+        return real_get(key, default)
+
+    monkeypatch.setattr(monitor.config_manager, "get", fake_get)
+
+
 def _run_wrapper_with_quarantine(monkeypatch, flag_setter, task_extra=None):
     task_id, batch_id, context_key = "rtask", "rbatch", "rctx"
     context = {"track_info": {}, "task_id": task_id, "batch_id": batch_id}
@@ -436,3 +450,120 @@ def test_retry_budget_exhausted_fails_task(monkeypatch):
     assert task["status"] == "failed"
     assert submitted == []
     assert completion == [("rbatch", "rtask", False)]
+
+
+def _acoustid_quarantine(ck, ctx, fp, runtime, metadata_runtime=None):
+    ctx["_acoustid_quarantined"] = True
+    ctx["_acoustid_failure_msg"] = "wrong song"
+
+
+def test_exhaustive_mode_uses_per_source_budget(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # query_count=2 → budget for source 'hifi' = 2 * 5 = 10; first failure retries.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine, task_extra={"query_count": 2},
+    )
+
+    assert task["status"] == "searching"
+    # Per-source budget tracked separately from the legacy global counter.
+    assert task["quarantine_retry_counts_by_source"] == {"hifi": 1}
+    assert task["quarantine_retry_count"] == 1
+    assert "hifi_123||A - B" in task["used_sources"]
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_exhaustive_source_budget_exhausted_fails(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # hifi already at its full budget (query_count 2 * 5 = 10) → fail, no retry.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 2, "quarantine_retry_counts_by_source": {"hifi": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_exhaustive_budget_is_separate_per_source(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek is already maxed, but the failing download is on hifi — hifi has
+    # its own fresh budget, so the task still retries.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 1, "quarantine_retry_counts_by_source": {"soulseek": 5}},
+    )
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_counts_by_source"] == {"soulseek": 5, "hifi": 1}
+    assert submitted == [("rtask", "rbatch")]
+
+
+def test_exhaustive_soulseek_peer_resolves_to_soulseek(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # A Soulseek peer name (not a streaming source) is bucketed under 'soulseek'.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "filename": "f.flac", "query_count": 1},
+    )
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_counts_by_source"] == {"soulseek": 1}
+
+
+def test_exhaustive_budget_defaults_query_count_to_one(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 1,
+    })
+
+    # No query_count on the task → budget defaults to 1 * 1 = 1; hifi already at 1.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"quarantine_retry_counts_by_source": {"hifi": 1}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+
+
+def test_exhaustive_absolute_ceiling_guards_runaway(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    import core.downloads.monitor as monitor
+    monkeypatch.setattr(monitor, "MAX_TOTAL_QUARANTINE_RETRIES", 3)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 1000,  # per-source budget effectively unbounded
+    })
+
+    # Per-source budget is huge, but the absolute total ceiling (3) still fires.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 1, "quarantine_retry_count": 3,
+                    "quarantine_retry_counts_by_source": {"hifi": 0}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
