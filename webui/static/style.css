@@ -471,6 +471,22 @@ body:not(.reduce-effects) .nav-button.active:hover {
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+/* Reduce-effects mode keeps the sidebar hover/active highlight — the
+   feedback matters for navigation — but only the CHEAP parts: a flat
+   background + border-color change (the base already reserves a 1px
+   transparent border, so no layout shift). The expensive full-effects
+   bits (gradient, transform/translateX, multi-layer box-shadow) stay
+   off so hovering doesn't trigger compositing/repaint churn. */
+body.reduce-effects .nav-button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+body.reduce-effects .nav-button.active:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
 .nav-icon {
     width: 40px;
     height: 40px;
