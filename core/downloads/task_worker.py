@@ -276,7 +276,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             _t = download_tasks.get(task_id, {})
             is_quarantine_retry = bool(_t.pop('_quarantine_retry', False))
             if not is_quarantine_retry:
-                _t.pop('searched_sources', None)
+                _t.pop('searched_queries', None)
         if is_quarantine_retry and _try_cached_candidates(task_id, batch_id, track, deps):
             with tasks_lock:
                 used_filename = download_tasks.get(task_id, {}).get('filename')
@@ -373,16 +373,23 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # source instead of re-fetching the same exhausted one (e.g. Soulseek
         # keeps returning fresh wrong peers — once its budget is gone, switch to
         # HiFi/Tidal/…). See monitor.requeue_quarantined_task_for_retry.
-        # On a quarantine retry we also exclude sources we've ALREADY searched:
-        # their candidates are walked via the cached-first path, so re-searching
-        # them is the wasteful repeat the cached-first design removes. The chain
-        # then falls through to a not-yet-searched source. Fresh / dead-connection
-        # runs cleared searched_sources above, so they search everything again.
+        #
+        # On a quarantine retry we do NOT exclude a source just because it was
+        # searched once: the first run only ran ONE query before starting a
+        # download, so the later queries (e.g. "artist + album") have never hit
+        # that source yet and may surface the correct upload. Instead we remember
+        # which QUERIES already ran (``searched_queries``) and skip re-running
+        # only those — their candidates are walked via the cached-first path
+        # above. The not-yet-searched queries still search the same source, so
+        # every query is exhausted per source before the chain switches sources.
+        # Fresh / dead-connection runs cleared searched_queries above, so they
+        # search everything again.
         with tasks_lock:
             _t = download_tasks.get(task_id, {})
             _exhausted_sources = [str(s) for s in (_t.get('exhausted_download_sources') or ())]
-            if is_quarantine_retry:
-                _exhausted_sources.extend(str(s) for s in (_t.get('searched_sources') or ()))
+            _searched_queries = (
+                set(_t.get('searched_queries') or ()) if is_quarantine_retry else set()
+            )
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -394,6 +401,17 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
+
+            # Cached-first: a query already run last generation has its candidates
+            # sitting in cache (walked above) — re-searching it is the wasteful
+            # repeat the cached-first design removes. Skip it; the not-yet-run
+            # queries below still search this source.
+            if is_quarantine_retry and query in _searched_queries:
+                logger.debug(
+                    f"[Modal Worker] Skipping already-searched query '{query}' "
+                    f"(candidates served from cache) for task {task_id}"
+                )
+                continue
 
             logger.debug(f"[Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
             logger.debug(f"About to call soulseek search for task {task_id}")
@@ -434,6 +452,16 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     if task_id not in download_tasks:
                         logger.info(f"[Modal Worker] Task {task_id} was deleted after search returned")
                         return
+                    # Remember this query ran so a later quarantine retry skips
+                    # re-searching it (its candidates are walked via cached-first).
+                    # Recorded regardless of result count: re-running a query is
+                    # deterministic, so a query that returned nothing won't return
+                    # anything new next time either.
+                    _sq = download_tasks[task_id].get('searched_queries')
+                    if not isinstance(_sq, set):
+                        _sq = set()
+                    _sq.add(query)
+                    download_tasks[task_id]['searched_queries'] = _sq
                     if download_tasks[task_id]['status'] == 'cancelled':
                         logger.warning(f"[Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
                         # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
@@ -456,19 +484,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                 logger.warning(f"[Modal Worker] Task {task_id} cancelled before processing candidates")
                                 # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                                 return
-                            # Store candidates for retry fallback (like GUI)
+                            # Store candidates for retry fallback (like GUI). A
+                            # later quarantine retry walks these via cached-first
+                            # and skips re-searching this query (searched_queries).
                             download_tasks[task_id]['cached_candidates'] = candidates
-                            # Remember which sources produced candidates so a later
-                            # quarantine retry walks them via cache instead of
-                            # re-searching them (cached-first design).
-                            _searched = download_tasks[task_id].get('searched_sources')
-                            if not isinstance(_searched, set):
-                                _searched = set()
-                            for _c in candidates:
-                                _u, _ = _cand_user_file(_c)
-                                if _u:
-                                    _searched.add(_resolve_worker_source(_u))
-                            download_tasks[task_id]['searched_sources'] = _searched
 
                         # Try to download with these candidates
                         success = deps.attempt_download_with_candidates(task_id, candidates, track, batch_id)
@@ -556,11 +575,6 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                 with tasks_lock:
                                     if task_id in download_tasks:
                                         download_tasks[task_id]['cached_candidates'] = fb_candidates
-                                        _searched = download_tasks[task_id].get('searched_sources')
-                                        if not isinstance(_searched, set):
-                                            _searched = set()
-                                        _searched.add(_resolve_worker_source(fallback_source))
-                                        download_tasks[task_id]['searched_sources'] = _searched
                                 success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
                                     return
