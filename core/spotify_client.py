@@ -577,25 +577,17 @@ class SpotifyClient:
         except Exception:
             return False
 
-    def _has_spotify_credentials(self) -> bool:
-        """Whether Spotify client credentials are configured (a 'connected'
-        user, even if currently rate-limit-banned). Drives the auto-bridge."""
-        try:
-            cfg = config_manager.get_spotify_config() or {}
-            return bool(cfg.get('client_id') and cfg.get('client_secret'))
-        except Exception:
-            return False
-
     def _free_installed(self) -> bool:
         from core.spotify_free_metadata import spotify_free_installed
         return spotify_free_installed()
 
     def _free_wanted(self) -> bool:
-        """Does the user want Spotify metadata at all? Either they have
-        credentials (connected → eligible for the rate-limit auto-bridge) or
-        they explicitly chose 'Spotify Free'. This is what keeps the free source
-        from auto-scraping for someone who never opted into Spotify."""
-        return self._has_spotify_credentials() or self._free_selected()
+        """Does the user actually want the free source? OPT-IN: only when they
+        picked 'Spotify Free'. This keeps free from auto-scraping for anyone who
+        didn't choose it — a plain-'Spotify' user just waits out a rate-limit ban
+        as before. A user on 'Spotify Free' who also connects an account uses the
+        official account normally and free only bridges their bans."""
+        return self._free_selected()
 
     def _free_available(self) -> bool:
         """Free CAN serve: package installed AND the user wants Spotify."""
