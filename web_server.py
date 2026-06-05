@@ -23222,6 +23222,12 @@ def update_youtube_discovery_match():
                             'confidence': 1.0,
                             'matched_data': matched_data,
                             'manual_match': True,
+                            # extra_data is MERGED on save, so explicitly clear
+                            # any stale stub/removal flags from before this fix —
+                            # otherwise a leftover wing_it_fallback would make the
+                            # pipeline re-discover and revert this manual pick.
+                            'wing_it_fallback': False,
+                            'unmatched_by_user': False,
                         }
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                         result['matched_data'] = matched_data

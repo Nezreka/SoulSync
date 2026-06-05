@@ -37,6 +37,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.manual_match import should_rediscover
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,44 +147,14 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         existing_extra = json.loads(track['extra_data']) if isinstance(track['extra_data'], str) else track['extra_data']
                     except (json.JSONDecodeError, TypeError):
                         pass
-                if existing_extra.get('discovered'):
-                    if existing_extra.get('wing_it_fallback'):
-                        # Wing It stub — always re-attempt to find a real match
-                        undiscovered_tracks.append(track)
-                    elif existing_extra.get('manual_match'):
-                        # User explicitly picked this match via the Fix popup.
-                        # Manual fixes are authoritative: they may lack
-                        # track_number / album.id / release_date (the Fix-popup
-                        # save shape is intentionally lean — search-result rows
-                        # don't include track_number, and the MBID-lookup flat
-                        # shape doesn't carry album.id), but re-running discovery
-                        # against the active source would overwrite the user's
-                        # deliberate pick with whatever the auto-search ranks
-                        # first. Skip — pipeline only re-discovers when the user
-                        # has cleared the match.
-                        pl_skipped += 1
-                        total_skipped += 1
-                    else:
-                        # Check if matched_data is complete — old discoveries may be missing
-                        # track_number/release_date due to the Track dataclass stripping them.
-                        # Re-discover these so the enriched pipeline fills in the gaps.
-                        md = existing_extra.get('matched_data', {})
-                        album = md.get('album', {})
-                        has_track_num = md.get('track_number')
-                        has_release = album.get('release_date') if isinstance(album, dict) else None
-                        has_album_id = album.get('id') if isinstance(album, dict) else None
-                        if has_track_num and (has_release or has_album_id):
-                            pl_skipped += 1
-                            total_skipped += 1
-                        else:
-                            # Incomplete discovery — re-discover to get full metadata
-                            undiscovered_tracks.append(track)
-                elif existing_extra.get('unmatched_by_user'):
-                    # User explicitly removed this match — respect their choice
+                # `should_rediscover` is the single source of truth for this
+                # gate (manual match checked FIRST so a stale Wing It flag can't
+                # revert a user's deliberate fix — see its docstring).
+                if should_rediscover(existing_extra):
+                    undiscovered_tracks.append(track)
+                else:
                     pl_skipped += 1
                     total_skipped += 1
-                else:
-                    undiscovered_tracks.append(track)
 
             if pl_skipped > 0:
                 deps.update_automation_progress(automation_id,
