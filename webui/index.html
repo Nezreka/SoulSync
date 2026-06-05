@@ -3838,21 +3838,15 @@
                                         <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
+                                            <option value="spotify_free">Spotify Free (no credentials)</option>
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
                                             <option value="discogs">Discogs</option>
                                             <option value="musicbrainz">MusicBrainz</option>
                                         </select>
                                     </div>
-                                    <div class="form-group">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="metadata-spotify-free">
-                                            <span>Use Spotify Free when Spotify is unavailable or rate-limited</span>
-                                        </label>
-                                        <div class="callback-help">Fetches Spotify metadata without API credentials. Works two ways: as a full Spotify source if you haven't connected your account, and as a bridge that keeps search &amp; enrichment going when your connected Spotify hits a rate-limit. Unofficial &amp; best-effort (can break if Spotify changes); it can't search albums by name or access your library, and never runs while your authenticated Spotify is working normally.</div>
-                                    </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify needs an active session — or enable Spotify Free above. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
+                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. <strong>Spotify</strong> needs a connected account. <strong>Spotify Free</strong> pulls the same Spotify data without credentials (unofficial &amp; best-effort — can break if Spotify changes, can't search albums by name, no library access). Either way, a connected Spotify that hits a rate-limit is automatically bridged by the free source if it's installed. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
                                     </div>
                                 </div>
 

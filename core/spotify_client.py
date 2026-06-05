@@ -569,26 +569,43 @@ class SpotifyClient:
             return self._itunes  # Fall back to iTunes if no Discogs token
         return self._itunes
 
-    def _free_enabled(self) -> bool:
-        """Opt-in switch for the no-creds SpotipyFree ('Spotify Free') source.
-        Default OFF — the user explicitly enables it (Settings), so there's no
-        surprise web-scraping for people who simply haven't connected Spotify."""
+    def _free_selected(self) -> bool:
+        """Whether the user picked 'Spotify Free' as their metadata source
+        (the no-creds option, for when they haven't connected Spotify)."""
         try:
             return bool(config_manager.get('metadata.spotify_free', False))
         except Exception:
             return False
 
-    def _free_available(self) -> bool:
-        """Whether the no-creds fallback can be offered at all: enabled in
-        config AND the SpotipyFree package is installed."""
+    def _has_spotify_credentials(self) -> bool:
+        """Whether Spotify client credentials are configured (a 'connected'
+        user, even if currently rate-limit-banned). Drives the auto-bridge."""
+        try:
+            cfg = config_manager.get_spotify_config() or {}
+            return bool(cfg.get('client_id') and cfg.get('client_secret'))
+        except Exception:
+            return False
+
+    def _free_installed(self) -> bool:
         from core.spotify_free_metadata import spotify_free_installed
-        return self._free_enabled() and spotify_free_installed()
+        return spotify_free_installed()
+
+    def _free_wanted(self) -> bool:
+        """Does the user want Spotify metadata at all? Either they have
+        credentials (connected → eligible for the rate-limit auto-bridge) or
+        they explicitly chose 'Spotify Free'. This is what keeps the free source
+        from auto-scraping for someone who never opted into Spotify."""
+        return self._has_spotify_credentials() or self._free_selected()
+
+    def _free_available(self) -> bool:
+        """Free CAN serve: package installed AND the user wants Spotify."""
+        return self._free_installed() and self._free_wanted()
 
     def is_spotify_metadata_available(self) -> bool:
         """Whether SoulSync can serve Spotify metadata — real auth OR the
-        no-creds fallback. Availability gates (search resolve, enrichment
-        worker, watchlist) use THIS instead of ``is_spotify_authenticated()``
-        so the fallback is reachable. Does NOT change auth semantics."""
+        no-creds source. Availability gates (search resolve, enrichment worker,
+        watchlist) use THIS instead of ``is_spotify_authenticated()`` so the
+        free source is reachable. Does NOT change auth semantics."""
         from core.spotify_free_metadata import should_offer_spotify_metadata
         try:
             authed = self.is_spotify_authenticated()
@@ -597,13 +614,15 @@ class SpotifyClient:
         return should_offer_spotify_metadata(authed, self._free_available())
 
     def _free_active(self) -> bool:
-        """Whether the no-creds SpotipyFree fallback may serve THIS request.
+        """Whether the no-creds source may serve THIS request: free available
+        AND official can't (no auth, or rate-limited). ``is_spotify_authenticated()``
+        already returns False during a rate-limit ban; the explicit rate-limit
+        term covers the brief window before the auth cache refreshes. When authed
+        + healthy the official path returns first, so this never opens.
 
-        Only when official Spotify can't (no auth, or rate-limited — note
-        ``is_spotify_authenticated()`` already returns False during a rate-limit
-        ban) AND the fallback is available. When authed + healthy the official
-        path returns before any fallback, so this never opens. Delegates the
-        pure decision to ``core.spotify_free_metadata.should_use_free_fallback``."""
+        Two activations fall out of this: a no-auth user who chose Spotify Free
+        (free is their source), and a connected user mid-rate-limit (free bridges
+        the ban) — see _free_wanted()."""
         from core.spotify_free_metadata import should_use_free_fallback
         if not self._free_available():
             return False
