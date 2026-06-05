@@ -13670,7 +13670,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Server tab — prominent first tab */
 .sync-tab-server {
-    flex: 1.4 !important;
+    /* No flex-grow: behave like every other brand chip (flex:0 0 auto from
+       .sync-tab-button). The old "equal-width pills" strip stretched this tab
+       with `flex:1.4 !important`, which leaked past the chip restyle and made
+       the active Server Playlists pill span the whole row (#799). */
     font-size: 12px;
     letter-spacing: 0.02em;
     position: relative;
