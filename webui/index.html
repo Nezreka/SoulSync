@@ -4966,6 +4966,14 @@
 
                             </div>
 
+                            <!-- ═══ QUALITY PROFILE ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Quality Profile</h3>
+                                <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
                             <!-- Quality Profile Settings (Soulseek only) -->
                             <div class="settings-group" id="quality-profile-section" data-stg="downloads">
                                 <h3>🎵 Quality Profile</h3>
@@ -5146,6 +5154,42 @@
                                     When track duration is unavailable, a generous file-size safety net is used instead.
                                 </div>
                             </div>
+
+                            </div><!-- end Quality Profile body -->
+
+                            <!-- ═══ RETRY LOGIC ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Retry Logic</h3>
+                                <span class="settings-section-hint">Next-best candidate, exhaustive per-source retry</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
+                            <div class="settings-group" data-stg="downloads">
+                                <h3>🔁 Retry Logic</h3>
+                                <small class="settings-hint" style="margin-bottom: 10px; display: block;">Controls what happens when a downloaded file is rejected (AcoustID mismatch, wrong version, or duration/integrity failure). Independent of post-processing.</small>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-next-candidate" checked>
+                                        Retry next-best candidate on mismatch
+                                    </label>
+                                    <small class="settings-hint">When a download is quarantined (AcoustID mismatch or duration/integrity failure), automatically try the next-best candidate instead of failing the track. Off = quarantine and fail immediately.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-exhaustive">
+                                        Exhaustive retry (separate budget per source)
+                                    </label>
+                                    <small class="settings-hint">Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="retries-per-query">Retries per query (per source)</label>
+                                    <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                    <small class="settings-hint">In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</small>
+                                </div>
+                            </div>
+
+                            </div><!-- end Retry Logic body -->
 
                             <!-- ═══ INDEXERS & DOWNLOADERS ═══ -->
                             <!-- Intro hero — explains the search → fetch flow in one glance -->
@@ -5562,25 +5606,6 @@
                                             <label for="duration-tolerance-seconds">Duration tolerance (seconds)</label>
                                             <input type="number" id="duration-tolerance-seconds" min="0" max="60" step="0.5" value="0" style="width: 100px;">
                                             <small class="settings-hint">Maximum drift between the file's actual length and the metadata source's expected length before the file is quarantined. <strong>0 = auto</strong> (3s normal, 5s for tracks &gt;10min). Raise this if tracks routinely quarantine for being a few seconds off (live recordings, alternate masterings, etc). Capped at 60s.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="retry-next-candidate" checked>
-                                                Retry next-best candidate on mismatch
-                                            </label>
-                                            <small class="settings-hint">When a download is quarantined (AcoustID mismatch or duration/integrity failure), automatically try the next-best candidate instead of failing the track. Off = quarantine and fail immediately.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="retry-exhaustive">
-                                                Exhaustive retry (separate budget per source)
-                                            </label>
-                                            <small class="settings-hint">Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="retries-per-query">Retries per query (per source)</label>
-                                            <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
-                                            <small class="settings-hint">In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</small>
                                         </div>
                                     </div>
 
