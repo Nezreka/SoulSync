@@ -1713,13 +1713,17 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality Profile tile visibility is handled entirely by the settings tab
-    // filter (data-stg="downloads" on #quality-profile-tile) — the same mechanism
-    // the Retry Logic tile uses. The old Soulseek-only JS gate fought the tab
-    // filter for control of `display` and, depending on activeSources/tab timing,
-    // left the tile either empty (when it gated the inner group) or fully hidden
-    // (when it gated the wrapper). Letting the tab filter own visibility makes it
-    // behave exactly like the working Retry Logic tile.
+    // Quality profile is Soulseek-only (it only affects Soulseek downloads) and
+    // downloads-tab-only. Gate the WHOLE collapsible tile (#quality-profile-tile
+    // = header + body) as a unit, so it either fully shows (Soulseek active) or
+    // fully hides — never an empty expandable shell (the earlier bug came from
+    // gating only the inner #quality-profile-section).
+    const qualityProfileTile = document.getElementById('quality-profile-tile');
+    if (qualityProfileTile) {
+        const activeTab = document.querySelector('.stg-tab.active');
+        const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
+        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+    }
 
     if (activeSources.has('tidal')) {
         checkTidalDownloadAuthStatus();
