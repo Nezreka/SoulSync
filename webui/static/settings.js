@@ -1711,12 +1711,14 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality profile is Soulseek-only and downloads-tab-only
-    const qualityProfileSection = document.getElementById('quality-profile-section');
-    if (qualityProfileSection) {
+    // Quality profile is Soulseek-only and downloads-tab-only. Gate the whole
+    // collapsible tile (header + body) — gating just the inner #quality-profile-section
+    // left the tile header expandable to an empty body.
+    const qualityProfileTile = document.getElementById('quality-profile-tile');
+    if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
         const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileSection.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
     }
 
     if (activeSources.has('tidal')) {

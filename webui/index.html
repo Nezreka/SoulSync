@@ -4967,7 +4967,11 @@
                             </div>
 
                             <!-- ═══ QUALITY PROFILE ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
+                                 by settings.js updateSourceVisibility — gating only the inner
+                                 group would leave an empty expandable shell. -->
+                            <div id="quality-profile-tile" data-stg="downloads">
+                            <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality Profile</h3>
                                 <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
@@ -5156,6 +5160,7 @@
                             </div>
 
                             </div><!-- end Quality Profile body -->
+                            </div><!-- end Quality Profile tile -->
 
                             <!-- ═══ RETRY LOGIC ═══ -->
                             <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
