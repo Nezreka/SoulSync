@@ -135,42 +135,23 @@ def test_parse_spotify_url_without_scheme_or_www():
 
 
 # ---------------------------------------------------------------------------
-# parse_metadata_identifier — bare IDs
+# parse_metadata_identifier — bare IDs are rejected (links only)
 # ---------------------------------------------------------------------------
 
-def test_parse_bare_uuid_is_musicbrainz_album_then_track():
-    mbid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-    out = by_id.parse_metadata_identifier(mbid)
-    assert out == [
-        LookupTarget('musicbrainz', 'album', mbid),
-        LookupTarget('musicbrainz', 'track', mbid),
-    ]
+def test_parse_bare_numeric_id_rejected():
+    # The footgun case (#775 follow-up): a bare number has no source/type, so
+    # it must NOT resolve to whatever album happens to own that id.
+    assert by_id.parse_metadata_identifier('525046') == []
 
 
-def test_parse_bare_base62_is_spotify_album_then_track():
-    sid = '4aawyAB9vmqN3uQ7FjRGTy'  # 22 chars, has letters
-    out = by_id.parse_metadata_identifier(sid)
-    assert out == [
-        LookupTarget('spotify', 'album', sid),
-        LookupTarget('spotify', 'track', sid),
-    ]
+def test_parse_bare_uuid_rejected():
+    assert by_id.parse_metadata_identifier(
+        'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    ) == []
 
 
-def test_parse_bare_numeric_fans_out_deezer_then_itunes():
-    out = by_id.parse_metadata_identifier('302127')
-    assert out == [
-        LookupTarget('deezer', 'album', '302127'),
-        LookupTarget('deezer', 'track', '302127'),
-        LookupTarget('itunes', 'album', '302127'),
-        LookupTarget('itunes', 'track', '302127'),
-    ]
-
-
-def test_parse_bare_numeric_biases_preferred_source_first():
-    out = by_id.parse_metadata_identifier('302127', preferred_source='itunes')
-    # iTunes pulled to the front of the fan-out.
-    assert out[0] == LookupTarget('itunes', 'album', '302127')
-    assert out[1] == LookupTarget('itunes', 'track', '302127')
+def test_parse_bare_base62_rejected():
+    assert by_id.parse_metadata_identifier('4aawyAB9vmqN3uQ7FjRGTy') == []
 
 
 def test_parse_empty_and_garbage_return_empty():
@@ -301,40 +282,35 @@ def test_resolve_deezer_album_uses_get_album_metadata():
     assert client.album_calls == ['302127']
 
 
-def test_resolve_kind_unknown_falls_back_album_then_track():
-    # Bare base62 → spotify, kind unknown. Album returns None, track resolves.
+def test_resolve_track_link():
+    # A track URL pins kind=track — only get_track_details is called.
     client = _FakeClient(album=None, track={
         'id': 't1', 'name': 'Creep', 'artists': ['Radiohead'],
         'album': {'name': 'Pablo Honey'}, 'duration_ms': 238000,
     })
-    sid = '4aawyAB9vmqN3uQ7FjRGTy'
     res = by_id.resolve_identifier(
-        sid, deps=None, client_resolver=_resolver_from({'spotify': client}),
+        'https://open.spotify.com/track/t1', deps=None,
+        client_resolver=_resolver_from({'spotify': client}),
     )
     assert res['available'] is True
     assert res['tracks'][0]['name'] == 'Creep'
     assert res['albums'] == []
-    assert client.album_calls == [sid]   # tried album first
-    assert client.track_calls == [sid]   # then track
+    assert client.album_calls == []      # kind pinned to track — no album probe
+    assert client.track_calls == ['t1']
 
 
-def test_resolve_numeric_fanout_first_hit_wins():
-    # Deezer has no such id (returns None), iTunes does — resolver moves on.
-    deezer = _FakeClient(album=None, track=None)
-    itunes = _FakeClient(album={'id': '99', 'name': 'Thriller',
-                                'artists': ['Michael Jackson'], 'images': [],
-                                'release_date': '1982', 'total_tracks': 9,
-                                'album_type': 'album', 'external_urls': {}})
+def test_resolve_bare_id_rejected_with_hint():
+    # The #775 follow-up regression: a bare number must not resolve; it
+    # returns not-found with a link hint instead of an unrelated album.
+    called = []
     res = by_id.resolve_identifier(
-        '99', deps=None,
-        client_resolver=_resolver_from({'deezer': deezer, 'itunes': itunes}),
+        '525046', deps=None,
+        client_resolver=lambda s: called.append(s),  # must never be invoked
     )
-    assert res['available'] is True
-    assert res['source'] == 'itunes'
-    assert res['albums'][0]['name'] == 'Thriller'
-    # Deezer was tried (album + track) before iTunes resolved.
-    assert deezer.album_calls == ['99']
-    assert deezer.track_calls == ['99']
+    assert res['available'] is False
+    assert res['albums'] == [] and res['tracks'] == []
+    assert 'link' in res['message'].lower()
+    assert called == []  # no source was even probed
 
 
 def test_resolve_unavailable_client_is_skipped():
@@ -345,7 +321,9 @@ def test_resolve_unavailable_client_is_skipped():
     )
     assert res['available'] is False
     assert res['albums'] == [] and res['tracks'] == []
-    assert res['source'] == ''
+    # The source we tried is reported even on miss.
+    assert res['source'] == 'spotify'
+    assert res['message']
 
 
 def test_resolve_client_exception_does_not_propagate():

@@ -300,10 +300,7 @@ function initializeSearchModeToggle() {
             const resp = await fetch('/api/enhanced-search/by-id', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    query: raw,
-                    source: searchController.state.activeSource,
-                }),
+                body: JSON.stringify({ query: raw }),
             });
             data = await resp.json();
         } catch (err) {
@@ -329,11 +326,14 @@ function initializeSearchModeToggle() {
             }
             _renderFromState(searchController.state);
         } else {
-            // No source resolved the link — show the empty state.
+            // Not a link, or nothing resolved — surface the backend's hint
+            // via a toast (non-destructive) and show the empty state.
             if (loadingState) loadingState.classList.add('hidden');
             if (resultsContainer) resultsContainer.classList.add('hidden');
             if (emptyState) emptyState.classList.remove('hidden');
             showDropdown();
+            const msg = (data && data.message) || 'No match for that link.';
+            if (typeof showToast === 'function') showToast(msg, 'warning');
         }
     }
 

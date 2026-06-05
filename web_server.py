@@ -5728,27 +5728,26 @@ def enhanced_search():
 
 @app.route('/api/enhanced-search/by-id', methods=['POST'])
 def enhanced_search_by_id():
-    """Resolve a pasted metadata link/ID to a single album or track (#775).
+    """Resolve a pasted metadata link to a single album or track (#775).
 
-    Source-agnostic: a provider URL (Spotify/Apple/MusicBrainz/Deezer) or a
-    bare ID is looked up directly on the owning source via its get-by-id —
-    no fuzzy search, no scoring. Returns the same dropdown shape the normal
-    enhanced search renders, plus the resolving ``source`` so the frontend
-    can route downloads/imports through the existing flow.
+    A provider URL (Spotify/Apple/MusicBrainz/Deezer) is looked up directly
+    on the owning source via its get-by-id — no fuzzy search, no scoring. The
+    domain pins the source and the path pins album-vs-track, so it's
+    unambiguous. Returns the same dropdown shape the normal enhanced search
+    renders, plus the resolving ``source`` so the frontend can route
+    downloads/imports through the existing flow.
 
-    Body: ``{"query": "<link or id>", "source": "<active source>"?}``. The
-    optional ``source`` only biases the fan-out for ambiguous bare numeric
-    IDs (Deezer vs iTunes).
+    Body: ``{"query": "<provider link or spotify: URI>"}``. Links only — a
+    bare ID is rejected with a hint, since it carries no source or type.
     """
     data = request.get_json() or {}
     raw = (data.get('query') or '').strip()
-    preferred = (data.get('source') or '').strip().lower() or None
     if not raw:
         return jsonify(_search_by_id._empty_result(''))
 
     try:
         deps = _build_search_deps()
-        result = _search_by_id.resolve_identifier(raw, deps, preferred_source=preferred)
+        result = _search_by_id.resolve_identifier(raw, deps)
         return jsonify(result)
     except Exception as e:
         logger.error(f"Link/ID resolve error: {e}")

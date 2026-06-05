@@ -6,13 +6,14 @@ entity up *directly* on the owning source — no scoring, no guessing.
 
 Design notes
 ------------
-- **Source-agnostic input.** A full URL carries its source in the domain
+- **Links only.** A full URL carries its source in the domain
   (``open.spotify.com`` → spotify, ``musicbrainz.org`` → musicbrainz, …)
   and its kind in the path (``/album/`` vs ``/track/``), so it resolves to
-  exactly one lookup. A *bare* ID is disambiguated by format where we can
-  (UUID → MusicBrainz, 22-char base62 → Spotify) and otherwise fanned out
-  across the numeric-ID sources (Deezer, iTunes); the first source that
-  returns a hit wins. Paste the full link to remove that ambiguity.
+  exactly one unambiguous lookup. The ``spotify:album:ID`` URI is accepted
+  too since it's equally explicit. Bare IDs are intentionally rejected: a
+  bare number like ``525046`` carries no source and no entity type, so it
+  would resolve to whatever album/track happens to own that id on some
+  source — often an unrelated entity. Paste the link instead.
 
 - **Reuses existing per-source get-by-id.** Spotify/iTunes/MusicBrainz all
   expose ``get_album``; Deezer exposes ``get_album_metadata``; all four
@@ -32,7 +33,6 @@ an injected ``client_resolver`` (defaulting to the orchestrator's
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Callable, NamedTuple, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -43,15 +43,6 @@ logger = logging.getLogger(__name__)
 # the common Spotify-shaped dict. Streaming download backends (Tidal/Qobuz)
 # return raw API shapes and aren't metadata-link sources, so they're omitted.
 SUPPORTED_SOURCES = ('spotify', 'itunes', 'musicbrainz', 'deezer')
-
-_UUID_RE = re.compile(
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I
-)
-_SPOTIFY_ID_RE = re.compile(r'^[0-9A-Za-z]{22}$')
-_NUMERIC_RE = re.compile(r'^\d+$')
-
-# Numeric-ID sources, tried in this order when a bare number is pasted.
-_NUMERIC_SOURCES = ('deezer', 'itunes')
 
 # Domains we recognize — used to detect a pasted URL even when the user
 # omitted the scheme (e.g. "open.spotify.com/album/…").
@@ -64,9 +55,10 @@ _KNOWN_HOSTS = (
 class LookupTarget(NamedTuple):
     """One (source, kind, id) lookup to attempt.
 
-    ``kind`` is ``'album'`` or ``'track'`` when the input pins it (a URL path
-    or URI type), or ``None`` when unknown — the resolver then tries album
-    first, then track.
+    ``kind`` is ``'album'`` or ``'track'`` — always pinned by the URL path or
+    URI type (links-only input). The ``Optional`` typing is kept defensively:
+    the resolver falls back to album-then-track if a future parser path ever
+    yields ``None``.
     """
 
     source: str
@@ -139,14 +131,12 @@ def _parse_url(raw: str) -> list[LookupTarget]:
     return []
 
 
-def parse_metadata_identifier(
-    raw: str, preferred_source: Optional[str] = None
-) -> list[LookupTarget]:
-    """Parse a pasted link/ID into an ordered list of lookup targets.
+def parse_metadata_identifier(raw: str) -> list[LookupTarget]:
+    """Parse a pasted provider link (or ``spotify:`` URI) into lookup targets.
 
-    Returns the candidates to try in order; the first that resolves wins.
-    ``preferred_source`` (the user's active source) only reorders the
-    fan-out for ambiguous *bare numeric* IDs.
+    Links only — a bare ID has no source/type and is rejected (returns ``[]``).
+    A URL resolves to exactly one target; the list type is kept for the
+    ``spotify:`` URI path and future multi-target patterns.
     """
     raw = (raw or '').strip()
     if not raw:
@@ -164,34 +154,9 @@ def parse_metadata_identifier(
     )
     if looks_like_url:
         url = raw if '://' in raw else f'https://{raw}'
-        targets = _parse_url(url)
-        if targets:
-            return targets
-        # Fall through: maybe a bare id slipped in with a stray scheme.
+        return _parse_url(url)
 
-    # Bare identifier — disambiguate by format.
-    if _UUID_RE.match(raw):
-        # MusicBrainz MBID: could be release / release-group (album) or
-        # recording (track). Try album first, then track.
-        return [LookupTarget('musicbrainz', 'album', raw),
-                LookupTarget('musicbrainz', 'track', raw)]
-
-    if _NUMERIC_RE.match(raw):
-        # Numeric IDs collide across Deezer/iTunes — fan out, first hit wins.
-        order = list(_NUMERIC_SOURCES)
-        if preferred_source in order:
-            order.remove(preferred_source)
-            order.insert(0, preferred_source)
-        targets: list[LookupTarget] = []
-        for src in order:
-            targets.append(LookupTarget(src, 'album', raw))
-            targets.append(LookupTarget(src, 'track', raw))
-        return targets
-
-    if _SPOTIFY_ID_RE.match(raw):
-        return [LookupTarget('spotify', 'album', raw),
-                LookupTarget('spotify', 'track', raw)]
-
+    # Bare ID (or anything we don't recognize as a link) — rejected.
     return []
 
 
@@ -286,28 +251,37 @@ def _fetch_track(client: Any, source: str, identifier: str) -> Optional[dict]:
     return client.get_track_details(identifier)
 
 
-def _empty_result(raw: str, source: str = '') -> dict:
+# Shown in the dropdown's empty state so the user knows what to do next.
+_MSG_NOT_A_LINK = (
+    'Paste a full link from Spotify, Apple Music, MusicBrainz, or Deezer '
+    '(a bare ID is ambiguous).'
+)
+_MSG_NOT_FOUND = "Couldn't resolve that link — double-check it's correct."
+
+
+def _empty_result(raw: str, source: str = '', message: str = '') -> dict:
     return {
         'source': source,
         'albums': [],
         'tracks': [],
         'available': False,
         'query': raw,
+        'message': message,
     }
 
 
 def resolve_identifier(
     raw: str,
     deps: Any,
-    preferred_source: Optional[str] = None,
     client_resolver: Optional[Callable[[str], Any]] = None,
 ) -> dict:
-    """Resolve a pasted link/ID to a single album or track card.
+    """Resolve a pasted provider link to a single album or track card.
 
     Returns a dropdown-compatible dict:
-    ``{source, albums, tracks, available, query}``. ``available`` is True iff
-    a source returned a hit. The first resolving target wins, so the result
-    carries exactly one card (and the ``source`` that owns it).
+    ``{source, albums, tracks, available, query, message}``. ``available`` is
+    True iff a source returned a hit; the first resolving target wins, so the
+    result carries exactly one card (and the ``source`` that owns it).
+    ``message`` is a user-facing hint when nothing resolved.
 
     ``client_resolver`` maps a source name to a client (or None). It defaults
     to the orchestrator's ``resolve_client``; tests inject fakes.
@@ -318,10 +292,10 @@ def resolve_identifier(
         def client_resolver(source: str) -> Any:  # noqa: E306
             return resolve_client(source, deps)[0]
 
-    targets = parse_metadata_identifier(raw, preferred_source=preferred_source)
+    targets = parse_metadata_identifier(raw)
     if not targets:
-        logger.info(f"Link/ID resolve: unrecognized identifier {raw!r}")
-        return _empty_result(raw, preferred_source or '')
+        logger.info(f"Link/ID resolve: not a recognized link {raw!r}")
+        return _empty_result(raw, message=_MSG_NOT_A_LINK)
 
     for target in targets:
         try:
@@ -361,4 +335,4 @@ def resolve_identifier(
                 )
 
     logger.info(f"Link/ID resolve: no source resolved {raw!r}")
-    return _empty_result(raw, preferred_source or '')
+    return _empty_result(raw, source=targets[0].source, message=_MSG_NOT_FOUND)
