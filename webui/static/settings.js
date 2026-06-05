@@ -64,7 +64,9 @@ function syncMetadataSourceSelection(source) {
 
 function _isMetadataSourceSelectable(source) {
     if (source === 'spotify') {
-        return _lastStatusPayload?.spotify?.authenticated === true;
+        // Selectable with real auth OR when Spotify Free (no-creds) is available.
+        return _lastStatusPayload?.spotify?.authenticated === true
+            || _lastStatusPayload?.spotify?.metadata_available === true;
     }
     if (source === 'discogs') {
         const token = document.getElementById('discogs-token');
@@ -1045,6 +1047,8 @@ async function loadSettingsData() {
 
         // Populate Metadata source setting
         document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'deezer';
+        const spotifyFreeToggle = document.getElementById('metadata-spotify-free');
+        if (spotifyFreeToggle) spotifyFreeToggle.checked = settings.metadata?.spotify_free === true;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -2842,7 +2846,8 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: metadataSource
+            fallback_source: metadataSource,
+            spotify_free: document.getElementById('metadata-spotify-free')?.checked === true
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,

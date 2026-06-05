@@ -3844,8 +3844,15 @@
                                             <option value="musicbrainz">MusicBrainz</option>
                                         </select>
                                     </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="metadata-spotify-free">
+                                            <span>Enable Spotify Free (no credentials)</span>
+                                        </label>
+                                        <div class="callback-help">Fetch Spotify metadata without API credentials, for when you can't or don't want to connect Spotify. Unofficial &amp; best-effort (it can break if Spotify changes), and it can't search albums by name or access your library — only used when Spotify isn't authenticated.</div>
+                                    </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify can only be selected while an active Spotify session exists. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
+                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify needs an active session — or enable Spotify Free above. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
                                     </div>
                                 </div>
 

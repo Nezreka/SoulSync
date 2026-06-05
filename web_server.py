@@ -2318,9 +2318,19 @@ def get_status():
                 if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
                     active_dl_count += 1
 
+        # Spotify Free: tell the UI whether Spotify metadata is available even
+        # without auth (so the Settings source selector can offer it).
+        spotify_status = dict(metadata_status['spotify'])
+        try:
+            spotify_status['metadata_available'] = bool(
+                spotify_client and spotify_client.is_spotify_metadata_available()
+            )
+        except Exception:
+            spotify_status['metadata_available'] = bool(spotify_status.get('authenticated'))
+
         status_data = {
             'metadata_source': metadata_status['metadata_source'],
-            'spotify': metadata_status['spotify'],
+            'spotify': spotify_status,
             'media_server': _status_cache['media_server'],
             'soulseek': soulseek_data,
             'active_media_server': active_server,
@@ -3665,10 +3675,23 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
-        return jsonify({
+        result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
-        })
+        }
+        # Spotify Free: Spotify metadata can be available without credentials
+        # (opt-in no-creds source). Surface that separately so the search source
+        # picker offers Spotify, while `configured` (the Connections indicator)
+        # keeps meaning "has client credentials".
+        if 'spotify' in result:
+            try:
+                meta_avail = bool(spotify_client and spotify_client.is_spotify_metadata_available())
+            except Exception:
+                meta_avail = False
+            result['spotify']['metadata_available'] = (
+                result['spotify']['configured'] or meta_avail
+            )
+        return jsonify(result)
     except Exception as e:
         logger.error(f"config-status error: {e}")
         return jsonify({"error": str(e)}), 500
