@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+import database.music_database as mdb_mod
 from core.maintenance import dedupe_source_ids as dd
 from database.music_database import MusicDatabase
 
@@ -129,3 +130,39 @@ def test_clean_library_is_a_noop(db):
     report = dd.clear_corrupt_source_ids(db, dry_run=False)
     assert report['cluster_count'] == 0
     assert report['artist_count'] == 0
+
+
+# ---------------------------------------------------------------------------
+# The one-time startup migration (auto-repair for users who pull the fix)
+# ---------------------------------------------------------------------------
+
+def test_startup_migration_clears_shared_source_ids(tmp_path):
+    """The _source_id_dedupe_v1 migration in MusicDatabase init must clear
+    differently-named shared ids and leave same-name cross-server dups."""
+    path = str(tmp_path / "music.db")
+    db = MusicDatabase(path)  # first init creates the marker on an empty db
+
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id,name,server_source,deezer_id,deezer_match_status) "
+                     "VALUES ('1','Kendrick Lamar','plex','525046','matched')")
+        conn.execute("INSERT INTO artists (id,name,server_source,deezer_id,deezer_match_status) "
+                     "VALUES ('2','Jorja Smith','plex','525046','matched')")
+        # Legit same-name dup across two servers — must survive.
+        conn.execute("INSERT INTO artists (id,name,server_source,spotify_artist_id) "
+                     "VALUES ('3','Radiohead','plex','rh')")
+        conn.execute("INSERT INTO artists (id,name,server_source,spotify_artist_id) "
+                     "VALUES ('4','Radiohead','jellyfin','rh')")
+        conn.execute("DROP TABLE _source_id_dedupe_v1")
+        conn.commit()
+
+    # Force the one-time migration to run again.
+    mdb_mod._database_initialized_paths.clear()
+    MusicDatabase(path)
+
+    with db._get_connection() as conn:
+        k = conn.execute("SELECT deezer_id, deezer_match_status FROM artists WHERE id='1'").fetchone()
+        assert tuple(k) == (None, None)
+        assert conn.execute("SELECT deezer_id FROM artists WHERE id='2'").fetchone()[0] is None
+        rh = conn.execute("SELECT spotify_artist_id FROM artists WHERE id IN ('3','4')").fetchall()
+        assert all(r[0] == 'rh' for r in rh)
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='_source_id_dedupe_v1'").fetchone()
