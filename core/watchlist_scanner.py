@@ -489,12 +489,16 @@ class WatchlistScanner:
         self._spotify_disabled_reason = reason
 
     def _spotify_available_for_run(self) -> bool:
-        """Check if Spotify should be used for this run."""
+        """Check if Spotify should be used for this run.
+
+        Available = real auth OR the no-creds SpotipyFree fallback (new-release
+        detection is metadata-only — get_artist_albums — so the free source can
+        serve it; the client routes internally when auth is missing/limited)."""
         if self._spotify_disabled_for_run:
             return False
         if not self.spotify_client:
             return False
-        return self.spotify_client.is_spotify_authenticated()
+        return self.spotify_client.is_spotify_metadata_available()
 
     def _spotify_is_primary_source(self) -> bool:
         """Check if Spotify is both authenticated and the configured primary metadata source.

@@ -215,10 +215,12 @@ class SpotifyWorker:
                 # We intentionally avoid calling is_spotify_authenticated() here
                 # because it makes an API probe that can re-trigger rate limits
                 # and lock users in an infinite rate-limit loop.
-                if not self.client.is_spotify_authenticated():
+                # Available = real auth OR the no-creds SpotipyFree fallback
+                # (enrichment is metadata-only, so the free source can serve it).
+                if not self.client.is_spotify_metadata_available():
                     self.client.reload_config()
-                    if not self.client.is_spotify_authenticated():
-                        logger.debug("Spotify not authenticated, sleeping 30s...")
+                    if not self.client.is_spotify_metadata_available():
+                        logger.debug("Spotify metadata unavailable, sleeping 30s...")
                         interruptible_sleep(self._stop_event, 30)
                         continue
 

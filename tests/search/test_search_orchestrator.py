@@ -50,7 +50,7 @@ class _Track:
 
 class _Client:
     def __init__(self, *, name='fake', artists=None, albums=None, tracks=None,
-                 fail_search=False, authed=True, connected=True):
+                 fail_search=False, authed=True, connected=True, meta_available=None):
         self.name = name
         self._artists = artists or []
         self._albums = albums or []
@@ -58,6 +58,10 @@ class _Client:
         self._fail = fail_search
         self._authed = authed
         self._connected = connected
+        # When unset, metadata availability tracks auth (the common case). Set
+        # explicitly to model the no-creds SpotipyFree fallback: not authed but
+        # metadata still available.
+        self._meta_available = meta_available
 
     def search_artists(self, q, limit=10):
         if self._fail:
@@ -76,6 +80,9 @@ class _Client:
 
     def is_spotify_authenticated(self):
         return self._authed
+
+    def is_spotify_metadata_available(self):
+        return self._authed if self._meta_available is None else self._meta_available
 
     def is_connected(self):
         return self._connected
@@ -157,10 +164,20 @@ def test_resolve_spotify_authed_returns_client():
 
 
 def test_resolve_spotify_unauthed_returns_none():
-    deps = _build_deps(spotify_client=_Client(authed=False))
+    # No auth AND no free fallback available → Spotify source unavailable.
+    deps = _build_deps(spotify_client=_Client(authed=False, meta_available=False))
     client, ok = orchestrator.resolve_client('spotify', deps)
     assert client is None
     assert ok is False
+
+
+def test_resolve_spotify_unauthed_but_free_available_returns_client():
+    # #798: no Spotify auth but the no-creds SpotipyFree fallback is available →
+    # the Spotify source stays usable (the client routes to free internally).
+    deps = _build_deps(spotify_client=_Client(authed=False, meta_available=True))
+    client, ok = orchestrator.resolve_client('spotify', deps)
+    assert client is deps.spotify_client
+    assert ok is True
 
 
 def test_resolve_spotify_missing_returns_none():
