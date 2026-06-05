@@ -2318,27 +2318,9 @@ def get_status():
                 if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
                     active_dl_count += 1
 
-        # Spotify Free: tell the UI (a) whether Spotify metadata is currently
-        # available (auth or free), and (b) whether the SpotipyFree package is
-        # installed — the latter is what makes 'Spotify Free' selectable in the
-        # source dropdown (selecting it is the opt-in, so it can't depend on
-        # already having selected it).
-        spotify_status = dict(metadata_status['spotify'])
-        try:
-            spotify_status['metadata_available'] = bool(
-                spotify_client and spotify_client.is_spotify_metadata_available()
-            )
-        except Exception:
-            spotify_status['metadata_available'] = bool(spotify_status.get('authenticated'))
-        try:
-            from core.spotify_free_metadata import spotify_free_installed
-            spotify_status['free_installed'] = spotify_free_installed()
-        except Exception:
-            spotify_status['free_installed'] = False
-
         status_data = {
             'metadata_source': metadata_status['metadata_source'],
-            'spotify': spotify_status,
+            'spotify': _spotify_status_with_availability(metadata_status['spotify']),
             'media_server': _status_cache['media_server'],
             'soulseek': soulseek_data,
             'active_media_server': active_server,
@@ -34451,6 +34433,26 @@ def import_staging_suggestions():
 # WEBSOCKET (SOCKET.IO) EVENT HANDLERS AND BACKGROUND EMITTERS
 # ================================================================================================
 
+def _spotify_status_with_availability(spotify_status):
+    """Augment the spotify status dict with the Spotify-Free availability flags
+    the UI needs: ``metadata_available`` (search picker) and ``free_installed``
+    (Settings source selector — 'Spotify Free' is selectable when the package is
+    installed, since selecting it is the opt-in). Used by BOTH the /status
+    endpoint and the WebSocket status push so they never drift."""
+    out = dict(spotify_status or {})
+    try:
+        out['metadata_available'] = bool(
+            spotify_client and spotify_client.is_spotify_metadata_available())
+    except Exception:
+        out['metadata_available'] = bool(out.get('authenticated'))
+    try:
+        from core.spotify_free_metadata import spotify_free_installed
+        out['free_installed'] = spotify_free_installed()
+    except Exception:
+        out['free_installed'] = False
+    return out
+
+
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
     download_mode = config_manager.get('download_source.mode', 'hybrid')
@@ -34470,7 +34472,7 @@ def _build_status_payload():
 
     return {
         'metadata_source': metadata_status['metadata_source'],
-        'spotify': metadata_status['spotify'],
+        'spotify': _spotify_status_with_availability(metadata_status['spotify']),
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
