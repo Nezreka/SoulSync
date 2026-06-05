@@ -288,6 +288,16 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
         all_raw_results = []  # Collect raw results across queries for candidate review modal
+        # Sources whose per-source quarantine-retry budget is spent (exhaustive
+        # mode). The monitor sets this when a source gives up; we exclude those
+        # sources from the hybrid search so the chain falls through to the next
+        # source instead of re-fetching the same exhausted one (e.g. Soulseek
+        # keeps returning fresh wrong peers — once its budget is gone, switch to
+        # HiFi/Tidal/…). See monitor.requeue_quarantined_task_for_retry.
+        with tasks_lock:
+            _exhausted_sources = [
+                str(s) for s in (download_tasks.get(task_id, {}).get('exhausted_download_sources') or ())
+            ]
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -324,9 +334,13 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                         _exclude_for_hybrid_album = ['torrent', 'usenet']
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
+                # Fold in budget-exhausted sources (per-source quarantine retry).
+                _exclude_sources = list(_exhausted_sources)
+                if _exclude_for_hybrid_album:
+                    _exclude_sources.extend(_exclude_for_hybrid_album)
                 # Perform search with timeout
                 tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
-                    query, timeout=30, exclude_sources=_exclude_for_hybrid_album,
+                    query, timeout=30, exclude_sources=_exclude_sources or None,
                 ))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
@@ -419,7 +433,12 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # (which was definitely tried). If the first was skipped (unconfigured),
                 # the orchestrator would have tried the second — but trying it again is
                 # harmless (streaming sources return fast).
-                remaining_sources = [s for s in hybrid_order[1:] if s in source_clients and source_clients[s]]
+                _exhausted_lower = {s.lower() for s in _exhausted_sources}
+                remaining_sources = [
+                    s for s in hybrid_order[1:]
+                    if s in source_clients and source_clients[s]
+                    and s.lower() not in _exhausted_lower
+                ]
                 if remaining_sources:
                     logger.warning(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
 
