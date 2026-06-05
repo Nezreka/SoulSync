@@ -109,7 +109,8 @@
     }
 
     #artist-hero-section #artist-detail-image {
-        width: 100% !important
+        width: 100% !important;
+        max-width: none !important;
     }
 
     #media-player {
@@ -127,6 +128,7 @@
         width: 100%;
         flex-direction: row;
         flex-wrap: wrap;
+        justify-content: center;
     }
 
     .enh-compact-item.artist-card {
@@ -1039,22 +1041,16 @@
         gap: 16px;
     }
 
-    .artist-image-container {
-        width: 100px;
-        height: 100px;
-    }
-
     .artist-image,
     .artist-image-fallback {
         width: 100px;
         height: 100px;
     }
 
-    .artist-info h1,
-    .artist-name {
-        font-size: 24px !important;
-        white-space: normal;
+    .artist-hero-section .artist-name {
+        font-size: 1.6em;
         text-align: center;
+        display: block;
     }
 
     .artist-hero-badges {
@@ -1076,7 +1072,7 @@
     .artist-hero-bio {
         font-size: 12px;
         -webkit-line-clamp: 3;
-        max-height: 54px;
+        max-height: fit-content;
     }
 
     .artist-hero-numbers {
@@ -1186,7 +1182,7 @@
     }
 
     .discover-card {
-        width: 160px;
+        width: 45%;
     }
 
     /* Horizontal scroll tabs */
@@ -3079,10 +3075,14 @@
 
     /* Notification panel */
     .notif-panel {
-        width: calc(100vw - 24px);
-        max-width: 100%;
-        right: 12px;
-        bottom: 62px;
+        /* JS positions this inline from the bell's rect (right/bottom), which on
+           mobile pushes it off-screen (the bell isn't flush right). Override the
+           inline styles with !important and anchor both sides so it always fits. */
+        left: 12px !important;
+        right: 12px !important;
+        width: auto !important;
+        max-width: none !important;
+        bottom: 62px !important;
         max-height: 55vh;
         border-radius: 14px;
     }
@@ -3190,9 +3190,10 @@
     }
 
     .notif-panel {
-        right: 8px;
-        width: calc(100vw - 16px);
-        bottom: 54px;
+        left: 8px !important;
+        right: 8px !important;
+        width: auto !important;
+        bottom: 54px !important;
     }
 }
 
@@ -3308,5 +3309,227 @@
     .library-empty-search-cta {
         font-size: 12px;
         padding: 9px 12px;
+    }
+}
+
+/* ============================================================================
+   Mobile fixes (v2) — phone-only, all inside max-width:768px. Desktop untouched.
+   ============================================================================ */
+@media (max-width: 768px) {
+    /* Center the artist hero action buttons + match-status chips on phone
+       (moved here from the base rule so desktop stays left-aligned). */
+    .artist-hero-actions { justify-content: center; }
+    .enhanced-match-status-row { justify-content: center; }
+
+    /* #8 Page-container heroes carry desktop-sized padding/margins that waste
+       space and look off on a phone. Tighten them up. */
+    .tools-maintenance-hero,
+    .watchlist-artist-config-hero,
+    .watchlist-detail-hero,
+    .discover-hero {
+        padding: 14px 14px;
+        margin-bottom: 16px;
+    }
+
+    /* #9 Sync page header: title + the three action buttons (Auto-Sync / Library
+       Match / Sync History) don't fit side-by-side. Stack the header and let the
+       buttons wrap so all three are reachable. */
+    .sync-header-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .sync-header-row > div:last-child {
+        flex-wrap: wrap;
+    }
+    .sync-header-row .sync-history-btn {
+        flex: 1 1 auto;
+    }
+}
+
+@media (max-width: 768px) {
+    /* #6 Enhanced-view track table: a 6+ column table can't fit a phone and the
+       panel clips the overflow, so only the first column showed. Drop table
+       layout entirely and make each row a single flex line: play · title (takes
+       the space) · duration · the ⋯ actions button. Secondary columns hidden. */
+    .enhanced-track-table,
+    .enhanced-track-table thead,
+    .enhanced-track-table tbody,
+    .enhanced-track-table tr,
+    .enhanced-track-table td,
+    .enhanced-track-table th {
+        display: block;
+        width: auto;
+    }
+    .enhanced-track-table thead { display: none; }
+    .enhanced-track-table tr {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 6px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .enhanced-track-table td,
+    .enhanced-track-table th {
+        padding: 0;
+        border: none;
+        white-space: normal;
+    }
+    .enhanced-track-table .col-play {
+        flex: 0 0 auto;
+        width: auto;
+    }
+    .enhanced-track-table .col-title {
+        flex: 1 1 auto;
+        min-width: 0;
+        word-break: break-word;
+        font-size: 13px;
+    }
+    .enhanced-track-table .col-duration {
+        flex: 0 0 auto;
+        width: auto;
+        font-size: 11px;
+        opacity: 0.65;
+    }
+    .enhanced-track-table .col-mobile-actions {
+        display: block;
+        flex: 0 0 auto;
+        width: auto;
+        text-align: right;
+    }
+    /* Everything else folds into the ⋯ actions sheet — hide on the row. */
+    .enhanced-track-table .col-num,
+    .enhanced-track-table .col-disc,
+    .enhanced-track-table .col-format,
+    .enhanced-track-table .col-bitrate,
+    .enhanced-track-table .col-bpm,
+    .enhanced-track-table .col-path,
+    .enhanced-track-table .col-match,
+    .enhanced-track-table .col-queue,
+    .enhanced-track-table .col-writetag,
+    .enhanced-track-table .col-delete,
+    .enhanced-track-table .col-report,
+    .enhanced-track-table tr > th:first-child {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    /* #7 Mini media player: on desktop it's a 340px widget pinned bottom-right
+       (right:132px) — that overflows a phone and overlaps the bottom search.
+       Make it a full-width bar that sits just ABOVE the global search bar
+       (which is at bottom:16px, height:38px on mobile). */
+    .media-player {
+        left: 10px;
+        right: 10px;
+        width: auto;
+        bottom: 62px;
+        margin: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    /* ── Now Playing modal — full responsive pass ──
+       Desktop is a two-column (art | controls) layout with heavy 40-48px
+       padding. Existing mobile rules made it full-screen + stacked the body but
+       left the panels' desktop padding and the controls/queue/lyrics untouched. */
+    .np-body {
+        padding: 24px 16px 28px;
+        gap: 20px;
+    }
+    .np-left,
+    .np-right {
+        width: 100%;
+    }
+    /* Album art scales with the screen instead of a fixed 220px. */
+    .np-album-art-container {
+        width: min(220px, 66vw);
+        height: auto;
+        aspect-ratio: 1 / 1;
+        margin: 0 auto;
+    }
+    .np-track-info { text-align: center; }
+    .np-action-buttons { justify-content: center; }
+    .np-util-row { justify-content: center; flex-wrap: wrap; }
+    /* Playback controls: tighten the gap so the row fits a phone. */
+    .np-controls-row { gap: 12px; justify-content: center; }
+    /* Queue + lyrics panels: drop the 40px desktop side padding that crushed
+       content on a narrow screen; give them a bit more vertical room. */
+    .np-queue-panel { padding: 0 16px 16px; }
+    .np-lyrics-panel { padding: 0 16px; }
+    .np-queue-body { max-height: 240px; }
+    .np-lyrics-body { max-height: 300px; }
+}
+
+/* When the expanded Now Playing modal is open, hide the floating mini-player —
+   it has a higher z-index (99998) than the modal overlay (10001), so it would
+   otherwise float on top of the modal's content. Both are body-level siblings
+   (#media-player follows #np-modal-overlay), and the overlay drops its .hidden
+   class when open. Not width-scoped — applies on desktop too. */
+.np-modal-overlay:not(.hidden) ~ #media-player {
+    display: none !important;
+}
+
+@media (max-width: 768px) {
+    /* Recommended-artist carousel cards → 2-up wrap on mobile. The base rule
+       pins them with flex:0 0 160px, which overrides plain width — so override
+       the flex-basis too for the 45% to take. */
+    .recommended-card--carousel {
+        flex: 0 0 45%;
+        width: 45%;
+    }
+}
+
+@media (max-width: 768px) {
+    /* ── Downloads page (.adl-*) ──
+       Had ZERO mobile rules. Desktop is a two-column layout: the main list
+       (.adl-main, flex:1) + a fixed 366px batch panel with a left border that
+       scrolls independently. On a phone that doesn't fit — stack it. */
+    .adl-layout {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .adl-batch-panel {
+        width: 100%;
+        flex-shrink: 1;
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 14px 4px 0;
+        overflow-y: visible;        /* grows in the page flow instead of own scroll */
+    }
+
+    /* Header: title + controls sat in one row; stack so the pills get full width. */
+    .adl-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .adl-title { font-size: 1.3rem; }
+    .adl-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    /* Filter pills (All / Active / Queued / Completed / Failed) + count +
+       Cancel All / Clear Completed: wrap instead of overflowing off-screen. */
+    .adl-filter-pills {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    .adl-pill { padding: 6px 12px; }
+    /* Action buttons full-width-friendly so they're tappable. */
+    .adl-cancel-all-btn,
+    .adl-clear-btn { flex: 1 1 auto; }
+}
+
+@media (max-width: 768px) {
+    /* Sidebar visualizer is pinned at the (desktop) sidebar's right edge, so on
+       mobile it floats over the page content when the off-canvas sidebar drawer
+       is closed. Show it ONLY while the drawer is open. The .active/.viz-* rules
+       set display with 2-class specificity, so this 3-class + !important selector
+       is needed to beat them; when the drawer IS open it doesn't match, so the
+       visualizer's normal display rules take over again. */
+    .sidebar:not(.mobile-open) ~ .sidebar-visualizer {
+        display: none !important;
     }
 }
