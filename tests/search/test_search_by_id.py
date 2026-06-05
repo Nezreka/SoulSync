@@ -26,12 +26,14 @@ from core.search.by_id import LookupTarget
 # ---------------------------------------------------------------------------
 
 class _FakeClient:
-    def __init__(self, album=None, track=None, name='fake'):
+    def __init__(self, album=None, track=None, artist=None, name='fake'):
         self._album = album
         self._track = track
+        self._artist = artist
         self._name = name
         self.album_calls: list[str] = []
         self.track_calls: list[str] = []
+        self.artist_calls: list[str] = []
 
     # Spotify / iTunes / MusicBrainz album-by-id
     def get_album(self, identifier, include_tracks=True):
@@ -47,6 +49,16 @@ class _FakeClient:
     def get_track_details(self, identifier):
         self.track_calls.append(identifier)
         return self._track
+
+    # Spotify / iTunes / MusicBrainz artist-by-id
+    def get_artist(self, identifier):
+        self.artist_calls.append(identifier)
+        return self._artist
+
+    # Deezer artist-by-id (different method name)
+    def get_artist_info(self, identifier):
+        self.artist_calls.append(identifier)
+        return self._artist
 
 
 def _resolver_from(mapping):
@@ -132,6 +144,41 @@ def test_parse_spotify_url_without_scheme_or_www():
     # Known host detected even without a scheme.
     out = by_id.parse_metadata_identifier('open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy')
     assert out == [LookupTarget('spotify', 'album', '4aawyAB9vmqN3uQ7FjRGTy')]
+
+
+# ---------------------------------------------------------------------------
+# parse_metadata_identifier — artist links
+# ---------------------------------------------------------------------------
+
+def test_parse_spotify_artist_url():
+    out = by_id.parse_metadata_identifier(
+        'https://open.spotify.com/artist/3TVXtAsR1Inumwj472S9r4'
+    )
+    assert out == [LookupTarget('spotify', 'artist', '3TVXtAsR1Inumwj472S9r4')]
+
+
+def test_parse_spotify_artist_uri():
+    assert by_id.parse_metadata_identifier('spotify:artist:ABC') == [
+        LookupTarget('spotify', 'artist', 'ABC')
+    ]
+
+
+def test_parse_apple_artist_url():
+    out = by_id.parse_metadata_identifier(
+        'https://music.apple.com/us/artist/kendrick-lamar/368183298'
+    )
+    assert out == [LookupTarget('itunes', 'artist', '368183298')]
+
+
+def test_parse_musicbrainz_artist_url():
+    mbid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    out = by_id.parse_metadata_identifier(f'https://musicbrainz.org/artist/{mbid}')
+    assert out == [LookupTarget('musicbrainz', 'artist', mbid)]
+
+
+def test_parse_deezer_artist_url():
+    out = by_id.parse_metadata_identifier('https://www.deezer.com/artist/13')
+    assert out == [LookupTarget('deezer', 'artist', '13')]
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +286,22 @@ def test_join_artists_empty_is_unknown():
     assert by_id._join_artists(None) == 'Unknown Artist'
 
 
+def test_artist_card_from_spotify_shaped_dict():
+    d = {
+        'id': 'a1', 'name': 'Radiohead',
+        'images': [{'url': 'http://img/rh.jpg', 'height': 640, 'width': 640}],
+        'external_urls': {'spotify': 'http://spot/a1'},
+        'genres': ['rock'], 'popularity': 80,
+    }
+    card = by_id.artist_dict_to_card(d)
+    assert card == {
+        'id': 'a1',
+        'name': 'Radiohead',
+        'image_url': 'http://img/rh.jpg',
+        'external_urls': {'spotify': 'http://spot/a1'},
+    }
+
+
 # ---------------------------------------------------------------------------
 # resolve_identifier — end-to-end with fake clients
 # ---------------------------------------------------------------------------
@@ -297,6 +360,38 @@ def test_resolve_track_link():
     assert res['albums'] == []
     assert client.album_calls == []      # kind pinned to track — no album probe
     assert client.track_calls == ['t1']
+
+
+def test_resolve_artist_link():
+    # An artist URL pins kind=artist — only get_artist is called.
+    client = _FakeClient(artist={
+        'id': 'a1', 'name': 'Radiohead',
+        'images': [{'url': 'http://i/rh.jpg'}],
+        'external_urls': {'spotify': 'http://s/a1'},
+    })
+    res = by_id.resolve_identifier(
+        'https://open.spotify.com/artist/a1', deps=None,
+        client_resolver=_resolver_from({'spotify': client}),
+    )
+    assert res['available'] is True
+    assert res['source'] == 'spotify'
+    assert res['artists'][0]['name'] == 'Radiohead'
+    assert res['albums'] == [] and res['tracks'] == []
+    assert client.artist_calls == ['a1']
+    assert client.album_calls == [] and client.track_calls == []
+
+
+def test_resolve_deezer_artist_uses_get_artist_info():
+    client = _FakeClient(artist={'id': '13', 'name': 'Daft Punk',
+                                 'images': [], 'external_urls': {}})
+    res = by_id.resolve_identifier(
+        'https://www.deezer.com/artist/13', deps=None,
+        client_resolver=_resolver_from({'deezer': client}),
+    )
+    assert res['available'] is True
+    assert res['source'] == 'deezer'
+    assert res['artists'][0]['name'] == 'Daft Punk'
+    assert client.artist_calls == ['13']
 
 
 def test_resolve_bare_id_rejected_with_hint():

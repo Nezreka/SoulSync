@@ -317,7 +317,7 @@ function initializeSearchModeToggle() {
             searchController.state.query = raw;
             searchController.state.sources[data.source] = {
                 db_artists: [],
-                artists: [],
+                artists: data.artists || [],
                 albums: data.albums || [],
                 tracks: data.tracks || [],
             };
