@@ -109,6 +109,30 @@ def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
             download_tasks[task_id]['quarantine_entry_id'] = entry_id
 
 
+def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
+    """Ask the download monitor to re-run this task on its next-best candidate.
+
+    Thin lazy-import wrapper around
+    ``core.downloads.monitor.requeue_quarantined_task_for_retry``. Imported
+    lazily (and defensively) so the post-processing pipeline stays importable on
+    its own — the monitor's retry globals are wired by web_server at startup, and
+    manual-import callers that never started a download worker simply get False.
+    Returns True when a retry was queued (caller must not mark the task failed).
+    """
+    if not task_id:
+        return False
+    try:
+        from core.downloads.monitor import requeue_quarantined_task_for_retry
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(f"next-candidate retry unavailable ({trigger}): {exc}")
+        return False
+    try:
+        return requeue_quarantined_task_for_retry(task_id, batch_id, trigger)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"next-candidate retry failed ({trigger}): {exc}")
+        return False
+
+
 def import_rejection_reason(context: dict) -> str | None:
     """Human-readable reason if post-processing terminally rejected the file
     (quarantine or race-guard), else ``None`` for a clean import.
@@ -992,6 +1016,16 @@ def post_process_matched_download_with_verification(context_key, context, file_p
 
         if context.get('_acoustid_quarantined'):
             failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
+            # Before failing outright, try the next-best candidate. The wrong
+            # file was just quarantined; re-running the worker (with the bad
+            # source flagged used) picks the runner-up match instead.
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'acoustid'):
+                logger.info(
+                    f"AcoustID mismatch for task {task_id} — retrying next-best candidate: {failure_msg}"
+                )
+                return
             logger.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
             with tasks_lock:
                 if task_id in download_tasks:
@@ -1000,9 +1034,6 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _eid = context.get('_quarantine_entry_id')
                     if _eid:
                         download_tasks[task_id]['quarantine_entry_id'] = _eid
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
             _notify_download_completed(batch_id, task_id, success=False)
             return
 
@@ -1044,6 +1075,16 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # source files failed integrity and were quarantined.
         if context.get('_integrity_failure_msg'):
             failure_msg = context.get('_integrity_failure_msg', 'unknown')
+            # Integrity/duration mismatch (truncated transfer, wrong-length cut,
+            # etc). Same treatment as an AcoustID mismatch: quarantine the bad
+            # file and retry the next-best candidate before failing.
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'integrity'):
+                logger.info(
+                    f"Integrity check failed for task {task_id} — retrying next-best candidate: {failure_msg}"
+                )
+                return
             logger.error(
                 f"Task {task_id} failed integrity check — marking failed: {failure_msg}"
             )
@@ -1056,9 +1097,6 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _eid = context.get('_quarantine_entry_id')
                     if _eid:
                         download_tasks[task_id]['quarantine_entry_id'] = _eid
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
             _notify_download_completed(batch_id, task_id, success=False)
             return
 

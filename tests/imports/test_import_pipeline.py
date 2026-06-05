@@ -304,3 +304,135 @@ def test_verification_wrapper_applies_quarantine_entry_id_on_integrity_failure(m
         runtime_state.download_tasks.update(original)
         runtime_state.matched_downloads_context.clear()
         runtime_state.matched_downloads_context.update(original_ctx)
+
+
+# ---------------------------------------------------------------------------
+# Next-best-candidate retry on AcoustID / integrity quarantine. When a
+# verification or integrity check quarantines the wrong/broken file, the wrapper
+# asks the monitor to re-run the worker on the next candidate (skipping the bad
+# source) instead of failing the task outright.
+# ---------------------------------------------------------------------------
+
+def _wire_retry_engine(monkeypatch):
+    """Wire monitor's retry globals to capture the worker re-submission."""
+    import core.downloads.monitor as monitor
+
+    submitted = []
+
+    class _Exec:
+        def submit(self, fn, *args):
+            submitted.append(args)
+
+    monkeypatch.setattr(monitor, "missing_download_executor", _Exec())
+    monkeypatch.setattr(monitor, "_download_track_worker", lambda task_id, batch_id: None)
+    monkeypatch.setattr(monitor, "MAX_QUARANTINE_RETRIES", 5)
+    return submitted
+
+
+def _run_wrapper_with_quarantine(monkeypatch, flag_setter, task_extra=None):
+    task_id, batch_id, context_key = "rtask", "rbatch", "rctx"
+    context = {"track_info": {}, "task_id": task_id, "batch_id": batch_id}
+
+    monkeypatch.setattr(import_pipeline, "post_process_matched_download", flag_setter)
+
+    original = dict(runtime_state.download_tasks)
+    original_ctx = dict(runtime_state.matched_downloads_context)
+    try:
+        runtime_state.download_tasks.clear()
+        task = {
+            "track_info": {}, "status": "downloading",
+            "username": "hifi", "filename": "123||A - B", "used_sources": set(),
+        }
+        if task_extra:
+            task.update(task_extra)
+        runtime_state.download_tasks[task_id] = task
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context[context_key] = context
+
+        completion = []
+        runtime = types.SimpleNamespace(
+            automation_engine=None,
+            on_download_completed=lambda b, t, success: completion.append((b, t, success)),
+            web_scan_manager=None,
+            repair_worker=None,
+        )
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key, context, "/tmp/source.flac", task_id, batch_id, runtime,
+        )
+        return dict(runtime_state.download_tasks[task_id]), completion, context_key
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(original)
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context.update(original_ctx)
+
+
+def test_acoustid_mismatch_requeues_next_candidate(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, completion, context_key = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    # Task goes back to searching for the next candidate — NOT failed.
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_count"] == 1
+    # The quarantined source is flagged so the re-run won't re-pick it.
+    assert "hifi_123||A - B" in task["used_sources"]
+    # Stale download identity cleared; worker re-submitted; no batch failure.
+    assert "download_id" not in task and "username" not in task
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+    # Old context cleaned up (the re-run builds a fresh one for the new pick).
+    assert context_key not in runtime_state.matched_downloads_context
+
+
+def test_integrity_mismatch_requeues_next_candidate(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_integrity_failure_msg"] = "Duration mismatch: file is 231.0s, expected 271.0s"
+
+    task, completion, _ = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_count"] == 1
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_manual_pick_does_not_requeue_on_mismatch(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_integrity_failure_msg"] = "Duration mismatch"
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _fake_inner, task_extra={"_user_manual_pick": True},
+    )
+
+    # User explicitly chose this file — fail it, don't silently swap.
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_retry_budget_exhausted_fails_task(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    import core.downloads.monitor as monitor
+    monkeypatch.setattr(monitor, "MAX_QUARANTINE_RETRIES", 2)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _fake_inner, task_extra={"quarantine_retry_count": 2},
+    )
+
+    # Cap reached — fall through to normal failure handling.
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]

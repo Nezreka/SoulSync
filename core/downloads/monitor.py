@@ -37,9 +37,98 @@ missing_download_executor = None
 download_orchestrator = None
 _RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
+# Hard ceiling on automatic next-candidate retries after a download was
+# quarantined (AcoustID mismatch / integrity / duration). The natural
+# terminator is used_sources exhaustion — once every candidate the worker can
+# find has been tried, attempt_download_with_candidates returns False and the
+# worker reports a clean failure. This cap is a safety net against a pathological
+# quarantine→retry→quarantine loop (e.g. a source that keeps returning fresh
+# wrong files).
+MAX_QUARANTINE_RETRIES = 5
+
 
 def _download_id_key(download_id):
     return f"download_id::{download_id}" if download_id else None
+
+
+def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
+    """Re-queue a task whose download was just quarantined so the worker tries
+    the NEXT best candidate instead of failing outright.
+
+    Called from the post-processing verification wrapper when AcoustID
+    verification or the integrity/duration check quarantines a file. It mirrors
+    the monitor's transfer-error retry path: mark the bad source as used, clear
+    the stale download identity, reset the task to ``searching`` and resubmit
+    the download worker. Because ``used_sources`` is preserved across the
+    re-run, the worker skips the quarantined source and picks the next-best
+    candidate (see ``attempt_download_with_candidates``).
+
+    Returns True if a retry was queued — the caller must then NOT mark the task
+    failed or notify batch completion, since the task is going around again.
+    Returns False when no retry is possible (retry engine unwired, manual pick,
+    cancelled, or retry budget exhausted); the caller falls through to its
+    existing failure handling.
+    """
+    # Opt-out escape hatch — default on. Lets users restore the old
+    # quarantine-and-fail behaviour without a code change.
+    if not config_manager.get('post_processing.retry_next_candidate_on_mismatch', True):
+        return False
+
+    # Retry engine not wired (e.g. manual-import path that never started a
+    # download worker). Nothing to re-run.
+    if missing_download_executor is None or _download_track_worker is None:
+        return False
+
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        # The user explicitly picked this candidate via the candidates modal —
+        # honour their choice rather than silently swapping in another file.
+        # (Matches the monitor's transfer-retry guards.)
+        if task.get('_user_manual_pick'):
+            return False
+        if task.get('status') == 'cancelled':
+            return False
+
+        username = task.get('username')
+        filename = task.get('filename')
+        # No source identity means this wasn't a worker-dispatched download we
+        # can retry — without the "{username}_{filename}" key we can't flag the
+        # bad source as used, so a re-run could re-pick the same file and loop.
+        # Bail and let the caller fail it normally.
+        if not username or not filename:
+            return False
+
+        retry_count = task.get('quarantine_retry_count', 0)
+        if retry_count >= MAX_QUARANTINE_RETRIES:
+            logger.warning(
+                f"[Retry:{trigger}] Task {task_id} hit the quarantine-retry cap "
+                f"({MAX_QUARANTINE_RETRIES}) — giving up, marking failed"
+            )
+            return False
+
+        # Mark the quarantined source as used so the re-run won't pick it again.
+        # Uses the same "{username}_{filename}" key the worker dedups against.
+        used_sources = task.get('used_sources', set())
+        used_sources.add(f"{username}_{filename}")
+        task['used_sources'] = used_sources
+
+        task['quarantine_retry_count'] = retry_count + 1
+        # Drop the stale download identity + the prior attempt's quarantine link.
+        task.pop('download_id', None)
+        task.pop('username', None)
+        task.pop('filename', None)
+        task.pop('quarantine_entry_id', None)
+        task['status'] = 'searching'
+        task['status_change_time'] = time.time()
+
+    logger.info(
+        f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "
+        f"(attempt {retry_count + 1}/{MAX_QUARANTINE_RETRIES})"
+    )
+    missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+    return True
 
 
 def _is_release_task(task):
