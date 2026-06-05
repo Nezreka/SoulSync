@@ -110,6 +110,10 @@ async function fetchSourceConfiguredMap() {
             for (const src of SOURCE_ORDER) {
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
+                } else if (src === 'spotify') {
+                    // Spotify Free: available without credentials when the
+                    // opt-in no-creds source is on (metadata_available).
+                    map[src] = !!(data[src] && (data[src].configured || data[src].metadata_available));
                 } else {
                     map[src] = !!(data[src] && data[src].configured);
                 }
