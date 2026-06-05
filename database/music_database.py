@@ -790,6 +790,55 @@ class MusicDatabase:
             except Exception as e:
                 logger.debug("Failed to purge cached tracks/albums with junk artist names: %s", e)
 
+            # One-time migration: clear source ids that enrichment wrongly
+            # SHARED across differently-named artists. The album/track "artist
+            # id correction" path (Deezer/AudioDB/Qobuz/Tidal) used to overwrite
+            # an artist's source id from a match without a name check, so e.g.
+            # everyone featured on Kendrick Lamar's curated "Black Panther" album
+            # got stamped with Kendrick's Deezer id. The workers are now
+            # name-guarded so this can't recur; clearing the bad rows lets the
+            # next enrichment pass re-derive each artist's correct id.
+            # Same-name duplicates (one artist indexed on two media servers,
+            # legitimately sharing an id) are left alone via the DISTINCT-name
+            # check, so this only touches genuine corruption.
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v1'")
+                if not cursor.fetchone():
+                    _dedupe_id_cols = [
+                        ('deezer_id', 'deezer_match_status'),
+                        ('spotify_artist_id', 'spotify_match_status'),
+                        ('itunes_artist_id', 'itunes_match_status'),
+                        ('musicbrainz_id', 'musicbrainz_match_status'),
+                        ('discogs_id', 'discogs_match_status'),
+                        ('audiodb_id', 'audiodb_match_status'),
+                        ('qobuz_id', 'qobuz_match_status'),
+                        ('tidal_id', 'tidal_match_status'),
+                    ]
+                    total_cleared = 0
+                    for id_col, status_col in _dedupe_id_cols:
+                        try:
+                            cursor.execute(f"""
+                                UPDATE artists
+                                SET {id_col} = NULL, {status_col} = NULL
+                                WHERE {id_col} IN (
+                                    SELECT {id_col} FROM artists
+                                    WHERE {id_col} IS NOT NULL AND {id_col} != ''
+                                    GROUP BY {id_col}
+                                    HAVING COUNT(DISTINCT LOWER(TRIM(name))) > 1
+                                )
+                            """)
+                            total_cleared += cursor.rowcount
+                        except Exception as col_err:
+                            logger.debug("Source-id dedupe skipped %s: %s", id_col, col_err)
+                    cursor.execute("CREATE TABLE _source_id_dedupe_v1 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    if total_cleared > 0:
+                        logger.info(
+                            f"Cleared {total_cleared} duplicated source ids shared across "
+                            f"differently-named artists — they'll re-derive on next enrichment"
+                        )
+            except Exception as e:
+                logger.debug("Failed to dedupe shared source ids: %s", e)
+
             # HiFi API instances table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS hifi_instances (
