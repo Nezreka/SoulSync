@@ -3075,10 +3075,14 @@
 
     /* Notification panel */
     .notif-panel {
-        width: calc(100vw - 24px);
-        max-width: 100%;
-        right: 12px;
-        bottom: 62px;
+        /* JS positions this inline from the bell's rect (right/bottom), which on
+           mobile pushes it off-screen (the bell isn't flush right). Override the
+           inline styles with !important and anchor both sides so it always fits. */
+        left: 12px !important;
+        right: 12px !important;
+        width: auto !important;
+        max-width: none !important;
+        bottom: 62px !important;
         max-height: 55vh;
         border-radius: 14px;
     }
@@ -3186,9 +3190,10 @@
     }
 
     .notif-panel {
-        right: 8px;
-        width: calc(100vw - 16px);
-        bottom: 54px;
+        left: 8px !important;
+        right: 8px !important;
+        width: auto !important;
+        bottom: 54px !important;
     }
 }
 
