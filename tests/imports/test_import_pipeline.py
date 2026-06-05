@@ -403,6 +403,20 @@ def test_acoustid_mismatch_requeues_next_candidate(monkeypatch):
     assert context_key not in runtime_state.matched_downloads_context
 
 
+def test_requeue_flags_quarantine_retry_for_cached_first(monkeypatch):
+    _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, _, _ = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    # The re-run is flagged so the worker walks cached candidates before
+    # re-searching (cached-first), rather than re-running the full search.
+    assert task["_quarantine_retry"] is True
+
+
 def test_integrity_mismatch_requeues_next_candidate(monkeypatch):
     submitted = _wire_retry_engine(monkeypatch)
 

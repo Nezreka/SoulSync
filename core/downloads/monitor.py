@@ -237,6 +237,12 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         task['used_sources'] = used_sources
 
         task['quarantine_retry_count'] = total_count + 1
+        # Flag the re-run as a quarantine retry so the worker walks the
+        # already-found candidates (cached-first) before re-searching — the
+        # connection was fine, the content was just wrong. Dead-connection /
+        # stuck retries (handled elsewhere in the monitor) deliberately do NOT
+        # set this, so they re-search fresh.
+        task['_quarantine_retry'] = True
         # Drop the stale download identity + the prior attempt's quarantine link.
         task.pop('download_id', None)
         task.pop('username', None)

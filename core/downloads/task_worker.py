@@ -31,6 +31,65 @@ from core.spotify_client import Track as SpotifyTrack
 logger = logging.getLogger(__name__)
 
 
+def _resolve_worker_source(username):
+    """Logical source bucket for a candidate's username (Soulseek peers all
+    collapse to 'soulseek'; streaming sources keep their name). Mirrors the
+    monitor's resolver — imported lazily to avoid an import cycle."""
+    try:
+        from core.downloads.monitor import _resolve_download_source
+        return _resolve_download_source(username)
+    except Exception:
+        return 'soulseek'
+
+
+def _cand_user_file(candidate):
+    """Read (username, filename) from a candidate that may be a TrackResult
+    object or a plain dict (tests / cached raw rows)."""
+    if isinstance(candidate, dict):
+        return candidate.get('username'), candidate.get('filename')
+    return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
+
+
+def _try_cached_candidates(task_id, batch_id, track, deps):
+    """Quarantine-retry fast path: attempt the already-found candidates before
+    re-searching anything.
+
+    When a verified-bad file is re-queued, the connection was fine (the file
+    downloaded, it was just the wrong/broken content) — so the next-best pick is
+    almost always already sitting in ``cached_candidates``. Walk those (skipping
+    sources already tried or budget-exhausted) and hand them to the normal
+    download path. Returns True if a download was started; False to fall through
+    to a fresh search (which only happens for a not-yet-searched source).
+    """
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        cached = list(task.get('cached_candidates') or [])
+        used = set(task.get('used_sources') or ())
+        exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
+
+    remaining = []
+    for c in cached:
+        uname, fname = _cand_user_file(c)
+        if not uname or not fname:
+            continue
+        if f"{uname}_{fname}" in used:
+            continue
+        if _resolve_worker_source(uname).lower() in exhausted:
+            continue
+        remaining.append(c)
+
+    if not remaining:
+        return False
+
+    logger.info(
+        f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
+        f"candidate(s) before re-searching (task {task_id})"
+    )
+    return deps.attempt_download_with_candidates(task_id, remaining, track, batch_id)
+
+
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
     """Return a user-facing miss reason when per-track search should stop.
 
@@ -206,6 +265,26 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     download_tasks[task_id]['used_sources'] = set()
                 # Else: keep existing used_sources to avoid retrying same failed hosts
 
+        # Cached-first quarantine retry. The monitor sets ``_quarantine_retry``
+        # when a verified-bad file is re-queued; in that case we walk the
+        # already-found candidates before re-searching (the connection was fine,
+        # just the content was wrong). A NON-quarantine entry (fresh download, or
+        # the monitor's dead-connection/stuck retry) instead starts a new search
+        # generation: clear the searched-source memory so each source can be
+        # searched fresh again.
+        with tasks_lock:
+            _t = download_tasks.get(task_id, {})
+            is_quarantine_retry = bool(_t.pop('_quarantine_retry', False))
+            if not is_quarantine_retry:
+                _t.pop('searched_sources', None)
+        if is_quarantine_retry and _try_cached_candidates(task_id, batch_id, track, deps):
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                deps.store_batch_source(batch_id, used_username, used_filename)
+            return
+
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
@@ -294,10 +373,16 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # source instead of re-fetching the same exhausted one (e.g. Soulseek
         # keeps returning fresh wrong peers — once its budget is gone, switch to
         # HiFi/Tidal/…). See monitor.requeue_quarantined_task_for_retry.
+        # On a quarantine retry we also exclude sources we've ALREADY searched:
+        # their candidates are walked via the cached-first path, so re-searching
+        # them is the wasteful repeat the cached-first design removes. The chain
+        # then falls through to a not-yet-searched source. Fresh / dead-connection
+        # runs cleared searched_sources above, so they search everything again.
         with tasks_lock:
-            _exhausted_sources = [
-                str(s) for s in (download_tasks.get(task_id, {}).get('exhausted_download_sources') or ())
-            ]
+            _t = download_tasks.get(task_id, {})
+            _exhausted_sources = [str(s) for s in (_t.get('exhausted_download_sources') or ())]
+            if is_quarantine_retry:
+                _exhausted_sources.extend(str(s) for s in (_t.get('searched_sources') or ()))
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -373,6 +458,17 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                 return
                             # Store candidates for retry fallback (like GUI)
                             download_tasks[task_id]['cached_candidates'] = candidates
+                            # Remember which sources produced candidates so a later
+                            # quarantine retry walks them via cache instead of
+                            # re-searching them (cached-first design).
+                            _searched = download_tasks[task_id].get('searched_sources')
+                            if not isinstance(_searched, set):
+                                _searched = set()
+                            for _c in candidates:
+                                _u, _ = _cand_user_file(_c)
+                                if _u:
+                                    _searched.add(_resolve_worker_source(_u))
+                            download_tasks[task_id]['searched_sources'] = _searched
 
                         # Try to download with these candidates
                         success = deps.attempt_download_with_candidates(task_id, candidates, track, batch_id)
@@ -457,6 +553,14 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             fb_candidates = deps.get_valid_candidates(fb_results, track, fb_query)
                             if fb_candidates:
                                 logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
+                                with tasks_lock:
+                                    if task_id in download_tasks:
+                                        download_tasks[task_id]['cached_candidates'] = fb_candidates
+                                        _searched = download_tasks[task_id].get('searched_sources')
+                                        if not isinstance(_searched, set):
+                                            _searched = set()
+                                        _searched.add(_resolve_worker_source(fallback_source))
+                                        download_tasks[task_id]['searched_sources'] = _searched
                                 success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
                                     return
