@@ -3846,7 +3846,13 @@
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. <strong>Spotify</strong> needs a connected account. <strong>Spotify Free</strong> pulls the same Spotify data without credentials (unofficial &amp; best-effort — can break if Spotify changes, can't search albums by name, no library access). Either way, a connected Spotify that hits a rate-limit is automatically bridged by the free source if it's installed. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
+                                        <div class="callback-help">Where artist, album, and track metadata comes from:<br>
+                                            • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
+                                            • <strong>Spotify Free</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site), can't search albums by name (album results come from iTunes/Deezer instead), and can't read your personal library or playlists.<br>
+                                            • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
+                                            • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
+                                            • <strong>Discogs</strong> — needs a personal access token.<br><br>
+                                            Tip: if you pick <strong>Spotify Free</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to free while Spotify is rate-limited — then switches back automatically.</div>
                                     </div>
                                 </div>
 

@@ -162,9 +162,23 @@ def test_connected_healthy_uses_official():
     assert avail is True and free is False  # official; free never opens
 
 
-def test_connected_ratelimited_bridges_to_free():
+def test_plain_spotify_ratelimited_does_NOT_bridge():
+    # OPT-IN: a user on plain 'Spotify' (didn't pick Spotify Free) waits out a
+    # rate-limit ban — free does NOT auto-bridge for them. No surprise scraping.
     avail, free = _gate(authed=False, has_creds=True, selected=False, installed=True, rate_limited=True)
-    assert avail is True and free is True   # auto-bridge, no toggle needed
+    assert avail is False and free is False
+
+
+def test_spotify_free_user_ratelimited_bridges():
+    # A user who DID pick Spotify Free and also connected an account: official
+    # when healthy, free bridges during a ban.
+    avail, free = _gate(authed=False, has_creds=True, selected=True, installed=True, rate_limited=True)
+    assert avail is True and free is True
+
+
+def test_spotify_free_user_healthy_uses_official():
+    avail, free = _gate(authed=True, has_creds=True, selected=True, installed=True, rate_limited=False)
+    assert avail is True and free is False   # picked Spotify Free but authed -> official
 
 
 def test_no_auth_picked_spotify_free_serves():
