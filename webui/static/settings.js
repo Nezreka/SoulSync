@@ -1171,6 +1171,8 @@ async function loadSettingsData() {
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
         document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
+        document.getElementById('accept-version-mismatch-fallback').checked = settings.post_processing?.accept_version_mismatch_fallback === true;
+        document.getElementById('version-mismatch-min-count').value = settings.post_processing?.version_mismatch_min_count ?? 2;
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -3002,6 +3004,8 @@ async function saveSettings(quiet = false) {
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,
             retries_per_query: Math.max(1, parseInt(document.getElementById('retries-per-query').value, 10) || 5),
+            accept_version_mismatch_fallback: document.getElementById('accept-version-mismatch-fallback').checked,
+            version_mismatch_min_count: Math.max(1, parseInt(document.getElementById('version-mismatch-min-count').value, 10) || 2),
         },
         library: {
             music_paths: collectMusicPaths(),
