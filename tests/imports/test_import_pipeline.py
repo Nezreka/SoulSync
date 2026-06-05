@@ -567,3 +567,79 @@ def test_exhaustive_absolute_ceiling_guards_runaway(monkeypatch):
 
     assert task["status"] == "failed"
     assert submitted == []
+
+
+def _wire_orchestrator(monkeypatch, mode, hybrid_order):
+    """Wire monitor's download_orchestrator so per-source budget exhaustion can
+    decide whether another source remains to fall back to."""
+    import core.downloads.monitor as monitor
+    orch = types.SimpleNamespace(mode=mode, hybrid_order=list(hybrid_order))
+    monkeypatch.setattr(monitor, "download_orchestrator", orch)
+    return orch
+
+
+def test_exhaustive_exhausted_source_switches_in_hybrid(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _wire_orchestrator(monkeypatch, "hybrid", ["soulseek", "hifi"])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek's budget (query_count 2 * 5 = 10) is spent. In hybrid mode the
+    # task switches to the next source instead of failing the whole track.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "query_count": 2,
+                    "quarantine_retry_counts_by_source": {"soulseek": 10}},
+    )
+
+    assert task["status"] == "searching"
+    # The spent source is flagged so the worker excludes it from the next search.
+    assert task["exhausted_download_sources"] == {"soulseek"}
+    # Its per-source counter is NOT pushed past budget — the source is simply done.
+    assert task["quarantine_retry_counts_by_source"]["soulseek"] == 10
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_exhaustive_all_sources_exhausted_fails_in_hybrid(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _wire_orchestrator(monkeypatch, "hybrid", ["soulseek", "hifi"])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek was exhausted on an earlier attempt; now hifi spends its last
+    # budget too — no fallback source remains, so the task finally fails.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "hifi", "query_count": 2,
+                    "exhausted_download_sources": {"soulseek"},
+                    "quarantine_retry_counts_by_source": {"hifi": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_exhaustive_single_source_exhausted_fails(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    # Single-source mode: nothing to fall back to once the budget is spent.
+    _wire_orchestrator(monkeypatch, "soulseek", [])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "query_count": 2,
+                    "quarantine_retry_counts_by_source": {"soulseek": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]

@@ -76,6 +76,25 @@ def _resolve_download_source(username):
     return 'soulseek'
 
 
+def _remaining_fallback_sources(exhausted):
+    """Sources in the configured hybrid chain that haven't exhausted their
+    per-source budget yet.
+
+    When a source spends its whole budget (exhaustive mode), the task switches
+    to the next source instead of failing — but only if there *is* another
+    source. Single-source mode has nothing to fall back to, so this returns
+    empty there (and when the orchestrator isn't wired). The returned list
+    drives both the give-up decision here and the worker's search-exclusion on
+    the next attempt (see task_worker: exhausted_download_sources).
+    """
+    orch = download_orchestrator
+    if orch is None or getattr(orch, 'mode', None) != 'hybrid':
+        return []
+    chain = getattr(orch, 'hybrid_order', None) or []
+    blocked = {str(s).lower() for s in exhausted}
+    return [s for s in chain if str(s).lower() not in blocked]
+
+
 def _download_id_key(download_id):
     return f"download_id::{download_id}" if download_id else None
 
@@ -160,23 +179,47 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
             source_count = counts.get(source, 0)
 
             if source_count >= budget:
-                logger.warning(
-                    f"[Retry:{trigger}] Task {task_id} exhausted its retry budget "
-                    f"for source '{source}' ({source_count}/{budget}) — giving up, "
-                    f"marking failed"
+                # This source spent its whole budget. Rather than fail the
+                # track outright, mark the source exhausted and fall through to
+                # the next source in the hybrid chain (the worker excludes
+                # exhausted sources from its next search). Only give up once no
+                # fallback source remains — or the absolute ceiling trips.
+                exhausted = set(task.get('exhausted_download_sources') or ())
+                exhausted.add(source)
+                remaining = _remaining_fallback_sources(exhausted)
+                if not remaining:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} exhausted its retry "
+                        f"budget for source '{source}' ({source_count}/{budget}) "
+                        f"and no fallback source remains — giving up, marking failed"
+                    )
+                    return False
+                if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
+                        f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
+                        f"marking failed"
+                    )
+                    return False
+                task['exhausted_download_sources'] = exhausted
+                # Don't push this source's counter past its budget — it's done.
+                # The next source starts spending its own fresh budget when its
+                # first candidate fails verification.
+                attempt_desc = (
+                    f"source '{source}' budget spent ({source_count}/{budget}) "
+                    f"— switching sources (remaining: {', '.join(remaining)})"
                 )
-                return False
-            if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
-                logger.warning(
-                    f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
-                    f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, marking "
-                    f"failed"
-                )
-                return False
-
-            counts[source] = source_count + 1
-            task['quarantine_retry_counts_by_source'] = counts
-            attempt_desc = f"source '{source}' {source_count + 1}/{budget}"
+            else:
+                if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
+                        f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
+                        f"marking failed"
+                    )
+                    return False
+                counts[source] = source_count + 1
+                task['quarantine_retry_counts_by_source'] = counts
+                attempt_desc = f"source '{source}' {source_count + 1}/{budget}"
         else:
             # Default mode: a single global cap, conservative and predictable.
             if total_count >= MAX_QUARANTINE_RETRIES:
