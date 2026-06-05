@@ -247,6 +247,20 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 except Exception:
                     search_queries = [f"{artist_name} {track_name}", track_name]
 
+                # #785: file/CSV playlists keep raw "Artist - Title" titles, so the
+                # queries above search for the artist prefix too. Also search the
+                # canonicalized title so the right candidates are actually returned
+                # (the scorer best-of then matches them).
+                try:
+                    from core.text.source_title import canonical_source_track
+                    _cq_title, _cq_artist = canonical_source_track(track_name, artist_name)
+                    if (_cq_title, _cq_artist) != (track_name, artist_name):
+                        for _q in (f"{_cq_artist} {_cq_title}", _cq_title):
+                            if _q not in search_queries:
+                                search_queries.append(_q)
+                except Exception:
+                    pass
+
                 # Step 3: Search and score
                 best_match = None
                 best_confidence = 0.0
