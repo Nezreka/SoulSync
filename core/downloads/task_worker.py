@@ -277,6 +277,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 seen.add(query.lower())
 
         search_queries = unique_queries
+        # Expose the query count so the quarantine-retry budget (exhaustive mode)
+        # can size each source's budget as query_count × retries_per_query.
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['query_count'] = len(search_queries)
         logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
         logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
