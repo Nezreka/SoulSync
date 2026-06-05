@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("deezer_worker")
@@ -404,14 +404,18 @@ class DeezerWorker:
         result = self.client.search_artist(artist_name)
         if result:
             result_name = result.get('name', '')
-            if self._name_matches(artist_name, result_name):
+            ok, reason = accept_artist_match(
+                self.db, 'deezer_id', result.get('id'), artist_id,
+                artist_name, result_name,
+            )
+            if ok:
                 self._update_artist(artist_id, result)
                 self.stats['matched'] += 1
                 logger.info(f"Matched artist '{artist_name}' -> Deezer ID: {result.get('id')}")
             else:
                 self._mark_status('artist', artist_id, 'not_found')
                 self.stats['not_found'] += 1
-                logger.debug(f"Name mismatch for artist '{artist_name}' (got '{result_name}')")
+                logger.debug(f"Artist '{artist_name}' not matched: {reason}")
         else:
             self._mark_status('artist', artist_id, 'not_found')
             self.stats['not_found'] += 1
