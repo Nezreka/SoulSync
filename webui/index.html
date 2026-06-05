@@ -2201,15 +2201,15 @@
                                     </div>
                                 </div>
 
-                                <!-- Link / ID lookup (#775): paste a provider link or
-                                     bare ID and resolve it directly on the owning source
-                                     (Spotify / Apple Music / MusicBrainz / Deezer) — no
-                                     fuzzy search. Results render in the dropdown below and
-                                     reuse the normal download/import flow. -->
+                                <!-- Link lookup (#775): paste a provider link and resolve
+                                     it directly on the owning source (Spotify / Apple Music
+                                     / MusicBrainz / Deezer) — no fuzzy search. Results render
+                                     in the dropdown below and reuse the normal download/
+                                     import flow. Links only: a bare ID is ambiguous. -->
                                 <div class="enh-id-lookup">
                                     <span class="enh-id-lookup-icon">🔗</span>
                                     <input type="text" id="enh-id-input" class="enh-id-input"
-                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link or ID"
+                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link"
                                         autocomplete="off" spellcheck="false">
                                     <button id="enh-id-btn" class="enh-id-btn" type="button">Look up</button>
                                 </div>
