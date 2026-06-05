@@ -7653,6 +7653,26 @@ def _find_library_artist_for_source(database, source, source_artist_id, artist_n
     )
 
 
+def _resolve_source_artist_name(source, artist_id):
+    """Resolve a source artist's display name by id, or '' on any failure.
+
+    Reuses the #775 link-resolver's per-source artist fetch so we have one
+    place that knows each source's get-by-id quirks. Used by the artist-detail
+    library upgrade to disambiguate a duplicated/corrupt source id by name
+    when the URL-driven navigation didn't carry a name.
+    """
+    try:
+        deps = _build_search_deps()
+        client, _available = _search_orchestrator.resolve_client(source, deps)
+        if client is None:
+            return ''
+        data = _search_by_id._fetch_artist(client, source, artist_id)
+        return (data or {}).get('name') or ''
+    except Exception as e:
+        logger.debug(f"Source artist name resolution failed for {source}:{artist_id}: {e}")
+        return ''
+
+
 def _build_source_only_artist_detail(artist_id, artist_name, source):
     """Thin wrapper around ``core.artist_source_detail.build_source_only_artist_detail``.
 
@@ -7754,6 +7774,18 @@ def get_artist_detail(artist_id):
             library_pk = _find_library_artist_for_source(
                 database, source_param, artist_id, artist_name_arg
             )
+            # URL-driven navigation carries no name, so a duplicated/corrupt
+            # source id (one Deezer id on several artists) can't be matched by
+            # the id alone — it's ambiguous and the lookup bails. Resolve the
+            # artist's name from the source and retry so an owned artist still
+            # gets the rich library view instead of the bare source one.
+            if not library_pk and not artist_name_arg:
+                resolved_name = _resolve_source_artist_name(source_param, artist_id)
+                if resolved_name:
+                    artist_name_arg = resolved_name
+                    library_pk = _find_library_artist_for_source(
+                        database, source_param, artist_id, artist_name_arg
+                    )
             if library_pk:
                 logger.info(
                     f"Source-id {source_param}:{artist_id} matched library artist "
