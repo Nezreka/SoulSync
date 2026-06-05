@@ -16,6 +16,10 @@ to test in isolation:
    overwrites the user's deliberate pick with whatever the auto-search
    ranks first, so manual matches are exempt regardless of provider
    drift. `is_drifted_for_redo` encapsulates the decision.
+
+3. *Should the Playlist Pipeline pre-scan (re)discover this track at all?*
+   — `should_rediscover` encapsulates that gate, with the manual match
+   checked FIRST so a leftover Wing It flag can't override the user's pick.
 """
 
 from __future__ import annotations
@@ -68,3 +72,49 @@ def is_drifted_for_redo(
         return False
     cached_provider = extra_data.get('provider', 'spotify')
     return cached_provider != active_provider
+
+
+def should_rediscover(extra_data: Optional[Dict[str, Any]]) -> bool:
+    """Return True when a mirrored track needs (re)discovery, False to skip it.
+
+    This is the gate the Playlist Pipeline pre-scan runs over every mirrored
+    track before discovering. The **ordering is the fix**: a manual match is
+    authoritative and is checked FIRST.
+
+    ``extra_data`` is *merged* on save (see ``update_mirrored_track_extra_data``),
+    so a track that was a Wing It stub and is then manually fixed still carries
+    ``wing_it_fallback: True`` alongside the new ``manual_match: True``. The old
+    pre-scan tested ``wing_it_fallback`` before ``manual_match``, so the stale
+    flag won and the pipeline re-discovered the track — silently reverting the
+    user's pick to Wing It. Checking ``manual_match`` first makes the fix stick.
+
+    Decision order:
+      * manual_match            -> skip   (authoritative; never re-discover)
+      * wing_it_fallback        -> redo   (stub — keep trying for a real match)
+      * discovered + complete   -> skip   (full metadata already stored)
+      * discovered + incomplete -> redo   (backfill track_number / album fields)
+      * unmatched_by_user       -> skip   (user deliberately removed the match)
+      * never discovered        -> redo   (first-time discovery)
+    """
+    extra = extra_data if isinstance(extra_data, dict) else {}
+
+    if extra.get('discovered'):
+        if extra.get('manual_match'):
+            return False
+        if extra.get('wing_it_fallback'):
+            return True
+        # Otherwise re-discover only when the stored match is missing the
+        # enriched fields (track_number + release_date/album.id) that older
+        # discoveries dropped via the Track dataclass.
+        matched = extra.get('matched_data')
+        matched = matched if isinstance(matched, dict) else {}
+        album = matched.get('album')
+        album = album if isinstance(album, dict) else {}
+        has_track_num = matched.get('track_number')
+        has_release = album.get('release_date')
+        has_album_id = album.get('id')
+        return not (has_track_num and (has_release or has_album_id))
+
+    if extra.get('unmatched_by_user'):
+        return False
+    return True
