@@ -109,7 +109,8 @@
     }
 
     #artist-hero-section #artist-detail-image {
-        width: 100% !important
+        width: 100% !important;
+        max-width: none !important;
     }
 
     #media-player {
@@ -3452,4 +3453,13 @@
     .np-lyrics-panel { padding: 0 16px; }
     .np-queue-body { max-height: 240px; }
     .np-lyrics-body { max-height: 300px; }
+}
+
+/* When the expanded Now Playing modal is open, hide the floating mini-player —
+   it has a higher z-index (99998) than the modal overlay (10001), so it would
+   otherwise float on top of the modal's content. Both are body-level siblings
+   (#media-player follows #np-modal-overlay), and the overlay drops its .hidden
+   class when open. Not width-scoped — applies on desktop too. */
+.np-modal-overlay:not(.hidden) ~ #media-player {
+    display: none !important;
 }
