@@ -164,6 +164,45 @@ class TestFindLibraryArtistForSource:
         )
         assert result is None
 
+    def test_ambiguous_source_id_skips_id_upgrade(self, db):
+        """Regression for the Kendrick/Jorja bug: when one Deezer id is
+        stamped on several library artists (enrichment corruption), the id
+        match is ambiguous and must NOT pick an arbitrary row — it returns
+        None so the caller falls back to showing the source artist."""
+        _insert_artist(db, artist_id="pk-kendrick", name="Kendrick Lamar",
+                       deezer_id="525046", server_source="plex")
+        _insert_artist(db, artist_id="pk-jorja", name="Jorja Smith",
+                       deezer_id="525046", server_source="plex")
+        _insert_artist(db, artist_id="pk-vince", name="Vince Staples",
+                       deezer_id="525046", server_source="plex")
+
+        # No name hint (the URL-driven path) → no id guess, no name fallback.
+        assert find_library_artist_for_source(
+            db, "deezer", "525046", active_server="plex"
+        ) is None
+
+    def test_ambiguous_source_id_still_allows_name_fallback(self, db):
+        """An ambiguous id shouldn't block a correct name match when the
+        caller does have the name."""
+        _insert_artist(db, artist_id="pk-kendrick", name="Kendrick Lamar",
+                       deezer_id="525046", server_source="plex")
+        _insert_artist(db, artist_id="pk-jorja", name="Jorja Smith",
+                       deezer_id="525046", server_source="plex")
+
+        result = find_library_artist_for_source(
+            db, "deezer", "525046", artist_name="Kendrick Lamar",
+            active_server="plex",
+        )
+        assert result == "pk-kendrick"
+
+    def test_unique_source_id_still_matches(self, db):
+        """Positive control: a non-duplicated id still upgrades as before."""
+        _insert_artist(db, artist_id="pk-solo", name="Solo Artist",
+                       deezer_id="999999", server_source="plex")
+        assert find_library_artist_for_source(
+            db, "deezer", "999999"
+        ) == "pk-solo"
+
     def test_id_match_wins_over_name_match(self, db):
         """If both a source-id match and a name match exist, the id match
         should take priority — it's the more reliable signal."""

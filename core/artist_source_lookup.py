@@ -53,7 +53,11 @@ def find_library_artist_for_source(
 
     Lookup order:
       1. Direct match on the source-specific ID column (server-agnostic — any
-         library record with the right external ID is a hit).
+         library record with the right external ID is a hit). If that id is
+         stamped on MORE than one library artist, the mapping is corrupt /
+         ambiguous (e.g. an enrichment bug wrote one Deezer id onto several
+         artists) — we refuse to guess and fall through, so the caller can
+         show the source artist directly instead of an arbitrary wrong one.
       2. Case-insensitive name match within ``active_server`` (defaults to the
          active media server when not provided), so we don't jump the user
          across server contexts on a name collision.
@@ -67,13 +71,23 @@ def find_library_artist_for_source(
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            # LIMIT 2 so we can tell a unique match from an ambiguous one.
             cursor.execute(
-                f"SELECT id, name FROM artists WHERE {column} = ? LIMIT 1",
+                f"SELECT id FROM artists WHERE {column} = ? LIMIT 2",
                 (str(source_artist_id),),
             )
-            row = cursor.fetchone()
-            if row:
-                return row[0]
+            rows = cursor.fetchall()
+            if len(rows) == 1:
+                return rows[0][0]
+            if len(rows) > 1:
+                # Same source id on multiple artists — corrupt mapping. Don't
+                # upgrade on the id; fall through to the name match (and, if
+                # that misses, let the caller render the source artist).
+                logger.warning(
+                    f"Source id {source}:{source_artist_id} maps to "
+                    f"{len(rows)}+ library artists — ambiguous, skipping "
+                    f"id-based library upgrade"
+                )
 
             if artist_name and active_server:
                 cursor.execute(
