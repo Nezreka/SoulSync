@@ -1,4 +1,4 @@
-"""Resolve a pasted metadata link or ID to a single album/track result.
+"""Resolve a pasted metadata link to a single album/track/artist result.
 
 This backs the Search page's "Link / ID" mode (#775): instead of a fuzzy
 name search, the user pastes a provider URL (or a bare ID) and we look the
@@ -76,6 +76,8 @@ def _kind_from_keyword(keyword: str) -> Optional[str]:
         return 'album'
     if keyword in ('track', 'recording', 'song'):
         return 'track'
+    if keyword == 'artist':
+        return 'artist'
     return None
 
 
@@ -231,6 +233,17 @@ def track_dict_to_card(d: dict) -> dict:
     }
 
 
+def artist_dict_to_card(d: dict) -> dict:
+    """Project a get_artist / get_artist_info dict onto the artist card shape
+    (mirrors ``core/search/sources.py`` ``search_kind('artists')``)."""
+    return {
+        'id': str(d.get('id', '')),
+        'name': d.get('name', ''),
+        'image_url': _first_image(d),
+        'external_urls': d.get('external_urls') or {},
+    }
+
+
 # --------------------------------------------------------------------------
 # Fetch dispatch — per-source method names differ slightly
 # --------------------------------------------------------------------------
@@ -251,6 +264,14 @@ def _fetch_track(client: Any, source: str, identifier: str) -> Optional[dict]:
     return client.get_track_details(identifier)
 
 
+def _fetch_artist(client: Any, source: str, identifier: str) -> Optional[dict]:
+    """Fetch artist metadata by id. Deezer names the method differently; the
+    rest share ``get_artist``."""
+    if source == 'deezer':
+        return client.get_artist_info(identifier)
+    return client.get_artist(identifier)
+
+
 # Shown in the dropdown's empty state so the user knows what to do next.
 _MSG_NOT_A_LINK = (
     'Paste a full link from Spotify, Apple Music, MusicBrainz, or Deezer '
@@ -264,10 +285,27 @@ def _empty_result(raw: str, source: str = '', message: str = '') -> dict:
         'source': source,
         'albums': [],
         'tracks': [],
+        'artists': [],
         'available': False,
         'query': raw,
         'message': message,
     }
+
+
+def _hit_result(raw: str, source: str, key: str, card: dict) -> dict:
+    """Build a success result carrying the single resolved card under ``key``
+    ('albums' | 'tracks' | 'artists'); the other lists stay empty."""
+    result = {
+        'source': source,
+        'albums': [],
+        'tracks': [],
+        'artists': [],
+        'available': True,
+        'query': raw,
+        'message': '',
+    }
+    result[key] = [card]
+    return result
 
 
 def resolve_identifier(
@@ -275,10 +313,10 @@ def resolve_identifier(
     deps: Any,
     client_resolver: Optional[Callable[[str], Any]] = None,
 ) -> dict:
-    """Resolve a pasted provider link to a single album or track card.
+    """Resolve a pasted provider link to a single album, track, or artist card.
 
     Returns a dropdown-compatible dict:
-    ``{source, albums, tracks, available, query, message}``. ``available`` is
+    ``{source, albums, tracks, artists, available, query, message}``. ``available`` is
     True iff a source returned a hit; the first resolving target wins, so the
     result carries exactly one card (and the ``source`` that owns it).
     ``message`` is a user-facing hint when nothing resolved.
@@ -312,23 +350,18 @@ def resolve_identifier(
                 if kind == 'album':
                     data = _fetch_album(client, target.source, target.id)
                     if data:
-                        return {
-                            'source': target.source,
-                            'albums': [album_dict_to_card(data)],
-                            'tracks': [],
-                            'available': True,
-                            'query': raw,
-                        }
+                        return _hit_result(raw, target.source, 'albums',
+                                           album_dict_to_card(data))
+                elif kind == 'artist':
+                    data = _fetch_artist(client, target.source, target.id)
+                    if data:
+                        return _hit_result(raw, target.source, 'artists',
+                                           artist_dict_to_card(data))
                 else:
                     data = _fetch_track(client, target.source, target.id)
                     if data:
-                        return {
-                            'source': target.source,
-                            'albums': [],
-                            'tracks': [track_dict_to_card(data)],
-                            'available': True,
-                            'query': raw,
-                        }
+                        return _hit_result(raw, target.source, 'tracks',
+                                           track_dict_to_card(data))
             except Exception as e:
                 logger.debug(
                     f"Link/ID resolve: {target.source} {kind} {target.id} failed: {e}"
