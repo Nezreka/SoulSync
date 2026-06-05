@@ -16896,6 +16896,53 @@ def _run_post_processing_worker(task_id, batch_id):
 from core.downloads import task_worker as _downloads_task_worker
 
 
+def _try_version_mismatch_fallback_for_worker(expected_title, expected_artist, task_id, batch_id):
+    """Called by the download worker when a quarantine-retry search finds no
+    candidates.  Delegates to version_mismatch_fallback so the best already-
+    quarantined version-mismatch candidate is accepted rather than giving up."""
+    import threading
+    import time
+    from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
+    from core.imports.quarantine import approve_quarantine_entry, list_quarantine_entries
+    from config.settings import config_manager
+    from core.imports.paths import docker_resolve_path
+    import os
+    try:
+        download_path = docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        )
+        quarantine_dir = os.path.join(download_path, 'ss_quarantine')
+        restore_dir = os.path.join(download_path, 'Transfer')
+
+        def _reprocess(restored_path, ctx, tid, bid):
+            new_key = f"vmfallback_{tid}_{int(time.time())}"
+            threading.Thread(
+                target=lambda: _post_process_matched_download_with_verification(
+                    new_key, ctx, restored_path, tid, bid
+                ),
+                daemon=True,
+            ).start()
+
+        return try_accept_version_mismatch_fallback(
+            quarantine_dir=quarantine_dir,
+            restore_dir=restore_dir,
+            expected_title=expected_title,
+            expected_artist=expected_artist,
+            task_id=task_id,
+            batch_id=batch_id,
+            config_get=config_manager.get,
+            list_entries=list_quarantine_entries,
+            approve_entry=approve_quarantine_entry,
+            reprocess=_reprocess,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug(
+            "[Version-Mismatch Fallback] worker-path skipped due to error: %s", exc
+        )
+        return False
+
+
 def _build_task_worker_deps():
     """Build TaskWorkerDeps bundle from web_server.py globals on each call."""
     return _downloads_task_worker.TaskWorkerDeps(
@@ -16909,6 +16956,7 @@ def _build_task_worker_deps():
         attempt_download_with_candidates=_attempt_download_with_candidates,
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
+        try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
     )
 
 

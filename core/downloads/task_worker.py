@@ -151,6 +151,7 @@ class TaskWorkerDeps:
     attempt_download_with_candidates: Callable    # (task_id, candidates, track, batch_id) -> bool
     on_download_completed: Callable               # (batch_id, task_id, success) -> None
     recover_worker_slot: Callable                 # (batch_id, task_id) -> None
+    try_version_mismatch_fallback: Optional[Callable] = None  # (title, artist, task_id, batch_id) -> bool
 
 
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
@@ -589,6 +590,15 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
 
         # If we get here, all search queries and hybrid fallbacks failed
         logger.warning(f"[Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
+
+        # Last-resort: quarantine retry with no new candidates — the retry search
+        # exhausted all sources.  If the setting is enabled, accept the best
+        # already-quarantined candidate rather than leaving the track missing.
+        if is_quarantine_retry and deps.try_version_mismatch_fallback:
+            _fallback_artist = track.artists[0] if track.artists else ''
+            if deps.try_version_mismatch_fallback(track.name, _fallback_artist, task_id, batch_id):
+                return  # fallback re-dispatched; batch completion handled by reprocess thread
+
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'not_found'
