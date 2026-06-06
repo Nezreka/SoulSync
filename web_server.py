@@ -35033,6 +35033,9 @@ def _emit_rate_monitor_loop():
                         }
                         if svc_key == 'spotify' and enr.get('daily_budget'):
                             entry['worker']['daily_budget'] = enr['daily_budget']
+                            # Budget ring styling: purple when the worker has
+                            # bridged to Spotify Free after spending the budget.
+                            entry['worker']['using_free'] = bool(enr.get('using_free'))
             except Exception as e:
                 logger.debug("enrichment worker status build failed: %s", e)
 
