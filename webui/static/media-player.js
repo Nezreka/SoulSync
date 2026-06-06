@@ -597,7 +597,11 @@ function updateWishlistStatsFromData(data) {
 }
 
 async function updateStreamStatus() {
-    if (socketConnected) return; // WebSocket handles this
+    // Always poll over HTTP: stream state is per-listener (resolved from the
+    // session cookie), and the old global 'tool:stream' socket broadcast could
+    // only see the DEFAULT session — it told every real browser "stopped"
+    // forever while this poller deferred to it. The poller only runs while a
+    // stream is being prepared, so the 1s fetch is negligible.
     // Poll server for streaming progress and handle state changes with enhanced error recovery
     try {
         const controller = new AbortController();
@@ -709,66 +713,11 @@ async function updateStreamStatus() {
     }
 }
 
-function updateStreamStatusFromData(data) {
-    const prev = _lastToolStatus['stream'];
-    _lastToolStatus['stream'] = data.status;
-    // Skip repeated terminal states to avoid duplicate toasts/actions
-    if (prev !== undefined && data.status === prev && data.status !== 'loading' && data.status !== 'queued') return;
-
-    currentStream.status = data.status;
-    currentStream.progress = data.progress;
-
-    switch (data.status) {
-        case 'loading':
-            setLoadingProgress(data.progress);
-            const loadingText = document.querySelector('.loading-text');
-            if (loadingText && data.progress > 0) {
-                loadingText.textContent = `Downloading... ${Math.round(data.progress)}%`;
-            }
-            break;
-        case 'queued':
-            const queueText = document.querySelector('.loading-text');
-            if (queueText) {
-                queueText.textContent = 'Queuing with uploader...';
-            }
-            setLoadingProgress(0);
-            break;
-        case 'ready':
-            console.log('🎵 Stream ready, starting audio playback');
-            stopStreamStatusPolling();
-            // Restore player UI if JS state was wiped (e.g. page refresh)
-            if (!currentTrack && data.track_info) {
-                const ti = data.track_info;
-                setTrackInfo({
-                    title: ti.name || ti.title || 'Unknown Track',
-                    artist: ti.artist || 'Unknown Artist',
-                    album: ti.album || 'Unknown Album',
-                    filename: ti.filename || '',
-                    is_library: !!ti.is_library,
-                    image_url: ti.image_url || null,
-                    id: ti.id || null,
-                    artist_id: ti.artist_id || null,
-                    album_id: ti.album_id || null,
-                });
-            }
-            startAudioPlayback();
-            break;
-        case 'error':
-            console.error('❌ Streaming error:', data.error_message);
-            stopStreamStatusPolling();
-            hideLoadingAnimation();
-            showToast(`Streaming error: ${data.error_message || 'Unknown error'}`, 'error');
-            clearTrack();
-            break;
-        case 'stopped':
-            // Do NOT clear track here — explicit stop (handleStop) calls clearTrack() directly.
-            // Clearing here collapses the player after audio naturally ends or during queue transitions.
-            console.log('🛑 Stream stopped');
-            stopStreamStatusPolling();
-            hideLoadingAnimation();
-            break;
-    }
-}
+// (updateStreamStatusFromData removed: it consumed the global 'tool:stream'
+// socket broadcast, which could only carry the DEFAULT session's state — every
+// real browser has its own per-listener stream session, so the broadcast told
+// everyone "stopped" forever. Stream status is driven by the per-session HTTP
+// poller (updateStreamStatus) exclusively.)
 
 async function startAudioPlayback() {
     // Start HTML5 audio playback of the streamed file with enhanced state management

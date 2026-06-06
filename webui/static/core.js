@@ -484,7 +484,9 @@ function initializeWebSocket() {
     });
 
     // Phase 4 event listeners (tool progress)
-    socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
+    // 'tool:stream' is intentionally NOT wired: stream state is per-listener
+    // (session cookie), so the global broadcast could only carry the DEFAULT
+    // session's eternal "stopped" — the player polls /api/stream/status instead.
     socket.on('tool:quality-scanner', (data) => updateQualityScanProgressFromData(data));
     socket.on('tool:duplicate-cleaner', (data) => updateDuplicateCleanProgressFromData(data));
     socket.on('tool:db-update', (data) => updateDbProgressFromData(data));

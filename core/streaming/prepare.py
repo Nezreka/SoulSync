@@ -31,14 +31,18 @@ from __future__ import annotations
 
 import asyncio
 import glob
-import logging
 import os
 import shutil
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-logger = logging.getLogger(__name__)
+from utils.logging_config import get_logger
+
+# Must live under the soulsync.* namespace — handlers are only attached there,
+# so a bare getLogger(__name__) ("core.streaming.prepare") logged into the void
+# and made stream-prep failures invisible in app.log.
+logger = get_logger("streaming.prepare")
 
 
 @dataclass
