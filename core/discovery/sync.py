@@ -188,6 +188,22 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                 server_source=active_server
             )
 
+            if not (db_track and confidence >= 0.80):
+                # #785: file/CSV playlists keep raw "Artist - Title" titles (unlike
+                # YouTube, cleaned at ingest), which don't match the clean library
+                # title. Retry with the canonical form (best-of, conservative).
+                try:
+                    from core.text.source_title import canonical_source_track
+                    _canon_title, _canon_artist = canonical_source_track(original_title, artist_name)
+                    if (_canon_title, _canon_artist) != (original_title, artist_name):
+                        _alt_track, _alt_conf = db.check_track_exists(
+                            _canon_title, _canon_artist,
+                            confidence_threshold=0.80, server_source=active_server)
+                        if _alt_track and _alt_conf > confidence:
+                            db_track, confidence = _alt_track, _alt_conf
+                except Exception as _canon_err:
+                    logger.debug("canonical retry failed: %s", _canon_err)
+
             if db_track and confidence >= 0.80:
                 logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
                 if spotify_id:
@@ -508,7 +524,13 @@ def run_sync_task(
         # don't want persisted to app.log.
         _synced = getattr(result, 'synced_tracks', 0)
         logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
-        if playlist_image_url and _synced > 0:
+        # In reconcile mode the whole point (#792) is to NOT touch the playlist's
+        # existing image — pushing the source image here would re-clobber a
+        # user's custom poster every sync, the exact bug reconcile fixes. So skip
+        # the auto image push for reconcile (the playlist keeps its own art).
+        if sync_mode == 'reconcile':
+            logger.info("[PLAYLIST IMAGE] reconcile mode — preserving existing playlist image")
+        elif playlist_image_url and _synced > 0:
             try:
                 active_server = deps.config_manager.get_active_media_server()
                 logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")

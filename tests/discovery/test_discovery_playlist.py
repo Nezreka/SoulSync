@@ -496,3 +496,45 @@ def test_multi_playlist_aggregates_grand_total():
 
     # All 3 tracks discovered → 3 extra_data writes
     assert len(deps._db.extra_data_writes) == 3
+
+
+# ---------------------------------------------------------------------------
+# _canonical_best_score — #785: file/CSV playlists keep raw "Artist - Title"
+# titles (YouTube is cleaned at ingest); the worker must try the canonical form.
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+
+def test_canonical_best_score_matches_file_style_title():
+    # Raw "Artist - Title" scores low; canonical "Title" scores high → take it.
+    def score(title, artist, dur, results):
+        if title == 'Do I Wanna Know?':
+            return ('MATCH', 0.95, None)
+        return (None, 0.2, None)
+    deps = SimpleNamespace(discovery_score_candidates=score)
+    match, conf = dp._canonical_best_score(
+        deps, 'Arctic Monkeys - Do I Wanna Know?', 'Arctic Monkeys', 0, ['r'])
+    assert match == 'MATCH'
+    assert conf == 0.95
+
+
+def test_canonical_best_score_clean_title_scored_once():
+    calls = []
+    def score(title, artist, dur, results):
+        calls.append(title)
+        return ('M', 0.9, None)
+    deps = SimpleNamespace(discovery_score_candidates=score)
+    match, conf = dp._canonical_best_score(deps, 'Do I Wanna Know?', 'Arctic Monkeys', 0, ['r'])
+    assert (match, conf) == ('M', 0.9)
+    assert calls == ['Do I Wanna Know?']  # canonical == original → no second score
+
+
+def test_canonical_best_score_keeps_original_when_better():
+    # Best-of: if the raw title actually scores higher, keep it.
+    def score(title, artist, dur, results):
+        return ('CANON', 0.6, None) if title == 'Do I Wanna Know?' else ('ORIG', 0.9, None)
+    deps = SimpleNamespace(discovery_score_candidates=score)
+    match, conf = dp._canonical_best_score(
+        deps, 'Arctic Monkeys - Do I Wanna Know?', 'Arctic Monkeys', 0, ['r'])
+    assert (match, conf) == ('ORIG', 0.9)

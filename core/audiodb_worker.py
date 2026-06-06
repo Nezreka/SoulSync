@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.audiodb_client import AudioDBClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import accept_artist_match, interruptible_sleep
 
 logger = get_logger("audiodb_worker")
 
@@ -273,8 +273,13 @@ class AudioDBWorker:
 
     def _verify_artist_id(self, item: Dict[str, Any], result: Dict[str, Any]) -> bool:
         """Verify that the result's artist ID matches the parent artist's stored AudioDB ID.
+
         If mismatched, the album/track search is more specific (uses artist+title),
-        so we trust it and correct the parent artist's audiodb_id."""
+        so we trust it and correct the parent artist's audiodb_id — BUT only when
+        the result's artist *name* matches our parent artist. Without that guard,
+        a collaboration/compilation (a track our library credits to one artist
+        that lives on another artist's album) would stamp the wrong AudioDB id
+        onto our artist. See the Deezer fix for the full write-up."""
         parent_audiodb_id = item.get('artist_audiodb_id')
         if not parent_audiodb_id:
             return True
@@ -284,6 +289,18 @@ class AudioDBWorker:
             return True
 
         if str(result_artist_id) != str(parent_audiodb_id):
+            parent_name = item.get('artist') or ''
+            result_artist_name = result.get('strArtist') or ''
+            if (result_artist_name and parent_name
+                    and not self._name_matches(parent_name, result_artist_name)):
+                logger.info(
+                    f"Skipping artist-ID correction from {item['type']} "
+                    f"'{item['name']}': result artist '{result_artist_name}' "
+                    f"≠ parent '{parent_name}' (collab/compilation, not a "
+                    f"correction)"
+                )
+                return True
+
             logger.info(
                 f"Artist ID correction from {item['type']} '{item['name']}': "
                 f"updating parent artist AudioDB ID from {parent_audiodb_id} to {result_artist_id}"
@@ -409,14 +426,18 @@ class AudioDBWorker:
                 result = self.client.search_artist(item_name)
                 if result:
                     result_name = result.get('strArtist', '')
-                    if self._name_matches(item_name, result_name):
+                    ok, reason = accept_artist_match(
+                        self.db, 'audiodb_id', result.get('idArtist'), item_id,
+                        item_name, result_name,
+                    )
+                    if ok:
                         self._update_artist(item_id, result)
                         self.stats['matched'] += 1
                         logger.info(f"Matched artist '{item_name}' -> AudioDB ID: {result.get('idArtist')}")
                     else:
                         self._mark_status('artist', item_id, 'not_found')
                         self.stats['not_found'] += 1
-                        logger.debug(f"Name mismatch for artist '{item_name}' (got '{result_name}')")
+                        logger.debug(f"Artist '{item_name}' not matched: {reason}")
                 else:
                     self._mark_status('artist', item_id, 'not_found')
                     self.stats['not_found'] += 1

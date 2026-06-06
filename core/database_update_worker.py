@@ -41,7 +41,19 @@ class DatabaseUpdateWorker:
         self.database_path = database_path
         self.full_refresh = full_refresh
         self.should_stop = False
-        
+
+        # Track ids of rows newly INSERTED this run (not updates). The web
+        # layer reads this to gap-fill embedded provider IDs for the new files
+        # (auto-reconcile), so newly-added music contributes its
+        # Spotify/MusicBrainz/etc. ids without a manual backfill.
+        self._new_track_ids = set()
+
+        # Optional callback(worker) run as the FINAL scan phase, immediately
+        # before the 'finished' signal — so the auto-reconcile is inside the
+        # scan's running window (automations/UI treat it as a normal phase and
+        # wait for it). Injected by the web layer (which owns path resolution).
+        self.post_scan_hook = None
+
         # Statistics tracking
         self.processed_artists = 0
         self.processed_albums = 0
@@ -79,7 +91,26 @@ class DatabaseUpdateWorker:
                 callback(*args)
             except Exception as e:
                 logger.error(f"Error in callback for {signal_name}: {e}")
-    
+
+    def _emit_finished(self, *args):
+        """Run the post-scan hook (auto-reconcile) as the final phase, THEN
+        emit 'finished'.
+
+        Running the hook before 'finished' keeps the scan's status at
+        'running' through the reconcile, so every caller (automations that
+        poll for completion, the dashboard card, the Tools page) treats it as
+        a normal scan phase and waits for it — rather than seeing 'finished'
+        and missing the tail. Best-effort: a hook failure never blocks the
+        completion signal.
+        """
+        if self.post_scan_hook:
+            try:
+                self.post_scan_hook(self)
+            except Exception as e:
+                logger.warning(f"post-scan hook failed (non-fatal): {e}")
+        self._emit_signal('finished', *args)
+
+
     def connect_callback(self, signal_name: str, callback: Callable):
         """Connect a callback for progress notifications."""
         self.callbacks.setdefault(signal_name, []).append(callback)
@@ -146,7 +177,7 @@ class DatabaseUpdateWorker:
                                 logger.info(f"Merged {merged} duplicate artists")
                         except Exception as e:
                             logger.warning(f"Could not merge duplicate artists: {e}")
-                    self._emit_signal('finished', 0, 0, 0, 0, 0)
+                    self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
             
@@ -230,7 +261,7 @@ class DatabaseUpdateWorker:
             self.removed_tracks = removal.get('tracks_removed', 0) if removal else 0
 
             # Emit final results
-            self._emit_signal('finished',
+            self._emit_finished(
                 self.processed_artists,
                 self.processed_albums,
                 self.processed_tracks,
@@ -331,7 +362,7 @@ class DatabaseUpdateWorker:
                         f"{self.processed_albums} albums, {self.processed_tracks} new tracks, "
                         f"{stale_removed} stale tracks removed")
 
-            self._emit_signal('finished',
+            self._emit_finished(
                 self.processed_artists,
                 self.processed_albums,
                 self.processed_tracks,
@@ -880,6 +911,8 @@ class DatabaseUpdateWorker:
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
+                                                if track_success == 'inserted':
+                                                    self._new_track_ids.add(str(track.ratingKey))
                                                 logger.debug(f"Processed new track: {track.title}")
                                         except Exception as e:
                                             logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
@@ -1344,6 +1377,8 @@ class DatabaseUpdateWorker:
                                             skipped_count += 1
                                         elif track_success:
                                             track_count += 1
+                                            if track_success == 'inserted':
+                                                self._new_track_ids.add(track_id_str)
                                     except Exception as e:
                                         logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
 

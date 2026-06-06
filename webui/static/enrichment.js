@@ -457,6 +457,10 @@ function updateSpotifyEnrichmentStatusFromData(data) {
 
     const notAuthenticated = data.authenticated === false;
     const isRateLimited = data.rate_limited === true;
+    // The real API is banned but the worker is still matching via the no-creds
+    // Spotify Free source — treat it as running, not stuck (#798 bridge).
+    const bridgingFree = data.using_free === true;
+    const rateLimitedStuck = isRateLimited && !bridgingFree;
     const budgetExhausted = data.daily_budget && data.daily_budget.exhausted;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
@@ -464,7 +468,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
         button.classList.add('paused');
     } else if (notAuthenticated) {
         button.classList.add('no-auth');
-    } else if (isRateLimited || budgetExhausted) {
+    } else if (rateLimitedStuck || budgetExhausted) {
         button.classList.add('paused');
     } else if (data.idle) {
         button.classList.add('complete');
@@ -479,7 +483,8 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     if (tooltipStatus) {
         if (data.paused) { tooltipStatus.textContent = 'Paused'; }
         else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (isRateLimited) { tooltipStatus.textContent = 'Rate Limited'; }
+        else if (rateLimitedStuck) { tooltipStatus.textContent = 'Rate Limited'; }
+        else if (bridgingFree) { tooltipStatus.textContent = 'Running (Spotify Free)'; }
         else if (budgetExhausted) { tooltipStatus.textContent = 'Daily Limit Reached'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running) { tooltipStatus.textContent = 'Running'; }
@@ -491,10 +496,12 @@ function updateSpotifyEnrichmentStatusFromData(data) {
             tooltipCurrent.textContent = notAuthenticated ? 'Connect Spotify in Settings to enrich' : 'Click to resume';
         } else if (notAuthenticated) {
             tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
-        } else if (isRateLimited) {
+        } else if (rateLimitedStuck) {
             const info = data.rate_limit || {};
             const remaining = info.remaining_seconds || 0;
             tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
+        } else if (bridgingFree && data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name} (via Spotify Free)`;
         } else if (budgetExhausted) {
             const resets = data.daily_budget.resets_in_seconds || 0;
             const hours = Math.floor(resets / 3600);
@@ -2725,7 +2732,7 @@ async function loadRepairFindings() {
             duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
-            missing_lossy_copy: 'No Lossy Copy'
+            missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
         };
 
         // Finding types that have an automated fix action
@@ -2740,6 +2747,7 @@ async function loadRepairFindings() {
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
             missing_discography_track: 'Add to Wishlist',
+            library_retag: 'Apply Tags',
         };
 
         container.innerHTML = items.map(f => {
@@ -2904,6 +2912,40 @@ function _renderFindingDetail(f) {
             if (d.modified) rows.push(['Last Modified', d.modified]);
             if (f.file_path) rows.push(['Full Path', f.file_path, 'path']);
             return _gridRows(rows) + _renderPlayButton(f);
+
+        case 'library_retag': {
+            const tracks = Array.isArray(d.tracks) ? d.tracks : [];
+            const changed = tracks.filter(t => t.changes && Object.keys(t.changes).length);
+            const meta = [];
+            if (d.source) meta.push(`Source: ${d.source}`);
+            if (d.mode) meta.push(`Mode: ${d.mode}`);
+            if (d.cover_action) meta.push(`Cover: ${d.cover_action}`);
+            let html = '';
+            if (meta.length) {
+                html += `<div class="repair-finding-meta" style="margin-bottom:8px">${_escFinding(meta.join('  ·  '))}</div>`;
+            }
+            if (!changed.length && d.cover_action) {
+                html += `<div class="repair-finding-desc">Tags already correct — this would refresh cover art only.</div>`;
+            }
+            // Per-track old → new diff (cap the rendered list so huge albums stay sane).
+            changed.slice(0, 40).forEach(t => {
+                const label = t.title || (t.file_path || '').split(/[\\/]/).pop();
+                const rows = Object.entries(t.changes).map(([field, c]) => [
+                    field.replace(/_/g, ' '),
+                    `${(c.old === '' || c.old == null) ? '∅' : c.old}   →   ${c.new}`,
+                    'highlight',
+                ]);
+                html += `<div style="margin:8px 0 2px;font-weight:600">${_escFinding(label)}</div>`;
+                html += _gridRows(rows);
+            });
+            if (changed.length > 40) {
+                html += `<div class="repair-finding-meta" style="margin-top:6px">…and ${changed.length - 40} more track(s)</div>`;
+            }
+            if (Array.isArray(d.unmatched) && d.unmatched.length) {
+                html += `<div class="repair-finding-meta" style="margin-top:8px">Unmatched (left untouched): ${_escFinding(d.unmatched.join(', '))}</div>`;
+            }
+            return html || '<div class="repair-finding-desc">No changes.</div>';
+        }
 
         case 'acoustid_mismatch': {
             let html = media + '<div style="margin-bottom:8px">';

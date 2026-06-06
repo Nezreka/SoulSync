@@ -976,6 +976,7 @@ class RepairWorker:
             'unknown_artist': self._fix_unknown_artist,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'missing_discography_track': self._fix_discography_backfill,
+            'library_retag': self._fix_library_retag,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1355,6 +1356,43 @@ class RepairWorker:
             # DB updated but nothing reached disk (e.g. read-only mount).
             msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
+
+    def _fix_library_retag(self, entity_type, entity_id, file_path, details):
+        """Apply a library re-tag finding: write each track's planned tags in
+        place (core.tag_writer.write_tags_to_file) + optionally embed/refresh
+        cover art. Only ADDS/overwrites the planned fields — no moves/renames."""
+        tracks = details.get('tracks') or []
+        if not tracks:
+            return {'success': False, 'error': 'No tracks to re-tag in finding'}
+
+        # Resolve container/host path mismatches, then delegate to the shared
+        # apply path the job's auto-fix mode also uses.
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved_plans = []
+        for t in tracks:
+            raw = t.get('file_path')
+            if not raw:
+                continue
+            rp = _resolve_file_path(raw, self.transfer_folder, download_folder,
+                                    config_manager=self._config_manager) or raw
+            plan = {'file_path': rp, 'db_data': t.get('db_data') or {}}
+            if t.get('full_meta'):
+                plan['full_meta'] = t['full_meta']
+            resolved_plans.append(plan)
+
+        from core.repair_jobs.library_retag import apply_track_plans
+        res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
+                                full=(details.get('depth') == 'full'))
+
+        if res['written'] == 0 and not res['cover_written']:
+            return {'success': False,
+                    'error': 'Nothing could be written — files unreachable or read-only?'}
+        msg = f"Re-tagged {res['written']} track(s)"
+        if res['failed']:
+            msg += f" ({res['failed']} failed)"
+        if res['cover_written']:
+            msg += ' + refreshed cover.jpg'
+        return {'success': True, 'action': 'library_retag', 'message': msg, **res}
 
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""

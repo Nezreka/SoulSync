@@ -1605,6 +1605,80 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error appending to Jellyfin playlist '{playlist_name}': {e}")
             return False
 
+    def reconcile_playlist(self, playlist_name: str, tracks) -> bool:
+        """In-place reconcile (#792): add missing + remove gone on the existing
+        playlist (POST/DELETE /Playlists/{id}/Items) so its poster, name, and Id
+        survive — no delete/recreate. Removal needs each entry's PlaylistItemId,
+        which we fetch from /Playlists/{id}/Items. Creates the playlist if
+        missing. Returns False so the caller can fall back to replace."""
+        if not self.ensure_connection():
+            return False
+        try:
+            import requests
+            from core.sync.playlist_edit import plan_playlist_reconcile
+            existing = self.get_playlist_by_name(playlist_name)
+            if not existing:
+                logger.info(f"Jellyfin reconcile: '{playlist_name}' doesn't exist — creating")
+                return self.create_playlist(playlist_name, tracks)
+
+            playlist_id = existing.id
+            # Entries carry both the track Id and the PlaylistItemId (entry id);
+            # removal is by EntryIds, not track Ids.
+            entries = []  # list of (track_id, entry_id) in playlist order
+            resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if resp:
+                for item in resp.get('Items', []):
+                    tid = str(item.get('Id') or '')
+                    eid = str(item.get('PlaylistItemId') or '')
+                    if tid:
+                        entries.append((tid, eid))
+
+            current_ids = [tid for tid, _ in entries]
+            desired_ids = []
+            for t in tracks:
+                tid = (str(t.id) if hasattr(t, 'id') and t.id
+                       else str(t.get('Id') or t.get('id') or '') if isinstance(t, dict) else '')
+                if tid and self._is_valid_guid(tid):
+                    desired_ids.append(tid)
+
+            plan = plan_playlist_reconcile(current_ids, desired_ids)
+            hdr = {'X-Emby-Token': self.api_key}
+
+            if plan['add']:
+                for i in range(0, len(plan['add']), 100):
+                    batch = plan['add'][i:i + 100]
+                    r = requests.post(
+                        f"{self.base_url}/Playlists/{playlist_id}/Items",
+                        params={'Ids': ','.join(batch), 'UserId': self.user_id},
+                        headers=hdr, timeout=30,
+                    )
+                    if r.status_code not in (200, 204):
+                        logger.error(f"Jellyfin reconcile add failed: HTTP {r.status_code}")
+                        return False
+
+            if plan['remove']:
+                remove_set = set(plan['remove'])
+                entry_ids = [eid for tid, eid in entries if tid in remove_set and eid]
+                for i in range(0, len(entry_ids), 100):
+                    batch = entry_ids[i:i + 100]
+                    r = requests.delete(
+                        f"{self.base_url}/Playlists/{playlist_id}/Items",
+                        params={'EntryIds': ','.join(batch)},
+                        headers=hdr, timeout=30,
+                    )
+                    if r.status_code not in (200, 204):
+                        logger.error(f"Jellyfin reconcile remove failed: HTTP {r.status_code}")
+                        return False
+
+            logger.info(
+                f"Jellyfin reconcile '{playlist_name}': +{len(plan['add'])} / "
+                f"-{len(plan['remove'])} (playlist preserved)"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error reconciling Jellyfin playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist"""
         if not self.ensure_connection():

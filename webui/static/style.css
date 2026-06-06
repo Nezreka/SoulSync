@@ -2970,11 +2970,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .main-content {
     flex: 1;
-    /* Opaque dark background (GPU-optimized: no backdrop-filter needed on solid dark body) */
-    background: linear-gradient(135deg,
-            rgba(10, 10, 10, 1) 0%,
-            rgba(15, 15, 15, 1) 50%,
-            rgba(11, 11, 11, 1) 100%);
+    /* Flat solid background — NOT a gradient. A gradient on the scroll container
+       has to be re-rastered across the whole scrolled area on every scroll frame
+       (the compositor can't just translate a cached tile), which caused the
+       dominant scroll jank (~25% dropped frames -> <1% once flattened, measured).
+       A solid color is drawn as a single compositor quad, no per-frame raster.
+       The gradient was rgb 10->15->11, visually indistinguishable from this. */
+    background: rgb(12, 12, 12);
     overflow: auto;
     position: relative;
 }
@@ -13668,7 +13670,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Server tab — prominent first tab */
 .sync-tab-server {
-    flex: 1.4 !important;
+    /* No flex-grow: behave like every other brand chip (flex:0 0 auto from
+       .sync-tab-button). The old "equal-width pills" strip stretched this tab
+       with `flex:1.4 !important`, which leaked past the chip restyle and made
+       the active Server Playlists pill span the whole row (#799). */
     font-size: 12px;
     letter-spacing: 0.02em;
     position: relative;
@@ -36916,6 +36921,62 @@ div.artist-hero-badge {
     color: #fff;
 }
 
+/* Link / ID lookup row (#775) — paste a provider link/ID under the search bar */
+.enh-id-lookup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 4px 8px 4px 14px;
+    transition: all 0.3s ease;
+}
+
+.enh-id-lookup:focus-within {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.enh-id-lookup-icon {
+    font-size: 15px;
+    opacity: 0.55;
+}
+
+.enh-id-input {
+    flex-grow: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    color: #ffffff;
+    padding: 8px 0;
+}
+
+.enh-id-input::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.enh-id-btn {
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.enh-id-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+}
+
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;
@@ -52585,6 +52646,13 @@ tr.tag-diff-same {
 .repair-setting-input[type="checkbox"] {
     width: auto;
     accent-color: var(--accent-color, #6366f1);
+}
+
+/* Native <option> popups don't inherit the translucent select background, so
+   they rendered as white-on-white. Give the options a solid dark background. */
+.repair-setting-input option {
+    background: #1e1e24;
+    color: #fff;
 }
 
 .repair-save-settings-btn {

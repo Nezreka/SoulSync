@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.musicbrainz_service import MusicBrainzService
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import interruptible_sleep, source_id_conflict
 
 logger = get_logger("musicbrainz_worker")
 
@@ -367,8 +367,17 @@ class MusicBrainzWorker:
 
             if item_type == 'artist':
                 result = self.mb_service.match_artist(item_name)
-                if result and result.get('mbid'):
-                    self.mb_service.update_artist_mbid(item_id, result['mbid'], 'matched')
+                mbid = result.get('mbid') if result else None
+                # MB's combined score can match a weak name ("Grant" -> "Amy
+                # Grant") when its own relevance rank is high. Guard against
+                # assigning an mbid a differently-named artist already holds, so
+                # one mbid can't be smeared across unrelated artists.
+                conflict = (
+                    source_id_conflict(self.db, 'musicbrainz_id', mbid, item_id, item_name)
+                    if mbid else None
+                )
+                if mbid and not conflict:
+                    self.mb_service.update_artist_mbid(item_id, mbid, 'matched')
                     # Issue #442 — pull alternate-spelling aliases (Japanese
                     # kanji, Cyrillic, etc.) so the verifier can recognise
                     # cross-script artist names without re-querying MB on
@@ -377,7 +386,7 @@ class MusicBrainzWorker:
                     # empty list) so a transient MB outage never regresses
                     # the enrichment outcome.
                     try:
-                        aliases = self.mb_service.fetch_artist_aliases(result['mbid'])
+                        aliases = self.mb_service.fetch_artist_aliases(mbid)
                         if aliases:
                             self.mb_service.update_artist_aliases(item_id, aliases)
                             logger.debug(
@@ -388,11 +397,17 @@ class MusicBrainzWorker:
                             "Alias enrichment failed for artist '%s': %s", item_name, alias_err,
                         )
                     self.stats['matched'] += 1
-                    logger.info(f"Matched artist '{item_name}' → MBID: {result['mbid']}")
+                    logger.info(f"Matched artist '{item_name}' → MBID: {mbid}")
                 else:
                     self.mb_service.update_artist_mbid(item_id, None, 'not_found')
                     self.stats['not_found'] += 1
-                    logger.debug(f"No match for artist '{item_name}'")
+                    if conflict:
+                        logger.debug(
+                            f"Artist '{item_name}' → MBID {mbid} skipped: "
+                            f"already claimed by '{conflict}'"
+                        )
+                    else:
+                        logger.debug(f"No match for artist '{item_name}'")
 
             elif item_type == 'album':
                 artist_name = item.get('artist')

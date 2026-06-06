@@ -110,6 +110,10 @@ async function fetchSourceConfiguredMap() {
             for (const src of SOURCE_ORDER) {
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
+                } else if (src === 'spotify') {
+                    // Spotify Free: available without credentials when the
+                    // opt-in no-creds source is on (metadata_available).
+                    map[src] = !!(data[src] && (data[src].configured || data[src].metadata_available));
                 } else {
                     map[src] = !!(data[src] && data[src].configured);
                 }
@@ -1265,8 +1269,10 @@ function playlistModalDownloadSyncFooterHtml(playlistId, options = {}) {
     }
 
     return `${downloadBtns}
-        <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Replace overwrites the server playlist; Append only adds new tracks (preserves user-added)">
-            <option value="replace" selected>Replace</option>
+        <select id="sync-mode-${playlistId}" class="playlist-modal-sync-mode" title="Default uses your Settings > Playlist sync mode. Replace overwrites the server playlist; Reconcile edits it in place (keeps custom image/description); Append only adds new tracks.">
+            <option value="" selected>Sync mode: default</option>
+            <option value="replace">Replace</option>
+            <option value="reconcile">Reconcile (keep image/desc)</option>
             <option value="append">Append only</option>
         </select>
         <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>`;
@@ -1476,6 +1482,10 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
+                        </label>
+                        <label class="force-download-toggle" title="Skip the AcoustID fingerprint check for this request. Useful for non-English artists whose original-language metadata AcoustID can't match against the romanized request (issue #797).">
+                            <input type="checkbox" id="skip-acoustid-${virtualPlaylistId}">
+                            <span>Skip AcoustID verification</span>
                         </label>
                         ${contextType === 'playlist' ? `
                         <label class="force-download-toggle">

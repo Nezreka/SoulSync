@@ -263,6 +263,58 @@ def test_transmission_normalises_bare_host_to_rpc_path() -> None:
     assert adapter._url == 'http://host:9091/transmission/rpc'
 
 
+# ---------------------------------------------------------------------------
+# URL scheme normalization (#790)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_client_url_prepends_http_when_scheme_missing() -> None:
+    from core.torrent_clients.base import normalize_client_url
+    # The exact shapes users type: bare IP:port, bare DNS name:port, bare host.
+    assert normalize_client_url('192.168.1.5:8080') == 'http://192.168.1.5:8080'
+    assert normalize_client_url('qbittorrent.lan:8080') == 'http://qbittorrent.lan:8080'
+    assert normalize_client_url('myhost') == 'http://myhost'
+
+
+def test_normalize_client_url_preserves_existing_scheme_and_trims() -> None:
+    from core.torrent_clients.base import normalize_client_url
+    assert normalize_client_url('http://host:8080') == 'http://host:8080'
+    assert normalize_client_url('https://host') == 'https://host'
+    assert normalize_client_url('  http://host:8080/  ') == 'http://host:8080'
+    assert normalize_client_url('') == ''
+    assert normalize_client_url(None) == ''
+
+
+def test_qbit_load_config_defaults_scheme_for_bare_host() -> None:
+    """Regression #790: a bare ``host:port`` config (no scheme) must become an
+    http:// URL. Otherwise requests can't pick an adapter and raises
+    'No connection adapters were found for ...', which surfaced to the user as
+    a generic 'qbittorrent probe failed'."""
+    adapter = QBittorrentAdapter.__new__(QBittorrentAdapter)
+    import threading
+    adapter._session = None
+    adapter._session_lock = threading.Lock()
+    with patch('core.torrent_clients.qbittorrent.config_manager') as cm:
+        cm.get.side_effect = lambda key, default='': {
+            'torrent_client.url': '192.168.1.5:8080',
+        }.get(key, default)
+        adapter._load_config()
+    assert adapter._url == 'http://192.168.1.5:8080'
+
+
+def test_deluge_load_config_defaults_scheme_for_bare_host() -> None:
+    adapter = DelugeAdapter.__new__(DelugeAdapter)
+    import threading
+    adapter._session = None
+    adapter._session_lock = threading.Lock()
+    with patch('core.torrent_clients.deluge.config_manager') as cm:
+        cm.get.side_effect = lambda key, default='': {
+            'torrent_client.url': 'deluge.lan:8112',
+        }.get(key, default)
+        adapter._load_config()
+    assert adapter._url == 'http://deluge.lan:8112'
+
+
 def test_transmission_session_id_renegotiation() -> None:
     """Transmission rejects the first call with 409 and a fresh
     ``X-Transmission-Session-Id`` header; the adapter must store it

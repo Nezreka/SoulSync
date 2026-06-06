@@ -706,13 +706,19 @@ def resolve_reported_save_path(
 
 
 def copy_audio_files_atomically(
-    sources: Iterable[Path], staging_dir: Path,
+    sources: Iterable[Path], staging_dir: Path, remove_source: bool = False,
 ) -> list:
     """Convenience wrapper: pick a non-colliding staging path for
     each source, copy via ``atomic_copy_to_staging``. Returns the
     list of final destination paths (as strings). Files that fail
     to copy are logged and skipped; the caller decides what to do
-    with a partial result."""
+    with a partial result.
+
+    ``remove_source=True`` deletes each source AFTER it copies
+    successfully — used by the Soulseek bundle path so slskd's
+    completed downloads don't pile up in its download folder (#796).
+    Kept False for torrent/usenet, whose clients must retain the
+    originals (seeding / client-managed)."""
     staging_dir.mkdir(parents=True, exist_ok=True)
     out: list = []
     for src in sources:
@@ -720,6 +726,14 @@ def copy_audio_files_atomically(
         try:
             atomic_copy_to_staging(src, dest)
             out.append(str(dest))
+            if remove_source:
+                # Only after a verified copy — never lose data on a failed stage.
+                try:
+                    Path(src).unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception as e:
+                    logger.debug("[album_bundle] Could not remove staged source %s: %s", src, e)
         except Exception as e:
             logger.warning("[album_bundle] Failed to stage %s -> %s: %s", src, dest, e)
     return out

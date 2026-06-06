@@ -64,7 +64,13 @@ function syncMetadataSourceSelection(source) {
 
 function _isMetadataSourceSelectable(source) {
     if (source === 'spotify') {
+        // Official Spotify needs a connected session.
         return _lastStatusPayload?.spotify?.authenticated === true;
+    }
+    if (source === 'spotify_free') {
+        // No-creds Spotify only needs the SpotipyFree package installed —
+        // selecting it IS the opt-in, so it must NOT depend on having selected it.
+        return _lastStatusPayload?.spotify?.free_installed === true;
     }
     if (source === 'discogs') {
         const token = document.getElementById('discogs-token');
@@ -143,6 +149,25 @@ function handleMetadataSourceChange(event) {
 }
 
 let _settingsInitialized = false;
+// Tell password-manager extensions (Bitwarden / 1Password / LastPass) to ignore
+// this app's credential inputs. The settings page is full of API-key / token /
+// secret fields; password managers treat them as login forms and re-scan the
+// whole (large, constantly-mutating) DOM on every change, which can peg the main
+// thread for seconds. These attributes make them skip the fields entirely.
+function _markCredentialFieldsNoAutofill(root) {
+    const scope = root || document;
+    scope.querySelectorAll('input, textarea').forEach((el) => {
+        if (el.dataset.bwignore !== undefined) return; // already tagged
+        el.setAttribute('data-bwignore', '');          // Bitwarden
+        el.setAttribute('data-1p-ignore', '');         // 1Password
+        el.setAttribute('data-lpignore', 'true');      // LastPass
+        if (!el.getAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+    });
+}
+// Run once on load (inputs exist from page load — all pages are mounted).
+if (document.readyState !== 'loading') _markCredentialFieldsNoAutofill();
+else document.addEventListener('DOMContentLoaded', () => _markCredentialFieldsNoAutofill());
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
@@ -150,6 +175,9 @@ function initializeSettings() {
     // re-scanning the ~960-node settings subtree on every revisit (scroll jank).
     if (_settingsInitialized) return;
     _settingsInitialized = true;
+
+    // Re-tag in case any inputs were added dynamically since page load.
+    _markCredentialFieldsNoAutofill(document.getElementById('settings-page'));
 
     // Accent color listeners (live preview + custom picker toggle)
     initAccentColorListeners();
@@ -1021,8 +1049,13 @@ async function loadSettingsData() {
         // Populate Discogs settings
         document.getElementById('discogs-token').value = settings.discogs?.token || '';
 
-        // Populate Metadata source setting
-        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'deezer';
+        // Populate Metadata source setting. 'Spotify Free' is stored as
+        // fallback_source='spotify' + spotify_free=true (so all downstream
+        // 'spotify' routing is unchanged) — map it back to the dropdown value.
+        const _fbSrc = settings.metadata?.fallback_source || 'deezer';
+        const _metaSel = (_fbSrc === 'spotify' && settings.metadata?.spotify_free === true)
+            ? 'spotify_free' : _fbSrc;
+        document.getElementById('metadata-fallback-source').value = _metaSel;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -1175,6 +1208,8 @@ async function loadSettingsData() {
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
+        const _syncModeEl = document.getElementById('playlist-sync-mode');
+        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -2731,11 +2766,18 @@ async function saveSettings(quiet = false) {
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
     let metadataSource = metadataSourceSelect?.value || 'deezer';
     const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
+    const spotifyFreeInstalled = _lastStatusPayload?.spotify?.free_installed === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
         metadataSource = _metadataSourceFallback('spotify');
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Spotify is disconnected, so the primary metadata source was switched.', 'warning');
+        }
+    } else if (metadataSource === 'spotify_free' && !spotifyFreeInstalled) {
+        metadataSource = _metadataSourceFallback('spotify_free');
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Spotify Free needs the SpotipyFree package installed.', 'warning');
         }
     } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
         metadataSource = _metadataSourceFallback('discogs');
@@ -2818,7 +2860,10 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: metadataSource
+            // 'Spotify Free' is stored as the spotify source + a flag, so all
+            // downstream 'spotify' routing is unchanged.
+            fallback_source: metadataSource === 'spotify_free' ? 'spotify' : metadataSource,
+            spotify_free: metadataSource === 'spotify_free'
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -2938,7 +2983,8 @@ async function saveSettings(quiet = false) {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked
         },
         playlist_sync: {
-            create_backup: document.getElementById('create-backup').checked
+            create_backup: document.getElementById('create-backup').checked,
+            mode: document.getElementById('playlist-sync-mode')?.value || 'replace'
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked

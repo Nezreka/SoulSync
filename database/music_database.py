@@ -790,6 +790,55 @@ class MusicDatabase:
             except Exception as e:
                 logger.debug("Failed to purge cached tracks/albums with junk artist names: %s", e)
 
+            # One-time migration: clear source ids that enrichment wrongly
+            # SHARED across differently-named artists. The album/track "artist
+            # id correction" path (Deezer/AudioDB/Qobuz/Tidal) used to overwrite
+            # an artist's source id from a match without a name check, so e.g.
+            # everyone featured on Kendrick Lamar's curated "Black Panther" album
+            # got stamped with Kendrick's Deezer id. The workers are now
+            # name-guarded so this can't recur; clearing the bad rows lets the
+            # next enrichment pass re-derive each artist's correct id.
+            # Same-name duplicates (one artist indexed on two media servers,
+            # legitimately sharing an id) are left alone via the DISTINCT-name
+            # check, so this only touches genuine corruption.
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_source_id_dedupe_v1'")
+                if not cursor.fetchone():
+                    _dedupe_id_cols = [
+                        ('deezer_id', 'deezer_match_status'),
+                        ('spotify_artist_id', 'spotify_match_status'),
+                        ('itunes_artist_id', 'itunes_match_status'),
+                        ('musicbrainz_id', 'musicbrainz_match_status'),
+                        ('discogs_id', 'discogs_match_status'),
+                        ('audiodb_id', 'audiodb_match_status'),
+                        ('qobuz_id', 'qobuz_match_status'),
+                        ('tidal_id', 'tidal_match_status'),
+                    ]
+                    total_cleared = 0
+                    for id_col, status_col in _dedupe_id_cols:
+                        try:
+                            cursor.execute(f"""
+                                UPDATE artists
+                                SET {id_col} = NULL, {status_col} = NULL
+                                WHERE {id_col} IN (
+                                    SELECT {id_col} FROM artists
+                                    WHERE {id_col} IS NOT NULL AND {id_col} != ''
+                                    GROUP BY {id_col}
+                                    HAVING COUNT(DISTINCT LOWER(TRIM(name))) > 1
+                                )
+                            """)
+                            total_cleared += cursor.rowcount
+                        except Exception as col_err:
+                            logger.debug("Source-id dedupe skipped %s: %s", id_col, col_err)
+                    cursor.execute("CREATE TABLE _source_id_dedupe_v1 (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    if total_cleared > 0:
+                        logger.info(
+                            f"Cleared {total_cleared} duplicated source ids shared across "
+                            f"differently-named artists — they'll re-derive on next enrichment"
+                        )
+            except Exception as e:
+                logger.debug("Failed to dedupe shared source ids: %s", e)
+
             # HiFi API instances table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS hifi_instances (
@@ -970,6 +1019,10 @@ class MusicDatabase:
                 'canonical_album_id': 'TEXT DEFAULT NULL',
                 'canonical_score': 'REAL DEFAULT NULL',
                 'canonical_resolved_at': 'TIMESTAMP DEFAULT NULL',
+                # #758 — set when the user MANUALLY pins an album version. The
+                # auto resolve job (and any re-resolution) must never overwrite
+                # a locked pin, so a manual match stays put across cycles.
+                'canonical_locked': 'INTEGER DEFAULT 0',
             }
             for _col, _typedef in _canonical_cols.items():
                 if album_cols and _col not in album_cols:
@@ -978,17 +1031,27 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
 
-    def set_album_canonical(self, album_id, source: str, canonical_album_id: str, score: float) -> bool:
+    def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
+                            score: float, locked: bool = False) -> bool:
         """Persist the resolved canonical (source, album_id, score) for an album
-        (#765 Stage 2). Returns True if a row was updated."""
+        (#765 Stage 2). Returns True if a row was updated.
+
+        ``locked=True`` marks a MANUAL pin (#758): the user explicitly chose this
+        album version. A manual write always wins (overwrites any existing pin).
+        An AUTO write (``locked=False``, the resolve job) will NOT overwrite a
+        locked pin — the guard is in the WHERE clause so it's atomic.
+        """
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            # Auto writes can't clobber a manual lock; manual writes always apply.
+            guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
                 "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
-                "canonical_score = ?, canonical_resolved_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (source, str(canonical_album_id), float(score), album_id),
+                "canonical_score = ?, canonical_locked = ?, "
+                "canonical_resolved_at = CURRENT_TIMESTAMP "
+                f"WHERE id = ?{guard}",
+                (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -999,15 +1062,16 @@ class MusicDatabase:
             conn.close()
 
     def get_album_canonical(self, album_id) -> Optional[dict]:
-        """Return ``{'source','album_id','score','resolved_at'}`` for an album's
-        pinned canonical release, or ``None`` when unresolved (#765 Stage 2).
-        Consumers treat ``None`` as 'fall back to today's behavior'."""
+        """Return ``{'source','album_id','score','resolved_at','locked'}`` for an
+        album's pinned canonical release, or ``None`` when unresolved (#765 Stage
+        2). ``locked`` is True for a manual pin (#758). Consumers treat ``None``
+        as 'fall back to today's behavior'."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT canonical_source, canonical_album_id, canonical_score, "
-                "canonical_resolved_at FROM albums WHERE id = ?",
+                "canonical_resolved_at, canonical_locked FROM albums WHERE id = ?",
                 (album_id,),
             )
             row = cursor.fetchone()
@@ -1018,6 +1082,7 @@ class MusicDatabase:
                 'album_id': row[1],
                 'score': row[2],
                 'resolved_at': row[3],
+                'locked': bool(row[4]),
             }
         except Exception as e:
             logger.error("Error reading album canonical for %s: %s", album_id, e)
@@ -4621,21 +4686,29 @@ class MusicDatabase:
                     CREATE INDEX IF NOT EXISTS idx_mltm_lib_track
                     ON manual_library_track_matches (library_track_id)
                 """)
+                # Stable re-resolution key: a library rescan can drop/re-key
+                # tracks (esp. Jellyfin/Navidrome GUIDs), leaving library_track_id
+                # dangling. Storing the file path lets us re-find the current
+                # track id after a scan so manual matches survive it.
+                cursor.execute("PRAGMA table_info(manual_library_track_matches)")
+                _mltm_cols = {r[1] for r in cursor.fetchall()}
+                if 'library_file_path' not in _mltm_cols:
+                    cursor.execute("ALTER TABLE manual_library_track_matches ADD COLUMN library_file_path TEXT")
         except Exception as e:
             logger.error(f"Error creating manual_library_track_matches table: {e}")
 
     def save_manual_library_match(self, profile_id: int, source: str, source_track_id: str,
                                    library_track_id: str, **meta) -> bool:
         """Insert or replace a manual match. meta keys: source_title, source_artist,
-        source_album, source_context_json, server_source."""
+        source_album, source_context_json, server_source, library_file_path."""
         try:
             with self._get_connection() as conn:
                 conn.execute("""
                     INSERT INTO manual_library_track_matches
                         (profile_id, source, source_track_id, library_track_id,
                          source_title, source_artist, source_album,
-                         source_context_json, server_source, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_context_json, server_source, library_file_path, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source, source_track_id, server_source)
                     DO UPDATE SET
                         library_track_id = excluded.library_track_id,
@@ -4643,17 +4716,45 @@ class MusicDatabase:
                         source_artist = excluded.source_artist,
                         source_album = excluded.source_album,
                         source_context_json = excluded.source_context_json,
+                        library_file_path = excluded.library_file_path,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     profile_id, source, source_track_id, library_track_id,
                     meta.get('source_title'), meta.get('source_artist'),
                     meta.get('source_album'), meta.get('source_context_json'),
-                    meta.get('server_source', ''),
+                    meta.get('server_source', ''), meta.get('library_file_path'),
                 ))
                 return True
         except Exception as e:
             logger.error(f"save_manual_library_match error: {e}")
             return False
+
+    def find_track_id_by_file_path(self, file_path: str) -> Optional[str]:
+        """Return the current tracks.id for a file path, or None.
+
+        Used to re-resolve a manual match whose stored library_track_id went
+        stale after a rescan re-keyed the track. Exact path first, then a
+        basename fallback (handles server-vs-local path differences)."""
+        if not file_path:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
+            row = cursor.fetchone()
+            if row:
+                return str(row[0])
+            import os as _os
+            fname = _os.path.basename(str(file_path).replace('\\', '/'))
+            if fname:
+                cursor.execute("SELECT id FROM tracks WHERE file_path LIKE ? LIMIT 1", (f"%{fname}",))
+                row = cursor.fetchone()
+                if row:
+                    return str(row[0])
+            return None
+        except Exception as e:
+            logger.error(f"find_track_id_by_file_path error: {e}")
+            return None
 
     def get_manual_library_match(self, profile_id: int, source: str,
                                   source_track_id: str, server_source: str = '') -> Optional[Dict[str, Any]]:
@@ -5948,8 +6049,12 @@ class MusicDatabase:
                     except Exception as e:
                         logger.debug("history logging: %s", e)
 
-                return True
-                
+                # Truthy on success (existing `if track_success` callers keep
+                # working); the specific value lets the scan worker tell a
+                # genuinely new row from an updated one so it can reconcile
+                # embedded IDs only for new arrivals.
+                return 'inserted' if is_new_track else 'updated'
+
             except Exception as e:
                 error_text = str(e).lower()
                 if (

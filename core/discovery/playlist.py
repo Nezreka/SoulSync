@@ -37,7 +37,33 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.manual_match import should_rediscover
+
 logger = logging.getLogger(__name__)
+
+
+def _canonical_best_score(deps, title, artist, duration_ms, results):
+    """Score search results against the source track, trying the canonicalized
+    title/artist too and keeping the better confidence (#785).
+
+    YouTube playlists have their "Artist - Title" / channel decoration stripped
+    at ingest, but file/CSV-imported playlists keep raw titles — so a track
+    titled "Arctic Monkeys - Do I Wanna Know?" scored verbatim against the
+    library's "Do I Wanna Know?" never matched. canonical_source_track is
+    conservative (only strips an "<artist> - " prefix when it equals the
+    artist), so this can only ADD a better candidate, never weaken a match.
+    Returns (match, confidence)."""
+    match, confidence, _ = deps.discovery_score_candidates(title, artist, duration_ms, results)
+    try:
+        from core.text.source_title import canonical_source_track
+        canon_title, canon_artist = canonical_source_track(title or '', artist or '')
+    except Exception:
+        return match, confidence
+    if (canon_title, canon_artist) != (title, artist):
+        alt_match, alt_conf, _ = deps.discovery_score_candidates(canon_title, canon_artist, duration_ms, results)
+        if alt_match and alt_conf > confidence:
+            return alt_match, alt_conf
+    return match, confidence
 
 
 @dataclass
@@ -121,44 +147,14 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         existing_extra = json.loads(track['extra_data']) if isinstance(track['extra_data'], str) else track['extra_data']
                     except (json.JSONDecodeError, TypeError):
                         pass
-                if existing_extra.get('discovered'):
-                    if existing_extra.get('wing_it_fallback'):
-                        # Wing It stub — always re-attempt to find a real match
-                        undiscovered_tracks.append(track)
-                    elif existing_extra.get('manual_match'):
-                        # User explicitly picked this match via the Fix popup.
-                        # Manual fixes are authoritative: they may lack
-                        # track_number / album.id / release_date (the Fix-popup
-                        # save shape is intentionally lean — search-result rows
-                        # don't include track_number, and the MBID-lookup flat
-                        # shape doesn't carry album.id), but re-running discovery
-                        # against the active source would overwrite the user's
-                        # deliberate pick with whatever the auto-search ranks
-                        # first. Skip — pipeline only re-discovers when the user
-                        # has cleared the match.
-                        pl_skipped += 1
-                        total_skipped += 1
-                    else:
-                        # Check if matched_data is complete — old discoveries may be missing
-                        # track_number/release_date due to the Track dataclass stripping them.
-                        # Re-discover these so the enriched pipeline fills in the gaps.
-                        md = existing_extra.get('matched_data', {})
-                        album = md.get('album', {})
-                        has_track_num = md.get('track_number')
-                        has_release = album.get('release_date') if isinstance(album, dict) else None
-                        has_album_id = album.get('id') if isinstance(album, dict) else None
-                        if has_track_num and (has_release or has_album_id):
-                            pl_skipped += 1
-                            total_skipped += 1
-                        else:
-                            # Incomplete discovery — re-discover to get full metadata
-                            undiscovered_tracks.append(track)
-                elif existing_extra.get('unmatched_by_user'):
-                    # User explicitly removed this match — respect their choice
+                # `should_rediscover` is the single source of truth for this
+                # gate (manual match checked FIRST so a stale Wing It flag can't
+                # revert a user's deliberate fix — see its docstring).
+                if should_rediscover(existing_extra):
+                    undiscovered_tracks.append(track)
+                else:
                     pl_skipped += 1
                     total_skipped += 1
-                else:
-                    undiscovered_tracks.append(track)
 
             if pl_skipped > 0:
                 deps.update_automation_progress(automation_id,
@@ -223,6 +219,20 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 except Exception:
                     search_queries = [f"{artist_name} {track_name}", track_name]
 
+                # #785: file/CSV playlists keep raw "Artist - Title" titles, so the
+                # queries above search for the artist prefix too. Also search the
+                # canonicalized title so the right candidates are actually returned
+                # (the scorer best-of then matches them).
+                try:
+                    from core.text.source_title import canonical_source_track
+                    _cq_title, _cq_artist = canonical_source_track(track_name, artist_name)
+                    if (_cq_title, _cq_artist) != (track_name, artist_name):
+                        for _q in (f"{_cq_artist} {_cq_title}", _cq_title):
+                            if _q not in search_queries:
+                                search_queries.append(_q)
+                except Exception as _cq_err:
+                    logger.debug("canonical search-query add failed: %s", _cq_err)
+
                 # Step 3: Search and score
                 best_match = None
                 best_confidence = 0.0
@@ -237,8 +247,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         if not results:
                             continue
 
-                        match, confidence, _ = deps.discovery_score_candidates(
-                            track_name, artist_name, duration_ms, results
+                        match, confidence = _canonical_best_score(
+                            deps, track_name, artist_name, duration_ms, results
                         )
 
                         if match and confidence > best_confidence:
@@ -259,8 +269,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         else:
                             extended = itunes_client_instance.search_tracks(query, limit=50)
                         if extended:
-                            match, confidence, _ = deps.discovery_score_candidates(
-                                track_name, artist_name, duration_ms, extended
+                            match, confidence = _canonical_best_score(
+                                deps, track_name, artist_name, duration_ms, extended
                             )
                             if match and confidence > best_confidence:
                                 best_confidence = confidence

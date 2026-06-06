@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.6"
+_SOULSYNC_BASE_VERSION = "2.6.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -861,19 +861,6 @@ duplicate_cleaner_state = {
 }
 duplicate_cleaner_lock = threading.Lock()
 duplicate_cleaner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DuplicateCleaner")
-
-# Retag Tool Globals
-retag_state = {
-    "status": "idle",
-    "phase": "Ready",
-    "progress": 0,
-    "current_track": "",
-    "total_tracks": 0,
-    "processed": 0,
-    "error_message": "",
-}
-retag_lock = threading.Lock()
-retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWorker")
 
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
@@ -1709,7 +1696,6 @@ def _shutdown_runtime_components():
         (db_update_executor, "db update executor"),
         (quality_scanner_executor, "quality scanner executor"),
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
-        (retag_executor, "retag executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
         (album_bundle_executor, "album bundle executor"),
@@ -2334,7 +2320,7 @@ def get_status():
 
         status_data = {
             'metadata_source': metadata_status['metadata_source'],
-            'spotify': metadata_status['spotify'],
+            'spotify': _spotify_status_with_availability(metadata_status['spotify']),
             'media_server': _status_cache['media_server'],
             'soulseek': soulseek_data,
             'active_media_server': active_server,
@@ -3679,10 +3665,23 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
-        return jsonify({
+        result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
-        })
+        }
+        # Spotify Free: Spotify metadata can be available without credentials
+        # (opt-in no-creds source). Surface that separately so the search source
+        # picker offers Spotify, while `configured` (the Connections indicator)
+        # keeps meaning "has client credentials".
+        if 'spotify' in result:
+            try:
+                meta_avail = bool(spotify_client and spotify_client.is_spotify_metadata_available())
+            except Exception:
+                meta_avail = False
+            result['spotify']['metadata_available'] = (
+                result['spotify']['configured'] or meta_avail
+            )
+        return jsonify(result)
     except Exception as e:
         logger.error(f"config-status error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -5621,6 +5620,7 @@ def start_sync():
 
 # Search route bodies live in core/search/* — these routes are thin handlers.
 from core.search import basic as _search_basic
+from core.search import by_id as _search_by_id
 from core.search import library_check as _search_library_check
 from core.search import orchestrator as _search_orchestrator
 from core.search import stream as _search_stream
@@ -5736,6 +5736,34 @@ def enhanced_search():
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/enhanced-search/by-id', methods=['POST'])
+def enhanced_search_by_id():
+    """Resolve a pasted metadata link to a single album or track (#775).
+
+    A provider URL (Spotify/Apple/MusicBrainz/Deezer) is looked up directly
+    on the owning source via its get-by-id — no fuzzy search, no scoring. The
+    domain pins the source and the path pins album-vs-track, so it's
+    unambiguous. Returns the same dropdown shape the normal enhanced search
+    renders, plus the resolving ``source`` so the frontend can route
+    downloads/imports through the existing flow.
+
+    Body: ``{"query": "<provider link or spotify: URI>"}``. Links only — a
+    bare ID is rejected with a hint, since it carries no source or type.
+    """
+    data = request.get_json() or {}
+    raw = (data.get('query') or '').strip()
+    if not raw:
+        return jsonify(_search_by_id._empty_result(''))
+
+    try:
+        deps = _build_search_deps()
+        result = _search_by_id.resolve_identifier(raw, deps)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Link/ID resolve error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -7638,6 +7666,26 @@ def _find_library_artist_for_source(database, source, source_artist_id, artist_n
     )
 
 
+def _resolve_source_artist_name(source, artist_id):
+    """Resolve a source artist's display name by id, or '' on any failure.
+
+    Reuses the #775 link-resolver's per-source artist fetch so we have one
+    place that knows each source's get-by-id quirks. Used by the artist-detail
+    library upgrade to disambiguate a duplicated/corrupt source id by name
+    when the URL-driven navigation didn't carry a name.
+    """
+    try:
+        deps = _build_search_deps()
+        client, _available = _search_orchestrator.resolve_client(source, deps)
+        if client is None:
+            return ''
+        data = _search_by_id._fetch_artist(client, source, artist_id)
+        return (data or {}).get('name') or ''
+    except Exception as e:
+        logger.debug(f"Source artist name resolution failed for {source}:{artist_id}: {e}")
+        return ''
+
+
 def _build_source_only_artist_detail(artist_id, artist_name, source):
     """Thin wrapper around ``core.artist_source_detail.build_source_only_artist_detail``.
 
@@ -7739,6 +7787,18 @@ def get_artist_detail(artist_id):
             library_pk = _find_library_artist_for_source(
                 database, source_param, artist_id, artist_name_arg
             )
+            # URL-driven navigation carries no name, so a duplicated/corrupt
+            # source id (one Deezer id on several artists) can't be matched by
+            # the id alone — it's ambiguous and the lookup bails. Resolve the
+            # artist's name from the source and retry so an owned artist still
+            # gets the rich library view instead of the bare source one.
+            if not library_pk and not artist_name_arg:
+                resolved_name = _resolve_source_artist_name(source_param, artist_id)
+                if resolved_name:
+                    artist_name_arg = resolved_name
+                    library_pk = _find_library_artist_for_source(
+                        database, source_param, artist_id, artist_name_arg
+                    )
             if library_pk:
                 logger.info(
                     f"Source-id {source_param}:{artist_id} matched library artist "
@@ -9336,6 +9396,13 @@ def _build_library_tag_db_data(track_data, album_genres=None):
         if artists_list:
             db_data['artists_list'] = artists_list
 
+    # Carry the known source IDs through so they get embedded too (the writer
+    # only acts on the ones present). These come from t.* on the track row.
+    for _k in ('spotify_track_id', 'itunes_track_id', 'musicbrainz_recording_id'):
+        _v = track_data.get(_k)
+        if _v:
+            db_data[_k] = _v
+
     return db_data
 
 
@@ -9760,6 +9827,159 @@ def get_write_tags_batch_status():
         state['errors'] = list(_write_tags_batch_state['errors'])  # snapshot to avoid mutation during serialize
         return jsonify(state)
 
+
+# ── Reconcile embedded provider IDs (gap-fill DB from file tags) ──
+#
+# Files that SoulSync (or MusicBrainz Picard) already tagged carry Spotify /
+# iTunes / MusicBrainz / Deezer / Tidal / AudioDB / Genius IDs in their
+# metadata. Reading them back and gap-filling the {provider}_id +
+# {provider}_match_status='matched' columns lets the enrichment workers skip
+# the API lookup entirely — large API savings on an already-tagged library.
+# Gap-fill only: an existing id is never overwritten (see
+# core/library/embedded_id_reconcile.py).
+def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_stop=None):
+    """Run the embedded-ID reconcile with web-server path resolution injected.
+
+    Thin wrapper over core.library.embedded_id_reconcile.reconcile_library that
+    supplies the read_tags callable (docker/library path resolution + mutagen
+    read). Used by the manual backfill job and available for any scoped
+    reconcile. ``track_ids=None`` => whole library.
+    """
+    from core.library.file_tags import read_embedded_tags
+    from core.library.embedded_id_reconcile import reconcile_library
+
+    def _read_tags(file_path):
+        resolved = _resolve_library_file_path(file_path)
+        if not resolved:
+            return None
+        info = read_embedded_tags(resolved)
+        return info.get('tags') if info.get('available') else None
+
+    return reconcile_library(conn, _read_tags, track_ids=track_ids,
+                             on_progress=on_progress, should_stop=should_stop)
+
+
+def _reconcile_after_scan(worker):
+    """Gap-fill embedded provider IDs for tracks a scan newly inserted.
+
+    Runs after a library scan/deep-scan completes, scoped to the rows the
+    worker actually INSERTED this run (``worker._new_track_ids``). New files
+    are written with empty provider-id columns, so this reads their tags and
+    fills any IDs present — keeping the DB current without a manual backfill.
+    Best-effort: never raises into the scan flow.
+    """
+    try:
+        new_ids = list(getattr(worker, '_new_track_ids', None) or [])
+        if not new_ids:
+            return
+        n = len(new_ids)
+        try:
+            _db_update_phase_callback(
+                f"Reading file tags for {n} new track{'s' if n != 1 else ''}…")
+        except Exception:  # noqa: S110 — best-effort UI phase, never block the reconcile
+            pass
+
+        def _on_progress(totals, title):
+            try:
+                pct = (totals.processed / totals.total * 100) if totals.total else 100
+                _db_update_progress_callback(title, totals.processed, totals.total, pct)
+            except Exception:  # noqa: S110 — best-effort UI progress tick
+                pass
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            totals = _reconcile_library_tracks(conn, track_ids=new_ids, on_progress=_on_progress)
+            logger.info(
+                "[Reconcile] Post-scan: filled %d id(s) across %d row(s) from %d new "
+                "track(s) (%d unreadable, %d conflicts)",
+                totals.ids_filled, totals.entities_updated, totals.processed,
+                totals.unreadable, totals.conflicts,
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("[Reconcile] Post-scan reconcile failed (non-fatal): %s", e)
+
+
+_reconcile_ids_state = {
+    'status': 'idle',          # idle | running | done
+    'total': 0,
+    'processed': 0,
+    'entities_updated': 0,     # track/album/artist rows written
+    'ids_filled': 0,           # individual id columns filled
+    'conflicts': 0,            # embedded id disagreed with a stored id (not applied)
+    'unreadable': 0,           # files missing / unreadable by mutagen
+    'current': '',
+}
+_reconcile_ids_lock = threading.Lock()
+
+
+@app.route('/api/library/reconcile-embedded-ids', methods=['POST'])
+def reconcile_embedded_ids():
+    """Scan every library file for embedded provider IDs and gap-fill them
+    into the DB so enrichment workers skip the API lookup. Runs in the
+    background; poll the status endpoint for progress."""
+    try:
+        with _reconcile_ids_lock:
+            if _reconcile_ids_state['status'] == 'running':
+                return jsonify({"success": False, "error": "A reconcile is already in progress"}), 409
+            _reconcile_ids_state.update({
+                'status': 'running', 'total': 0, 'processed': 0,
+                'entities_updated': 0, 'ids_filled': 0, 'conflicts': 0,
+                'unreadable': 0, 'current': 'Starting…',
+            })
+
+        database = get_database()
+
+        def _run():
+            conn = None
+            try:
+                conn = database._get_connection()
+
+                def _on_progress(totals, title):
+                    with _reconcile_ids_lock:
+                        _reconcile_ids_state.update({
+                            'total': totals.total,
+                            'processed': totals.processed,
+                            'entities_updated': totals.entities_updated,
+                            'ids_filled': totals.ids_filled,
+                            'conflicts': totals.conflicts,
+                            'unreadable': totals.unreadable,
+                            'current': title,
+                        })
+
+                # Whole-library backfill (track_ids=None). Shares the exact
+                # orchestration used by the on-scan auto-reconcile hook.
+                _reconcile_library_tracks(conn, on_progress=_on_progress)
+            except Exception as e:
+                logger.error(f"Reconcile embedded IDs background error: {e}")
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:  # noqa: S110 — connection cleanup, nothing to recover
+                        pass
+                with _reconcile_ids_lock:
+                    _reconcile_ids_state['status'] = 'done'
+                    _reconcile_ids_state['current'] = ''
+
+        thread = threading.Thread(target=_run, daemon=True, name="ReconcileEmbeddedIds")
+        thread.start()
+        return jsonify({"success": True, "message": "Reconcile started"})
+
+    except Exception as e:
+        logger.error(f"Reconcile embedded IDs kickoff error: {e}")
+        with _reconcile_ids_lock:
+            _reconcile_ids_state['status'] = 'idle'
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reconcile-embedded-ids/status', methods=['GET'])
+def get_reconcile_embedded_ids_status():
+    """Poll the status of the embedded-ID reconcile job."""
+    with _reconcile_ids_lock:
+        return jsonify(dict(_reconcile_ids_state))
 
 
 # ── ReplayGain Analysis endpoints ──
@@ -11095,6 +11315,18 @@ def library_manual_match():
             conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+
+        # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
+        # version to the chosen release, so the auto resolve job and every tool
+        # that reads the canonical pin (track-number repair, reorganize,
+        # missing-tracks) honor the user's edition instead of re-resolving back
+        # to the deluxe. The lock survives future enrichment/resolution cycles.
+        try:
+            from core.metadata.canonical_version import should_pin_manual_canonical
+            if should_pin_manual_canonical(entity_type, service):
+                database.set_album_canonical(entity_id, service, service_id, 1.0, locked=True)
+        except Exception as e:
+            logger.warning("Manual canonical pin failed for album %s: %s", entity_id, e)
 
         # Re-fetch fresh data
         artist_id = data.get('artist_id', entity_id)
@@ -14267,45 +14499,6 @@ _download_retry_attempts = {}  # {context_key: {'count': N, 'first_attempt': tim
 _download_retry_max = 10  # Max retries before giving up (10 seconds with 1s poll interval)
 _download_retry_lock = threading.Lock()
 
-# Retag worker logic lives in core/library/retag.py.
-from core.library import retag as _library_retag
-
-
-def _build_retag_deps():
-    """Build the RetagDeps bundle from web_server.py globals on each call."""
-    from database.music_database import get_database as _get_db
-
-    def _get_state():
-        return retag_state
-
-    def _set_state(value):
-        global retag_state
-        retag_state = value
-
-    from core.metadata.lyrics import generate_lrc_file as _generate_lrc_file
-
-    return _library_retag.RetagDeps(
-        config_manager=config_manager,
-        retag_lock=retag_lock,
-        spotify_client=spotify_client,
-        get_audio_quality_string=_get_audio_quality_string,
-        enhance_file_metadata=_enhance_file_metadata,
-        build_final_path_for_track=_build_final_path_for_track,
-        safe_move_file=_safe_move_file,
-        cleanup_empty_directories=_cleanup_empty_directories,
-        download_cover_art=_download_cover_art,
-        docker_resolve_path=docker_resolve_path,
-        _get_retag_state=_get_state,
-        _set_retag_state=_set_state,
-        get_database=_get_db,
-        generate_lrc_file=_generate_lrc_file,
-    )
-
-
-def _execute_retag(group_id, album_id):
-    return _library_retag.execute_retag(group_id, album_id, _build_retag_deps())
-
-
 def _automatic_wishlist_cleanup_after_db_update():
     """Automatic wishlist cleanup that runs after database updates."""
     return _cleanup_wishlist_after_db_update(logger=logger)
@@ -15035,6 +15228,11 @@ def _run_db_update_task(full_refresh, server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
+    # Auto-reconcile runs as the FINAL scan phase (inside run(), before the
+    # 'finished' signal) so status stays 'running' through it — automations,
+    # the dashboard card, and the Tools page all treat it as part of the scan.
+    db_update_worker.post_scan_hook = _reconcile_after_scan
+
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
 
@@ -15082,6 +15280,9 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('artist_processed', _db_update_artist_callback)
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
+
+    # Auto-reconcile runs as the final scan phase (see _run_database_update_task).
+    db_update_worker.post_scan_hook = _reconcile_after_scan
 
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()
@@ -16453,115 +16654,6 @@ def stop_duplicate_cleaner():
 # ===============================
 # == RETAG TOOL ENDPOINTS      ==
 # ===============================
-
-@app.route('/api/retag/stats', methods=['GET'])
-def get_retag_stats():
-    """Get retag tool statistics for the dashboard card."""
-    from database.music_database import get_database
-    db = get_database()
-    stats = db.get_retag_stats()
-    return jsonify({"success": True, **stats})
-
-@app.route('/api/retag/groups', methods=['GET'])
-def get_retag_groups():
-    """Get all retag groups sorted by artist name."""
-    from database.music_database import get_database
-    db = get_database()
-    groups = db.get_retag_groups()
-    return jsonify({"success": True, "groups": groups})
-
-@app.route('/api/retag/groups/<int:group_id>/tracks', methods=['GET'])
-def get_retag_group_tracks(group_id):
-    """Get tracks for a specific retag group."""
-    from database.music_database import get_database
-    db = get_database()
-    tracks = db.get_retag_tracks(group_id)
-    return jsonify({"success": True, "tracks": tracks})
-
-@app.route('/api/retag/search', methods=['GET'])
-def search_retag_albums():
-    """Search for albums to use for retagging (uses Spotify/iTunes fallback)."""
-    query = request.args.get('q', '').strip()
-    if not query:
-        return jsonify({"success": False, "error": "Query parameter 'q' is required"}), 400
-
-    limit = min(int(request.args.get('limit', 12)), 50)
-    try:
-        results = spotify_client.search_albums(query, limit=limit)
-        albums = []
-        for a in results:
-            albums.append({
-                'id': str(a.id),
-                'name': a.name,
-                'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
-                'release_date': a.release_date or '',
-                'total_tracks': a.total_tracks,
-                'image_url': a.image_url,
-                'album_type': a.album_type or 'album'
-            })
-        return jsonify({"success": True, "albums": albums})
-    except Exception as e:
-        logger.error(f"[Retag] Album search error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/api/retag/execute', methods=['POST'])
-def execute_retag():
-    """Start a retag operation for a group with a new album match."""
-    data = request.get_json()
-    if not data:
-        return jsonify({"success": False, "error": "JSON body required"}), 400
-
-    group_id = data.get('group_id')
-    album_id = data.get('album_id')
-    if not group_id or not album_id:
-        return jsonify({"success": False, "error": "group_id and album_id are required"}), 400
-
-    with retag_lock:
-        if retag_state["status"] == "running":
-            return jsonify({"success": False, "error": "A retag operation is already running"}), 409
-
-    retag_executor.submit(_execute_retag, group_id, str(album_id))
-    return jsonify({"success": True, "message": "Retag operation started"})
-
-@app.route('/api/retag/status', methods=['GET'])
-def get_retag_status():
-    """Get the current retag operation status."""
-    with retag_lock:
-        return jsonify(dict(retag_state))
-
-@app.route('/api/retag/groups/<int:group_id>', methods=['DELETE'])
-def delete_retag_group(group_id):
-    """Delete a retag group (files are NOT deleted)."""
-    from database.music_database import get_database
-    db = get_database()
-    success = db.delete_retag_group(group_id)
-    if success:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "error": "Group not found"}), 404
-
-@app.route('/api/retag/groups/delete-batch', methods=['POST'])
-def delete_retag_groups_batch():
-    """Delete multiple retag groups at once."""
-    from database.music_database import get_database
-    data = request.get_json() or {}
-    group_ids = data.get('group_ids', [])
-    if not group_ids:
-        return jsonify({"success": False, "error": "No group IDs provided"}), 400
-    db = get_database()
-    removed = 0
-    for gid in group_ids:
-        if db.delete_retag_group(int(gid)):
-            removed += 1
-    return jsonify({"success": True, "removed": removed})
-
-@app.route('/api/retag/groups/clear-all', methods=['POST'])
-def clear_all_retag_groups():
-    """Delete all retag groups."""
-    from database.music_database import get_database
-    db = get_database()
-    count = db.delete_all_retag_groups()
-    return jsonify({"success": True, "removed": count})
 
 # ===============================
 # == DOWNLOAD MISSING TRACKS   ==
@@ -18227,13 +18319,26 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_match_overrides
+        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
-        _override_pairs = resolve_match_overrides(
-            source_tracks,
-            server_tracks,
-            lambda src_id: ((_db_for_overrides.read_sync_match_cache(src_id, active_server) or {}).get('server_track_id')),
-        )
+        # Set of server track ids currently in this playlist — used to validate
+        # a re-resolved durable match actually exists before pairing it.
+        _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
+        _ov_profile = get_current_profile_id()
+
+        def _override_lookup(src_id):
+            # 1) Fast override cache (cleared on every rescan).
+            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
+            if cached.get('server_track_id'):
+                return cached['server_track_id']
+            # 2) Durable manual library match — survives a rescan (#787), so a
+            #    Find & Add / manual match keeps pairing after a DB scan. Re-
+            #    resolves a stale id via the stored file path when needed.
+            return resolve_durable_match_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            )
+
+        _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
@@ -18349,26 +18454,54 @@ def server_playlist_replace_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist):
-    """Wrap match-override persistence with the active DB. No-op when
-    source_track_id is missing (e.g. add to a non-mirrored playlist)."""
+def _persist_find_and_add_match(source_track_id, server_source, server_track_id, server_track_title, source_title, source_artist, source='spotify'):
+    """Persist a Find & Add selection two ways. No-op when source_track_id is
+    missing (e.g. add to a non-mirrored playlist).
+
+    1. ``sync_match_cache`` override — fast auto-match on the next sync, but
+       wiped on every library rescan.
+    2. A DURABLE manual library match (#787) — survives a rescan, so the
+       source→library pairing sticks in the sync display AND the download loop
+       stops re-fetching it. This is the unification the issue asked for:
+       Find & Add now also records a manual library match (one-way; the manual
+       match tool has no playlist to act on, so it doesn't reverse-create)."""
     if not source_track_id:
         return
+    db = get_database()
     try:
         from core.sync.match_overrides import record_manual_match
         ok = record_manual_match(
-            get_database(),
+            db,
             source_track_id=source_track_id,
             server_source=server_source,
             server_track_id=server_track_id,
-            server_track_title=server_track_title,
             source_title=source_title,
             source_artist=source_artist,
+            server_track_title=server_track_title,
         )
         if ok:
             logger.info(f"[ServerPlaylist] Persisted Find & Add override: {source_track_id} → {server_track_id} ({server_source})")
     except Exception as e:
         logger.warning(f"[ServerPlaylist] Failed to persist Find & Add override: {e}")
+
+    # Durable manual library match — survives a rescan (the override above does not).
+    try:
+        from core.library import manual_library_match as _mlm
+        file_path = ''
+        try:
+            _rows = db.api_get_tracks_by_ids([server_track_id])
+            if _rows:
+                file_path = _rows[0].get('file_path', '') or ''
+        except Exception as _fp_err:
+            logger.debug(f"[ServerPlaylist] file_path lookup for manual match failed: {_fp_err}")
+        _mlm.save_match(
+            db, get_current_profile_id(), (source or 'spotify'), str(source_track_id), str(server_track_id),
+            source_title=source_title, source_artist=source_artist,
+            server_source=server_source, library_file_path=file_path,
+        )
+        logger.info(f"[ServerPlaylist] Recorded durable manual library match: {source_track_id} → {server_track_id}")
+    except Exception as e:
+        logger.warning(f"[ServerPlaylist] Failed to record durable manual match: {e}")
 
 
 @app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
@@ -18391,6 +18524,9 @@ def server_playlist_add_track(playlist_id):
         source_title = data.get('source_title') or ''
         source_artist = data.get('source_artist') or ''
         server_track_title = data.get('server_track_title') or ''
+        # Provider of the source track (spotify/deezer/...) for the durable
+        # manual match. Retrieval is source-agnostic, so this is metadata.
+        source_provider = data.get('source') or 'spotify'
 
         if not track_id:
             return jsonify({"success": False, "error": "track_id required"}), 400
@@ -18431,7 +18567,7 @@ def server_playlist_add_track(playlist_id):
                 except Exception:
                     _existing = set()
                 if str(track_id) in _existing:
-                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+                    _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
                     return jsonify({"success": True, "message": "Track linked"})
 
             logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
@@ -18455,7 +18591,7 @@ def server_playlist_add_track(playlist_id):
 
             new_id = str(raw_playlist.ratingKey)
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
@@ -18468,7 +18604,7 @@ def server_playlist_add_track(playlist_id):
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
                 media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -18481,7 +18617,7 @@ def server_playlist_add_track(playlist_id):
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
                 media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
-            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist)
+            _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
@@ -18685,8 +18821,12 @@ def mlm_save():
         db = get_database()
         profile_id = get_current_profile_id()
         # Validate library track exists before saving
-        if not db.api_get_tracks_by_ids([library_track_id]):
+        _lib_rows = db.api_get_tracks_by_ids([library_track_id])
+        if not _lib_rows:
             return jsonify({"success": False, "error": "Library track not found — it may have been removed"}), 400
+        # Store the file path so this match re-resolves after a rescan re-keys
+        # the track (#787) — same durability the Find & Add path gets.
+        _lib_file_path = (_lib_rows[0].get('file_path') or '') if _lib_rows else ''
         ok = mlm.save_match(
             db, profile_id, source, source_track_id, library_track_id,
             source_title=data.get('source_title', ''),
@@ -18694,6 +18834,7 @@ def mlm_save():
             source_album=data.get('source_album', ''),
             source_context_json=data.get('source_context_json', ''),
             server_source=data.get('server_source', ''),
+            library_file_path=_lib_file_path,
         )
         if not ok:
             return jsonify({"success": False, "error": "Failed to save match"}), 500
@@ -18739,6 +18880,10 @@ def start_missing_tracks_process(playlist_id):
     is_album_download = data.get('is_album_download', False)
     album_context = data.get('album_context', None)
     artist_context = data.get('artist_context', None)
+    # Issue #797 — per-request "Skip AcoustID verification" toggle from the
+    # album-download modal. Stored on the batch and propagated per-track by
+    # the master worker so AcoustID never quarantines this request's files.
+    skip_acoustid = bool(data.get('skip_acoustid', False))
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
@@ -18806,6 +18951,7 @@ def start_missing_tracks_process(playlist_id):
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,
+            'skip_acoustid': skip_acoustid,  # #797 per-request AcoustID bypass
             'batch_source': _downloads_history.detect_sync_source(playlist_id),
         }
 
@@ -21159,10 +21305,17 @@ def _get_source_playlist_states(states, error_label, info_log_label=None):
 def _submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_image_url):
     """Submit a sync to the shared executor (closes over sync_executor /
     _run_sync_task / get_current_profile_id so the lifted start_sync helper
-    stays free of those globals)."""
+    stays free of those globals).
+
+    Used by ALL per-source discovery syncs (Spotify-Public/Tidal/Deezer/Qobuz/
+    YouTube/iTunes-link/ListenBrainz/Beatport). These have no per-request mode
+    selector, so honor the configured default (Settings > Playlist sync mode) —
+    otherwise they always ran 'replace' regardless of the setting (#792)."""
+    from core.sync.playlist_edit import normalize_sync_mode
+    _mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
     return sync_executor.submit(
         _run_sync_task, sync_playlist_id, playlist_name, spotify_tracks,
-        None, get_current_profile_id(), playlist_image_url,
+        None, get_current_profile_id(), playlist_image_url, _mode,
     )
 
 
@@ -23260,6 +23413,12 @@ def update_youtube_discovery_match():
                             'confidence': 1.0,
                             'matched_data': matched_data,
                             'manual_match': True,
+                            # extra_data is MERGED on save, so explicitly clear
+                            # any stale stub/removal flags from before this fix —
+                            # otherwise a leftover wing_it_fallback would make the
+                            # pipeline re-discover and revert this manual pick.
+                            'wing_it_fallback': False,
+                            'unmatched_by_user': False,
                         }
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                         result['matched_data'] = matched_data
@@ -23652,9 +23811,11 @@ def start_playlist_sync():
     # playlist — only adds tracks that aren't there yet. Per-server clients
     # implement append via native add APIs (Plex addItems, Jellyfin POST
     # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
-    sync_mode = data.get('sync_mode', 'replace')
-    if sync_mode not in ('replace', 'append'):
-        sync_mode = 'replace'
+    # Per-request sync_mode wins; otherwise use the configured default
+    # (Settings > Playlist sync mode). Default 'replace' keeps today's behavior.
+    from core.sync.playlist_edit import normalize_sync_mode
+    sync_mode = normalize_sync_mode(data.get('sync_mode'),
+                                    config_manager.get('playlist_sync.mode', 'replace'))
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
@@ -34450,6 +34611,26 @@ def import_staging_suggestions():
 # WEBSOCKET (SOCKET.IO) EVENT HANDLERS AND BACKGROUND EMITTERS
 # ================================================================================================
 
+def _spotify_status_with_availability(spotify_status):
+    """Augment the spotify status dict with the Spotify-Free availability flags
+    the UI needs: ``metadata_available`` (search picker) and ``free_installed``
+    (Settings source selector — 'Spotify Free' is selectable when the package is
+    installed, since selecting it is the opt-in). Used by BOTH the /status
+    endpoint and the WebSocket status push so they never drift."""
+    out = dict(spotify_status or {})
+    try:
+        out['metadata_available'] = bool(
+            spotify_client and spotify_client.is_spotify_metadata_available())
+    except Exception:
+        out['metadata_available'] = bool(out.get('authenticated'))
+    try:
+        from core.spotify_free_metadata import spotify_free_installed
+        out['free_installed'] = spotify_free_installed()
+    except Exception:
+        out['free_installed'] = False
+    return out
+
+
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
     download_mode = config_manager.get('download_source.mode', 'hybrid')
@@ -34469,7 +34650,7 @@ def _build_status_payload():
 
     return {
         'metadata_source': metadata_status['metadata_source'],
-        'spotify': metadata_status['spotify'],
+        'spotify': _spotify_status_with_availability(metadata_status['spotify']),
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
@@ -34714,12 +34895,24 @@ from core.enrichment.services import (
 
 
 def _spotify_resume_pre_check():
-    """Mirror the inline Spotify rate-limit guard from the legacy
-    ``/api/spotify-enrichment/resume`` route. Returns
-    ``(429, message)`` to short-circuit when banned, ``None`` when ok."""
+    """Guard the Spotify enrichment worker's resume button against a rate-limit
+    ban. Returns ``(429, message)`` to short-circuit when banned, ``None`` ok.
+
+    Mirrors the worker's own loop: if the opt-in Spotify-Free fallback can
+    serve enrichment, allow resume and let the worker bridge via the no-creds
+    source during the ban. Block only when rate-limited AND nothing can serve
+    (plain auth, no free) — where resuming would just sleep.
+    """
     try:
         if _spotify_rate_limited():
-            return (429, 'Cannot resume while Spotify is rate limited')
+            from core.spotify_free_metadata import should_block_rate_limited_resume
+            try:
+                metadata_available = bool(spotify_client.is_spotify_metadata_available())
+            except Exception as e:
+                logger.debug("spotify free-availability check failed: %s", e)
+                metadata_available = False
+            if should_block_rate_limited_resume(True, metadata_available):
+                return (429, 'Cannot resume while Spotify is rate limited')
     except Exception as e:
         logger.debug("spotify rate-limit pre-check failed: %s", e)
     return None
@@ -34961,12 +35154,6 @@ def _emit_tool_progress_loop():
                 socketio.emit('tool:duplicate-cleaner', state_copy)
         except Exception as e:
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
-        # Retag
-        try:
-            with retag_lock:
-                socketio.emit('tool:retag', dict(retag_state))
-        except Exception as e:
-            logger.debug(f"Error emitting retag status: {e}")
         # DB Update
         try:
             with db_update_lock:

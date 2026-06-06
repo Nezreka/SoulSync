@@ -65,7 +65,9 @@ class SearchDeps:
 def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
     """Return (client, is_available) for an explicit metadata source request."""
     if source_name == 'spotify':
-        if deps.spotify_client and deps.spotify_client.is_spotify_authenticated():
+        # Available when real auth OR the no-creds SpotipyFree fallback can serve
+        # (the client routes to free internally when auth is missing/limited).
+        if deps.spotify_client and deps.spotify_client.is_spotify_metadata_available():
             return deps.spotify_client, True
         return None, False
     if source_name == 'itunes':

@@ -271,6 +271,79 @@ function initializeSearchModeToggle() {
         });
     }
 
+    // ── Link / ID lookup (#775) ──────────────────────────────────────
+    // Paste a provider link or bare ID; the backend resolves it directly
+    // on the owning source (no fuzzy search) and returns the single hit
+    // plus that source. We adopt the resolved source as the active one so
+    // the existing album re-fetch + download/import flow routes correctly,
+    // then render through the same dropdown path as a normal search.
+    const idInput = document.getElementById('enh-id-input');
+    const idBtn = document.getElementById('enh-id-btn');
+
+    async function submitIdLookup() {
+        if (!idInput) return;
+        const raw = idInput.value.trim();
+        if (!raw) return;
+
+        // Show the controller's loading UI while resolving.
+        if (loadingState) {
+            loadingState.classList.remove('hidden');
+            const loadingText = document.getElementById('enhanced-loading-text');
+            if (loadingText) loadingText.textContent = 'Resolving link…';
+        }
+        if (emptyState) emptyState.classList.add('hidden');
+        if (resultsContainer) resultsContainer.classList.add('hidden');
+        showDropdown();
+
+        let data;
+        try {
+            const resp = await fetch('/api/enhanced-search/by-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: raw }),
+            });
+            data = await resp.json();
+        } catch (err) {
+            console.error('Link/ID lookup failed:', err);
+            if (loadingState) loadingState.classList.add('hidden');
+            if (typeof showToast === 'function') showToast('Link/ID lookup failed.', 'error');
+            return;
+        }
+
+        if (data && data.available && data.source) {
+            // Adopt the resolving source as active, seed its cache with the
+            // single hit, and render via the shared state-driven path.
+            searchController.state.activeSource = data.source;
+            searchController.state.query = raw;
+            searchController.state.sources[data.source] = {
+                db_artists: [],
+                artists: data.artists || [],
+                albums: data.albums || [],
+                tracks: data.tracks || [],
+            };
+            if (typeof searchController.renderSourceRow === 'function') {
+                searchController.renderSourceRow();
+            }
+            _renderFromState(searchController.state);
+        } else {
+            // Not a link, or nothing resolved — surface the backend's hint
+            // via a toast (non-destructive) and show the empty state.
+            if (loadingState) loadingState.classList.add('hidden');
+            if (resultsContainer) resultsContainer.classList.add('hidden');
+            if (emptyState) emptyState.classList.remove('hidden');
+            showDropdown();
+            const msg = (data && data.message) || 'No match for that link.';
+            if (typeof showToast === 'function') showToast(msg, 'warning');
+        }
+    }
+
+    if (idBtn) idBtn.addEventListener('click', submitIdLookup);
+    if (idInput) {
+        idInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitIdLookup();
+        });
+    }
+
     // Close button inside dropdown (mobile)
     const dropdownCloseBtn = document.getElementById('enhanced-dropdown-close');
     if (dropdownCloseBtn) {
