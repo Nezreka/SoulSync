@@ -55,6 +55,16 @@
     let inflows = [];            // pulses traveling from active orbs into the hub
     let ripples = [];            // impact rings where a pulse lands on the nucleus
     const MAX_RIPPLES = 24;
+
+    // ── Sleep/wake ──
+    // With zero workers active (and no pulses in flight) for SLEEP_AFTER_MS,
+    // the system drowses: nucleus dims to embers, spokes fade, drift slows to
+    // a crawl. First sign of work snaps it awake (~0.3s) with a ripple bloom
+    // from the nucleus. The idle/busy contrast is what makes activity read.
+    const SLEEP_AFTER_MS = 75000;
+    let sleepLevel = 0;          // 0 awake .. 1 asleep (eased, never snaps)
+    let lastActivityAt = performance.now();
+    let wakeBurstDone = true;
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
@@ -345,6 +355,7 @@
 
     function drawRipples(ctx) {
         for (const rp of ripples) {
+            if (rp.age < 0) continue;              // staggered (wake bloom)
             const t = rp.age / rp.life;            // 0 → 1
             const [r, g, b] = rp.color;
             ctx.beginPath();
@@ -578,6 +589,28 @@
         const visibleOrbs = orbs.filter(o => o.visible);
         const hub = visibleOrbs.find(o => o.hub);
 
+        // Sleep/wake bookkeeping (see declarations for the design).
+        if (visibleOrbs.some(o => !o.hub && o.active) || inflows.length) {
+            lastActivityAt = performance.now();
+        }
+        if (performance.now() - lastActivityAt > SLEEP_AFTER_MS) {
+            sleepLevel = Math.min(1, sleepLevel + 0.004);   // ~4s drowse-in
+            wakeBurstDone = false;
+        } else {
+            if (!wakeBurstDone && sleepLevel > 0.4 && hub) {
+                // Wake bloom: three staggered rings out of the nucleus.
+                for (let i = 0; i < 3 && ripples.length < MAX_RIPPLES; i++) {
+                    ripples.push({
+                        x: hub.x, y: hub.y,
+                        color: hub.rainbow ? getRainbowColor(time) : hub.color,
+                        age: -i * 6, life: 30,
+                    });
+                }
+            }
+            wakeBurstDone = true;
+            sleepLevel = Math.max(0, sleepLevel - 0.05);    // fast wake (~0.3s)
+        }
+
         if (state === 'orbs' || state === 'collapsing') {
             updatePhysics(visibleOrbs, w, h);
         } else if (state === 'expanding') {
@@ -703,9 +736,11 @@
                 }
             }
 
-            // Move
-            orb.x += orb.vx;
-            orb.y += orb.vy;
+            // Move — asleep, the drift slows to a crawl (velocities keep
+            // integrating so motion stays continuous through wake)
+            const drowse = 1 - sleepLevel * 0.75;
+            orb.x += orb.vx * drowse;
+            orb.y += orb.vy * drowse;
 
             // Boundary bounce
             if (orb.x < ORB_RADIUS) { orb.x = ORB_RADIUS; orb.vx *= -0.7; }
@@ -756,8 +791,9 @@
         for (const orb of ordered) {
             const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
             // -1 (back): ~18% smaller, dimmer. +1 (front): ~18% larger, full.
+            // Sleep folds in as a further global dim (embers, not blackout).
             const dScale = 1 + orb.z * 0.18;
-            const dAlpha = 0.78 + 0.22 * ((orb.z + 1) / 2);
+            const dAlpha = (0.78 + 0.22 * ((orb.z + 1) / 2)) * (1 - sleepLevel * 0.45);
 
             // ── The hub: an energy-reactive nucleus ──
             // Calm + dim when nothing's running; bigger, brighter and faster
@@ -780,9 +816,12 @@
                 const hg = Math.round(g + (60 - g) * tint);
                 const hb = Math.round(b + (60 - b) * tint);
 
-                // Wide ambient glow — steady, only gently lifting with energy
+                // Wide ambient glow — steady, only gently lifting with energy.
+                // Asleep, the nucleus dims to embers.
+                const ember = 1 - sleepLevel * 0.55;
                 const glowR = hubR * (4 + energy * 1.5);
-                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.16 + energy * 0.16 + slow * 0.04 + stress * 0.08);
+                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb,
+                    (0.16 + energy * 0.16 + slow * 0.04 + stress * 0.08) * ember);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -793,7 +832,7 @@
                     const dw = natW * fit;
                     const dh = natH * fit;
                     ctx.save();
-                    ctx.globalAlpha = Math.min(1, 0.9 + energy * 0.1 + slow * 0.03);
+                    ctx.globalAlpha = Math.min(1, 0.9 + energy * 0.1 + slow * 0.03) * (1 - sleepLevel * 0.35);
                     ctx.drawImage(hubImage, orb.x - dw / 2, orb.y - dh / 2, dw, dh);
                     ctx.restore();
                 } else {
@@ -909,9 +948,9 @@
                 const dx = hub.x - orb.x;
                 const dy = hub.y - orb.y;
                 const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                // Gentle traveling pulse along each spoke
+                // Gentle traveling pulse along each spoke (fades while asleep)
                 const flow = 0.5 + 0.5 * Math.sin(time * 2 - dist * 0.05);
-                const alpha = 0.10 + flow * 0.10 + (orb.active ? 0.06 : 0);
+                const alpha = (0.10 + flow * 0.10 + (orb.active ? 0.06 : 0)) * (1 - sleepLevel * 0.7);
                 ctx.beginPath();
                 ctx.moveTo(hub.x, hub.y);
                 ctx.lineTo(orb.x, orb.y);
@@ -934,7 +973,7 @@
                     const activePair = a.active && b.active;
                     const anyActive = a.active || b.active;
                     const baseAlpha = activePair ? 0.3 : (anyActive ? 0.2 : 0.15);
-                    const alpha = (1 - dist / CONNECTION_DIST) * baseAlpha;
+                    const alpha = (1 - dist / CONNECTION_DIST) * baseAlpha * (1 - sleepLevel * 0.7);
 
                     const [r1, g1, b1] = a.rainbow ? getRainbowColor(time) : a.color;
                     const [r2, g2, b2] = b.rainbow ? getRainbowColor(time) : b.color;
