@@ -567,6 +567,10 @@
         if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
+        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
+        // difference is invisible, and the canvas GPU cost drops by two thirds
+        // for the hours the dashboard sits idle. Wakes re-run every frame.
+        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
