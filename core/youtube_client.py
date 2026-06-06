@@ -93,6 +93,29 @@ class YouTubeSearchResult:
 
 from core.download_plugins.base import DownloadSourcePlugin
 
+_JS_RUNTIME_WARNED = False
+
+
+def _warn_if_no_js_runtime():
+    """One-time startup check: YouTube gates downloadable formats behind JS
+    challenges (nsig), and yt-dlp needs a JavaScript runtime (Deno, its only
+    default-enabled one) to solve them. Without it every stream / music-video
+    download dies with the cryptic "Requested format is not available" — say
+    so plainly in the log instead. Docker images bundle Deno; bare-metal
+    installs need it on PATH."""
+    global _JS_RUNTIME_WARNED
+    if _JS_RUNTIME_WARNED:
+        return
+    _JS_RUNTIME_WARNED = True
+    import shutil as _sh
+    if not _sh.which('deno'):
+        logger.warning(
+            "No JavaScript runtime found (deno not on PATH). YouTube streaming and "
+            "music-video downloads will fail with 'Requested format is not available'. "
+            "Install Deno (https://docs.deno.com/runtime/) and restart SoulSync. "
+            "Windows: winget install DenoLand.Deno"
+        )
+
 
 class YouTubeClient(DownloadSourcePlugin):
     """
@@ -110,6 +133,7 @@ class YouTubeClient(DownloadSourcePlugin):
         self.download_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"YouTube client using download path: {self.download_path}")
+        _warn_if_no_js_runtime()
 
         # Callback for shutdown check (avoids circular imports)
         self.shutdown_check = None

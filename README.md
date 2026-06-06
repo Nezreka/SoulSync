@@ -317,6 +317,11 @@ cd ..
 
 If `webui/static/dist/.vite/manifest.json` is missing or stale, React-owned routes and route handoffs may not load correctly.
 
+**YouTube streaming / music videos** need two extra things on bare-metal installs (Docker bundles both):
+
+- **Deno** — yt-dlp now requires a JavaScript runtime to unlock YouTube formats. Without it, streams and music-video downloads fail with `Requested format is not available`. Install: `winget install DenoLand.Deno` (Windows) or see [deno.com](https://docs.deno.com/runtime/), then restart SoulSync.
+- **yt-dlp nightly** — the stable release can lag months behind YouTube changes. If YouTube breaks, update with: `python -m pip install -U --pre "yt-dlp[default]"`
+
 ### Local Development
 
 This is only for contributors working on the WebUI with hot reload. Normal Python/no-Docker installs should build once with `npm run build` as shown above, then run only Gunicorn.
@@ -355,6 +360,7 @@ on any OS. `./dev.sh` remains available as a Unix shell wrapper.
 - **slskd** running and accessible ([Download](https://github.com/slskd/slskd/releases)) — required for Soulseek downloads
 - **Spotify API** credentials ([Dashboard](https://developer.spotify.com/dashboard)) — optional but recommended for discovery
 - **Media Server** (optional): Plex, Jellyfin, or Navidrome
+- **Deno** (Python/no-Docker installs only): JavaScript runtime required by yt-dlp for YouTube streaming/music videos — `winget install DenoLand.Deno` or [deno.com](https://docs.deno.com/runtime/). Docker images bundle it.
 - **Deezer ARL token** (optional): For Deezer downloads — get from browser cookies after logging into deezer.com
 - **Tidal account** (optional): For Tidal downloads — authenticate via device flow in Settings
 - **Qobuz account** (optional): For Qobuz downloads — email/password login in Settings
