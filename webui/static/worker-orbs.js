@@ -103,6 +103,12 @@
                 homeX: 0, homeY: 0,
                 visible: true,
                 phase: Math.random() * Math.PI * 2,
+                // Pseudo-3D orbital depth: z oscillates -1 (behind the nucleus,
+                // smaller + dimmer) to +1 (in front, larger + brighter). Pure
+                // draw-time effect — the force physics stay 2D.
+                z: 0,
+                zPhase: Math.random() * Math.PI * 2,
+                zSpeed: 0.22 + Math.random() * 0.18,
                 active: false,
                 statusSeen: false,    // has a real WS status arrived for this worker?
                 lastProcessed: 0,     // cumulative matched+not_found seen last update
@@ -662,8 +668,23 @@
     // ── Drawing ──
 
     function drawOrbs(ctx, visible, time) {
+        // ── Depth pass ──
+        // Each worker orb drifts on a slow z-oscillation; the hub sits at z=0.
+        // Painter's order (back → front) makes orbs visibly pass BEHIND the
+        // nucleus and swing back in front — the flat drift reads as an atom.
+        // The effect eases out during the hover-expand morph so orbs land on
+        // their buttons at natural size.
+        const depthFade = state === 'expanding' ? (1 - expandProgress) : 1;
         for (const orb of visible) {
+            orb.z = orb.hub ? 0 : Math.sin(time * orb.zSpeed + orb.zPhase) * depthFade;
+        }
+        const ordered = [...visible].sort((a, b) => a.z - b.z);
+
+        for (const orb of ordered) {
             const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
+            // -1 (back): ~18% smaller, dimmer. +1 (front): ~18% larger, full.
+            const dScale = 1 + orb.z * 0.18;
+            const dAlpha = 0.78 + 0.22 * ((orb.z + 1) / 2);
 
             // ── The hub: an energy-reactive nucleus ──
             // Calm + dim when nothing's running; bigger, brighter and faster
@@ -749,25 +770,25 @@
                 baseRadius += 2 * Math.sin(time * 3 + orb.phase);
             }
 
-            // Scale up during expand transition
-            const currentRadius = state === 'expanding'
+            // Scale up during expand transition; depth scales the whole orb
+            const currentRadius = (state === 'expanding'
                 ? baseRadius + expandProgress * 4
-                : baseRadius;
+                : baseRadius) * dScale;
 
             // Inactive orbs are dimmer
             const activeMult = orb.active ? 1.0 : 0.45;
 
             // Outer glow — much larger and brighter for active
             const glowRadius = orb.active ? currentRadius * 5 : currentRadius * 3;
-            const glowAlpha = orb.active
+            const glowAlpha = (orb.active
                 ? (0.25 + pulse * 0.2) * activeMult
-                : (0.06 + pulse * 0.03) * activeMult;
+                : (0.06 + pulse * 0.03) * activeMult) * dAlpha;
             drawGlow(ctx, orb.x, orb.y, glowRadius, r, g, b, glowAlpha);
 
             // Core
-            const coreAlpha = orb.active
+            const coreAlpha = (orb.active
                 ? 0.85 + pulse * 0.15
-                : (0.3 + pulse * 0.08) * activeMult;
+                : (0.3 + pulse * 0.08) * activeMult) * dAlpha;
             ctx.beginPath();
             ctx.arc(orb.x, orb.y, Math.max(1, currentRadius), 0, Math.PI * 2);
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${coreAlpha})`;
