@@ -121,6 +121,7 @@
                 z: 0,
                 zPhase: Math.random() * Math.PI * 2,
                 zSpeed: 0.22 + Math.random() * 0.18,
+                kick: 0,              // excitement-kick energy (decays)
                 active: false,
                 statusSeen: false,    // has a real WS status arrived for this worker?
                 lastProcessed: 0,     // cumulative matched+not_found seen last update
@@ -582,7 +583,20 @@
         if (frameCount % 30 === 0) {
             orbs.forEach(orb => {
                 orb.visible = orb.el.offsetParent !== null;
-                orb.active = orb.btn ? orb.btn.classList.contains('active') : false;
+                const nowActive = orb.btn ? orb.btn.classList.contains('active') : false;
+                if (nowActive && !orb.active && !orb.hub) {
+                    // Excitement kick: a freshly-woken worker jolts into motion
+                    // (brief overspeed + size wobble + a few sparks) instead of
+                    // just getting brighter. Decays in physics/draw.
+                    const ang = Math.random() * Math.PI * 2;
+                    orb.vx += Math.cos(ang) * 1.6;
+                    orb.vy += Math.sin(ang) * 1.6;
+                    orb.kick = 1.0;
+                    for (let i = 0; i < 3; i++) {
+                        emitSpark(orb, orb.rainbow ? getRainbowColor(time) : null);
+                    }
+                }
+                orb.active = nowActive;
             });
         }
 
@@ -714,8 +728,10 @@
             orb.vx *= 0.993;
             orb.vy *= 0.993;
 
-            // Speed cap — active orbs move a bit faster
-            const maxSpeed = orb.active ? 0.8 : 0.5;
+            // Speed cap — active orbs move a bit faster; an excitement kick
+            // briefly lifts the cap so the jolt actually darts, then decays.
+            orb.kick = (orb.kick || 0) * 0.94;
+            const maxSpeed = (orb.active ? 0.8 : 0.5) * (1 + orb.kick * 2);
             const speed = Math.sqrt(orb.vx * orb.vx + orb.vy * orb.vy);
             if (speed > maxSpeed) {
                 const scale = maxSpeed / speed;
@@ -880,6 +896,10 @@
             let baseRadius = orb.active ? ORB_RADIUS + 3 : ORB_RADIUS;
             if (orb.active) {
                 baseRadius += 2 * Math.sin(time * 3 + orb.phase);
+            }
+            // Excitement-kick wobble: fast, shallow, gone in under a second
+            if (orb.kick > 0.02) {
+                baseRadius += orb.kick * 2.5 * Math.sin(time * 14 + orb.phase);
             }
 
             // Scale up during expand transition; depth scales the whole orb
