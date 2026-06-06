@@ -3413,6 +3413,27 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.6.7': [
+        { date: 'June 5, 2026 — 2.6.7 release' },
+        { title: 'Spotify Free — Spotify metadata with no credentials, and a rate-limit bridge (#798)', desc: 'a new "Spotify Free (no credentials)" metadata source. Pick it in Settings → Metadata to get Spotify search + enrichment without connecting a Spotify account (it uses the public web-player data via the optional spotapi package). It also works as a rate-limit bridge for connected users: if your real Spotify auth gets rate-limited, enrichment automatically falls through to the free source instead of stalling, then returns to your real auth once the ban lifts. The worker can be resumed mid-ban, the dashboard now shows "Running (Spotify Free)" instead of looking stuck, and the daily-API budget no longer blocks free work (it only ever capped real-API calls). Opt-in — nothing changes unless you select it.', page: 'settings' },
+        { title: 'Import IDs from File Tags — recover the provider IDs already in your files', desc: 'a new "Import IDs from File Tags" tool (Tools → Database & Scanning) reads the Spotify / iTunes / MusicBrainz / Deezer / Tidal / AudioDB / Genius / Last.fm IDs that SoulSync (or MusicBrainz Picard) already embedded in your files and fills them into the database. The media-server API never exposes these IDs, so the only way to get them is from the files themselves — and once they\'re in the DB, the enrichment workers skip every entity that already has an ID, saving a large amount of API traffic on an already-tagged library. Gap-fill only: it never overwrites an existing match, and it\'s atomically guarded so it can\'t clobber a match a worker makes at the same moment. New tracks also get this automatically as the final phase of every library scan, so it stays current without re-running the tool.', page: 'dashboard' },
+        { title: 'Library Re-tag — rewrite your library\'s tags from the source, safely', desc: 'a proper Library Re-tag job replaces the old Retag tool. It matches each file to its source tracklist and rewrites the tags — title, artist, album, track / disc numbers, cover art, and the embedded source IDs — and shows you a per-track old→new diff before anything is written. Standard dry-run pattern (you see exactly what would change and opt in to apply), Light / Full depth settings, and it pulls cover art + metadata from your configured source order.', page: 'dashboard' },
+        { title: 'Paste a metadata link to open an artist, album, or track (#775)', desc: 'the Search page now accepts a pasted metadata link. Paste a Spotify / iTunes / Deezer / etc. artist, album, or track URL and SoulSync resolves it and opens that exact item instead of running a name search — handy when a name search is ambiguous or you already have the link. Bare IDs are rejected as ambiguous (a link carries the entity type), and a clear not-found hint shows when nothing resolves.', page: 'search' },
+        { title: 'Mobile: a full responsive pass across the app (#793, #795)', desc: 'a comprehensive small-screen pass. The artist-detail page, enhanced track table, music player and Now Playing modal, sync buttons, discover carousels, the downloads page, the notification panel, and the mini-player all lay out cleanly on phones now, plus scroll-render and password-manager-extension compatibility improvements.' },
+        { title: 'Playlist sync: new "Reconcile" mode that edits in place (#792)', desc: 'playlist sync gains a "Reconcile" mode alongside Replace and Append. Replace deletes and recreates the server playlist every sync (which wipes its custom image / description); Reconcile updates the same playlist in place — adds new tracks, removes ones no longer in the source — so your custom image and description survive. Choose it per playlist in the sync-mode setting.', page: 'sync' },
+        { title: 'Manual album match now locks the edition it\'s pinned to (#758)', desc: 'manually matching an album now pins AND locks that exact edition. Previously the auto canonical resolver could drag a manually-matched regular edition back to the deluxe on the next cycle — reporting missing songs or renumbering tracks. The manual choice is now the authority every downstream tool reads (track-number repair, reorganize, missing-tracks), and the auto resolver won\'t override it. A new manual match still wins if you change your mind.', page: 'library' },
+        { title: 'Write Tags won\'t overwrite a correct file with placeholder data (#800)', desc: 'Write Tags will no longer stamp a correctly-tagged file with placeholder database values like "Various Artists" or "[Unknown Album]". If your file already holds a real value and the database only has a placeholder, the file\'s value is preserved instead of being destroyed. A legitimate value (including a genuine compilation\'s "Various Artists") still writes normally.', page: 'library' },
+        { title: 'AcoustID stops quarantining correct downloads of non-English artists (#797)', desc: 'AcoustID verification no longer false-quarantines correct downloads from non-English artists. When the fingerprint database returns the artist/title in its original script (e.g. Japanese kanji for Joe Hisaishi) and your metadata is romanized, the title can\'t match across scripts — so a correct file used to get quarantined. When the artist is confirmed across scripts via MusicBrainz aliases, the file is now kept instead of quarantined. A per-request "Skip AcoustID verification" toggle was also added to the download flow.', page: 'downloads' },
+        { title: 'Fix: wrong artist on the artist-detail page when a source ID was duplicated', desc: 'fixed a class of bugs where the artist-detail page could show the wrong artist, and where one enrichment worker could stamp a single source ID onto several different artists. Artist matching is tightened (a 0.85 confidence gate + a shared uniqueness guard), a one-time startup repair de-duplicates any source IDs shared across multiple artists, and the library view is kept when a source ID is ambiguous instead of jumping to the wrong artist.', page: 'library' },
+        { title: 'Fix: manual playlist fixes reverted on the next mirrored-sync run (#799)', desc: 'a manual fix on a mirrored playlist no longer reverts to "Wing It" on the next discovery / sync run — the manual match is checked first and its flag is cleared correctly. Also stopped the wide "Server Playlists" sync tab from stretching full-width.', page: 'sync' },
+        { title: 'Find & Add: manual matches now survive a library rescan (#787)', desc: 'a match made via Find & Add (and via the manual-match tool) now records a durable manual match plus the file path, so it survives a library rescan instead of being lost and re-flagged.' },
+        { title: 'Fix: streamed tracks played with no sound', desc: 'fixed streamed tracks occasionally playing silently — the browser\'s Web Audio context could be left suspended. It\'s now resumed on the play event across every play path.', page: 'dashboard' },
+        { title: 'Navidrome: respect the selected music library + survive renames (#789)', desc: 'Navidrome now respects the music library you selected (it previously ignored the selection and imported all libraries), and pins that selection by id rather than name so it survives a library rename.', page: 'settings' },
+        { title: 'Fix: file / CSV playlists failed to match raw "Artist - Title" titles (#785)', desc: 'file and CSV playlists whose rows are raw "Artist - Title" strings now match correctly — the discovery worker also searches the canonical title form.', page: 'sync' },
+        { title: 'Fix: torrent client URL without http:// failed to connect (#790)', desc: 'a torrent client URL entered without an http:// or https:// scheme now connects instead of failing the connection probe.', page: 'settings' },
+        { title: 'Fix: Soulseek album bundle left completed files in the slskd folder (#796)', desc: 'Soulseek album-bundle downloads no longer leave their completed copies behind in the slskd download folder after the bundle finishes.', page: 'downloads' },
+        { title: 'Cover Art Filler + Library Re-tag honor your configured cover-art sources', desc: 'both the Cover Art Filler and the new Library Re-tag job now pull artwork from your configured cover-art source order instead of a fixed path, so the cover you get matches your source preferences.', page: 'dashboard' },
+    ],
     '2.6.6': [
         { date: 'June 3, 2026 — 2.6.6 release' },
         { title: 'Fix: qBittorrent 5.2.0+ would not connect (HTTP 204 login)', desc: 'qBittorrent 5.2.0 changed its /api/v2/auth/login endpoint to answer a successful login with HTTP 204 (No Content) instead of the old HTTP 200 + "Ok." body. SoulSync required the literal "Ok." response, so on 5.2.0+ every login failed with "HTTP 204 body=" — the connection probe and all torrent actions were dead even though qBittorrent itself logged a successful login. Login is now accepted on the SID auth cookie and/or a success response (the old "Ok." or the new empty 204), while bad credentials (which qBittorrent reports as HTTP 200 + "Fails.") are still rejected. Covers 5.2.0 / 5.2.1; no more whitelist-bypass workaround needed.', page: 'settings' },
@@ -3572,6 +3593,63 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Spotify Free — metadata with no credentials (#798)",
+        description: "a new \"Spotify Free\" metadata source that uses Spotify's public web-player data, so you can get Spotify search + enrichment without connecting an account. For connected users it also bridges rate-limit bans automatically — when your real auth is rate-limited, enrichment keeps running through the free source instead of stalling, then returns to your real auth once the ban lifts.",
+        features: [
+            "pick \"Spotify Free (no credentials)\" in Settings → Metadata to use it without a Spotify account",
+            "automatic rate-limit bridge for connected users — no more enrichment stalling out during a ban",
+            "the worker resumes mid-ban, the dashboard shows \"Running (Spotify Free)\" instead of looking stuck",
+            "the daily-API budget no longer blocks free work — it only ever capped real-API calls",
+            "opt-in; requires the optional spotapi package",
+        ],
+        usage_note: "Settings → Metadata → Spotify Free",
+    },
+    {
+        title: "Import IDs from File Tags",
+        description: "your files often already carry the Spotify / MusicBrainz / iTunes / Deezer IDs that SoulSync (or MusicBrainz Picard) embedded when they were tagged — but the media-server scan can't see them. This tool reads them straight from the files into the database, so the enrichment workers can skip those lookups entirely. On an already-tagged library that's a large amount of saved API traffic.",
+        features: [
+            "reads embedded Spotify / iTunes / MusicBrainz / Deezer / Tidal / AudioDB / Genius / Last.fm IDs into the DB",
+            "gap-fill only — never overwrites an existing match, and atomically guarded against races",
+            "new tracks also get it automatically as the final phase of every library scan",
+            "enrichment workers skip any entity that already has an ID, so this directly cuts API calls",
+        ],
+        usage_note: "Tools → Database & Scanning → Import IDs from File Tags",
+    },
+    {
+        title: "Library Re-tag",
+        description: "a proper Library Re-tag job (replacing the old Retag tool): it matches each file to its source tracklist and rewrites the tags — title, artist, album, track / disc numbers, cover art, and the embedded source IDs — and shows a per-track old→new diff so you can review before anything is written.",
+        features: [
+            "per-track old→new diff in the finding card before you apply",
+            "standard dry-run pattern — see what would change, then opt in to apply",
+            "Light / Full depth settings; cover art + metadata pulled from your configured source order",
+            "writes the embedded source IDs too, so re-tagged files survive future scans",
+        ],
+        usage_note: "Dashboard → Manage Workers → Library Re-tag",
+    },
+    {
+        title: "Paste a metadata link to open it (#775)",
+        description: "the Search page now takes a pasted metadata link. Drop in a Spotify / iTunes / Deezer artist, album, or track URL and SoulSync opens that exact item instead of running a name search — perfect when a name search is ambiguous or you already have the link.",
+        features: [
+            "paste an artist / album / track URL → opens the exact item",
+            "bare IDs are rejected as ambiguous (a link carries the entity type)",
+            "clear not-found hint when nothing resolves",
+        ],
+        usage_note: "Search page",
+    },
+    {
+        title: "Recent Fixes & Polish (2.6.7)",
+        description: "a stack of fixes and refinements that shipped alongside the headline features.",
+        features: [
+            "Manual album match now LOCKS the edition it's pinned to (#758) — the auto resolver can't drag it back to the deluxe",
+            "Write Tags won't overwrite a correct file with placeholder data like \"Various Artists\" / \"[Unknown Album]\" (#800)",
+            "AcoustID stops false-quarantining correct downloads of non-English artists (#797)",
+            "full mobile / small-screen responsive pass across the app (#793, #795)",
+            "new \"Reconcile\" playlist sync mode that edits in place and keeps your custom image / description (#792)",
+            "fixes: wrong artist on duplicated source IDs, manual fixes reverting on mirrored sync (#799), Find & Add matches surviving rescans (#787), Navidrome library selection (#789), silent streamed tracks, torrent URL without scheme (#790), file/CSV playlist matching (#785)",
+        ],
+        usage_note: "browse the What's New panel for the full 2.6.7 changelog",
+    },
     {
         title: "Artist Map, Reimagined",
         description: "the Discover artist map got a full rework — it now reads like a living constellation of your library instead of a flat blob. Explore one genre island at a time, watch bubbles bloom into place, and open a side panel with everything about the artist under your cursor.",
