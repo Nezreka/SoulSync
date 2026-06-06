@@ -63242,6 +63242,29 @@ body.reduce-effects .dash-card::after {
     opacity: 0.85;
 }
 
+/* Peak-hold tick — sticks at the recent maximum and slowly falls, like a
+ * hardware VU meter's peak LED. Position (bottom %) is driven from JS;
+ * only visible while it's meaningfully above the live fill so idle bars
+ * don't carry a stray line. */
+.rate-eq-peak {
+    position: absolute;
+    left: 10%;
+    right: 10%;
+    bottom: 4%;
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--eq-accent) 55%, white 45%);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--eq-accent) 70%, transparent);
+    opacity: 0;
+    transition: bottom 0.9s linear, opacity 0.4s;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rate-eq-peak.visible {
+    opacity: 0.75;
+}
+
 /* Vertical shimmer scan — runs continuously when active */
 .rate-eq-shimmer {
     position: absolute;
