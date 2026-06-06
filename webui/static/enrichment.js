@@ -2931,13 +2931,19 @@ function _renderFindingDetail(f) {
             }
             // Per-track old → new diff (cap the rendered list so huge albums stay sane).
             changed.slice(0, 40).forEach(t => {
-                const label = t.title || (t.file_path || '').split(/[\\/]/).pop();
+                const fname = (t.file_path || '').split(/[\\/]/).pop();
+                const label = t.title || fname || 'Unknown';
                 const rows = Object.entries(t.changes).map(([field, c]) => [
                     field.replace(/_/g, ' '),
                     `${(c.old === '' || c.old == null) ? '∅' : c.old}   →   ${c.new}`,
                     'highlight',
                 ]);
                 html += `<div style="margin:8px 0 2px;font-weight:600">${_escFinding(label)}</div>`;
+                // Show the physical filename so a wrong match is easy to spot before
+                // applying (skip when the label already IS the filename, i.e. no title).
+                if (fname && fname !== label) {
+                    html += `<div class="repair-finding-meta" style="margin:0 0 4px;opacity:.7;word-break:break-all">📄 ${_escFinding(fname)}</div>`;
+                }
                 html += _gridRows(rows);
             });
             if (changed.length > 40) {
