@@ -209,8 +209,19 @@ class SpotifyWorker:
                     interruptible_sleep(self._stop_event, min(remaining, 60))  # Check again every 60s max
                     continue
 
-                # Daily budget guard — worker-only cap to avoid saturating Spotify rate limits
-                if self._is_daily_budget_exhausted():
+                # Is the worker serving via the no-creds Spotify Free source this
+                # iteration? The daily budget and post-ban cooldown both exist to
+                # protect the REAL authenticated API from bans — they don't apply
+                # to free (a different, anonymous path). Computed once and reused
+                # below; the loop already probes auth, so no extra quota cost.
+                try:
+                    free_serving = self.client._free_active()
+                except Exception:
+                    free_serving = False
+
+                # Daily budget guard — worker-only cap to avoid saturating the REAL
+                # Spotify API. Skipped while serving via free (free isn't that API).
+                if not free_serving and self._is_daily_budget_exhausted():
                     budget = self._get_daily_budget_info()
                     resets_in = budget['resets_in_seconds']
                     logger.info(f"Daily enrichment budget exhausted ({budget['used']}/{budget['limit']}), "
@@ -219,8 +230,9 @@ class SpotifyWorker:
                     continue
 
                 # Post-ban cooldown guard — after ban expires, wait before resuming
-                # to avoid immediately re-triggering the rate limit
-                cooldown = self.client.get_post_ban_cooldown_remaining()
+                # to avoid immediately re-triggering the rate limit. Only matters
+                # for the real API, so skip it while serving via free.
+                cooldown = 0 if free_serving else self.client.get_post_ban_cooldown_remaining()
                 if cooldown > 0:
                     logger.debug(f"Post-ban cooldown active ({cooldown}s left), sleeping...")
                     interruptible_sleep(self._stop_event, min(cooldown, 60))
@@ -261,7 +273,10 @@ class SpotifyWorker:
                     continue
 
                 self._process_item(item)
-                self._increment_daily_budget()
+                # Only real-API work counts toward the daily cap — free-served
+                # items don't touch the authenticated API's quota.
+                if not free_serving:
+                    self._increment_daily_budget()
                 interruptible_sleep(self._stop_event, self.inter_item_sleep)
 
             except SpotifyRateLimitError:
