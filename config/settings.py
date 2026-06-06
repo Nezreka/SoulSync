@@ -497,8 +497,8 @@ class ConfigManager:
             "post_processing": {
                 # When a download is quarantined (AcoustID mismatch, integrity /
                 # duration failure), retry the next-best candidate instead of
-                # failing outright. Default on.
-                "retry_next_candidate_on_mismatch": True,
+                # failing outright. Default off — opt-in.
+                "retry_next_candidate_on_mismatch": False,
                 # Opt-in exhaustive retry: budget retries PER SOURCE so every
                 # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
                 # before the track gives up. Default off (single global cap).
