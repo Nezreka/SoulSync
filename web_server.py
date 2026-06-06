@@ -9828,6 +9828,133 @@ def get_write_tags_batch_status():
         return jsonify(state)
 
 
+# ── Reconcile embedded provider IDs (gap-fill DB from file tags) ──
+#
+# Files that SoulSync (or MusicBrainz Picard) already tagged carry Spotify /
+# iTunes / MusicBrainz / Deezer / Tidal / AudioDB / Genius IDs in their
+# metadata. Reading them back and gap-filling the {provider}_id +
+# {provider}_match_status='matched' columns lets the enrichment workers skip
+# the API lookup entirely — large API savings on an already-tagged library.
+# Gap-fill only: an existing id is never overwritten (see
+# core/library/embedded_id_reconcile.py).
+_reconcile_ids_state = {
+    'status': 'idle',          # idle | running | done
+    'total': 0,
+    'processed': 0,
+    'entities_updated': 0,     # track/album/artist rows written
+    'ids_filled': 0,           # individual id columns filled
+    'conflicts': 0,            # embedded id disagreed with a stored id (not applied)
+    'unreadable': 0,           # files missing / unreadable by mutagen
+    'current': '',
+}
+_reconcile_ids_lock = threading.Lock()
+
+
+@app.route('/api/library/reconcile-embedded-ids', methods=['POST'])
+def reconcile_embedded_ids():
+    """Scan every library file for embedded provider IDs and gap-fill them
+    into the DB so enrichment workers skip the API lookup. Runs in the
+    background; poll the status endpoint for progress."""
+    try:
+        with _reconcile_ids_lock:
+            if _reconcile_ids_state['status'] == 'running':
+                return jsonify({"success": False, "error": "A reconcile is already in progress"}), 409
+            _reconcile_ids_state.update({
+                'status': 'running', 'total': 0, 'processed': 0,
+                'entities_updated': 0, 'ids_filled': 0, 'conflicts': 0,
+                'unreadable': 0, 'current': 'Starting…',
+            })
+
+        database = get_database()
+
+        def _run():
+            from core.library.file_tags import read_embedded_tags
+            from core.library.embedded_id_reconcile import reconcile_track_row
+            conn = None
+            try:
+                conn = database._get_connection()
+                cur = conn.cursor()
+                # Parent IDs in memory (these tables are far smaller than tracks).
+                cur.execute("SELECT * FROM albums")
+                album_map = {str(r['id']): dict(r) for r in cur.fetchall()}
+                cur.execute("SELECT * FROM artists")
+                artist_map = {str(r['id']): dict(r) for r in cur.fetchall()}
+                # Track IDs only first (light); rows are pulled per page below so
+                # memory stays bounded on large libraries. Each page's SELECT is
+                # fully fetched before any UPDATE, so reusing one cursor is safe.
+                cur.execute("SELECT id FROM tracks WHERE file_path IS NOT NULL AND TRIM(file_path) != ''")
+                track_ids = [str(r['id']) for r in cur.fetchall()]
+
+                with _reconcile_ids_lock:
+                    _reconcile_ids_state['total'] = len(track_ids)
+
+                PAGE = 500
+                for start in range(0, len(track_ids), PAGE):
+                    page = track_ids[start:start + PAGE]
+                    ph = ','.join('?' * len(page))
+                    cur.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", page)
+                    rows = [dict(r) for r in cur.fetchall()]
+
+                    for tr in rows:
+                        title = tr.get('title') or '?'
+                        with _reconcile_ids_lock:
+                            _reconcile_ids_state['current'] = title
+
+                        # One bad file must never abort the whole library scan.
+                        try:
+                            resolved = _resolve_library_file_path(tr.get('file_path'))
+                            info = read_embedded_tags(resolved) if resolved else {'available': False}
+                            tags = info.get('tags') if info.get('available') else None
+
+                            result = reconcile_track_row(cur, tr, album_map, artist_map, tags)
+
+                            with _reconcile_ids_lock:
+                                if not result.readable:
+                                    _reconcile_ids_state['unreadable'] += 1
+                                else:
+                                    _reconcile_ids_state['entities_updated'] += result.applied.rows_updated
+                                    _reconcile_ids_state['ids_filled'] += result.applied.ids_filled
+                                    _reconcile_ids_state['conflicts'] += result.conflicts
+                        except Exception as _te:
+                            logger.debug("reconcile: skipped track %s: %s", tr.get('id'), _te)
+                            with _reconcile_ids_lock:
+                                _reconcile_ids_state['unreadable'] += 1
+                        finally:
+                            with _reconcile_ids_lock:
+                                _reconcile_ids_state['processed'] += 1
+
+                    # Commit per page — releases the write lock so concurrent
+                    # enrichment workers aren't starved during a long scan.
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Reconcile embedded IDs background error: {e}")
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                with _reconcile_ids_lock:
+                    _reconcile_ids_state['status'] = 'done'
+                    _reconcile_ids_state['current'] = ''
+
+        thread = threading.Thread(target=_run, daemon=True, name="ReconcileEmbeddedIds")
+        thread.start()
+        return jsonify({"success": True, "message": "Reconcile started"})
+
+    except Exception as e:
+        logger.error(f"Reconcile embedded IDs kickoff error: {e}")
+        with _reconcile_ids_lock:
+            _reconcile_ids_state['status'] = 'idle'
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reconcile-embedded-ids/status', methods=['GET'])
+def get_reconcile_embedded_ids_status():
+    """Poll the status of the embedded-ID reconcile job."""
+    with _reconcile_ids_lock:
+        return jsonify(dict(_reconcile_ids_state))
+
 
 # ── ReplayGain Analysis endpoints ──
 

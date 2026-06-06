@@ -2935,6 +2935,118 @@ function stopQualityScannerPolling() {
     }
 }
 
+// ===================================================================
+// IMPORT IDS FROM FILE TAGS (reconcile embedded provider IDs)
+// ===================================================================
+
+let reconcileIdsStatusInterval = null;
+
+async function handleReconcileIdsButtonClick() {
+    const button = document.getElementById('reconcile-ids-button');
+    if (!button) return;
+    if (button.textContent.trim() !== 'Scan Library') return; // already running
+
+    const ok = confirm(
+        'Scan every library file for embedded provider IDs and fill any that are ' +
+        'missing in the database?\n\nEach file is read once. Existing matches are ' +
+        'never overwritten. This can take a while on large libraries.'
+    );
+    if (!ok) return;
+
+    try {
+        button.disabled = true;
+        button.textContent = 'Starting...';
+        const response = await fetch('/api/library/reconcile-embedded-ids', { method: 'POST' });
+        if (response.ok) {
+            showToast('Tag import started!', 'success');
+            checkAndUpdateReconcileIdsProgress();
+        } else {
+            const err = await response.json().catch(() => ({}));
+            showToast(`Error: ${err.error || 'could not start'}`, 'error');
+            button.disabled = false;
+            button.textContent = 'Scan Library';
+        }
+    } catch (error) {
+        showToast('Failed to start tag import.', 'error');
+        button.disabled = false;
+        button.textContent = 'Scan Library';
+    }
+}
+
+async function checkAndUpdateReconcileIdsProgress() {
+    try {
+        const response = await fetch('/api/library/reconcile-embedded-ids/status', {
+            signal: AbortSignal.timeout(10000)
+        });
+        if (!response.ok) return;
+        const state = await response.json();
+        updateReconcileIdsProgressUI(state);
+        if (state.status === 'running' && !reconcileIdsStatusInterval) {
+            reconcileIdsStatusInterval = setInterval(checkAndUpdateReconcileIdsProgress, 1500);
+        }
+    } catch (error) {
+        // Transient error — keep any existing polling alive.
+    }
+}
+
+function updateReconcileIdsProgressUI(state) {
+    const button = document.getElementById('reconcile-ids-button');
+    const phaseLabel = document.getElementById('reconcile-phase-label');
+    const progressLabel = document.getElementById('reconcile-progress-label');
+    const progressBar = document.getElementById('reconcile-progress-bar');
+    if (!button || !phaseLabel || !progressLabel || !progressBar) return;
+
+    const filled = document.getElementById('reconcile-stat-filled');
+    const updated = document.getElementById('reconcile-stat-updated');
+    const conflicts = document.getElementById('reconcile-stat-conflicts');
+    const unreadable = document.getElementById('reconcile-stat-unreadable');
+    if (filled) filled.textContent = state.ids_filled || 0;
+    if (updated) updated.textContent = state.entities_updated || 0;
+    if (conflicts) conflicts.textContent = state.conflicts || 0;
+    if (unreadable) unreadable.textContent = state.unreadable || 0;
+
+    const total = state.total || 0;
+    const processed = state.processed || 0;
+    const pct = total > 0 ? (processed / total) * 100 : 0;
+    const wasRunning = reconcileIdsStatusInterval !== null;
+
+    if (state.status === 'running') {
+        button.textContent = 'Scanning…';
+        button.disabled = true;
+        phaseLabel.textContent = state.current ? `Scanning: ${state.current}` : 'Scanning…';
+        progressLabel.textContent = `${processed} / ${total} files scanned (${pct.toFixed(1)}%)`;
+        progressBar.style.width = `${pct}%`;
+    } else {
+        stopReconcileIdsPolling();
+        button.textContent = 'Scan Library';
+        button.disabled = false;
+        progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))';
+        if (state.status === 'done') {
+            phaseLabel.textContent =
+                `Done — filled ${state.ids_filled} ID${state.ids_filled === 1 ? '' : 's'} ` +
+                `across ${state.entities_updated} row${state.entities_updated === 1 ? '' : 's'}`;
+            progressLabel.textContent = `${processed} / ${total} files scanned (100%)`;
+            progressBar.style.width = '100%';
+            if (wasRunning) {
+                showToast(
+                    `Tag import complete — ${state.ids_filled} IDs filled` +
+                    (state.conflicts ? `, ${state.conflicts} conflicts skipped` : ''),
+                    'success'
+                );
+            }
+        } else {
+            phaseLabel.textContent = 'Ready to scan';
+        }
+    }
+}
+
+function stopReconcileIdsPolling() {
+    if (reconcileIdsStatusInterval) {
+        clearInterval(reconcileIdsStatusInterval);
+        reconcileIdsStatusInterval = null;
+    }
+}
+
 // ============================================
 // == DUPLICATE CLEANER FUNCTIONS            ==
 // ============================================
@@ -7410,6 +7522,14 @@ async function initializeToolsPage() {
     if (duplicateCleanButton && !duplicateCleanButton._toolsWired) {
         duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
         duplicateCleanButton._toolsWired = true;
+    }
+
+    const reconcileIdsButton = document.getElementById('reconcile-ids-button');
+    if (reconcileIdsButton && !reconcileIdsButton._toolsWired) {
+        reconcileIdsButton.addEventListener('click', handleReconcileIdsButtonClick);
+        reconcileIdsButton._toolsWired = true;
+        // Hydrate the card with any in-progress / completed run.
+        checkAndUpdateReconcileIdsProgress();
     }
 
 
