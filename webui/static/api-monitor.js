@@ -383,6 +383,14 @@ function _renderEqualizerBars(grid, data) {
         }
         bar.classList.toggle('cooldown', cooling);
 
+        // Call embers: tiny accent sparks rise off the fill tip, spawned per
+        // socket update in proportion to REAL traffic — motion strictly means
+        // API calls are happening right now. Suppressed during cooldown and
+        // under reduced-effects.
+        if (!window._reduceEffectsActive && !cooling && realPct > 0.03) {
+            _spawnEmbers(bar, pct, realPct > 0.6 ? 3 : realPct > 0.25 ? 2 : 1);
+        }
+
         // Daily-budget ring (Spotify is the only service with a real daily
         // cap): a conic rim inside the avatar disc fills as the budget is
         // spent — green → amber → red, purple once the worker has bridged
@@ -406,6 +414,23 @@ function _renderEqualizerBars(grid, data) {
         }
 
         _eqDisplay[svc] = { value, pct, peak, peakAt, rlTotal, cooling };
+    }
+}
+
+// Spawn ember particles at a bar's fill tip. Self-removing DOM sparks with
+// a per-bar live cap so a busy hour can't accumulate nodes.
+function _spawnEmbers(bar, pct, count) {
+    const track = bar.querySelector('.rate-eq-track');
+    if (!track || track.querySelectorAll('.rate-eq-ember').length > 6) return;
+    for (let i = 0; i < count; i++) {
+        const e = document.createElement('span');
+        e.className = 'rate-eq-ember';
+        e.style.left = `${20 + Math.random() * 60}%`;
+        e.style.bottom = `${Math.min(96, pct * 100)}%`;
+        e.style.setProperty('--ember-drift', `${(Math.random() - 0.5) * 14}px`);
+        e.style.animationDuration = `${1.1 + Math.random() * 0.7}s`;
+        e.addEventListener('animationend', () => e.remove());
+        track.appendChild(e);
     }
 }
 
