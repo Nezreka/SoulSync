@@ -229,7 +229,7 @@ function _renderEqualizerBars(grid, data) {
                        <span class="rate-eq-avatar-glyph">${fallbackGlyph}</span>
                    </div>`;
             bar.innerHTML = `
-                ${avatar}
+                <div class="rate-eq-avatar-wrap">${avatar}</div>
                 <div class="rate-eq-track">
                     <div class="rate-eq-ticks"></div>
                     <div class="rate-eq-fill">

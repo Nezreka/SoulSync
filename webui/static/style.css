@@ -8447,27 +8447,41 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Ambient light sweep — clip-path keeps it inside the header without overflow:hidden */
-.dashboard-header::before {
-    content: '';
+/* Header sweep — a soft accent band drifting across the header. Implemented
+ * as a real child strip translated inside an overflow-clipped wrap (NOT an
+ * animated background-position on a pseudo): transform+opacity stay on the
+ * compositor, while background-position repainted the full-width band every
+ * frame for half of every 12s cycle. Same visuals, ~zero paint. */
+.dashboard-header-sweep {
     position: absolute;
     inset: 0;
+    overflow: hidden;
+    border-radius: 24px 24px 0 0;
     pointer-events: none;
-    background-image: linear-gradient(90deg,
+}
+
+.dashboard-header-sweep span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 60%;
+    background: linear-gradient(90deg,
         transparent 0%,
         rgba(var(--accent-rgb), 0.04) 40%,
         rgba(var(--accent-rgb), 0.08) 50%,
         rgba(var(--accent-rgb), 0.04) 60%,
         transparent 100%);
-    background-size: 60% 100%;
-    background-repeat: no-repeat;
+    transform: translateX(-40%);
+    opacity: 0;
     animation: dashboard-header-sweep 12s ease-in-out infinite;
-    clip-path: inset(0 0 0 0 round 24px 24px 0 0);
+    will-change: transform, opacity;
 }
 
 @keyframes dashboard-header-sweep {
-    0%, 100% { background-position: -60% 0; opacity: 0; }
+    0%, 100% { transform: translateX(-40%); opacity: 0; }
     10% { opacity: 1; }
-    50% { background-position: 160% 0; opacity: 1; }
+    50% { transform: translateX(106.7%); opacity: 1; }
     60% { opacity: 0; }
 }
 
@@ -63107,23 +63121,37 @@ body.reduce-effects .dash-card::after {
     opacity: 0.95;
 }
 
-.rate-eq.active .rate-eq-avatar {
-    animation: rate-eq-avatar-halo 2.8s ease-in-out infinite;
+/* Avatar halo / warn — GPU note: these used to animate box-shadow and
+ * filter:brightness directly on the avatar, which forces a repaint every
+ * frame, forever, on every active bar. The bright state is now painted ONCE
+ * onto wrap pseudo-elements and only their OPACITY breathes — same visuals,
+ * compositor-only. The wrap exists because the avatar clips its overflow. */
+.rate-eq-avatar-wrap {
+    position: relative;
+    margin: 0 auto;
+    width: fit-content;
+    flex: 0 0 auto;
 }
 
-@keyframes rate-eq-avatar-halo {
-    0%, 100% {
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.25),
-            0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
-            0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
-    }
-    50% {
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.3),
-            0 4px 18px color-mix(in srgb, var(--eq-accent) 55%, transparent),
-            0 0 0 5px color-mix(in srgb, var(--eq-accent) 12%, transparent);
-    }
+.rate-eq-avatar-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow:
+        0 4px 18px color-mix(in srgb, var(--eq-accent) 55%, transparent),
+        0 0 0 5px color-mix(in srgb, var(--eq-accent) 12%, transparent);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.rate-eq.active .rate-eq-avatar-wrap::before {
+    animation: rate-eq-halo-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes rate-eq-halo-breathe {
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .rate-eq:hover .rate-eq-avatar {
@@ -63134,12 +63162,29 @@ body.reduce-effects .dash-card::after {
     background:
         radial-gradient(circle at 30% 25%, #ffb4b4, #ef4444 55%, #7a1a1a 100%);
     border-color: rgba(239, 68, 68, 0.5);
-    animation: rate-eq-avatar-warn 1.1s ease-in-out infinite;
 }
 
-@keyframes rate-eq-avatar-warn {
-    0%, 100% { filter: brightness(1); }
-    50%      { filter: brightness(1.35); }
+/* The brightness(1.35) warn pulse, as a white wash whose opacity breathes */
+.rate-eq-avatar-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%,
+        rgba(255, 255, 255, 0.30),
+        rgba(255, 255, 255, 0.10) 70%);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.rate-eq.rate-limited .rate-eq-avatar-wrap::after {
+    animation: rate-eq-warn-breathe 1.1s ease-in-out infinite;
+}
+
+@keyframes rate-eq-warn-breathe {
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .rate-eq:focus-visible {
@@ -63406,21 +63451,23 @@ body.reduce-effects .dash-card::after {
 }
 
 /* Active state — fill pulses subtly so the "alive" services radiate */
+/* Active-fill breathing — GPU note: this used to animate the fill's
+ * box-shadow (repaint every frame on every active bar, forever). The glow is
+ * now STATIC at the old animation's midpoint and the breathing moved to the
+ * tip's opacity, which composites for free. Reads the same at a glance. */
 .rate-eq.active .rate-eq-fill {
-    animation: rate-eq-pulse 2.4s ease-in-out infinite;
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+        0 0 25px color-mix(in srgb, var(--eq-accent) 42%, transparent);
 }
 
-@keyframes rate-eq-pulse {
-    0%, 100% {
-        box-shadow:
-            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
-            0 0 18px color-mix(in srgb, var(--eq-accent) 30%, transparent);
-    }
-    50% {
-        box-shadow:
-            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
-            0 0 32px color-mix(in srgb, var(--eq-accent) 55%, transparent);
-    }
+.rate-eq.active .rate-eq-tip {
+    animation: rate-eq-tip-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes rate-eq-tip-breathe {
+    0%, 100% { opacity: 0.6; }
+    50%      { opacity: 1; }
 }
 
 /* Peak-flash — fires on a real upward step in cpm between socket
