@@ -65,6 +65,20 @@ def should_offer_spotify_metadata(authenticated: bool, free_available: bool) -> 
     return authenticated or free_available
 
 
+def should_block_rate_limited_resume(rate_limited: bool, metadata_available: bool) -> bool:
+    """Whether to refuse resuming the Spotify enrichment worker.
+
+    The worker's own loop bridges to the no-creds free source during a ban
+    (its rate-limit guard checks ``is_spotify_metadata_available()``). The
+    resume button must mirror that: block ONLY when rate-limited AND nothing
+    can serve (plain auth, no free) — otherwise resuming just sleeps. When the
+    free fallback is available, ``metadata_available`` is True during a ban
+    (``is_spotify_authenticated()`` returns False while banned), so resume is
+    allowed and the worker bridges via free.
+    """
+    return rate_limited and not metadata_available
+
+
 # --------------------------------------------------------------------------
 # Normalizers (pure — unit-testable against captured fixtures)
 # --------------------------------------------------------------------------

@@ -10,10 +10,32 @@ from __future__ import annotations
 
 from core.spotify_free_metadata import (
     normalize_artist,
+    should_block_rate_limited_resume,
     should_offer_spotify_metadata,
     should_use_free_fallback,
     spotify_free_installed,
 )
+
+
+# ---------------------------------------------------------------------------
+# should_block_rate_limited_resume — the worker resume guard
+# ---------------------------------------------------------------------------
+
+def test_resume_blocked_when_rate_limited_and_nothing_serves():
+    # Plain auth, no free: resuming during a ban would just sleep → block.
+    assert should_block_rate_limited_resume(rate_limited=True, metadata_available=False) is True
+
+
+def test_resume_allowed_when_free_can_bridge():
+    # Rate-limited but free is available (metadata_available True during a ban
+    # because is_spotify_authenticated() is False while banned) → allow resume,
+    # the worker bridges via free.
+    assert should_block_rate_limited_resume(rate_limited=True, metadata_available=True) is False
+
+
+def test_resume_never_blocked_when_not_rate_limited():
+    assert should_block_rate_limited_resume(rate_limited=False, metadata_available=False) is False
+    assert should_block_rate_limited_resume(rate_limited=False, metadata_available=True) is False
 
 
 # ---------------------------------------------------------------------------
