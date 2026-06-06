@@ -15216,12 +15216,13 @@ def _run_db_update_task(full_refresh, server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
+    # Auto-reconcile runs as the FINAL scan phase (inside run(), before the
+    # 'finished' signal) so status stays 'running' through it — automations,
+    # the dashboard card, and the Tools page all treat it as part of the scan.
+    db_update_worker.post_scan_hook = _reconcile_after_scan
+
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
-
-    # Auto-reconcile: pull embedded provider IDs from newly-added files into
-    # the DB so enrichment workers skip those API lookups (#tag-id-backfill).
-    _reconcile_after_scan(db_update_worker)
 
 
 def _run_deep_scan_task(server_type):
@@ -15268,11 +15269,11 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
+    # Auto-reconcile runs as the final scan phase (see _run_database_update_task).
+    db_update_worker.post_scan_hook = _reconcile_after_scan
+
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()
-
-    # Auto-reconcile newly-inserted files' embedded provider IDs into the DB.
-    _reconcile_after_scan(db_update_worker)
 
 
 @app.route('/api/database/stats', methods=['GET'])
