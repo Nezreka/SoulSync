@@ -366,6 +366,22 @@
             const alpha = 0.55 * (1 - Math.abs(p.t - 0.5) * 0.6); // fade in/out at the ends
             const radius = 2.2;
 
+            // Comet tail — ghost positions at trailing t values. The path is
+            // parametric, so no position history is needed; the same easing
+            // evaluated slightly in the past gives a tail that stretches as
+            // the pulse accelerates into the hub.
+            for (let i = 3; i >= 1; i--) {
+                const tt = p.t - i * p.speed * 2.4;
+                if (tt <= 0) continue;
+                const te = tt * tt;
+                const tx = p.orb.x + (hub.x - p.orb.x) * te;
+                const ty = p.orb.y + (hub.y - p.orb.y) * te;
+                ctx.beginPath();
+                ctx.arc(tx, ty, Math.max(0.4, radius * (1 - i * 0.24)), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * (1 - i / 4) * 0.5})`;
+                ctx.fill();
+            }
+
             drawGlow(ctx, x, y, radius * 3, r, g, b, alpha * 0.5);
 
             ctx.beginPath();
