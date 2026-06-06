@@ -236,6 +236,7 @@ function _renderEqualizerBars(grid, data) {
                         <div class="rate-eq-shimmer"></div>
                         <div class="rate-eq-tip"></div>
                     </div>
+                    <div class="rate-eq-peak"></div>
                     <div class="rate-eq-value">0</div>
                 </div>
                 <div class="rate-eq-meta">
@@ -274,6 +275,26 @@ function _renderEqualizerBars(grid, data) {
 
         const fill = bar.querySelector('.rate-eq-fill');
         if (fill) fill.style.height = `${pct * 100}%`;
+
+        // Peak-hold tick — the VU-meter idiom: a thin marker sticks at the
+        // recent maximum, holds ~1.2s, then falls a few %/update until it
+        // rests on the live fill. A burst stays readable after it's over.
+        const nowTs = performance.now();
+        let peak = prev.peak ?? pct;
+        let peakAt = prev.peakAt ?? nowTs;
+        if (pct >= peak) {
+            peak = pct;
+            peakAt = nowTs;
+        } else if (nowTs - peakAt > 1200) {
+            peak = Math.max(pct, peak - 0.045);
+        }
+        const peakEl = bar.querySelector('.rate-eq-peak');
+        if (peakEl) {
+            peakEl.style.bottom = `${peak * 100}%`;
+            // Only show while meaningfully above the live fill — idle bars
+            // shouldn't carry a stray line.
+            peakEl.classList.toggle('visible', peak > pct + 0.015 && peak > 0.06);
+        }
 
         // The reflection puddle (CSS ::after on the track) fades in
         // proportional to the real (unclamped) rate so idle services
@@ -329,7 +350,7 @@ function _renderEqualizerBars(grid, data) {
         bar.classList.toggle('active', value > 0 || wStatus === 'running');
         bar.classList.toggle('rate-limited', isRateLimited);
 
-        _eqDisplay[svc] = { value, pct };
+        _eqDisplay[svc] = { value, pct, peak, peakAt };
     }
 }
 
