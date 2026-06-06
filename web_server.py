@@ -34883,12 +34883,24 @@ from core.enrichment.services import (
 
 
 def _spotify_resume_pre_check():
-    """Mirror the inline Spotify rate-limit guard from the legacy
-    ``/api/spotify-enrichment/resume`` route. Returns
-    ``(429, message)`` to short-circuit when banned, ``None`` when ok."""
+    """Guard the Spotify enrichment worker's resume button against a rate-limit
+    ban. Returns ``(429, message)`` to short-circuit when banned, ``None`` ok.
+
+    Mirrors the worker's own loop: if the opt-in Spotify-Free fallback can
+    serve enrichment, allow resume and let the worker bridge via the no-creds
+    source during the ban. Block only when rate-limited AND nothing can serve
+    (plain auth, no free) — where resuming would just sleep.
+    """
     try:
         if _spotify_rate_limited():
-            return (429, 'Cannot resume while Spotify is rate limited')
+            from core.spotify_free_metadata import should_block_rate_limited_resume
+            try:
+                metadata_available = bool(spotify_client.is_spotify_metadata_available())
+            except Exception as e:
+                logger.debug("spotify free-availability check failed: %s", e)
+                metadata_available = False
+            if should_block_rate_limited_resume(True, metadata_available):
+                return (429, 'Cannot resume while Spotify is rate limited')
     except Exception as e:
         logger.debug("spotify rate-limit pre-check failed: %s", e)
     return None
