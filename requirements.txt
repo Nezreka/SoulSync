@@ -46,7 +46,14 @@ tzdata>=2024.1
 # keeps existing schedules running at the same wall-clock time.
 tzlocal>=5.0
 
-# YouTube support -- unpinned; yt-dlp must track upstream releases to stay functional
+# YouTube support -- unpinned; yt-dlp must track upstream releases to stay functional.
+# NOTE: pip resolves this to the latest STABLE release, which can lag months
+# behind a breaking YouTube change. If streams/music-video downloads fail with
+# "Requested format is not available", switch to the nightly channel:
+#     pip install -U --pre "yt-dlp[default]"
+# YouTube extraction ALSO requires a JavaScript runtime (Deno) on the system --
+# it is NOT a Python package and cannot be listed here. Docker images bundle
+# it; bare-metal installs need it on PATH: https://docs.deno.com/runtime/
 yt-dlp>=2026.3.17
 
 # Lyrics support
