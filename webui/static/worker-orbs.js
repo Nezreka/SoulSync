@@ -53,6 +53,8 @@
     let orbs = [];
     let sparks = [];             // particle emissions from active orbs
     let inflows = [];            // pulses traveling from active orbs into the hub
+    let ripples = [];            // impact rings where a pulse lands on the nucleus
+    const MAX_RIPPLES = 24;
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
@@ -294,10 +296,62 @@
         });
     }
 
-    function updateInflows() {
+    function updateInflows(hub) {
         for (let i = inflows.length - 1; i >= 0; i--) {
-            inflows[i].t += inflows[i].speed;
-            if (inflows[i].t >= 1) inflows.splice(i, 1);
+            const p = inflows[i];
+            p.t += p.speed;
+            if (p.t >= 1) {
+                // The pulse lands: ripple + a couple of debris sparks at the
+                // contact point on the nucleus rim, so the hub visibly absorbs
+                // it instead of the dot just vanishing.
+                if (hub) {
+                    const dx = hub.x - p.orb.x, dy = hub.y - p.orb.y;
+                    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const ux = dx / d, uy = dy / d;
+                    const rim = ORB_RADIUS + 4;
+                    emitImpact(hub.x - ux * rim, hub.y - uy * rim, p.color, ux, uy);
+                }
+                inflows.splice(i, 1);
+            }
+        }
+    }
+
+    // ── Impact ripples (pulse → nucleus contact) ──
+
+    function emitImpact(x, y, color, dirX, dirY) {
+        if (ripples.length < MAX_RIPPLES) {
+            ripples.push({ x, y, color, age: 0, life: 26 + Math.random() * 8 });
+        }
+        // Two debris sparks splash back roughly the way the pulse came, fanned.
+        for (let i = 0; i < 2 && sparks.length < MAX_SPARKS; i++) {
+            const spread = (Math.random() - 0.5) * 1.6;
+            const cos = Math.cos(spread), sin = Math.sin(spread);
+            const rx = -(dirX * cos - dirY * sin);
+            const ry = -(dirX * sin + dirY * cos);
+            const speed = 0.5 + Math.random() * 0.7;
+            sparks.push({
+                x, y, vx: rx * speed, vy: ry * speed,
+                life: 0.8, decay: 0.03 + Math.random() * 0.02,
+                color, radius: 1 + Math.random() * 1.2,
+            });
+        }
+    }
+
+    function updateRipples() {
+        for (let i = ripples.length - 1; i >= 0; i--) {
+            if (++ripples[i].age >= ripples[i].life) ripples.splice(i, 1);
+        }
+    }
+
+    function drawRipples(ctx) {
+        for (const rp of ripples) {
+            const t = rp.age / rp.life;            // 0 → 1
+            const [r, g, b] = rp.color;
+            ctx.beginPath();
+            ctx.arc(rp.x, rp.y, 3 + t * 11, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - t) * 0.45})`;
+            ctx.lineWidth = 1.5 * (1 - t) + 0.5;
+            ctx.stroke();
         }
     }
 
@@ -382,6 +436,7 @@
         resizeCanvas();
         computeHomes();
         inflows = [];   // drop in-flight pulses; positions are about to jump
+        ripples = [];
         orbs.forEach(orb => {
             orb.x = orb.homeX;
             orb.y = orb.homeY;
@@ -552,7 +607,8 @@
             }
         }
         updateSparks();
-        updateInflows();
+        updateInflows(hub);
+        updateRipples();
 
         // Draw
         ctx.clearRect(0, 0, w, h);
@@ -560,6 +616,7 @@
         drawConnections(ctx, visibleOrbs, time);
         drawSparks(ctx);
         drawInflows(ctx, hub);
+        drawRipples(ctx);
         drawOrbs(ctx, visibleOrbs, time);
     }
 
@@ -940,12 +997,14 @@
             computeHomes();
             resizeCanvas();
             sparks = [];
+            ripples = [];
             enterOrbState();
         } else if (!onDashboard && wasDashboard) {
             if (collapseDelay) { clearTimeout(collapseDelay); collapseDelay = null; }
             stopLoop();
             state = 'idle';
             sparks = [];
+            ripples = [];
             orbs.forEach(orb => {
                 orb.el.classList.remove('worker-orb-hidden', 'worker-orb-reveal');
             });
