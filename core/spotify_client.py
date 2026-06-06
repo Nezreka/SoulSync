@@ -471,6 +471,14 @@ class Album:
             artist_ids=[artist['id'] for artist in album_data['artists']]
         )
 
+# The web UI's virtual "Liked Songs" playlist id. There is NO real playlist
+# behind a user's liked songs — Spotify serves them via /me/tracks (saved
+# tracks), and passing this id to the playlist endpoint 400s with
+# "Unsupported URL / URI". Anything resolving playlists by id must special-case
+# it (get_playlist_by_id does).
+LIKED_SONGS_PLAYLIST_ID = "spotify:liked-songs"
+
+
 @dataclass
 class Playlist:
     id: str
@@ -1287,14 +1295,55 @@ class SpotifyClient:
     def get_playlist_by_id(self, playlist_id: str) -> Optional[Playlist]:
         if not self.is_spotify_authenticated():
             return None
-        
+
+        # "Liked Songs" is virtual — no playlist URI exists for it, so the
+        # playlist endpoint 400s ("Unsupported URL / URI"). Serve it from the
+        # saved-tracks endpoint instead, so mirrored playlists / anything that
+        # re-resolves by stored id can refresh it like a normal playlist.
+        if playlist_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs'):
+            return self._liked_songs_as_playlist()
+
         try:
             playlist_data = self.sp.playlist(playlist_id)
             tracks = self._get_playlist_tracks(playlist_id)
             return Playlist.from_spotify_playlist(playlist_data, tracks)
-            
+
         except Exception as e:
             logger.error(f"Error fetching playlist {playlist_id}: {e}")
+            return None
+
+    def _liked_songs_as_playlist(self) -> Optional[Playlist]:
+        """Build a ``Playlist`` for the virtual Liked Songs collection from the
+        saved-tracks endpoint (the only API that serves it)."""
+        try:
+            tracks = self.get_saved_tracks()
+            if not tracks:
+                # get_saved_tracks swallows fetch errors into [] — indistinguishable
+                # from "no likes". The virtual playlist is only offered when likes
+                # exist, so treat empty as a FAILED refresh (None) rather than hand
+                # the sync a valid-looking empty playlist it might mirror by
+                # clearing the server-side copy.
+                logger.error("Liked Songs resolve: saved-tracks fetch returned nothing — treating as failed refresh")
+                return None
+            owner = 'You'
+            try:
+                info = self.get_user_info()
+                if info and info.get('display_name'):
+                    owner = info['display_name']
+            except Exception:  # noqa: S110 — owner label is cosmetic; default stands
+                pass
+            return Playlist(
+                id=LIKED_SONGS_PLAYLIST_ID,
+                name='Liked Songs',
+                description='Your liked songs on Spotify',
+                owner=owner,
+                public=False,
+                collaborative=False,
+                tracks=tracks,
+                total_tracks=len(tracks),
+            )
+        except Exception as e:
+            logger.error(f"Error building Liked Songs playlist: {e}")
             return None
     
     @rate_limited
