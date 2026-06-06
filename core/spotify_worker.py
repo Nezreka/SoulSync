@@ -126,13 +126,17 @@ class SpotifyWorker:
             rate_limit_info = self.client.get_rate_limit_info() if rate_limited else None
             in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
             authenticated = self.client.sp is not None
-            # Is the worker still serving via the no-creds Spotify Free source
-            # despite the real-API ban? Only check WHEN rate-limited: during a
-            # ban is_spotify_authenticated() returns False without an API probe,
-            # so is_spotify_metadata_available() reduces to "is free available"
-            # (no quota cost). Lets the UI show "via Spotify Free" instead of a
-            # misleading "rate limited / waiting" while the worker keeps matching.
-            using_free = bool(rate_limited and self.client.is_spotify_metadata_available())
+            # Is the worker serving via the no-creds Spotify Free source right
+            # now? Two cases: bridging a rate-limit ban (only checked WHEN
+            # rate-limited — there is_spotify_authenticated() returns False
+            # without an API probe, so this is quota-free), OR bridging the spent
+            # real-API daily budget (the worker set _budget_exhausted_use_free —
+            # a cheap attribute read). Lets the UI show "Running (Spotify Free)"
+            # instead of a misleading "rate limited" / "daily limit reached".
+            using_free = bool(
+                (rate_limited and self.client.is_spotify_metadata_available())
+                or getattr(self.client, '_budget_exhausted_use_free', False)
+            )
         except Exception:
             authenticated = False
             rate_limited = False
@@ -214,14 +218,35 @@ class SpotifyWorker:
                 # protect the REAL authenticated API from bans — they don't apply
                 # to free (a different, anonymous path). Computed once and reused
                 # below; the loop already probes auth, so no extra quota cost.
+                budget_exhausted = self._is_daily_budget_exhausted()
+
+                # Daily budget is a REAL-API ban protection. When it's spent, if
+                # the no-creds free source is available, BRIDGE to it (uncapped)
+                # for the rest of the day instead of pausing — so a Spotify-Free
+                # user is never stopped by the budget. The flag makes the client
+                # route subsequent calls to free; it clears on the daily reset.
+                try:
+                    if budget_exhausted and self.client._free_available():
+                        self.client._budget_exhausted_use_free = True
+                    elif not budget_exhausted and getattr(self.client, '_budget_exhausted_use_free', False):
+                        self.client._budget_exhausted_use_free = False
+                except Exception:  # noqa: S110 — budget→free toggle is best-effort
+                    pass
+
+                # Is the worker serving via the no-creds Spotify Free source this
+                # iteration? The daily budget and post-ban cooldown both exist to
+                # protect the REAL authenticated API from bans — they don't apply
+                # to free (a different, anonymous path). _free_active() now also
+                # returns True when the budget-bridge flag above is set. Computed
+                # once and reused below; the loop already probes auth, no extra cost.
                 try:
                     free_serving = self.client._free_active()
                 except Exception:
                     free_serving = False
 
-                # Daily budget guard — worker-only cap to avoid saturating the REAL
-                # Spotify API. Skipped while serving via free (free isn't that API).
-                if not free_serving and self._is_daily_budget_exhausted():
+                # Daily budget guard — pause ONLY when the budget is spent AND we
+                # can't serve via free (no free available). Otherwise free took over.
+                if not free_serving and budget_exhausted:
                     budget = self._get_daily_budget_info()
                     resets_in = budget['resets_in_seconds']
                     logger.info(f"Daily enrichment budget exhausted ({budget['used']}/{budget['limit']}), "
