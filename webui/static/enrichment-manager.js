@@ -274,6 +274,9 @@ async function _emPollSelected() {
 
 function _emStatusInfo(status) {
     if (!status || !status.enabled) return { cls: 'disabled', label: 'Disabled' };
+    // Rate-limited on the real API but still matching via the no-creds Spotify
+    // Free source — show as running, not stuck (#798 bridge).
+    if (status.using_free) return { cls: 'running', label: 'Running (Spotify Free)' };
     if (status.rate_limited) return { cls: 'ratelimited', label: 'Rate-limited' };
     if (status.paused) return { cls: 'paused', label: 'Paused' };
     if (status.idle) return { cls: 'idle', label: 'Idle' };
@@ -709,6 +712,9 @@ function _emUpdateHeaderLive() {
             cls += ' em-banner--warn';
             html = '⚙️ This source isn’t configured — add its credentials in Settings. '
                  + 'Browsing works, but matches and retries won’t run until it’s set up.';
+        } else if (status && status.using_free) {
+            // Real API banned but bridging via the no-creds Spotify Free source.
+            html = '✓ Spotify is rate-limited — matching via Spotify Free until the ban lifts.';
         } else if (status && status.rate_limited) {
             cls += ' em-banner--warn';
             const rl = status.rate_limit || {};

@@ -126,11 +126,19 @@ class SpotifyWorker:
             rate_limit_info = self.client.get_rate_limit_info() if rate_limited else None
             in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
             authenticated = self.client.sp is not None
+            # Is the worker still serving via the no-creds Spotify Free source
+            # despite the real-API ban? Only check WHEN rate-limited: during a
+            # ban is_spotify_authenticated() returns False without an API probe,
+            # so is_spotify_metadata_available() reduces to "is free available"
+            # (no quota cost). Lets the UI show "via Spotify Free" instead of a
+            # misleading "rate limited / waiting" while the worker keeps matching.
+            using_free = bool(rate_limited and self.client.is_spotify_metadata_available())
         except Exception:
             authenticated = False
             rate_limited = False
             rate_limit_info = None
             in_cooldown = False
+            using_free = False
 
         return {
             'enabled': True,
@@ -139,6 +147,7 @@ class SpotifyWorker:
             'idle': is_idle,
             'authenticated': authenticated,
             'rate_limited': rate_limited,
+            'using_free': using_free,
             'rate_limit': rate_limit_info,
             'daily_budget': self._get_daily_budget_info(),
             'current_item': self.current_item,

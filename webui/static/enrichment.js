@@ -457,6 +457,10 @@ function updateSpotifyEnrichmentStatusFromData(data) {
 
     const notAuthenticated = data.authenticated === false;
     const isRateLimited = data.rate_limited === true;
+    // The real API is banned but the worker is still matching via the no-creds
+    // Spotify Free source — treat it as running, not stuck (#798 bridge).
+    const bridgingFree = data.using_free === true;
+    const rateLimitedStuck = isRateLimited && !bridgingFree;
     const budgetExhausted = data.daily_budget && data.daily_budget.exhausted;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
@@ -464,7 +468,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
         button.classList.add('paused');
     } else if (notAuthenticated) {
         button.classList.add('no-auth');
-    } else if (isRateLimited || budgetExhausted) {
+    } else if (rateLimitedStuck || budgetExhausted) {
         button.classList.add('paused');
     } else if (data.idle) {
         button.classList.add('complete');
@@ -479,7 +483,8 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     if (tooltipStatus) {
         if (data.paused) { tooltipStatus.textContent = 'Paused'; }
         else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (isRateLimited) { tooltipStatus.textContent = 'Rate Limited'; }
+        else if (rateLimitedStuck) { tooltipStatus.textContent = 'Rate Limited'; }
+        else if (bridgingFree) { tooltipStatus.textContent = 'Running (Spotify Free)'; }
         else if (budgetExhausted) { tooltipStatus.textContent = 'Daily Limit Reached'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running) { tooltipStatus.textContent = 'Running'; }
@@ -491,10 +496,12 @@ function updateSpotifyEnrichmentStatusFromData(data) {
             tooltipCurrent.textContent = notAuthenticated ? 'Connect Spotify in Settings to enrich' : 'Click to resume';
         } else if (notAuthenticated) {
             tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
-        } else if (isRateLimited) {
+        } else if (rateLimitedStuck) {
             const info = data.rate_limit || {};
             const remaining = info.remaining_seconds || 0;
             tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
+        } else if (bridgingFree && data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name} (via Spotify Free)`;
         } else if (budgetExhausted) {
             const resets = data.daily_budget.resets_in_seconds || 0;
             const hours = Math.floor(resets / 3600);
