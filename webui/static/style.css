@@ -63083,6 +63083,30 @@ body.reduce-effects .dash-card::after {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
+/* Daily-budget ring — a conic progress rim hugging the avatar disc's inner
+ * edge, filling as the day's API budget is spent. Color comes from JS
+ * (green → amber → red, purple when bridged to Spotify Free). Drawn inside
+ * the disc because the avatar clips overflow. */
+.rate-eq-avatar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(
+        var(--eq-budget-color, #4ade80) calc(var(--eq-budget, 0) * 360deg),
+        transparent 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px));
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rate-eq.has-budget .rate-eq-avatar::after {
+    opacity: 0.95;
+}
+
 .rate-eq.active .rate-eq-avatar {
     animation: rate-eq-avatar-halo 2.8s ease-in-out infinite;
 }

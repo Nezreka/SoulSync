@@ -383,6 +383,28 @@ function _renderEqualizerBars(grid, data) {
         }
         bar.classList.toggle('cooldown', cooling);
 
+        // Daily-budget ring (Spotify is the only service with a real daily
+        // cap): a conic rim inside the avatar disc fills as the budget is
+        // spent — green → amber → red, purple once the worker has bridged
+        // to Spotify Free for the rest of the day.
+        const budget = worker.daily_budget;
+        if (budget && budget.limit > 0) {
+            const bPct = Math.min(1, (budget.used || 0) / budget.limit);
+            const bridged = !!worker.using_free && !!budget.exhausted;
+            bar.classList.add('has-budget');
+            bar.style.setProperty('--eq-budget', String(Math.max(bPct, 0.02)));
+            bar.style.setProperty('--eq-budget-color',
+                bridged ? '#a78bfa' : bPct < 0.7 ? '#4ade80' : bPct < 0.95 ? '#fbbf24' : '#ef4444');
+            const avatar = bar.querySelector('.rate-eq-avatar');
+            if (avatar) {
+                avatar.title = bridged
+                    ? `Daily budget spent — running on Spotify Free (${budget.used}/${budget.limit})`
+                    : `Daily API budget: ${budget.used}/${budget.limit}`;
+            }
+        } else {
+            bar.classList.remove('has-budget');
+        }
+
         _eqDisplay[svc] = { value, pct, peak, peakAt, rlTotal, cooling };
     }
 }
