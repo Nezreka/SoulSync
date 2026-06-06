@@ -6591,6 +6591,43 @@
                             </div>
                         </div>
 
+                        <div class="tool-card" id="reconcile-ids-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Import IDs from File Tags</h4>
+                                <button class="tool-help-button" data-tool="reconcile-ids"
+                                    title="Learn more about this tool">?</button>
+                            </div>
+                            <p class="tool-card-info">Read provider IDs (Spotify, MusicBrainz, iTunes, Deezer&hellip;) already embedded in your files and fill them into the database &mdash; lets enrichment workers skip redundant API lookups. Only fills blanks; never overwrites an existing match.</p>
+                            <div class="tool-card-stats">
+                                <div class="stat-item">
+                                    <span class="stat-item-label">IDs Filled:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-filled">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Rows Updated:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-updated">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Conflicts:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-conflicts">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Unreadable:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-unreadable">0</span>
+                                </div>
+                            </div>
+                            <div class="tool-card-controls">
+                                <button id="reconcile-ids-button">Scan Library</button>
+                            </div>
+                            <div class="tool-card-progress-section">
+                                <p class="progress-phase-label" id="reconcile-phase-label">Ready to scan</p>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="reconcile-progress-bar" style="width: 0%;"></div>
+                                </div>
+                                <p class="progress-details-label" id="reconcile-progress-label">0 / 0 files scanned (0.0%)</p>
+                            </div>
+                        </div>
+
                         <div class="tool-card" id="duplicate-cleaner-card">
                             <div class="tool-card-header">
                                 <h4 class="tool-card-title">Duplicate Cleaner</h4>
