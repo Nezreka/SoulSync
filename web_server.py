@@ -11316,6 +11316,18 @@ def library_manual_match():
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
 
+        # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
+        # version to the chosen release, so the auto resolve job and every tool
+        # that reads the canonical pin (track-number repair, reorganize,
+        # missing-tracks) honor the user's edition instead of re-resolving back
+        # to the deluxe. The lock survives future enrichment/resolution cycles.
+        try:
+            from core.metadata.canonical_version import should_pin_manual_canonical
+            if should_pin_manual_canonical(entity_type, service):
+                database.set_album_canonical(entity_id, service, service_id, 1.0, locked=True)
+        except Exception as e:
+            logger.warning("Manual canonical pin failed for album %s: %s", entity_id, e)
+
         # Re-fetch fresh data
         artist_id = data.get('artist_id', entity_id)
         if entity_type != 'artist':

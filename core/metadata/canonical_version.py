@@ -207,4 +207,24 @@ def pick_canonical_release(
     return best, best_score
 
 
-__all__ = ["score_release_against_files", "pick_canonical_release"]
+# Album sources the canonical system reads (mirror of
+# core.library_reorganize._ALBUM_ID_COLUMNS — a test pins them in sync). A manual
+# match on any of these should pin/lock the canonical version (#758); a match on
+# a source the canonical tools don't read (e.g. lastfm) has no version to pin.
+CANONICAL_ALBUM_SOURCES = frozenset({'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'})
+
+
+def should_pin_manual_canonical(entity_type: str, source: str) -> bool:
+    """Whether a manual match should also pin (and lock) the canonical album
+    version (#758). True only for an ALBUM match on a canonical-recognised
+    source — so the user's chosen edition becomes the authority every downstream
+    tool (track-number repair, reorganize, missing-tracks) reads, and the auto
+    resolve job won't override it.
+    """
+    return entity_type == 'album' and source in CANONICAL_ALBUM_SOURCES
+
+
+__all__ = [
+    "score_release_against_files", "pick_canonical_release",
+    "CANONICAL_ALBUM_SOURCES", "should_pin_manual_canonical",
+]
