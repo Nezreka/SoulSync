@@ -117,7 +117,7 @@
         });
 
         computeHomes();
-        scatterOrbs();
+        centerOrbs();
 
         dashboardHeader.addEventListener('mouseenter', onMouseEnter);
         dashboardHeader.addEventListener('mouseleave', onMouseLeave);
@@ -137,15 +137,22 @@
         });
     }
 
-    function scatterOrbs() {
+    function centerOrbs() {
+        // Spawn the whole cluster dead-center and let the physics bloom it
+        // outward. Positions EVERY orb (visible or not): the old random
+        // scatter skipped not-yet-visible orbs, so on page load they all sat
+        // at the canvas origin and drifted in from the top-left corner.
         if (!canvas) return;
         const w = canvas.clientWidth || 600;
         const h = canvas.clientHeight || 80;
 
         orbs.forEach(orb => {
-            if (!orb.visible) return;
-            orb.x = ORB_RADIUS + Math.random() * (w - ORB_DIAMETER);
-            orb.y = ORB_RADIUS + Math.random() * (h - ORB_DIAMETER);
+            // A few px of jitter so the separation force can split the stack
+            // (it ignores pairs closer than 0.1px).
+            orb.x = w / 2 + (Math.random() - 0.5) * 6;
+            orb.y = h / 2 + (Math.random() - 0.5) * 6;
+            orb.vx = (Math.random() - 0.5) * 0.6;
+            orb.vy = (Math.random() - 0.5) * 0.6;
         });
     }
 
@@ -322,6 +329,10 @@
         canvas.style.opacity = '1';
         canvas.style.display = '';
         resizeCanvas();
+        // Dashboard (re)activation: the canvas just got its real size — init may
+        // have run while the header was hidden (0x0), leaving positions stale.
+        // Bloom the cluster from dead center instead of wherever that left them.
+        centerOrbs();
         startLoop();
     }
 
