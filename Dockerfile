@@ -32,7 +32,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # yt-dlp must track YouTube faster than its stable channel ships — stable can
 # lag months behind a breaking YouTube change while extraction is broken
 # ("Requested format is not available"). Build images with the NIGHTLY channel.
-RUN pip install --no-cache-dir -U --pre "yt-dlp[default]"
+# COMMIT_SHA is referenced in the RUN so CI's layer cache (cache-from: gha)
+# busts on every new commit — otherwise this layer could pin a stale "nightly"
+# for months, silently defeating its purpose.
+ARG COMMIT_SHA=""
+RUN echo "yt-dlp nightly for build ${COMMIT_SHA}" && \
+    pip install --no-cache-dir -U --pre "yt-dlp[default]"
 
 # Stage 2: Runtime — only runtime dependencies, no build tools
 FROM python:3.11-slim
