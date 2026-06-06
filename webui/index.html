@@ -2201,6 +2201,19 @@
                                     </div>
                                 </div>
 
+                                <!-- Link lookup (#775): paste a provider link and resolve
+                                     it directly on the owning source (Spotify / Apple Music
+                                     / MusicBrainz / Deezer) — no fuzzy search. Results render
+                                     in the dropdown below and reuse the normal download/
+                                     import flow. Links only: a bare ID is ambiguous. -->
+                                <div class="enh-id-lookup">
+                                    <span class="enh-id-lookup-icon">🔗</span>
+                                    <input type="text" id="enh-id-input" class="enh-id-input"
+                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link"
+                                        autocomplete="off" spellcheck="false">
+                                    <button id="enh-id-btn" class="enh-id-btn" type="button">Look up</button>
+                                </div>
+
                                 <!-- Enhanced Search Dropdown (Overlay Panel) -->
                                 <div id="enhanced-dropdown" class="enhanced-dropdown hidden">
                                     <div class="enhanced-dropdown-content">
@@ -3825,6 +3838,7 @@
                                         <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
+                                            <option value="spotify_free">Spotify Free (no credentials)</option>
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
                                             <option value="discogs">Discogs</option>
@@ -3832,7 +3846,13 @@
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify can only be selected while an active Spotify session exists. Discogs requires a personal token. MusicBrainz is always available but rate-limited to 1 req/sec.</div>
+                                        <div class="callback-help">Where artist, album, and track metadata comes from:<br>
+                                            • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
+                                            • <strong>Spotify Free</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site), can't search albums by name (album results come from iTunes/Deezer instead), and can't read your personal library or playlists.<br>
+                                            • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
+                                            • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
+                                            • <strong>Discogs</strong> — needs a personal access token.<br><br>
+                                            Tip: if you pick <strong>Spotify Free</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to free while Spotify is rate-limited — then switches back automatically.</div>
                                     </div>
                                 </div>
 
@@ -6113,6 +6133,18 @@
                                 <h3>Playlist Sync Settings</h3>
 
                                 <div class="form-group">
+                                    <label>Sync mode:</label>
+                                    <select id="playlist-sync-mode" class="form-select">
+                                        <option value="replace">Replace — recreate the playlist each sync (default)</option>
+                                        <option value="reconcile">Reconcile — edit in place, keep image &amp; description</option>
+                                        <option value="append">Append — only add new tracks, never remove</option>
+                                    </select>
+                                    <div class="help-text">
+                                        "Replace" deletes and recreates the server playlist every sync, which wipes its custom image/description. "Reconcile" updates the same playlist in place (adds new tracks, removes ones no longer in the source) so your custom image and description survive. "Append" only ever adds.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="create-backup" checked>
                                         Create playlist backups before sync
@@ -6516,37 +6548,6 @@
                             </div>
                         </div>
 
-                        <div class="tool-card" id="metadata-updater-card">
-                            <div class="tool-card-header">
-                                <h4 class="tool-card-title">Metadata Updater</h4>
-                                <button class="tool-help-button" data-tool="metadata-updater"
-                                    title="Learn more about this tool">?</button>
-                            </div>
-                            <p class="metadata-updater-description tool-card-info">Updates artist photos, genres,
-                                and album art from Spotify.</p>
-                            <div class="tool-card-controls">
-                                <select id="metadata-refresh-interval">
-                                    <option value="180">6 months</option>
-                                    <option value="90">3 months</option>
-                                    <option value="30" selected>1 month</option>
-                                    <option value="14">2 weeks</option>
-                                    <option value="7">1 week</option>
-                                    <option value="0">Full refresh</option>
-                                </select>
-                                <button id="metadata-update-button">Begin Update</button>
-                            </div>
-                            <div class="tool-card-progress-section">
-                                <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not
-                                    running</p>
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;">
-                                    </div>
-                                </div>
-                                <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)
-                                </p>
-                            </div>
-                        </div>
-
                         <div class="tool-card" id="quality-scanner-card">
                             <div class="tool-card-header">
                                 <h4 class="tool-card-title">Quality Scanner</h4>
@@ -6587,6 +6588,43 @@
                                 </div>
                                 <p class="progress-details-label" id="quality-progress-label">0 / 0 tracks scanned
                                     (0.0%)</p>
+                            </div>
+                        </div>
+
+                        <div class="tool-card" id="reconcile-ids-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Import IDs from File Tags</h4>
+                                <button class="tool-help-button" data-tool="reconcile-ids"
+                                    title="Learn more about this tool">?</button>
+                            </div>
+                            <p class="tool-card-info">Read provider IDs (Spotify, MusicBrainz, iTunes, Deezer&hellip;) already embedded in your files and fill them into the database &mdash; lets enrichment workers skip redundant API lookups. Only fills blanks; never overwrites an existing match.</p>
+                            <div class="tool-card-stats">
+                                <div class="stat-item">
+                                    <span class="stat-item-label">IDs Filled:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-filled">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Rows Updated:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-updated">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Conflicts:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-conflicts">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-item-label">Unreadable:</span>
+                                    <span class="stat-item-value" id="reconcile-stat-unreadable">0</span>
+                                </div>
+                            </div>
+                            <div class="tool-card-controls">
+                                <button id="reconcile-ids-button">Scan Library</button>
+                            </div>
+                            <div class="tool-card-progress-section">
+                                <p class="progress-phase-label" id="reconcile-phase-label">Ready to scan</p>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="reconcile-progress-bar" style="width: 0%;"></div>
+                                </div>
+                                <p class="progress-details-label" id="reconcile-progress-label">0 / 0 files scanned (0.0%)</p>
                             </div>
                         </div>
 
@@ -6667,6 +6705,37 @@
                     <div class="tools-section">
                         <h3 class="tools-section-title">Metadata &amp; Cache</h3>
                         <div class="tools-grid">
+                        <div class="tool-card" id="metadata-updater-card">
+                            <div class="tool-card-header">
+                                <h4 class="tool-card-title">Metadata Updater</h4>
+                                <button class="tool-help-button" data-tool="metadata-updater"
+                                    title="Learn more about this tool">?</button>
+                            </div>
+                            <p class="metadata-updater-description tool-card-info">Updates artist photos, genres,
+                                and album art from Spotify.</p>
+                            <div class="tool-card-controls">
+                                <select id="metadata-refresh-interval">
+                                    <option value="180">6 months</option>
+                                    <option value="90">3 months</option>
+                                    <option value="30" selected>1 month</option>
+                                    <option value="14">2 weeks</option>
+                                    <option value="7">1 week</option>
+                                    <option value="0">Full refresh</option>
+                                </select>
+                                <button id="metadata-update-button">Begin Update</button>
+                            </div>
+                            <div class="tool-card-progress-section">
+                                <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not
+                                    running</p>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;">
+                                    </div>
+                                </div>
+                                <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)
+                                </p>
+                            </div>
+                        </div>
+
 
                         <div class="tool-card" id="discovery-pool-card">
                             <div class="tool-card-header">
@@ -6707,45 +6776,6 @@
                                 <button onclick="openManualLibraryMatchTool()">Open Library Match</button>
                             </div>
                         </div>
-
-                        <div class="tool-card" id="retag-tool-card">
-                            <div class="tool-card-header">
-                                <h4 class="tool-card-title">Retag Tool</h4>
-                                <button class="tool-help-button" data-tool="retag-tool"
-                                    title="Learn more about this tool">?</button>
-                            </div>
-                            <p class="tool-card-info">Fix metadata on previously downloaded albums &amp; singles</p>
-                            <div class="tool-card-stats">
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Groups:</span>
-                                    <span class="stat-item-value" id="retag-stat-groups">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Tracks:</span>
-                                    <span class="stat-item-value" id="retag-stat-tracks">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Artists:</span>
-                                    <span class="stat-item-value" id="retag-stat-artists">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Status:</span>
-                                    <span class="stat-item-value" id="retag-stat-status">Idle</span>
-                                </div>
-                            </div>
-                            <div class="tool-card-controls">
-                                <button id="retag-open-button">Open Retag Tool</button>
-                            </div>
-                            <div class="tool-card-progress-section">
-                                <p class="progress-phase-label" id="retag-phase-label">Ready</p>
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-fill" id="retag-progress-bar" style="width: 0%;">
-                                    </div>
-                                </div>
-                                <p class="progress-details-label" id="retag-progress-label">0 / 0 tracks (0.0%)</p>
-                            </div>
-                        </div>
-
                     </div></div>
 
                     <!-- ── Management ── -->
@@ -7788,40 +7818,6 @@
 
     <!-- Tool Help Modal -->
     <!-- Retag Tool Modal -->
-    <div class="retag-modal-overlay" id="retag-modal">
-        <div class="retag-modal-container">
-            <div class="retag-modal-header">
-                <div class="retag-modal-header-left">
-                    <h2 class="retag-modal-title">Retag Tool</h2>
-                </div>
-                <div class="retag-header-actions">
-                    <button class="retag-clear-all-btn" id="retag-clear-all-btn" onclick="clearAllRetagGroups(this)">Clear All</button>
-                    <button class="retag-modal-close" onclick="closeRetagModal()">&times;</button>
-                </div>
-            </div>
-            <div class="retag-batch-bar" id="retag-batch-bar" style="display: none;">
-                <span class="retag-batch-count" id="retag-batch-count">0 selected</span>
-                <button class="retag-batch-remove-btn" onclick="batchRemoveRetagGroups()">Remove Selected</button>
-            </div>
-            <div class="retag-modal-body" id="retag-modal-body">
-                <div class="retag-loading">Loading downloads...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Retag Search Sub-Modal -->
-    <div class="retag-search-overlay" id="retag-search-modal">
-        <div class="retag-search-container">
-            <div class="retag-search-header">
-                <h3 class="retag-search-title" id="retag-search-title">Search for Correct Album</h3>
-                <button class="retag-search-close" onclick="closeRetagSearch()">&times;</button>
-            </div>
-            <div class="retag-search-input-section">
-                <input type="text" id="retag-search-input" placeholder="Search albums..." autocomplete="off">
-            </div>
-            <div class="retag-search-results" id="retag-search-results"></div>
-        </div>
-    </div>
 
     <div class="tool-help-modal" id="tool-help-modal" onclick="if(event.target===this)closeToolHelpModal()">
         <div class="tool-help-modal-content">

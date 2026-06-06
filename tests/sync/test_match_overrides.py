@@ -1,6 +1,10 @@
 from unittest.mock import MagicMock
 
-from core.sync.match_overrides import record_manual_match, resolve_match_overrides
+from core.sync.match_overrides import (
+    record_manual_match,
+    resolve_durable_match_server_id,
+    resolve_match_overrides,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -191,3 +195,84 @@ def test_record_handles_empty_optional_strings():
     assert kwargs["normalized_title"] == ""
     assert kwargs["normalized_artist"] == ""
     assert kwargs["server_track_title"] == ""
+
+
+# ──────────────────────────────────────────────────────────────────────
+# resolve_durable_match_server_id — manual match survives a rescan (#787)
+# ──────────────────────────────────────────────────────────────────────
+
+class _FakeMatchDB:
+    """Minimal DB stub for the durable-match resolver."""
+    def __init__(self, match=None, file_path_id=None):
+        self._match = match
+        self._file_path_id = file_path_id
+        self.saved = []
+
+    def find_manual_library_match_by_source_track_id(self, profile_id, source_track_id, server_source):
+        return dict(self._match) if self._match else None
+
+    def find_track_id_by_file_path(self, file_path):
+        return self._file_path_id
+
+    def save_manual_library_match(self, profile_id, source, source_track_id, library_track_id, **meta):
+        self.saved.append((library_track_id, meta))
+        return True
+
+
+def test_durable_match_returns_id_when_still_valid():
+    # Stored library id still present in the server playlist → direct hit.
+    db = _FakeMatchDB(match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+                             "profile_id": 1, "source": "spotify", "source_track_id": "iron",
+                             "server_source": "plex"})
+    out = resolve_durable_match_server_id(db, 1, "iron", "plex", {"5001", "5002"})
+    assert out == "5001"
+    assert db.saved == []  # no self-heal needed
+
+
+def test_durable_match_reresolves_stale_id_via_file_path_and_self_heals():
+    # Rescan re-keyed the track: old id 5001 gone, file now lives at id 7777.
+    db = _FakeMatchDB(
+        match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+               "profile_id": 1, "source": "spotify", "source_track_id": "iron", "server_source": "plex"},
+        file_path_id="7777",
+    )
+    out = resolve_durable_match_server_id(db, 1, "iron", "plex", {"7777", "9000"})
+    assert out == "7777"                      # re-resolved to the current id
+    assert db.saved and db.saved[0][0] == "7777"  # self-healed the stored id
+
+
+def test_durable_match_none_when_no_match():
+    db = _FakeMatchDB(match=None)
+    assert resolve_durable_match_server_id(db, 1, "iron", "plex", {"5001"}) is None
+
+
+def test_durable_match_none_when_stale_and_file_path_unresolvable():
+    # Stale id AND the file path no longer resolves (file moved/removed) → no pair.
+    db = _FakeMatchDB(
+        match={"library_track_id": "5001", "library_file_path": "/m/gone.flac",
+               "profile_id": 1, "source": "spotify", "source_track_id": "iron", "server_source": "plex"},
+        file_path_id=None,
+    )
+    assert resolve_durable_match_server_id(db, 1, "iron", "plex", {"7777"}) is None
+    assert db.saved == []
+
+
+def test_durable_match_none_when_reresolved_id_not_in_playlist():
+    # File resolves to a track, but that track isn't in THIS playlist → don't pair.
+    db = _FakeMatchDB(
+        match={"library_track_id": "5001", "library_file_path": "/m/a.flac",
+               "profile_id": 1, "source": "spotify", "source_track_id": "iron", "server_source": "plex"},
+        file_path_id="7777",
+    )
+    assert resolve_durable_match_server_id(db, 1, "iron", "plex", {"1234"}) is None
+
+
+def test_durable_match_safe_when_db_lacks_methods():
+    class Bare:
+        pass
+    assert resolve_durable_match_server_id(Bare(), 1, "iron", "plex", {"5001"}) is None
+
+
+def test_durable_match_empty_source_id_returns_none():
+    db = _FakeMatchDB(match={"library_track_id": "5001"})
+    assert resolve_durable_match_server_id(db, 1, "", "plex", {"5001"}) is None

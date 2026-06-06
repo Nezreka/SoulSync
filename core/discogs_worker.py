@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.discogs_client import DiscogsClient
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
 
 logger = get_logger("discogs_worker")
 
@@ -332,9 +332,13 @@ class DiscogsWorker:
             self.stats['not_found'] += 1
             return
 
-        # Find best match by name similarity
+        # Find best match by name similarity (skipping ids already claimed by
+        # a differently-named artist, so we don't create a shared/duplicate id).
         for result in results:
-            if self._name_matches(artist_name, result.name):
+            ok, reason = accept_artist_match(
+                self.db, 'discogs_id', result.id, artist_id, artist_name, result.name,
+            )
+            if ok:
                 # Fetch full artist detail (uses cache)
                 data = self.client._fetch_and_cache_artist(result.id)
                 if data:

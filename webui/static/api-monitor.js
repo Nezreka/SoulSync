@@ -65,6 +65,14 @@ function _handleRateMonitorUpdate(data) {
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
 
+    // Skip DOM writes while the equalizer is off-screen (you're on another page).
+    // All pages stay mounted, so updating a hidden grid still fires every
+    // MutationObserver on the document — including password-manager extensions
+    // that re-scan the WHOLE DOM on each mutation — for zero visible benefit.
+    // offsetParent is null when an ancestor is display:none. The next update that
+    // arrives while the dashboard is visible renders normally.
+    if (grid.offsetParent === null) return;
+
     // The dashboard rate monitor uses the equalizer-bar visual — a
     // vertical-bar VU-meter row that fits any service count without
     // an orphan grid cell. Detail page / mobile breakpoints keep the

@@ -24,6 +24,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("sync.match_overrides")
+
 
 def resolve_match_overrides(
     source_tracks: List[Dict[str, Any]],
@@ -117,3 +121,76 @@ def record_manual_match(
         ))
     except Exception:
         return False
+
+
+def resolve_durable_match_server_id(
+    db: Any,
+    profile_id: int,
+    source_track_id: str,
+    server_source: str,
+    valid_server_ids: set,
+) -> Optional[str]:
+    """Current server track id for a DURABLE manual library match, or None.
+
+    Unlike ``sync_match_cache`` (wiped on every rescan), the
+    ``manual_library_track_matches`` table survives a scan — so consulting it
+    here is what makes a user's Find & Add / manual match persist across a
+    library rescan (#787). If the stored ``library_track_id`` went stale
+    (a rescan re-keyed the track — common on Jellyfin/Navidrome), re-resolve
+    it from the stored file path and self-heal the row so the next lookup is
+    a direct hit.
+
+    Pure helper: ``db`` is injected. ``valid_server_ids`` is the set of
+    string ids that currently exist in the server playlist's track list —
+    a re-resolved id is only returned if it's actually present. Never raises.
+    """
+    if not source_track_id:
+        return None
+    finder = getattr(db, "find_manual_library_match_by_source_track_id", None)
+    if finder is None:
+        return None
+    try:
+        match = finder(profile_id, str(source_track_id), server_source or "")
+    except Exception:
+        return None
+    if not match:
+        return None
+
+    lib_id = match.get("library_track_id")
+    if lib_id is not None and str(lib_id) in valid_server_ids:
+        return str(lib_id)
+
+    # Stale pointer — re-resolve via the stored file path and self-heal.
+    file_path = match.get("library_file_path")
+    resolver = getattr(db, "find_track_id_by_file_path", None)
+    if file_path and resolver is not None:
+        try:
+            new_id = resolver(file_path)
+        except Exception:
+            new_id = None
+        if new_id and str(new_id) in valid_server_ids:
+            _self_heal_match_id(db, match, str(new_id))
+            return str(new_id)
+    return None
+
+
+def _self_heal_match_id(db: Any, match: Dict[str, Any], new_library_track_id: str) -> None:
+    """Rewrite a manual match's library_track_id after re-resolution. Best-effort."""
+    saver = getattr(db, "save_manual_library_match", None)
+    if saver is None:
+        return
+    try:
+        saver(
+            match.get("profile_id", 1),
+            match.get("source", ""),
+            match.get("source_track_id", ""),
+            new_library_track_id,
+            source_title=match.get("source_title"),
+            source_artist=match.get("source_artist"),
+            source_album=match.get("source_album"),
+            source_context_json=match.get("source_context_json"),
+            server_source=match.get("server_source", ""),
+            library_file_path=match.get("library_file_path"),
+        )
+    except Exception as e:
+        logger.debug("manual match self-heal failed: %s", e)

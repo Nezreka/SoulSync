@@ -1613,7 +1613,10 @@ class SoulseekClient(DownloadSourcePlugin):
             return result
 
         _emit('staging', release=getattr(picked, 'album_title', folder_path) if picked else folder_path)
-        copied = copy_audio_files_atomically(completed, Path(staging_dir))
+        # remove_source=True: clean slskd's completed files once staged so they
+        # don't pile up in the download folder (#796). Soulseek has no seeding,
+        # unlike the torrent/usenet bundle paths which keep their originals.
+        copied = copy_audio_files_atomically(completed, Path(staging_dir), remove_source=True)
         if not copied:
             result['error'] = 'No Soulseek album files copied to staging'
             return result

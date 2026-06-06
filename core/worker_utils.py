@@ -1,9 +1,104 @@
 """Shared helpers for background workers."""
 
 import logging
+import re
 import threading
+from difflib import SequenceMatcher
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Artist-match acceptance gate. Stricter than the 0.80 each worker uses for
+# album/track titles: artist names are short, so 0.80 lets distinct artists
+# slip through ("ODESZA"/"odessa", "Blance"/"Blanke", "Lady A"/"Lady Gaga" all
+# score 0.80-0.83). 0.85 rejects those while still tolerating real variation
+# that survives normalization.
+ARTIST_NAME_MATCH_THRESHOLD = 0.85
+
+# Whitelist of artist source-id columns we'll interpolate into SQL — guards the
+# conflict query against any unexpected column name.
+_ARTIST_ID_COLUMNS = frozenset({
+    'deezer_id', 'spotify_artist_id', 'itunes_artist_id', 'musicbrainz_id',
+    'discogs_id', 'audiodb_id', 'qobuz_id', 'tidal_id', 'amazon_id', 'soul_id',
+})
+
+
+def normalize_artist_name(name: str) -> str:
+    """Lowercase, drop ' - ...' suffixes / parentheticals / punctuation, and
+    collapse whitespace — the same normalization the per-worker matchers use."""
+    name = (name or '').lower().strip()
+    name = re.sub(r'\s+[-–—]\s+.*$', '', name)
+    name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
+    name = re.sub(r'[^\w\s]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+
+def artist_name_matches(query: str, result: str,
+                        threshold: float = ARTIST_NAME_MATCH_THRESHOLD) -> bool:
+    """True if two artist names match at/above ``threshold`` after normalization."""
+    nq, nr = normalize_artist_name(query), normalize_artist_name(result)
+    if not nq or not nr:
+        return False
+    return SequenceMatcher(None, nq, nr).ratio() >= threshold
+
+
+def _names_equivalent(a: str, b: str) -> bool:
+    return normalize_artist_name(a) == normalize_artist_name(b)
+
+
+def source_id_conflict(database, id_column: str, source_id, artist_id,
+                       artist_name: str) -> Optional[str]:
+    """Return the name of a DIFFERENTLY-named library artist that already holds
+    ``source_id`` in ``id_column``, or None.
+
+    A same-named holder (the same artist indexed on two media servers) is NOT a
+    conflict — both legitimately share the id. Only a different artist holding
+    the id signals the kind of corruption where one source id gets smeared
+    across unrelated artists.
+    """
+    if source_id in (None, ''):
+        return None
+    if id_column not in _ARTIST_ID_COLUMNS:
+        logger.debug(f"source_id_conflict: refusing unknown column {id_column!r}")
+        return None
+    try:
+        with database._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT name FROM artists WHERE {id_column} = ? AND id != ?",
+                (str(source_id), artist_id),
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"source_id_conflict check failed for {id_column}={source_id}: {e}")
+        return None
+    for (other_name,) in rows:
+        if not _names_equivalent(artist_name, other_name):
+            return other_name
+    return None
+
+
+def accept_artist_match(database, id_column: str, source_id, artist_id,
+                        query_name: str, result_name: str,
+                        threshold: float = ARTIST_NAME_MATCH_THRESHOLD) -> tuple:
+    """Decide whether to store ``source_id`` on an artist.
+
+    Returns ``(ok: bool, reason: str)``. Accepts only when the result's name
+    matches the library artist at/above ``threshold`` AND the id isn't already
+    claimed by a differently-named artist. ``reason`` explains a rejection (for
+    debug logging). This is the single gate every worker's artist match should
+    pass through, so the 'one id smeared across many artists' bug can't recur.
+    """
+    if not artist_name_matches(query_name, result_name, threshold):
+        return False, (
+            f"name mismatch '{query_name}' vs '{result_name}' (< {threshold})"
+        )
+    conflict = source_id_conflict(database, id_column, source_id, artist_id, query_name)
+    if conflict:
+        return False, (
+            f"{id_column}={source_id} already claimed by '{conflict}' — "
+            f"skipping to avoid a shared/duplicate id"
+        )
+    return True, ""
 
 
 def interruptible_sleep(stop_event: threading.Event, seconds: float, step: float = 0.5) -> bool:

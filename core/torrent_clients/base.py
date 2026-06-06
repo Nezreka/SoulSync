@@ -20,6 +20,24 @@ from dataclasses import dataclass
 from typing import List, Optional, Protocol, runtime_checkable
 
 
+def normalize_client_url(raw: str) -> str:
+    """Clean a user-entered WebUI URL into something ``requests`` accepts.
+
+    Users routinely type a bare host like ``192.168.1.5:8080`` or
+    ``qbittorrent.lan:8080`` with no scheme. ``requests`` then raises
+    "No connection adapters were found for '...'" because it can't pick an
+    http/https adapter (a bare ``host:port`` even gets misparsed as
+    ``scheme=host``). Default a missing scheme to ``http://`` and trim a
+    trailing slash. Empty input passes through unchanged.
+    """
+    url = (raw or '').strip()
+    if not url:
+        return ''
+    if '://' not in url:
+        url = 'http://' + url
+    return url.rstrip('/')
+
+
 @dataclass
 class TorrentStatus:
     """Adapter-uniform view of one torrent's live state.

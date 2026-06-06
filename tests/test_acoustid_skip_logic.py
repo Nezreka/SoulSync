@@ -185,6 +185,80 @@ def test_high_score_but_artist_mismatch_no_longer_skipped(verifier):
     assert result == VerificationResult.FAIL
 
 
+def test_low_fingerprint_score_never_skipped_same_script_artist(verifier):
+    """#797 guard — the #607 protection for a SAME-SCRIPT artist (Latin
+    'Yoko Takahashi' on both sides) with only a cross-script TITLE must
+    stay FAIL below the 0.95 floor. The #797 relaxation is keyed on the
+    ARTIST spanning scripts, which this case is NOT, so nothing changes
+    here. (Duplicates test_low_fingerprint_score_never_skipped's intent
+    explicitly against the new code path.)"""
+    _stub_lookup(verifier, recordings=[
+        {'title': '残酷な天使のテーゼ', 'artist': 'Yoko Takahashi'},
+    ], best_score=0.85)
+
+    result, _msg = verifier.verify_audio_file(
+        '/fake/path.flac',
+        'Zankoku na Tenshi no Theze',
+        'Yoko Takahashi',
+    )
+    assert result == VerificationResult.FAIL
+
+
+# ---------------------------------------------------------------------------
+# Issue #797 — non-English ARTIST whose name spans scripts
+# ---------------------------------------------------------------------------
+
+
+def test_cross_script_artist_confirmed_via_alias_skips_below_095(verifier):
+    """#797 headline: requested 'Joe Hisaishi' (romanized), AcoustID
+    returns the recording with the artist/title in their native kanji
+    ('久石譲'). The alias bridge confirms 久石譲 IS Joe Hisaishi, the
+    fingerprint is solid (0.85, above the 0.80 trust floor) but below
+    the old 0.95 language/script bar. Pre-#797 this FAILed and the
+    correct file was quarantined. Now it SKIPs."""
+    with patch(
+        'core.acoustid_verification._resolve_expected_artist_aliases',
+        return_value=['久石譲'],
+    ):
+        _stub_lookup(verifier, recordings=[
+            {'title': '風のとおり道', 'artist': '久石譲'},
+        ], best_score=0.85)
+
+        result, msg = verifier.verify_audio_file(
+            '/fake/path.flac',
+            'The Path of the Wind',
+            'Joe Hisaishi',
+        )
+    assert result == VerificationResult.SKIP
+    assert 'language/script' in msg.lower()
+
+
+def test_cross_script_artist_NOT_confirmed_still_fails(verifier):
+    """#797 tight scope: if the alias bridge can't confirm the artist
+    (lookup returns nothing), we have no positive evidence the kanji
+    artist IS the expected one — so the #797 relaxation must NOT fire.
+    The relaxation only rescues a CONFIRMED cross-script artist.
+
+    Constructed so best_rec is set (partial title overlap → non-zero
+    combined score) and the title stays under the strict threshold, so
+    the flow reaches the same skip-decision point the rescue lives at —
+    proving it doesn't fire without a confirmed artist."""
+    with patch(
+        'core.acoustid_verification._resolve_expected_artist_aliases',
+        return_value=[],
+    ):
+        _stub_lookup(verifier, recordings=[
+            {'title': 'Summer Night', 'artist': '久石譲'},
+        ], best_score=0.85)
+
+        result, _msg = verifier.verify_audio_file(
+            '/fake/path.flac',
+            'Summer',
+            'Joe Hisaishi',
+        )
+    assert result == VerificationResult.FAIL
+
+
 def test_old_loose_threshold_no_longer_fires_for_unrelated_titles(verifier):
     """Pin the negative case for the old loose threshold (title_sim
     >= 0.55). 'Crown' vs 'Crown of Thorns' had similarity around 0.6

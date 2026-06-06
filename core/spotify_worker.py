@@ -9,7 +9,12 @@ from datetime import datetime, date, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.spotify_client import SpotifyClient, SpotifyRateLimitError
-from core.worker_utils import interruptible_sleep, set_album_api_track_count
+from core.worker_utils import (
+    ARTIST_NAME_MATCH_THRESHOLD,
+    interruptible_sleep,
+    set_album_api_track_count,
+    source_id_conflict,
+)
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("spotify_worker")
@@ -121,11 +126,19 @@ class SpotifyWorker:
             rate_limit_info = self.client.get_rate_limit_info() if rate_limited else None
             in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
             authenticated = self.client.sp is not None
+            # Is the worker still serving via the no-creds Spotify Free source
+            # despite the real-API ban? Only check WHEN rate-limited: during a
+            # ban is_spotify_authenticated() returns False without an API probe,
+            # so is_spotify_metadata_available() reduces to "is free available"
+            # (no quota cost). Lets the UI show "via Spotify Free" instead of a
+            # misleading "rate limited / waiting" while the worker keeps matching.
+            using_free = bool(rate_limited and self.client.is_spotify_metadata_available())
         except Exception:
             authenticated = False
             rate_limited = False
             rate_limit_info = None
             in_cooldown = False
+            using_free = False
 
         return {
             'enabled': True,
@@ -134,6 +147,7 @@ class SpotifyWorker:
             'idle': is_idle,
             'authenticated': authenticated,
             'rate_limited': rate_limited,
+            'using_free': using_free,
             'rate_limit': rate_limit_info,
             'daily_budget': self._get_daily_budget_info(),
             'current_item': self.current_item,
@@ -181,16 +195,33 @@ class SpotifyWorker:
                     interruptible_sleep(self._stop_event, 1)
                     continue
 
-                # Rate limit guard — if globally rate limited, sleep until ban expires
-                if self.client.is_rate_limited():
+                # Rate limit guard — if globally rate limited, sleep until ban
+                # expires. EXCEPT: when Spotify Free is available it bridges the
+                # ban (is_spotify_metadata_available() is True via the no-creds
+                # source, and the client routes there), so we keep enriching
+                # instead of stalling. Purely additive: with Spotify Free off,
+                # is_spotify_metadata_available() is False during a ban and this
+                # sleeps exactly as before.
+                if self.client.is_rate_limited() and not self.client.is_spotify_metadata_available():
                     info = self.client.get_rate_limit_info()
                     remaining = info['remaining_seconds'] if info else 60
                     logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
                     interruptible_sleep(self._stop_event, min(remaining, 60))  # Check again every 60s max
                     continue
 
-                # Daily budget guard — worker-only cap to avoid saturating Spotify rate limits
-                if self._is_daily_budget_exhausted():
+                # Is the worker serving via the no-creds Spotify Free source this
+                # iteration? The daily budget and post-ban cooldown both exist to
+                # protect the REAL authenticated API from bans — they don't apply
+                # to free (a different, anonymous path). Computed once and reused
+                # below; the loop already probes auth, so no extra quota cost.
+                try:
+                    free_serving = self.client._free_active()
+                except Exception:
+                    free_serving = False
+
+                # Daily budget guard — worker-only cap to avoid saturating the REAL
+                # Spotify API. Skipped while serving via free (free isn't that API).
+                if not free_serving and self._is_daily_budget_exhausted():
                     budget = self._get_daily_budget_info()
                     resets_in = budget['resets_in_seconds']
                     logger.info(f"Daily enrichment budget exhausted ({budget['used']}/{budget['limit']}), "
@@ -199,8 +230,9 @@ class SpotifyWorker:
                     continue
 
                 # Post-ban cooldown guard — after ban expires, wait before resuming
-                # to avoid immediately re-triggering the rate limit
-                cooldown = self.client.get_post_ban_cooldown_remaining()
+                # to avoid immediately re-triggering the rate limit. Only matters
+                # for the real API, so skip it while serving via free.
+                cooldown = 0 if free_serving else self.client.get_post_ban_cooldown_remaining()
                 if cooldown > 0:
                     logger.debug(f"Post-ban cooldown active ({cooldown}s left), sleeping...")
                     interruptible_sleep(self._stop_event, min(cooldown, 60))
@@ -210,10 +242,12 @@ class SpotifyWorker:
                 # We intentionally avoid calling is_spotify_authenticated() here
                 # because it makes an API probe that can re-trigger rate limits
                 # and lock users in an infinite rate-limit loop.
-                if not self.client.is_spotify_authenticated():
+                # Available = real auth OR the no-creds SpotipyFree fallback
+                # (enrichment is metadata-only, so the free source can serve it).
+                if not self.client.is_spotify_metadata_available():
                     self.client.reload_config()
-                    if not self.client.is_spotify_authenticated():
-                        logger.debug("Spotify not authenticated, sleeping 30s...")
+                    if not self.client.is_spotify_metadata_available():
+                        logger.debug("Spotify metadata unavailable, sleeping 30s...")
                         interruptible_sleep(self._stop_event, 30)
                         continue
 
@@ -239,7 +273,10 @@ class SpotifyWorker:
                     continue
 
                 self._process_item(item)
-                self._increment_daily_budget()
+                # Only real-API work counts toward the daily cap — free-served
+                # items don't touch the authenticated API's quota.
+                if not free_serving:
+                    self._increment_daily_budget()
                 interruptible_sleep(self._stop_event, self.inter_item_sleep)
 
             except SpotifyRateLimitError:
@@ -483,12 +520,14 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for artist '{artist_name}'")
             return
 
-        # Find best fuzzy match — score all candidates, pick highest above threshold
+        # Find best fuzzy match — score all candidates, pick highest above the
+        # (stricter, artist-specific) threshold so short-name false positives
+        # like "ODESZA"/"odessa" don't slip through.
         best_obj = None
         best_score = 0
         for artist_obj in results:
             score = self._name_similarity(artist_name, artist_obj.name)
-            if score >= self.name_similarity_threshold and score > best_score:
+            if score >= ARTIST_NAME_MATCH_THRESHOLD and score > best_score:
                 best_obj = artist_obj
                 best_score = score
 
@@ -497,6 +536,19 @@ class SpotifyWorker:
                 logger.warning(f"Rejecting non-Spotify ID '{best_obj.id}' for artist '{artist_name}' (iTunes fallback leak)")
                 self._mark_status('artist', artist_id, 'error')
                 self.stats['errors'] += 1
+                return
+            # Don't assign a Spotify id another (differently-named) artist
+            # already holds — prevents one id smeared across artists.
+            conflict = source_id_conflict(
+                self.db, 'spotify_artist_id', best_obj.id, artist_id, artist_name
+            )
+            if conflict:
+                self._mark_status('artist', artist_id, 'not_found')
+                self.stats['not_found'] += 1
+                logger.debug(
+                    f"Artist '{artist_name}' -> Spotify {best_obj.id} skipped: "
+                    f"already claimed by '{conflict}'"
+                )
                 return
             self._update_artist(artist_id, best_obj)
             self.stats['matched'] += 1

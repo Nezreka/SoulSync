@@ -326,6 +326,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                             "task=%s username=%s filename=%s",
                             task_id, username, os.path.basename(filename),
                         )
+                    elif track_info and track_info.get('_skip_acoustid'):
+                        # Issue #797 — the album-download request had the
+                        # per-request "Skip AcoustID verification" toggle on.
+                        # Bypass only the AcoustID gate (same as a manual
+                        # pick); integrity + bit-depth still run.
+                        matched_downloads_context[context_key]['_skip_quarantine_check'] = 'acoustid'
+                        logger.info(
+                            "[Context] Skip-AcoustID toggle — bypassing AcoustID for "
+                            "task=%s filename=%s",
+                            task_id, os.path.basename(filename),
+                        )
 
                     logger.info(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
                     logger.debug(f"[Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")

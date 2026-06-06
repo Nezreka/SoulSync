@@ -569,6 +569,72 @@ class SpotifyClient:
             return self._itunes  # Fall back to iTunes if no Discogs token
         return self._itunes
 
+    def _free_selected(self) -> bool:
+        """Whether the user picked 'Spotify Free' as their metadata source
+        (the no-creds option, for when they haven't connected Spotify)."""
+        try:
+            return bool(config_manager.get('metadata.spotify_free', False))
+        except Exception:
+            return False
+
+    def _free_installed(self) -> bool:
+        from core.spotify_free_metadata import spotify_free_installed
+        return spotify_free_installed()
+
+    def _free_wanted(self) -> bool:
+        """Does the user actually want the free source? OPT-IN: only when they
+        picked 'Spotify Free'. This keeps free from auto-scraping for anyone who
+        didn't choose it — a plain-'Spotify' user just waits out a rate-limit ban
+        as before. A user on 'Spotify Free' who also connects an account uses the
+        official account normally and free only bridges their bans."""
+        return self._free_selected()
+
+    def _free_available(self) -> bool:
+        """Free CAN serve: package installed AND the user wants Spotify."""
+        return self._free_installed() and self._free_wanted()
+
+    def is_spotify_metadata_available(self) -> bool:
+        """Whether SoulSync can serve Spotify metadata — real auth OR the
+        no-creds source. Availability gates (search resolve, enrichment worker,
+        watchlist) use THIS instead of ``is_spotify_authenticated()`` so the
+        free source is reachable. Does NOT change auth semantics."""
+        from core.spotify_free_metadata import should_offer_spotify_metadata
+        try:
+            authed = self.is_spotify_authenticated()
+        except Exception:
+            authed = False
+        return should_offer_spotify_metadata(authed, self._free_available())
+
+    def _free_active(self) -> bool:
+        """Whether the no-creds source may serve THIS request: free available
+        AND official can't (no auth, or rate-limited). ``is_spotify_authenticated()``
+        already returns False during a rate-limit ban; the explicit rate-limit
+        term covers the brief window before the auth cache refreshes. When authed
+        + healthy the official path returns first, so this never opens.
+
+        Two activations fall out of this: a no-auth user who chose Spotify Free
+        (free is their source), and a connected user mid-rate-limit (free bridges
+        the ban) — see _free_wanted()."""
+        from core.spotify_free_metadata import should_use_free_fallback
+        if not self._free_available():
+            return False
+        try:
+            authed = self.is_spotify_authenticated()
+        except Exception:
+            authed = False
+        return should_use_free_fallback(authed, _is_globally_rate_limited())
+
+    @property
+    def _free_meta(self):
+        """Lazy SpotipyFree-backed metadata client (soft import — absence is
+        not fatal; methods degrade to the iTunes/Deezer fallback)."""
+        client = getattr(self, '_free_meta_client', None)
+        if client is None:
+            from core.spotify_free_metadata import SpotifyFreeMetadataClient
+            client = SpotifyFreeMetadataClient()
+            self._free_meta_client = client
+        return client
+
     def reload_config(self):
         """Reload configuration and re-initialize client"""
         self._invalidate_auth_cache()
@@ -1276,6 +1342,17 @@ class SpotifyClient:
                 logger.error(f"Error searching tracks via Spotify: {e}")
                 # Fall through to fallback
 
+        # No-creds Spotify (SpotipyFree) before the iTunes/Deezer fallback —
+        # only when official Spotify is unavailable (no auth / rate-limited).
+        if allow_fallback and self._free_active():
+            try:
+                objs = [Track.from_spotify_track(t)
+                        for t in self._free_meta.search_tracks(query, effective_limit)]
+                if objs:
+                    return objs
+            except Exception as e:
+                logger.debug("SpotipyFree track search failed: %s", e)
+
         # Fallback (iTunes or Deezer — configured in settings)
         if allow_fallback:
             logger.debug(f"Using {self._fallback_source} fallback for track search: {query}")
@@ -1335,6 +1412,21 @@ class SpotifyClient:
                 _detect_and_set_rate_limit(e, 'search_artists')
                 logger.error(f"Error searching artists via Spotify: {e}")
                 # Fall through to iTunes fallback
+
+        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when
+        # official Spotify can't serve us (no auth / rate-limited), before the
+        # iTunes/Deezer fallback. Gated by _free_active() so it never runs while
+        # auth is healthy.
+        if allow_fallback and self._free_active():
+            try:
+                objs = [Artist.from_spotify_artist(a)
+                        for a in self._free_meta.search_artists(query, limit)]
+                if objs:
+                    query_lower = query.lower().strip()
+                    objs.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+                    return objs
+            except Exception as e:
+                logger.debug("SpotipyFree artist search failed: %s", e)
 
         # Fallback (iTunes or Deezer)
         if allow_fallback:
@@ -1437,6 +1529,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching track details via Spotify: {e}")
                 # Fall through to iTunes fallback
 
+        # No-creds Spotify (SpotipyFree) for a real Spotify track id when
+        # official Spotify is unavailable (no auth / rate-limited).
+        if allow_fallback and self._free_active() and not self._is_itunes_id(track_id):
+            free = self._free_meta.get_track_details(track_id)
+            if free:
+                return free
+
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(track_id):
             logger.debug(f"Using {fallback_src} fallback for track details: {track_id}")
@@ -1528,6 +1627,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching album via Spotify: {e}")
                 # Fall through to fallback
 
+        # No-creds Spotify (SpotipyFree) for a real Spotify album id when
+        # official Spotify is unavailable (no auth / rate-limited).
+        if allow_fallback and self._free_active() and not self._is_itunes_id(album_id):
+            free = self._free_meta.get_album(album_id)
+            if free:
+                return free
+
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(album_id):
             logger.debug(f"Using {fallback_src} fallback for album: {album_id}")
@@ -1604,6 +1710,13 @@ class SpotifyClient:
                 _detect_and_set_rate_limit(e, 'get_album_tracks')
                 logger.error(f"Error fetching album tracks via Spotify: {e}")
                 # Fall through to iTunes fallback
+
+        # No-creds Spotify (SpotipyFree) for a real Spotify album id when
+        # official Spotify is unavailable (no auth / rate-limited).
+        if allow_fallback and self._free_active() and not self._is_itunes_id(album_id):
+            free = self._free_meta.get_album_tracks(album_id)
+            if free:
+                return free
 
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(album_id):
@@ -1691,6 +1804,18 @@ class SpotifyClient:
                 logger.error(f"Error fetching artist albums via Spotify: {e}")
                 # Fall through to iTunes fallback
 
+        # No-creds Spotify (SpotipyFree) for a real Spotify artist id when
+        # official Spotify is unavailable (no auth / rate-limited). The free
+        # discography is already album-shaped — project to Album dataclasses.
+        if allow_fallback and self._free_active() and not self._is_itunes_id(artist_id):
+            try:
+                free = [Album.from_spotify_album(a)
+                        for a in self._free_meta.get_artist_albums_list(artist_id, limit)]
+                if free:
+                    return free
+            except Exception as e:
+                logger.debug("SpotipyFree artist albums failed: %s", e)
+
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(artist_id):
             logger.debug(f"Using {fallback_src} fallback for artist albums: {artist_id}")
@@ -1744,6 +1869,13 @@ class SpotifyClient:
                 _detect_and_set_rate_limit(e, 'get_artist')
                 logger.error(f"Error fetching artist via Spotify: {e}")
                 # Fall through to iTunes fallback
+
+        # No-creds Spotify (SpotipyFree) for a real Spotify artist id when
+        # official Spotify is unavailable (no auth / rate-limited).
+        if allow_fallback and self._free_active() and not self._is_itunes_id(artist_id):
+            free = self._free_meta.get_artist(artist_id)
+            if free:
+                return free
 
         # Fallback - only if ID is numeric (non-Spotify format)
         if allow_fallback and self._is_itunes_id(artist_id):
