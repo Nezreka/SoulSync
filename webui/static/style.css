@@ -63265,6 +63265,77 @@ body.reduce-effects .dash-card::after {
     opacity: 0.75;
 }
 
+/* Cooldown drain — while a service is rate-limit banned, the track shows a
+ * red column that DRAINS as the ban ticks down plus an m:ss countdown.
+ * "Back in 4:00", not just "something's red". JS drives the fill height
+ * (remaining/total) and timer text; .cooldown gates visibility. */
+.rate-eq-cooldown {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+    z-index: 3;
+}
+
+.rate-eq.cooldown .rate-eq-cooldown {
+    opacity: 1;
+}
+
+.rate-eq.cooldown .rate-eq-fill,
+.rate-eq.cooldown .rate-eq-peak {
+    opacity: 0.18;  /* the live VU yields the stage to the countdown */
+}
+
+.rate-eq-cooldown-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 100%;
+    background: linear-gradient(180deg,
+        rgba(239, 68, 68, 0.55) 0%,
+        rgba(239, 68, 68, 0.28) 60%,
+        rgba(239, 68, 68, 0.12) 100%);
+    border-radius: 0 0 11px 11px;
+    box-shadow: inset 0 1px 0 rgba(255, 120, 120, 0.5);
+    transition: height 0.9s linear;
+}
+
+.rate-eq-cooldown-time {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 200, 200, 0.95);
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+}
+
+/* Recovery flash — the moment a ban expires the track blinks back alive */
+.rate-eq.recovered .rate-eq-track {
+    animation: rate-eq-recovered 1.2s ease-out;
+}
+
+@keyframes rate-eq-recovered {
+    0% {
+        border-color: rgba(74, 222, 128, 0.9);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 0 26px rgba(74, 222, 128, 0.55);
+    }
+    100% {
+        border-color: rgba(255, 255, 255, 0.06);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            inset 0 -10px 24px rgba(0, 0, 0, 0.35);
+    }
+}
+
 /* Vertical shimmer scan — runs continuously when active */
 .rate-eq-shimmer {
     position: absolute;

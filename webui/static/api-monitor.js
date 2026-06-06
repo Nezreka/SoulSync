@@ -237,6 +237,10 @@ function _renderEqualizerBars(grid, data) {
                         <div class="rate-eq-tip"></div>
                     </div>
                     <div class="rate-eq-peak"></div>
+                    <div class="rate-eq-cooldown">
+                        <div class="rate-eq-cooldown-fill"></div>
+                        <div class="rate-eq-cooldown-time"></div>
+                    </div>
                     <div class="rate-eq-value">0</div>
                 </div>
                 <div class="rate-eq-meta">
@@ -350,7 +354,36 @@ function _renderEqualizerBars(grid, data) {
         bar.classList.toggle('active', value > 0 || wStatus === 'running');
         bar.classList.toggle('rate-limited', isRateLimited);
 
-        _eqDisplay[svc] = { value, pct, peak, peakAt };
+        // Cooldown drain — a ban isn't just "red", it's a COUNTDOWN. The
+        // payload only carries seconds remaining, so latch the largest value
+        // seen this ban as the denominator; the red column then drains away
+        // as the ban ticks down and the timer shows m:ss until recovery.
+        const rlRemaining = isRateLimited ? Math.max(0, Math.round(d.rl_remaining || 0)) : 0;
+        let rlTotal = prev.rlTotal || 0;
+        const cooling = rlRemaining > 0;
+        if (cooling) {
+            rlTotal = Math.max(rlTotal, rlRemaining);
+            const cdFill = bar.querySelector('.rate-eq-cooldown-fill');
+            if (cdFill) cdFill.style.height = `${(rlRemaining / rlTotal) * 100}%`;
+            const cdTime = bar.querySelector('.rate-eq-cooldown-time');
+            if (cdTime) {
+                const m = Math.floor(rlRemaining / 60);
+                const s = String(rlRemaining % 60).padStart(2, '0');
+                cdTime.textContent = `${m}:${s}`;
+            }
+        } else {
+            rlTotal = 0;
+            // Recovery moment: the ban just ended — flash the bar back alive.
+            if (prev.cooling) {
+                bar.classList.remove('recovered');
+                void bar.offsetWidth;  // restart the animation
+                bar.classList.add('recovered');
+                window.setTimeout(() => bar.classList.remove('recovered'), 1300);
+            }
+        }
+        bar.classList.toggle('cooldown', cooling);
+
+        _eqDisplay[svc] = { value, pct, peak, peakAt, rlTotal, cooling };
     }
 }
 
