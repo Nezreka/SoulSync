@@ -63340,6 +63340,26 @@ body.reduce-effects .dash-card::after {
     text-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
 }
 
+/* Call embers — tiny accent sparks rising off the fill tip, spawned per
+ * socket update in proportion to real traffic. Motion == actual API calls. */
+.rate-eq-ember {
+    position: absolute;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--eq-accent) 60%, white 40%);
+    box-shadow: 0 0 6px var(--eq-accent);
+    pointer-events: none;
+    animation: rate-eq-ember-rise 1.4s ease-out forwards;
+    z-index: 1;
+}
+
+@keyframes rate-eq-ember-rise {
+    0%   { opacity: 0; transform: translate(0, 0) scale(1); }
+    15%  { opacity: 0.9; }
+    100% { opacity: 0; transform: translate(var(--ember-drift, 0px), -26px) scale(0.4); }
+}
+
 /* Recovery flash — the moment a ban expires the track blinks back alive */
 .rate-eq.recovered .rate-eq-track {
     animation: rate-eq-recovered 1.2s ease-out;
