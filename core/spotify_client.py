@@ -612,9 +612,12 @@ class SpotifyClient:
         term covers the brief window before the auth cache refreshes. When authed
         + healthy the official path returns first, so this never opens.
 
-        Two activations fall out of this: a no-auth user who chose Spotify Free
-        (free is their source), and a connected user mid-rate-limit (free bridges
-        the ban) — see _free_wanted()."""
+        Three activations fall out of this: a no-auth user who chose Spotify
+        Free (free is their source), a connected user mid-rate-limit (free
+        bridges the ban), and a connected user who has spent the enrichment
+        worker's real-API daily budget (``_budget_exhausted_use_free``, set by
+        the worker) — so a Spotify-Free user is never paused by the budget, it
+        just switches to the uncapped free source. See _free_wanted()."""
         from core.spotify_free_metadata import should_use_free_fallback
         if not self._free_available():
             return False
@@ -622,7 +625,10 @@ class SpotifyClient:
             authed = self.is_spotify_authenticated()
         except Exception:
             authed = False
-        return should_use_free_fallback(authed, _is_globally_rate_limited())
+        return should_use_free_fallback(
+            authed, _is_globally_rate_limited(),
+            getattr(self, '_budget_exhausted_use_free', False),
+        )
 
     @property
     def _free_meta(self):

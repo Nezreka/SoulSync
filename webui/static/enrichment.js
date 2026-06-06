@@ -461,14 +461,16 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     // Spotify Free source — treat it as running, not stuck (#798 bridge).
     const bridgingFree = data.using_free === true;
     const rateLimitedStuck = isRateLimited && !bridgingFree;
-    const budgetExhausted = data.daily_budget && data.daily_budget.exhausted;
+    // Budget is a real-API cap; when bridging to free it no longer applies, so
+    // only treat the budget as a stop when we're NOT serving via free (#798).
+    const budgetStuck = (data.daily_budget && data.daily_budget.exhausted) && !bridgingFree;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
     if (data.paused) {
         button.classList.add('paused');
     } else if (notAuthenticated) {
         button.classList.add('no-auth');
-    } else if (rateLimitedStuck || budgetExhausted) {
+    } else if (rateLimitedStuck || budgetStuck) {
         button.classList.add('paused');
     } else if (data.idle) {
         button.classList.add('complete');
@@ -485,7 +487,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
         else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
         else if (rateLimitedStuck) { tooltipStatus.textContent = 'Rate Limited'; }
         else if (bridgingFree) { tooltipStatus.textContent = 'Running (Spotify Free)'; }
-        else if (budgetExhausted) { tooltipStatus.textContent = 'Daily Limit Reached'; }
+        else if (budgetStuck) { tooltipStatus.textContent = 'Daily Limit Reached'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
@@ -502,7 +504,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
             tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
         } else if (bridgingFree && data.current_item && data.current_item.name) {
             tooltipCurrent.textContent = `Now: ${data.current_item.name} (via Spotify Free)`;
-        } else if (budgetExhausted) {
+        } else if (budgetStuck) {
             const resets = data.daily_budget.resets_in_seconds || 0;
             const hours = Math.floor(resets / 3600);
             const mins = Math.floor((resets % 3600) / 60);
