@@ -1019,6 +1019,10 @@ class MusicDatabase:
                 'canonical_album_id': 'TEXT DEFAULT NULL',
                 'canonical_score': 'REAL DEFAULT NULL',
                 'canonical_resolved_at': 'TIMESTAMP DEFAULT NULL',
+                # #758 — set when the user MANUALLY pins an album version. The
+                # auto resolve job (and any re-resolution) must never overwrite
+                # a locked pin, so a manual match stays put across cycles.
+                'canonical_locked': 'INTEGER DEFAULT 0',
             }
             for _col, _typedef in _canonical_cols.items():
                 if album_cols and _col not in album_cols:
@@ -1027,17 +1031,27 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
 
-    def set_album_canonical(self, album_id, source: str, canonical_album_id: str, score: float) -> bool:
+    def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
+                            score: float, locked: bool = False) -> bool:
         """Persist the resolved canonical (source, album_id, score) for an album
-        (#765 Stage 2). Returns True if a row was updated."""
+        (#765 Stage 2). Returns True if a row was updated.
+
+        ``locked=True`` marks a MANUAL pin (#758): the user explicitly chose this
+        album version. A manual write always wins (overwrites any existing pin).
+        An AUTO write (``locked=False``, the resolve job) will NOT overwrite a
+        locked pin — the guard is in the WHERE clause so it's atomic.
+        """
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            # Auto writes can't clobber a manual lock; manual writes always apply.
+            guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
                 "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
-                "canonical_score = ?, canonical_resolved_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (source, str(canonical_album_id), float(score), album_id),
+                "canonical_score = ?, canonical_locked = ?, "
+                "canonical_resolved_at = CURRENT_TIMESTAMP "
+                f"WHERE id = ?{guard}",
+                (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -1048,15 +1062,16 @@ class MusicDatabase:
             conn.close()
 
     def get_album_canonical(self, album_id) -> Optional[dict]:
-        """Return ``{'source','album_id','score','resolved_at'}`` for an album's
-        pinned canonical release, or ``None`` when unresolved (#765 Stage 2).
-        Consumers treat ``None`` as 'fall back to today's behavior'."""
+        """Return ``{'source','album_id','score','resolved_at','locked'}`` for an
+        album's pinned canonical release, or ``None`` when unresolved (#765 Stage
+        2). ``locked`` is True for a manual pin (#758). Consumers treat ``None``
+        as 'fall back to today's behavior'."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT canonical_source, canonical_album_id, canonical_score, "
-                "canonical_resolved_at FROM albums WHERE id = ?",
+                "canonical_resolved_at, canonical_locked FROM albums WHERE id = ?",
                 (album_id,),
             )
             row = cursor.fetchone()
@@ -1067,6 +1082,7 @@ class MusicDatabase:
                 'album_id': row[1],
                 'score': row[2],
                 'resolved_at': row[3],
+                'locked': bool(row[4]),
             }
         except Exception as e:
             logger.error("Error reading album canonical for %s: %s", album_id, e)
