@@ -284,3 +284,112 @@ def test_fix_library_retag_counts_unreachable(tmp_path, monkeypatch):
                'cover_action': None, 'cover_url': None}
     res = worker._fix_library_retag('album', '1', None, details)
     assert res['success'] is False        # nothing written (file missing)
+
+
+# ---------------------------------------------------------------------------
+# Cover-art scans on path-mapped setups (the "(0 track(s))" / "No tracks to
+# re-tag in finding" report): the scan must resolve DB paths the same way the
+# apply handler does, never emit an empty finding, and give unmatched tracks
+# the album art.
+# ---------------------------------------------------------------------------
+
+def test_scan_resolves_mapped_paths_instead_of_skipping(tmp_path, monkeypatch):
+    """DB stores a container path the scan process can't see directly; the
+    resolver maps it to the real file. Before the fix the bare isfile() check
+    dropped every track and cover-mode scans produced unappliable 0-track
+    findings."""
+    real = tmp_path / 'track.flac'; real.write_bytes(b'')
+    raw = '/container/music/track.flac'   # not a real path here
+    conn = _db_with_album(str(tmp_path / 'm.db'), raw, current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'replace', 'source': 'spotify'})
+    _patch_source(monkeypatch, {
+        'title': 'Old Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+    monkeypatch.setattr(lr, 'resolve_library_file_path',
+                        lambda p, **k: str(real) if p == raw else None)
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    tracks = ctx.findings[0]['details']['tracks']
+    assert len(tracks) == 1
+    assert tracks[0]['file_path'] == str(real)   # plan carries the RESOLVED path
+
+
+def test_cover_scan_with_no_reachable_tracks_creates_no_finding(tmp_path, monkeypatch):
+    """Cover action set but no track resolvable: skip the album entirely.
+    The old behavior created a '(0 track(s))' finding whose apply always
+    failed with 'No tracks to re-tag in finding'."""
+    conn = _db_with_album(str(tmp_path / 'm.db'), '/container/music/gone.flac')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'replace', 'source': 'spotify'})
+    _patch_source(monkeypatch, {'title': 'Old Title'})
+    monkeypatch.setattr(lr, 'resolve_library_file_path', lambda p, **k: None)
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert ctx.findings == []
+    assert result.findings_created == 0
+    assert result.skipped == 1
+
+
+def test_cover_scan_includes_unmatched_tracks_as_art_only(tmp_path, monkeypatch):
+    """A track with no source match can't be re-tagged, but album cover art
+    still applies to it — cover-mode scans include an art-only plan (empty
+    db_data) and the finding title says 'cover art', not '(0 track(s))'."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Old Title')
+    ctx = _context(conn, {'mode': 'overwrite', 'cover_art': 'replace', 'source': 'spotify'})
+    _patch_source(monkeypatch, {'title': 'Old Title'})
+    # Source tracklist that matches NOTHING in the library.
+    monkeypatch.setattr(lr, 'get_album_tracks_for_source',
+                        lambda s, i: [{'name': 'Zzz Unrelated Song', 'track_number': 9,
+                                       'disc_number': 9, 'id': 'zz'}])
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    f = ctx.findings[0]
+    assert 'cover art' in f['title']
+    tracks = f['details']['tracks']
+    assert len(tracks) == 1
+    assert not tracks[0]['changes'] and tracks[0]['db_data'] == {}  # art-only plan
+
+
+def test_apply_art_only_plan_embeds_cover(tmp_path, monkeypatch):
+    """The art-only plans the cover-mode scan now emits (empty db_data) must go
+    through apply_track_plans as a WRITE (cover embed), not a skip/failure."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    calls = []
+    monkeypatch.setattr('core.tag_writer.download_cover_art',
+                        lambda url: (b'img-bytes', 'image/jpeg'))
+    monkeypatch.setattr('core.tag_writer.write_tags_to_file',
+                        lambda fp, db_data, **k: calls.append((fp, db_data, k)) or {'success': True})
+
+    res = lr.apply_track_plans(
+        [{'file_path': str(track), 'db_data': {}}],
+        cover_action='replace', cover_url='http://art/cover.jpg',
+    )
+
+    assert res['written'] == 1 and res['failed'] == 0
+    fp, db_data, kwargs = calls[0]
+    assert db_data == {} and kwargs['embed_cover'] is True
+    assert kwargs['cover_data'] == (b'img-bytes', 'image/jpeg')
+    assert res['cover_written'] is True  # cover.jpg written next to the track
+
+
+def test_apply_art_only_plan_skips_when_cover_download_fails(tmp_path, monkeypatch):
+    """If the cover can't be downloaded there's nothing to write for an
+    art-only plan — it must count as skipped, never failed."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    monkeypatch.setattr('core.tag_writer.download_cover_art',
+                        lambda url: (_ for _ in ()).throw(RuntimeError('net down')))
+    monkeypatch.setattr('core.tag_writer.write_tags_to_file',
+                        lambda fp, db_data, **k: {'success': True})
+
+    res = lr.apply_track_plans(
+        [{'file_path': str(track), 'db_data': {}}],
+        cover_action='replace', cover_url='http://art/cover.jpg',
+    )
+
+    assert res == {'written': 0, 'failed': 0, 'skipped': 1, 'cover_written': False}

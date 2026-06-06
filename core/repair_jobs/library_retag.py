@@ -12,6 +12,7 @@ finding. The apply handler lives in repair_worker (_fix_library_retag).
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.library.retag_planner import (
     MODE_FILL_MISSING,
     MODE_OVERWRITE,
@@ -366,15 +367,41 @@ class LibraryRetagJob(RepairJob):
         cover_action = self._cover_action(cover_mode, cover_url, library_tracks)
 
         pairs = match_source_tracks(source_tracks, library_tracks)
+        download_folder = (context.config_manager.get('soulseek.download_path', '')
+                           if context.config_manager else None)
         track_plans = []
         unmatched = []
+        unreachable = 0
         for lib, src in pairs:
+            # Resolve container/host path mismatches the same way the apply
+            # handler does. The old bare os.path.isfile() on the raw DB path
+            # failed for EVERY track on path-mapped setups (Docker mounts), so
+            # cover-mode scans produced "(0 track(s))" findings that the apply
+            # then rejected with "No tracks to re-tag in finding".
+            rp = resolve_library_file_path(
+                lib['file_path'],
+                transfer_folder=getattr(context, 'transfer_folder', None),
+                download_folder=download_folder,
+                config_manager=context.config_manager,
+            )
+            if not rp:
+                unreachable += 1
+                continue  # genuinely unreachable from this process
             if src is None:
                 unmatched.append(lib['title'] or os.path.basename(lib['file_path']))
+                # No source match means no re-tag — but album cover art still
+                # applies to the file, so cover modes include an art-only plan
+                # (empty db_data: apply embeds art and writes no tags).
+                if cover_action:
+                    track_plans.append({
+                        'file_path': rp,
+                        'track_id': lib['id'],
+                        'title': lib['title'],
+                        'changes': [],
+                        'db_data': {},
+                    })
                 continue
-            if not os.path.isfile(lib['file_path']):
-                continue  # not reachable at the stored path — skip (apply resolves paths)
-            current = _read_current_tags(lib['file_path'])
+            current = _read_current_tags(rp)
             plan = plan_track(current, src, album_meta, mode=mode)
             # Include a track when its tags change, OR when there's a cover action
             # to apply to it (db_data may be empty — apply embeds art either way).
@@ -382,7 +409,7 @@ class LibraryRetagJob(RepairJob):
                 db_data = plan['db_data']
                 _add_source_ids(db_data, source, album_source_id, src)
                 tp = {
-                    'file_path': lib['file_path'],
+                    'file_path': rp,
                     'track_id': lib['id'],
                     'title': lib['title'],
                     'changes': plan['changes'],
@@ -394,7 +421,14 @@ class LibraryRetagJob(RepairJob):
                 track_plans.append(tp)
 
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])
-        if not tag_change_tracks and not cover_action:
+        if (not tag_change_tracks and not cover_action) or not track_plans:
+            # Nothing actionable. The second clause covers cover-action albums
+            # where no track is reachable/included — creating a finding there
+            # gives an unappliable "(0 track(s))" entry.
+            if cover_action and not track_plans:
+                logger.debug(
+                    "Library re-tag: album %s skipped — cover action but no usable tracks "
+                    "(%d unreachable, %d unmatched)", album_id, unreachable, len(unmatched))
             result.skipped += 1
             return
 
@@ -419,7 +453,14 @@ class LibraryRetagJob(RepairJob):
         desc = (f'Album "{album_title}" by {artist_name or "Unknown"} would be re-tagged from '
                 f'{source} ({", ".join(summary_bits)}).')
         if unmatched:
-            desc += f' {len(unmatched)} track(s) could not be matched to the source and are left untouched.'
+            desc += (f' {len(unmatched)} track(s) could not be matched to the source — '
+                     f'tags left untouched{" (cover art still applied)" if cover_action else ""}.')
+        if unreachable:
+            desc += f' {unreachable} track(s) not reachable on disk and skipped.'
+
+        # Cover-only findings say so instead of the puzzling "(0 track(s))".
+        title_what = (f'{tag_change_tracks} track(s)' if tag_change_tracks
+                      else f'cover art, {len(track_plans)} track(s)')
 
         if context.create_finding:
             inserted = context.create_finding(
@@ -429,7 +470,7 @@ class LibraryRetagJob(RepairJob):
                 entity_type='album',
                 entity_id=str(album_id),
                 file_path=None,
-                title=f'Re-tag: {album_title or "Unknown"} ({tag_change_tracks} track(s))',
+                title=f'Re-tag: {album_title or "Unknown"} ({title_what})',
                 description=desc,
                 details={
                     'album_id': album_id,
