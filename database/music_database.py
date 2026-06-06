@@ -6033,8 +6033,12 @@ class MusicDatabase:
                     except Exception as e:
                         logger.debug("history logging: %s", e)
 
-                return True
-                
+                # Truthy on success (existing `if track_success` callers keep
+                # working); the specific value lets the scan worker tell a
+                # genuinely new row from an updated one so it can reconcile
+                # embedded IDs only for new arrivals.
+                return 'inserted' if is_new_track else 'updated'
+
             except Exception as e:
                 error_text = str(e).lower()
                 if (

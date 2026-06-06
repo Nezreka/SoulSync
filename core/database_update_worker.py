@@ -41,7 +41,13 @@ class DatabaseUpdateWorker:
         self.database_path = database_path
         self.full_refresh = full_refresh
         self.should_stop = False
-        
+
+        # Track ids of rows newly INSERTED this run (not updates). The web
+        # layer reads this after the scan to gap-fill embedded provider IDs
+        # for the new files (auto-reconcile), so newly-added music contributes
+        # its Spotify/MusicBrainz/etc. ids without a manual backfill.
+        self._new_track_ids = set()
+
         # Statistics tracking
         self.processed_artists = 0
         self.processed_albums = 0
@@ -880,6 +886,8 @@ class DatabaseUpdateWorker:
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
+                                                if track_success == 'inserted':
+                                                    self._new_track_ids.add(str(track.ratingKey))
                                                 logger.debug(f"Processed new track: {track.title}")
                                         except Exception as e:
                                             logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
@@ -1344,6 +1352,8 @@ class DatabaseUpdateWorker:
                                             skipped_count += 1
                                         elif track_success:
                                             track_count += 1
+                                            if track_success == 'inserted':
+                                                self._new_track_ids.add(track_id_str)
                                     except Exception as e:
                                         logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
 
