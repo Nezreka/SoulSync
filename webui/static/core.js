@@ -469,7 +469,7 @@ function initializeWebSocket() {
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
-    socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
+    socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); });
 
     // Forward enrichment status to the dashboard worker-orbs so the hub fires
     // a pulse on each real item matched / error (additional listener — does not
@@ -487,15 +487,15 @@ function initializeWebSocket() {
     // 'tool:stream' is intentionally NOT wired: stream state is per-listener
     // (session cookie), so the global broadcast could only carry the DEFAULT
     // session's eternal "stopped" — the player polls /api/stream/status instead.
-    socket.on('tool:quality-scanner', (data) => updateQualityScanProgressFromData(data));
-    socket.on('tool:duplicate-cleaner', (data) => updateDuplicateCleanProgressFromData(data));
-    socket.on('tool:db-update', (data) => updateDbProgressFromData(data));
-    socket.on('tool:metadata', (data) => updateMetadataStatusFromData(data));
+    socket.on('tool:quality-scanner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateQualityScanProgressFromData(data); });
+    socket.on('tool:duplicate-cleaner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDuplicateCleanProgressFromData(data); });
+    socket.on('tool:db-update', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDbProgressFromData(data); });
+    socket.on('tool:metadata', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMetadataStatusFromData(data); });
     socket.on('tool:logs', (data) => updateLogsFromData(data));
 
     // Phase 5 event listeners (sync/discovery progress + scans)
-    socket.on('sync:progress', (data) => updateSyncProgressFromData(data));
-    socket.on('discovery:progress', (data) => updateDiscoveryProgressFromData(data));
+    socket.on('sync:progress', (data) => { qaSignal('sync'); updateSyncProgressFromData(data); });
+    socket.on('discovery:progress', (data) => { qaSignal('sync'); updateDiscoveryProgressFromData(data); });
     socket.on('scan:watchlist', (data) => {
         updateWatchlistScanFromData(data);
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
@@ -503,11 +503,43 @@ function initializeWebSocket() {
             watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
         }
     });
-    socket.on('scan:media', (data) => updateMediaScanFromData(data));
+    socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
-    socket.on('automation:progress', (data) => updateAutomationProgressFromData(data));
+    socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
 }
+
+// ── Quick Actions tiles: animation == gauge ──
+// Each tile's signature background animation SURGES while its subsystem is
+// actually working: the sync EQ dances while a playlist pipeline runs, the
+// gear spins up while a tool/scan/repair job runs, the automation flow pulses
+// while an automation fires. Socket handlers ping a channel; tiles carry
+// .is-live while the last ping is fresh. Idle keeps the original calm look.
+const _qaLastSignal = { sync: 0, tools: 0, auto: 0 };
+
+function qaSignal(channel) {
+    _qaLastSignal[channel] = Date.now();
+}
+
+// Recognise "actually running" across the tool payload shapes
+// ({status:'running'}, {status:{is_scanning:true}}, {running:true}, ...).
+function _qaToolBusy(d) {
+    if (!d) return false;
+    const s = d.status;
+    if (s && typeof s === 'object') {
+        return !!(s.is_scanning || s.status === 'running' || s.status === 'scanning');
+    }
+    return s === 'running' || s === 'scanning' || d.is_scanning === true || d.running === true;
+}
+
+setInterval(() => {
+    const now = Date.now();
+    const map = { sync: '.qa-tile--sync', tools: '.qa-tile--tools', auto: '.qa-tile--auto' };
+    for (const ch in map) {
+        const tile = document.querySelector(map[ch]);
+        if (tile) tile.classList.toggle('is-live', now - _qaLastSignal[ch] < 6000);
+    }
+}, 2000);
 
 function handleServiceStatusUpdate(data) {
     // Cache for library status card
