@@ -495,6 +495,32 @@ class Playlist:
             total_tracks=(playlist_data.get('tracks') or playlist_data.get('items') or {}).get('total', 0)
         )
 
+def describe_spotify_unavailable(*, configured: bool, rate_limited: bool,
+                                 ban_seconds_left: int = 0, in_cooldown: bool = False,
+                                 cooldown_seconds_left: int = 0, has_token: bool = True) -> str:
+    """Human reason Spotify can't serve a request right now.
+
+    ``is_spotify_authenticated()`` returns False for five distinct reasons, but
+    every API call site logged the same bare "Not authenticated with Spotify" —
+    so a rate-limit ban looked like a logout. This maps the real state to a
+    clear message (priority matches is_spotify_authenticated): not-configured →
+    rate-limited → post-ban cooldown → no-token → unknown probe failure. Pure.
+    """
+    if not configured:
+        return "Spotify not configured (add credentials in Settings)"
+    if rate_limited:
+        if ban_seconds_left and ban_seconds_left > 0:
+            return f"Spotify rate-limited — ban ~{max(1, round(ban_seconds_left / 60))}m left (not a logout)"
+        return "Spotify rate-limited — waiting out a ban (not a logout)"
+    if in_cooldown:
+        if cooldown_seconds_left and cooldown_seconds_left > 0:
+            return f"Spotify post-ban cooldown — ~{cooldown_seconds_left}s left (not a logout)"
+        return "Spotify post-ban cooldown (not a logout)"
+    if not has_token:
+        return "Spotify not connected — no saved token; re-authenticate in Settings"
+    return "Spotify auth check failed (token refresh may have failed — see debug log)"
+
+
 class SpotifyClient:
     def __init__(self):
         self.sp: Optional[spotipy.Spotify] = None
@@ -848,6 +874,28 @@ class SpotifyClient:
 
         return result
 
+    def _auth_unavailable_reason(self) -> str:
+        """Real reason an API call can't reach Spotify right now, for logging —
+        distinguishes a rate-limit ban / cooldown from a genuine logout instead
+        of the old catch-all 'Not authenticated'. Side-effect-free: reads the
+        cached token (no refresh, no API probe)."""
+        has_token = True
+        try:
+            if self.sp is not None:
+                ch = getattr(self.sp.auth_manager, 'cache_handler', None)
+                has_token = ch is None or ch.get_cached_token() is not None
+        except Exception:
+            has_token = True  # unknown → don't wrongly claim "not connected"
+        rl = _get_rate_limit_info() if _is_globally_rate_limited() else None
+        return describe_spotify_unavailable(
+            configured=self.sp is not None,
+            rate_limited=_is_globally_rate_limited(),
+            ban_seconds_left=(rl or {}).get('remaining_seconds', 0) or 0,
+            in_cooldown=_is_in_post_ban_cooldown(),
+            cooldown_seconds_left=_get_post_ban_cooldown_remaining() or 0,
+            has_token=has_token,
+        )
+
     def disconnect(self):
         """Disconnect Spotify: clear client, delete cache, invalidate auth cache, clear rate limit"""
         import os
@@ -915,7 +963,7 @@ class SpotifyClient:
     @rate_limited
     def get_user_playlists(self) -> List[Playlist]:
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
         
         if not self._ensure_user_id():
@@ -960,7 +1008,7 @@ class SpotifyClient:
     def get_user_playlists_metadata_only(self) -> List[Playlist]:
         """Get playlists without fetching all track details for faster loading"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
         
         if not self._ensure_user_id():
@@ -1033,7 +1081,7 @@ class SpotifyClient:
     def get_saved_tracks_count(self) -> int:
         """Get the total count of user's saved/liked songs without fetching all tracks"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return 0
 
         try:
@@ -1052,7 +1100,7 @@ class SpotifyClient:
     def get_saved_tracks(self) -> List[Track]:
         """Fetch all user's saved/liked songs from Spotify"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
 
         tracks = []
@@ -1103,7 +1151,7 @@ class SpotifyClient:
             List of dicts with album metadata ready for DB upsert.
         """
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
 
         albums = []
