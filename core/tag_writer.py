@@ -136,10 +136,49 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
     return result
 
 
+# Known placeholder / "we don't really know" metadata values. A match in the
+# DB never warrants overwriting a real value already in the file (issue #800:
+# a mis-grouped track sits under a "Various Artists" / "[Unknown Album]" record,
+# and Write Tags would otherwise stamp that junk over the file's correct tags).
+_PLACEHOLDER_META_VALUES = frozenset({
+    'various artists', 'various artist',
+    'unknown artist', 'unknown album', 'unknown',
+    '[unknown album]', '[unknown artist]', '[unknown]',
+    'untitled album',
+})
+
+
+def is_placeholder_meta(value: Any) -> bool:
+    """True for empty or known-placeholder metadata strings (case-insensitive)."""
+    if value is None:
+        return True
+    s = str(value).strip().lower()
+    return s == '' or s in _PLACEHOLDER_META_VALUES
+
+
+def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
+    """#800 guard: never replace a real file value with a placeholder.
+
+    Returns ``None`` (skip the write → preserve the file's value) ONLY when the
+    DB value is a placeholder/empty AND the file already holds a real,
+    non-placeholder value. Otherwise returns ``db_val`` unchanged — so a
+    legitimate value still writes, including a genuine ``Various Artists`` album
+    artist on a real compilation (there the file has no conflicting real value,
+    so the guard doesn't fire).
+    """
+    if is_placeholder_meta(db_val) and not is_placeholder_meta(file_val):
+        return None
+    return db_val
+
+
 def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Compare file tags against DB metadata. Returns a list of diffs:
-    [{ field, file_value, db_value, changed }]
+    [{ field, file_value, db_value, changed, protected }]
+
+    ``protected`` marks a field the #800 guard is holding back: the DB value is
+    a placeholder and the file's real value would be preserved, so it's shown
+    as no-change rather than a wrong overwrite.
     """
     fields = [
         ('title', 'title', 'Title'),
@@ -179,12 +218,22 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # Only mark as changed if DB has a value AND it differs from file
         # (writer skips fields where DB value is empty, so don't show them as diffs)
         changed = bool(db_str) and file_str != db_str
+
+        # #800 — if the change would replace a real file value with a
+        # placeholder (Various Artists / [Unknown Album] / …), hold it back:
+        # the writer preserves the file's value, so show it as no-change.
+        protected = False
+        if changed and guard_placeholder_overwrite(db_val, file_val) is None:
+            changed = False
+            protected = True
+
         diffs.append({
             'field': label,
             'file_key': file_key,
             'file_value': str(file_val) if file_val is not None else '',
             'db_value': str(db_val) if db_val is not None else '',
             'changed': changed,
+            'protected': protected,
         })
 
     # Cover art — special row
@@ -253,6 +302,23 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         artist = db_data.get('track_artist') or db_data.get('artist_name')  # Per-track artist for compilations/DJ mixes
         album = db_data.get('album_title')
         album_artist = db_data.get('artist_name')  # Album artist stays as the album-level artist
+
+        # #800 — never overwrite a real value already in the file with a
+        # placeholder DB value (Various Artists / [Unknown Album] / …). A
+        # mis-grouped track sits under such a record; writing it would destroy
+        # the file's correct tags. Reads the file's current values and skips
+        # only the placeholder-over-real fields (legit values, incl. a genuine
+        # compilation's Various Artists, still write — see guard docstring).
+        try:
+            _current = read_file_tags(file_path)
+        except Exception:
+            _current = {}
+        if not _current.get('error'):
+            title = guard_placeholder_overwrite(title, _current.get('title'))
+            artist = guard_placeholder_overwrite(artist, _current.get('artist'))
+            album = guard_placeholder_overwrite(album, _current.get('album'))
+            album_artist = guard_placeholder_overwrite(album_artist, _current.get('album_artist'))
+
         year = db_data.get('year')
         genres = db_data.get('genres')
         track_num = db_data.get('track_number')
