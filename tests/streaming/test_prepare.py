@@ -200,3 +200,18 @@ def test_worker_drives_a_real_stream_session(tmp_path):
     assert session['status'] == 'error'
     assert 'Failed to initiate' in session['error_message']
     assert session['track_info'] == {'username': 'u', 'filename': 'song.flac', 'size': 1}
+
+
+# ---------------------------------------------------------------------------
+# Observability: prep logs must actually reach app.log
+# ---------------------------------------------------------------------------
+
+def test_prepare_logger_is_in_soulsync_namespace():
+    """Handlers only attach to the soulsync.* hierarchy. A bare
+    getLogger(__name__) gave this module a 'core.streaming.prepare' logger with
+    no handler — every prep log (including failures) vanished, which made the
+    broken-stream report undebuggable from app.log. Lock the namespace."""
+    assert sp.logger.name.startswith('soulsync.'), (
+        f"prepare logger '{sp.logger.name}' is outside the soulsync.* namespace "
+        "— its output never reaches app.log"
+    )

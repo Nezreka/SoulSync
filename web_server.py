@@ -35129,17 +35129,13 @@ def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
-        # Stream status
-        try:
-            with stream_lock:
-                socketio.emit('tool:stream', {
-                    "status": stream_state["status"],
-                    "progress": stream_state["progress"],
-                    "track_info": stream_state["track_info"],
-                    "error_message": stream_state["error_message"]
-                })
-        except Exception as e:
-            logger.debug(f"Error emitting stream status: {e}")
+        # NOTE: no 'tool:stream' broadcast here. Stream state is PER-LISTENER
+        # (Phase 3b sessions) and this thread has no request context, so it can
+        # only ever read the DEFAULT session — which no real browser uses. The
+        # old global emit told every client "stopped" forever, and the player
+        # (which skipped HTTP polling while the socket was up) never learned
+        # its stream was ready. Each client polls /api/stream/status instead,
+        # which resolves its own session from the cookie.
         # Quality Scanner
         try:
             with quality_scanner_lock:
