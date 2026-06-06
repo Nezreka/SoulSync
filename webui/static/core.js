@@ -496,6 +496,11 @@ function initializeWebSocket() {
     // Phase 5 event listeners (sync/discovery progress + scans)
     socket.on('sync:progress', (data) => { qaSignal('sync'); updateSyncProgressFromData(data); });
     socket.on('discovery:progress', (data) => { qaSignal('sync'); updateDiscoveryProgressFromData(data); });
+    // Unscoped heartbeat for the Auto-Sync tile: sync:progress above is
+    // room-scoped (only playlist watchers receive it), so the dashboard
+    // relies on this 1s pulse that fires while ANY pipeline work runs —
+    // manual syncs, UI pipelines, and the scheduled auto-sync automation.
+    socket.on('sync:active', () => qaSignal('sync'));
     socket.on('scan:watchlist', (data) => {
         updateWatchlistScanFromData(data);
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');

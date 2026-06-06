@@ -35269,6 +35269,27 @@ def handle_discovery_unsubscribe(data):
     for pid in data.get('ids', []):
         leave_room(f'discovery:{pid}')
 
+_SYNC_ACTIVE_STATUSES = ('starting', 'syncing', 'running', 'in_progress', 'discovering', 'analyzing')
+_SYNC_AUTOMATION_TYPES = ('playlist_pipeline', 'sync_playlist', 'refresh_mirrored')
+
+
+def _any_playlist_sync_running() -> bool:
+    """True while ANY playlist sync work is running anywhere: a manual
+    per-playlist sync, the UI-triggered mirrored pipeline, or a scheduled
+    auto-sync pipeline (which runs as a playlist-flavored automation)."""
+    with sync_lock:
+        if any((s or {}).get('status') in _SYNC_ACTIVE_STATUSES for s in sync_states.values()):
+            return True
+    with playlist_pipeline_progress_lock:
+        if any((s or {}).get('status') == 'running' for s in playlist_pipeline_progress_states.values()):
+            return True
+    with _auto_progress.progress_lock:
+        return any(
+            s.get('status') == 'running' and s.get('action_type') in _SYNC_AUTOMATION_TYPES
+            for s in _auto_progress.progress_states.values()
+        )
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -35282,6 +35303,14 @@ def _emit_sync_progress_loop():
                         }, room=f'sync:{pid}')
                     except Exception as e:
                         logger.debug("sync progress emit failed: %s", e)
+
+            # Quick Actions gauge heartbeat — UNSCOPED, unlike sync:progress
+            # which only reaches clients subscribed to a playlist room. The
+            # dashboard's Auto-Sync tile needs to light for ALL pipeline
+            # work, including the scheduled auto-sync (an automation).
+            # Emitted only while active; the frontend decays on silence.
+            if _any_playlist_sync_running():
+                socketio.emit('sync:active', {'active': True})
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
