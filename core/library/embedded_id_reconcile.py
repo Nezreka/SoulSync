@@ -233,6 +233,122 @@ def reconcile_track_row(
     return TrackReconcileResult(applied, len(plan.conflicts), readable=True)
 
 
+@dataclass
+class ReconcileTotals:
+    """Accumulated counts over a reconcile run."""
+    total: int = 0
+    processed: int = 0
+    ids_filled: int = 0
+    entities_updated: int = 0
+    conflicts: int = 0
+    unreadable: int = 0
+
+
+def _load_missing_rows(cursor, ids, table, target: Dict[str, Dict[str, Any]]) -> None:
+    """Load any not-yet-cached entity rows for ``ids`` into ``target`` in place.
+
+    Ids with no row get an empty dict so they're never re-queried. Chunked to
+    keep the IN clause bounded.
+    """
+    missing = [i for i in {x for x in ids if x} if i not in target]
+    for start in range(0, len(missing), 500):
+        chunk = missing[start:start + 500]
+        ph = ','.join('?' * len(chunk))
+        cursor.execute(f"SELECT * FROM {table} WHERE id IN ({ph})", chunk)
+        for r in cursor.fetchall():
+            target[str(r['id'])] = dict(r)
+    for i in missing:
+        target.setdefault(i, {})  # mark absent → don't re-query
+
+
+def reconcile_library(
+    conn,
+    read_tags,
+    track_ids=None,
+    page_size: int = 500,
+    on_progress=None,
+    should_stop=None,
+) -> ReconcileTotals:
+    """Gap-fill embedded provider IDs into the DB for a set of tracks.
+
+    Shared orchestration used by both the manual backfill job and the
+    auto-reconcile hook on library scans. Pages the track list (bounded
+    memory), lazily loads only the parent album/artist rows actually
+    referenced (cheap when scoped to a handful of new tracks), and commits
+    per page so concurrent enrichment workers aren't starved of the write
+    lock.
+
+    Args:
+        conn: open DB connection; this function commits per page.
+        read_tags: callable ``(file_path) -> tags dict | None``. The caller
+            injects path resolution + ``read_embedded_tags`` so this module
+            stays free of Flask / docker-path concerns. ``None`` => unreadable.
+        track_ids: iterable of track ids to reconcile, or ``None`` for every
+            track that has a ``file_path``.
+        page_size: rows materialised per page.
+        on_progress: optional ``(totals, current_title) -> None`` after each
+            track (for live UI).
+        should_stop: optional ``() -> bool`` checked between tracks/pages to
+            abort early.
+
+    Returns:
+        :class:`ReconcileTotals`.
+    """
+    from utils.logging_config import get_logger
+    logger = get_logger("library.reconcile")
+
+    totals = ReconcileTotals()
+    cur = conn.cursor()
+
+    if track_ids is None:
+        cur.execute("SELECT id FROM tracks WHERE file_path IS NOT NULL AND TRIM(file_path) != ''")
+        ids = [str(r[0]) for r in cur.fetchall()]
+    else:
+        ids = [str(t) for t in track_ids if t is not None]
+    totals.total = len(ids)
+
+    album_map: Dict[str, Dict[str, Any]] = {}
+    artist_map: Dict[str, Dict[str, Any]] = {}
+
+    for start in range(0, len(ids), page_size):
+        if should_stop and should_stop():
+            break
+        page = ids[start:start + page_size]
+        ph = ','.join('?' * len(page))
+        cur.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", page)
+        rows = [dict(r) for r in cur.fetchall()]
+
+        _load_missing_rows(cur, [str(r['album_id']) for r in rows if r.get('album_id') is not None],
+                           'albums', album_map)
+        _load_missing_rows(cur, [str(r['artist_id']) for r in rows if r.get('artist_id') is not None],
+                           'artists', artist_map)
+
+        for tr in rows:
+            if should_stop and should_stop():
+                break
+            title = tr.get('title') or '?'
+            try:
+                tags = read_tags(tr.get('file_path'))
+                result = reconcile_track_row(cur, tr, album_map, artist_map, tags)
+                if not result.readable:
+                    totals.unreadable += 1
+                else:
+                    totals.ids_filled += result.applied.ids_filled
+                    totals.entities_updated += result.applied.rows_updated
+                    totals.conflicts += result.conflicts
+            except Exception as e:
+                logger.debug("reconcile: skipped track %s: %s", tr.get('id'), e)
+                totals.unreadable += 1
+            finally:
+                totals.processed += 1
+                if on_progress:
+                    on_progress(totals, title)
+
+        conn.commit()
+
+    return totals
+
+
 def _existing_columns(cursor, table: str) -> set:
     """Return the set of column names on ``table`` (migration-safe guard)."""
     cursor.execute(f"PRAGMA table_info({table})")

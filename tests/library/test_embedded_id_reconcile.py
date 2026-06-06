@@ -19,8 +19,10 @@ from core.library.embedded_id_reconcile import (
     Fill,
     ReconcileApplied,
     ReconcilePlan,
+    ReconcileTotals,
     apply_reconcile_plan,
     plan_reconcile,
+    reconcile_library,
     reconcile_track_row,
 )
 
@@ -271,3 +273,91 @@ def test_reconcile_track_row_handles_null_parent_ids():
     assert result.applied.ids_filled == 1  # album fill has no album id to land on
     cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t1'")
     assert cur.fetchone()[0] == 'TRK'
+
+
+# ---------------------------------------------------------------------------
+# reconcile_library — the shared orchestration (paging, lazy maps, scope)
+# ---------------------------------------------------------------------------
+
+def _make_library_db():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
+        file_path TEXT, title TEXT, spotify_track_id TEXT, spotify_match_status TEXT,
+        spotify_last_attempted TIMESTAMP)""")
+    cur.execute("""CREATE TABLE albums (id TEXT PRIMARY KEY, spotify_album_id TEXT,
+        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
+    cur.execute("""CREATE TABLE artists (id TEXT PRIMARY KEY, spotify_artist_id TEXT,
+        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
+    # Two tracks on the same album/artist, one orphan track with no file.
+    cur.execute("INSERT INTO artists (id) VALUES ('ar1')")
+    cur.execute("INSERT INTO albums (id) VALUES ('al1')")
+    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t1','al1','ar1','/a.flac','A')")
+    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t2','al1','ar1','/b.flac','B')")
+    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t3','al1','ar1','','NoFile')")
+    conn.commit()
+    return conn, cur
+
+
+def _reader(mapping):
+    """read_tags stub: file_path -> tags dict (or None)."""
+    return lambda fp: mapping.get(fp)
+
+
+def test_reconcile_library_whole_library_fills_all():
+    conn, cur = _make_library_db()
+    tags = {
+        '/a.flac': {'spotify_track_id': 'TA', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'},
+        '/b.flac': {'spotify_track_id': 'TB', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'},
+    }
+    totals = reconcile_library(conn, _reader(tags))
+    assert isinstance(totals, ReconcileTotals)
+    # t3 has empty file_path -> excluded from the whole-library SELECT entirely.
+    assert totals.total == 2 and totals.processed == 2
+    # t1: track+album+artist (3); t2: only its own track id (parents already filled) (1)
+    assert totals.ids_filled == 4
+    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    assert cur.fetchone()[0] == 'TB'
+    cur.execute("SELECT spotify_album_id FROM albums WHERE id='al1'")
+    assert cur.fetchone()[0] == 'ALB'
+
+
+def test_reconcile_library_scoped_to_given_ids():
+    conn, cur = _make_library_db()
+    tags = {'/b.flac': {'spotify_track_id': 'TB'}, '/a.flac': {'spotify_track_id': 'TA'}}
+    totals = reconcile_library(conn, _reader(tags), track_ids=['t2'])
+    assert totals.total == 1 and totals.ids_filled == 1
+    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    assert cur.fetchone()[0] == 'TB'
+    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t1'")
+    assert cur.fetchone()[0] is None  # not in scope
+
+
+def test_reconcile_library_unreadable_counted():
+    conn, cur = _make_library_db()
+    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'])  # reader returns None
+    assert totals.unreadable == 2 and totals.ids_filled == 0
+
+
+def test_reconcile_library_is_idempotent():
+    conn, cur = _make_library_db()
+    tags = {'/a.flac': {'spotify_track_id': 'TA', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'}}
+    first = reconcile_library(conn, _reader(tags), track_ids=['t1'])
+    second = reconcile_library(conn, _reader(tags), track_ids=['t1'])
+    assert first.ids_filled == 3
+    assert second.ids_filled == 0  # nothing left to fill
+
+
+def test_reconcile_library_progress_and_stop():
+    conn, cur = _make_library_db()
+    seen = []
+    reconcile_library(conn, _reader({'/a.flac': {'spotify_track_id': 'TA'}}),
+                      track_ids=['t1', 't2'],
+                      on_progress=lambda totals, title: seen.append(title))
+    assert seen == ['A', 'B']
+
+    # should_stop halts before processing anything
+    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'],
+                               should_stop=lambda: True)
+    assert totals.processed == 0

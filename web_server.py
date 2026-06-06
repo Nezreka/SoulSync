@@ -9837,6 +9837,71 @@ def get_write_tags_batch_status():
 # the API lookup entirely — large API savings on an already-tagged library.
 # Gap-fill only: an existing id is never overwritten (see
 # core/library/embedded_id_reconcile.py).
+def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_stop=None):
+    """Run the embedded-ID reconcile with web-server path resolution injected.
+
+    Thin wrapper over core.library.embedded_id_reconcile.reconcile_library that
+    supplies the read_tags callable (docker/library path resolution + mutagen
+    read). Used by the manual backfill job and available for any scoped
+    reconcile. ``track_ids=None`` => whole library.
+    """
+    from core.library.file_tags import read_embedded_tags
+    from core.library.embedded_id_reconcile import reconcile_library
+
+    def _read_tags(file_path):
+        resolved = _resolve_library_file_path(file_path)
+        if not resolved:
+            return None
+        info = read_embedded_tags(resolved)
+        return info.get('tags') if info.get('available') else None
+
+    return reconcile_library(conn, _read_tags, track_ids=track_ids,
+                             on_progress=on_progress, should_stop=should_stop)
+
+
+def _reconcile_after_scan(worker):
+    """Gap-fill embedded provider IDs for tracks a scan newly inserted.
+
+    Runs after a library scan/deep-scan completes, scoped to the rows the
+    worker actually INSERTED this run (``worker._new_track_ids``). New files
+    are written with empty provider-id columns, so this reads their tags and
+    fills any IDs present — keeping the DB current without a manual backfill.
+    Best-effort: never raises into the scan flow.
+    """
+    try:
+        new_ids = list(getattr(worker, '_new_track_ids', None) or [])
+        if not new_ids:
+            return
+        n = len(new_ids)
+        try:
+            _db_update_phase_callback(
+                f"Reading file tags for {n} new track{'s' if n != 1 else ''}…")
+        except Exception:  # noqa: S110 — best-effort UI phase, never block the reconcile
+            pass
+
+        def _on_progress(totals, title):
+            try:
+                pct = (totals.processed / totals.total * 100) if totals.total else 100
+                _db_update_progress_callback(title, totals.processed, totals.total, pct)
+            except Exception:  # noqa: S110 — best-effort UI progress tick
+                pass
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            totals = _reconcile_library_tracks(conn, track_ids=new_ids, on_progress=_on_progress)
+            logger.info(
+                "[Reconcile] Post-scan: filled %d id(s) across %d row(s) from %d new "
+                "track(s) (%d unreadable, %d conflicts)",
+                totals.ids_filled, totals.entities_updated, totals.processed,
+                totals.unreadable, totals.conflicts,
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("[Reconcile] Post-scan reconcile failed (non-fatal): %s", e)
+
+
 _reconcile_ids_state = {
     'status': 'idle',          # idle | running | done
     'total': 0,
@@ -9868,71 +9933,32 @@ def reconcile_embedded_ids():
         database = get_database()
 
         def _run():
-            from core.library.file_tags import read_embedded_tags
-            from core.library.embedded_id_reconcile import reconcile_track_row
             conn = None
             try:
                 conn = database._get_connection()
-                cur = conn.cursor()
-                # Parent IDs in memory (these tables are far smaller than tracks).
-                cur.execute("SELECT * FROM albums")
-                album_map = {str(r['id']): dict(r) for r in cur.fetchall()}
-                cur.execute("SELECT * FROM artists")
-                artist_map = {str(r['id']): dict(r) for r in cur.fetchall()}
-                # Track IDs only first (light); rows are pulled per page below so
-                # memory stays bounded on large libraries. Each page's SELECT is
-                # fully fetched before any UPDATE, so reusing one cursor is safe.
-                cur.execute("SELECT id FROM tracks WHERE file_path IS NOT NULL AND TRIM(file_path) != ''")
-                track_ids = [str(r['id']) for r in cur.fetchall()]
 
-                with _reconcile_ids_lock:
-                    _reconcile_ids_state['total'] = len(track_ids)
+                def _on_progress(totals, title):
+                    with _reconcile_ids_lock:
+                        _reconcile_ids_state.update({
+                            'total': totals.total,
+                            'processed': totals.processed,
+                            'entities_updated': totals.entities_updated,
+                            'ids_filled': totals.ids_filled,
+                            'conflicts': totals.conflicts,
+                            'unreadable': totals.unreadable,
+                            'current': title,
+                        })
 
-                PAGE = 500
-                for start in range(0, len(track_ids), PAGE):
-                    page = track_ids[start:start + PAGE]
-                    ph = ','.join('?' * len(page))
-                    cur.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", page)
-                    rows = [dict(r) for r in cur.fetchall()]
-
-                    for tr in rows:
-                        title = tr.get('title') or '?'
-                        with _reconcile_ids_lock:
-                            _reconcile_ids_state['current'] = title
-
-                        # One bad file must never abort the whole library scan.
-                        try:
-                            resolved = _resolve_library_file_path(tr.get('file_path'))
-                            info = read_embedded_tags(resolved) if resolved else {'available': False}
-                            tags = info.get('tags') if info.get('available') else None
-
-                            result = reconcile_track_row(cur, tr, album_map, artist_map, tags)
-
-                            with _reconcile_ids_lock:
-                                if not result.readable:
-                                    _reconcile_ids_state['unreadable'] += 1
-                                else:
-                                    _reconcile_ids_state['entities_updated'] += result.applied.rows_updated
-                                    _reconcile_ids_state['ids_filled'] += result.applied.ids_filled
-                                    _reconcile_ids_state['conflicts'] += result.conflicts
-                        except Exception as _te:
-                            logger.debug("reconcile: skipped track %s: %s", tr.get('id'), _te)
-                            with _reconcile_ids_lock:
-                                _reconcile_ids_state['unreadable'] += 1
-                        finally:
-                            with _reconcile_ids_lock:
-                                _reconcile_ids_state['processed'] += 1
-
-                    # Commit per page — releases the write lock so concurrent
-                    # enrichment workers aren't starved during a long scan.
-                    conn.commit()
+                # Whole-library backfill (track_ids=None). Shares the exact
+                # orchestration used by the on-scan auto-reconcile hook.
+                _reconcile_library_tracks(conn, on_progress=_on_progress)
             except Exception as e:
                 logger.error(f"Reconcile embedded IDs background error: {e}")
             finally:
                 if conn is not None:
                     try:
                         conn.close()
-                    except Exception:
+                    except Exception:  # noqa: S110 — connection cleanup, nothing to recover
                         pass
                 with _reconcile_ids_lock:
                     _reconcile_ids_state['status'] = 'done'
@@ -15193,6 +15219,10 @@ def _run_db_update_task(full_refresh, server_type):
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
 
+    # Auto-reconcile: pull embedded provider IDs from newly-added files into
+    # the DB so enrichment workers skip those API lookups (#tag-id-backfill).
+    _reconcile_after_scan(db_update_worker)
+
 
 def _run_deep_scan_task(server_type):
     """Run a deep library scan in the background thread."""
@@ -15240,6 +15270,9 @@ def _run_deep_scan_task(server_type):
 
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()
+
+    # Auto-reconcile newly-inserted files' embedded provider IDs into the DB.
+    _reconcile_after_scan(db_update_worker)
 
 
 @app.route('/api/database/stats', methods=['GET'])
