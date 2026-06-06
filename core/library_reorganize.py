@@ -213,7 +213,79 @@ def _unresolvable_reason(album_data: dict, primary_source: str, strict_source: b
     return "No metadata source ID for this album"
 
 
-def _resolve_source(album_data: dict, primary_source: str, strict_source: bool = False):
+# #767-2: a walked edition scoring below this against the on-disk files is treated
+# as the WRONG edition (e.g. a 1-track single vs the 10-track deluxe scores 0.1),
+# triggering the alternate-edition search. Matches the resolver's min_score.
+_CANONICAL_FIT_FLOOR = 0.5
+
+
+def _score_edition_items(file_tracks: List[dict], items: List[dict]) -> float:
+    """Score a fetched provider tracklist (raw ``items``) against the on-disk
+    ``file_tracks`` using the canonical scorer. Normalises the provider's varied
+    shapes (``name``/``title``, ``duration_ms``/``duration`` seconds) first."""
+    from core.metadata.canonical_version import score_release_against_files
+    rel = []
+    for it in items or []:
+        dur = it.get('duration_ms')
+        if dur is None:
+            secs = it.get('duration')
+            dur = int(secs * 1000) if isinstance(secs, (int, float)) and secs else None
+        rel.append({'title': it.get('name') or it.get('title') or '', 'duration_ms': dur})
+    return score_release_against_files(file_tracks, rel) if rel else 0.0
+
+
+def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source):
+    """Misfit path: run the canonical resolver WITH alternate-edition expansion and,
+    if it lands on a genuinely different edition than the linked ones, fetch it for
+    organizing. Returns ``(source, album_id, api_album, items, score)`` or ``None``."""
+    from core.metadata.canonical_resolver import (
+        default_fetch_alternates,
+        default_fetch_tracklist,
+        resolve_canonical_for_album,
+    )
+    art_id = str(album_data.get('artist_id') or '')
+    art_name = album_data.get('artist_name') or ''
+    title = album_data.get('title') or ''
+
+    def _alts(source, aid):
+        return default_fetch_alternates(
+            source, aid, artist_id=art_id, artist_name=art_name, album_title=title,
+        )
+
+    try:
+        result = resolve_canonical_for_album(
+            album_source_ids=source_ids,
+            file_tracks=file_tracks,
+            fetch_tracklist=default_fetch_tracklist,
+            fetch_alternates=_alts,
+            source_priority=get_source_priority(primary_source),
+            primary_source=primary_source,
+        )
+    except Exception as e:
+        logger.warning(f"[Reorganize] canonical resolve raised: {e}")
+        return None
+    if not result:
+        return None
+    linked = source_ids.get(result['source'])
+    if str(result['album_id']) == str(linked or ''):
+        return None  # resolver chose a linked edition the walk already considered
+    try:
+        b_album = get_album_for_source(result['source'], result['album_id'])
+        b_items = _normalize_album_tracks(
+            get_album_tracks_for_source(result['source'], result['album_id'])
+        )
+    except Exception as e:
+        logger.warning(f"[Reorganize] alternate edition fetch raised: {e}")
+        return None
+    if not b_album or not b_items:
+        return None
+    return result['source'], result['album_id'], b_album, b_items, result.get('score') or 0.0
+
+
+def _resolve_source(
+    album_data: dict, primary_source: str, strict_source: bool = False,
+    *, file_tracks: Optional[List[dict]] = None, on_better_edition=None,
+):
     """Walk the configured source priority looking for the first source
     we have an ID for AND that returns a usable tracklist.
 
@@ -222,6 +294,11 @@ def _resolve_source(album_data: dict, primary_source: str, strict_source: bool =
     explicitly picked a source in the reorganize modal: picking Spotify
     means "use Spotify or fail", not "use Spotify and silently fall
     back to Deezer".
+
+    When ``file_tracks`` is supplied (and not ``strict_source``), the walked
+    edition is fit-scored against the on-disk files; a clear misfit triggers an
+    alternate-edition search (#767-2). ``on_better_edition(source, album_id,
+    score)`` is invoked to persist the pin when a better edition is chosen.
 
     Returns ``(source_name, album_meta, tracks_list)`` or ``(None, None, None)``.
     """
@@ -251,6 +328,7 @@ def _resolve_source(album_data: dict, primary_source: str, strict_source: bool =
     else:
         sources_to_try = get_source_priority(primary_source)
 
+    walk_source = walk_album = walk_items = None
     for source in sources_to_try:
         sid = source_ids.get(source) or ''
         if not sid:
@@ -264,8 +342,36 @@ def _resolve_source(album_data: dict, primary_source: str, strict_source: bool =
         items = _normalize_album_tracks(api_tracks)
         if not items or not api_album:
             continue
-        return source, api_album, items
+        walk_source, walk_album, walk_items = source, api_album, items
+        break
 
+    # #767-2: the walk takes the first source we have an ID for, but that ID can
+    # point at the WRONG edition (a single enriched against the deluxe → it'd file
+    # the track as #2 of a 10-track album). With the on-disk tracklist in hand,
+    # fit-score the walked edition; only a clear misfit looks for a better-fitting
+    # edition. Well-fitting albums keep today's exact behavior + make no extra calls.
+    if not strict_source and file_tracks:
+        walk_fit = _score_edition_items(file_tracks, walk_items) if walk_items else 0.0
+        if walk_fit < _CANONICAL_FIT_FLOOR:
+            better = _resolve_better_edition(
+                album_data, source_ids, file_tracks, primary_source,
+            )
+            if better is not None:
+                b_source, b_id, b_album, b_items, b_score = better
+                if on_better_edition:
+                    try:
+                        on_better_edition(b_source, b_id, b_score)
+                    except Exception as e:
+                        logger.warning(f"[Reorganize] canonical pin persist failed: {e}")
+                logger.info(
+                    "[Reorganize] %s: walked edition fit %.2f below floor — using "
+                    "better-fit %s edition %s (fit %.2f)",
+                    album_data.get('title', '?'), walk_fit, b_source, b_id, b_score,
+                )
+                return b_source, b_album, b_items
+
+    if walk_source:
+        return walk_source, walk_album, walk_items
     return None, None, None
 
 
@@ -682,6 +788,7 @@ def plan_album_reorganize(
     strict_source: bool = False,
     metadata_source: str = 'api',
     resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]] = None,
+    on_better_edition: Optional[Callable[[str, str, float], None]] = None,
 ) -> dict:
     """Compute the per-track plan for an album reorganize without doing
     any file IO. Both the actual reorganize orchestrator and the preview
@@ -731,8 +838,14 @@ def plan_album_reorganize(
         except Exception:
             primary_source = 'deezer'
 
+    # On-disk track shape for the #767-2 fit check (duration stored in ms).
+    file_tracks = [
+        {'duration_ms': t.get('duration') or 0, 'title': t.get('title') or ''}
+        for t in tracks
+    ]
     source, api_album, api_tracks = _resolve_source(
-        album_data, primary_source, strict_source=strict_source
+        album_data, primary_source, strict_source=strict_source,
+        file_tracks=file_tracks, on_better_edition=on_better_edition,
     )
     if not source:
         reason = _unresolvable_reason(album_data, primary_source, strict_source)
@@ -1475,12 +1588,23 @@ def reorganize_album(
     summary['total'] = len(tracks)
     _emit(total=len(tracks))
 
+    # #767-2: persist the canonical pin when the resolver lands on a better-fit
+    # edition than the linked one, so Track Number Repair + future runs agree and
+    # we don't re-resolve every time. Never overrides a manually-locked pin (the
+    # set_album_canonical SQL guard from #758 enforces that).
+    def _persist_canonical(source, alt_album_id, score):
+        try:
+            db.set_album_canonical(album_id, source, alt_album_id, score)
+        except Exception as e:
+            logger.warning("[Reorganize] set_album_canonical failed: %s", e)
+
     # Build the per-track plan (same logic the preview uses).
     plan = plan_album_reorganize(
         album_data, tracks,
         primary_source=primary_source, strict_source=strict_source,
         metadata_source=metadata_source,
         resolve_file_path_fn=resolve_file_path_fn,
+        on_better_edition=_persist_canonical,
     )
     if plan['status'] == 'no_source_id':
         summary['status'] = 'no_source_id'
