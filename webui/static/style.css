@@ -62200,28 +62200,34 @@ body.reduce-effects .dash-card::after {
 /* Hero playhead — slow vertical accent line that drifts across the
    equalizer like a now-playing scrubber. Fades in/out at the edges so
    the loop reset isn't visible. */
+/* GPU note: this used to animate `left`, which re-lays-out and repaints every
+ * frame for the whole 9s loop. The pseudo is now a full-width strip whose
+ * 1.5px line is a STATIC background (background-size positioned at center),
+ * and only transform/opacity animate — compositor-only, identical look. */
 .qa-tile--hero .qa-tile__bg::after {
     content: '';
     position: absolute;
     inset: auto 0 0 0;
     height: 65%;
-    width: 1.5px;
-    background: linear-gradient(180deg,
-        transparent 0%,
-        rgba(var(--accent-rgb), 0.7) 40%,
-        rgba(var(--accent-rgb), 0.7) 85%,
-        transparent 100%);
+    background:
+        linear-gradient(180deg,
+            transparent 0%,
+            rgba(var(--accent-rgb), 0.7) 40%,
+            rgba(var(--accent-rgb), 0.7) 85%,
+            transparent 100%)
+        50% 0 / 1.5px 100% no-repeat;
     filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.35));
     opacity: 0;
+    transform: translateX(-54%);
     animation: qa-playhead 9s linear infinite;
     pointer-events: none;
 }
 
 @keyframes qa-playhead {
-    0%   { left: -4%; opacity: 0; }
+    0%   { transform: translateX(-54%); opacity: 0; }
     10%  { opacity: 0.5; }
     85%  { opacity: 0.5; }
-    100% { left: 102%; opacity: 0; }
+    100% { transform: translateX(52%); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -62273,6 +62279,7 @@ body.reduce-effects .dash-card::after {
 }
 
 .qa-flow-node {
+    position: relative;
     width: clamp(16px, 1.4cqw + 8px, 24px);
     aspect-ratio: 1;
     border: 1.5px solid rgba(var(--accent-rgb), 0.6);
@@ -62281,9 +62288,23 @@ body.reduce-effects .dash-card::after {
     flex-shrink: 0;
 }
 
-.qa-flow-node:nth-of-type(1) { animation: qa-flow-pulse 3.2s ease-in-out infinite; }
-.qa-flow-node:nth-of-type(2) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -1.07s; }
-.qa-flow-node:nth-of-type(3) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -2.13s; }
+/* GPU note: the node pulse used to animate background + box-shadow (repaint
+ * every frame, forever, x3 nodes). The bright state is painted once on a
+ * pseudo and only its opacity breathes. */
+.qa-flow-node::after {
+    content: '';
+    position: absolute;
+    inset: -1.5px;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.4);
+    box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.18);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.qa-flow-node:nth-of-type(1)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; }
+.qa-flow-node:nth-of-type(2)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -1.07s; }
+.qa-flow-node:nth-of-type(3)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -2.13s; }
 
 .qa-flow-line {
     position: relative;
@@ -62323,17 +62344,37 @@ body.reduce-effects .dash-card::after {
 }
 
 @keyframes qa-flow-pulse {
-    0%, 100% { background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
-    50%      { background: rgba(var(--accent-rgb), 0.5); box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.18); }
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .qa-tile--auto:hover .qa-tile__flow,
 .qa-tile--auto:focus-visible .qa-tile__flow { opacity: 0.85; }
 
+/* ── Live amplification (animation == gauge) ──
+ * Each tile's signature animation SURGES while its subsystem is actually
+ * working — sync pipeline running, a tool/scan/repair job running, an
+ * automation firing. core.js toggles .is-live from the live socket events;
+ * idle keeps the exact calm look these tiles always had. Purely additive. */
+.qa-tile--sync.is-live .qa-tile__eq { opacity: 0.65; }
+.qa-tile--sync.is-live .qa-tile__eq span { animation-duration: 1.1s; }
+.qa-tile--sync.is-live .qa-tile__bg::after { animation-duration: 4s; }
+.qa-tile--sync.is-live .qa-tile__pulse::after { animation-duration: 0.9s; }
+
+.qa-tile--tools.is-live .qa-tile__gear {
+    color: rgba(var(--accent-rgb), 0.16);
+    animation-duration: 7s;
+}
+
+.qa-tile--auto.is-live .qa-tile__flow { opacity: 0.85; }
+.qa-tile--auto.is-live .qa-flow-node::after { animation-duration: 1.3s; }
+.qa-tile--auto.is-live .qa-flow-line::before { animation-duration: 1.3s; }
+
 @media (prefers-reduced-motion: reduce) {
     .qa-tile__eq span,
     .qa-tile__gear,
     .qa-flow-node,
+    .qa-flow-node::after,
     .qa-tile__pulse::after { animation: none !important; }
 }
 
