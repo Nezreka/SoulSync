@@ -1059,15 +1059,35 @@ function initializeSearchModeToggle() {
                 try {
                     const downloadData = type === 'album'
                         ? { result_type: 'album', tracks: result.tracks || [] }
-                        : { result_type: 'track', username: result.username, filename: result.filename, size: result.size };
+                        : { result_type: 'track', username: result.username, filename: result.filename,
+                            size: result.size,
+                            // Carry artist/title so the blocklist guard can match (Phase 2b).
+                            artist: result.artist || result.artist_name || '',
+                            title: result.title || result.name || '' };
 
-                    const response = await fetch('/api/download', {
+                    let response = await fetch('/api/download', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(downloadData)
                     });
+                    let data = await response.json();
 
-                    const data = await response.json();
+                    // Blocklist (Phase 2b): blocked artist → confirm override + retry.
+                    if (data.blocked) {
+                        if (typeof confirmBlockedDownload === 'function' && confirmBlockedDownload(data)) {
+                            downloadData.ignore_blocklist = true;
+                            response = await fetch('/api/download', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(downloadData)
+                            });
+                            data = await response.json();
+                        } else {
+                            showToast(`Skipped — ${data.blocked_name} is blocklisted`, 'info');
+                            this.disabled = false;
+                            this.innerHTML = '💾 Download';
+                            return;
+                        }
+                    }
 
                     if (data.error) {
                         showToast(`Download error: ${data.error}`, 'error');

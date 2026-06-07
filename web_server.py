@@ -6152,6 +6152,25 @@ def start_download():
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
+            # Blocklist guard (Phase 2b): a manual download is source-file-centric
+            # (no metadata IDs), so this matches the blocked ARTIST by name. The
+            # frontend shows "blocked — download anyway?" and re-POSTs with
+            # ignore_blocklist=true on confirm.
+            if not data.get('ignore_blocklist'):
+                try:
+                    _dl_artist = data.get('artist')
+                    if _dl_artist and _dl_artist != 'Unknown':
+                        _reason = get_database().blocklist_reason_for_track(
+                            get_current_profile_id(),
+                            {'name': data.get('title'), 'artists': [{'name': _dl_artist}]})
+                        if _reason:
+                            return jsonify({
+                                "success": False, "blocked": True,
+                                "blocked_entity_type": _reason[0], "blocked_name": _reason[1],
+                            }), 409
+                except Exception as _bl_err:
+                    logger.debug("manual download blocklist check skipped: %s", _bl_err)
+
             download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
 
@@ -19147,9 +19166,36 @@ def start_missing_tracks_process(playlist_id):
     # album-download modal. Stored on the batch and propagated per-track by
     # the master worker so AcoustID never quarantines this request's files.
     skip_acoustid = bool(data.get('skip_acoustid', False))
+    # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
+    ignore_blocklist = bool(data.get('ignore_blocklist', False))
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
+
+    # Blocklist up-front check (Phase 2b): if the WHOLE album or artist being
+    # downloaded is blocklisted, stop here with a clear, actionable response
+    # instead of silently dropping every track in the per-track filter (2a) and
+    # leaving an empty batch. Scattered single-track bans still fall through to
+    # the per-track filter. The modal re-POSTs with ignore_blocklist=true after
+    # the user confirms "download anyway".
+    if not ignore_blocklist and (album_context or artist_context):
+        try:
+            _bsrc = _downloads_history.detect_sync_source(playlist_id)
+            _synthetic = {
+                'album': {'id': (album_context or {}).get('id'),
+                          'name': (album_context or {}).get('name')},
+                'artists': [{'id': (artist_context or {}).get('id'),
+                             'name': (artist_context or {}).get('name')}],
+            }
+            _reason = get_database().blocklist_reason_for_track(
+                get_current_profile_id(), _synthetic, source=_bsrc)
+            if _reason:
+                return jsonify({
+                    "success": False, "blocked": True,
+                    "blocked_entity_type": _reason[0], "blocked_name": _reason[1],
+                }), 409
+        except Exception as _bl_err:
+            logger.debug("blocklist up-front check skipped: %s", _bl_err)
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
@@ -19208,6 +19254,9 @@ def start_missing_tracks_process(playlist_id):
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
             'ignore_manual_matches': ignore_manual_matches,
+            # Blocklist override (Phase 2b) — the user confirmed "download anyway"
+            # at the modal, so the per-track filter (2a) skips this batch.
+            'ignore_blocklist': ignore_blocklist,
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,

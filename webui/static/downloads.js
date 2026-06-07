@@ -1,6 +1,15 @@
 // WING IT — Download without metadata discovery
 // ==================================================================================
 
+// Blocklist (Phase 2b): when a download is refused because the artist/album/track
+// is on the blocklist, the backend returns {blocked:true,...}. Ask the user
+// whether to override; callers re-POST with ignore_blocklist:true on confirm.
+function confirmBlockedDownload(data) {
+    const what = data.blocked_entity_type || 'item';
+    const name = data.blocked_name || 'this item';
+    return confirm(`"${name}" is on your blocklist (${what} blocked).\n\nDownload anyway?`);
+}
+
 function _toggleWingItDropdown(btn, urlHash) {
     // Remove any existing dropdown
     const existing = document.querySelector('.wing-it-dropdown.visible');
@@ -2524,13 +2533,27 @@ async function startMissingTracksProcess(playlistId) {
             }
         }
 
-        const response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
+        let response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
         });
 
-        const data = await response.json();
+        let data = await response.json();
+        // Blocklist (Phase 2b): whole album/artist is blocked → confirm override.
+        if (data.blocked) {
+            if (!confirmBlockedDownload(data)) {
+                showToast(`Skipped — ${data.blocked_name} is blocklisted`, 'info');
+                return;
+            }
+            requestBody.ignore_blocklist = true;
+            response = await fetch(`/api/playlists/${playlistId}/start-missing-process`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+            data = await response.json();
+        }
         if (!data.success) {
             // Special handling for rate limit
             if (response.status === 429) {
