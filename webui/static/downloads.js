@@ -3679,6 +3679,12 @@ function processModalStatusUpdate(playlistId, data) {
                 delete statusEl.dataset.quarantineTrack;
                 delete statusEl.dataset.detailOpen;
                 statusEl.textContent = statusText;
+                // Visual-only hooks: the cell carries its state for the badge
+                // styling, the row glows while a track is actively working.
+                statusEl.dataset.state = isQuarantinedTask ? 'quarantined'
+                    : (isV2Task && uiState === 'cancelling' ? 'cancelling' : task.status);
+                row.classList.toggle('row-working',
+                    ['searching', 'downloading', 'post_processing'].includes(task.status));
 
                 if ((task.status === 'failed' || task.status === 'cancelled' || task.status === 'not_found') && task.error_message) {
                     statusEl.classList.add('has-error-tooltip');
