@@ -5350,6 +5350,23 @@
                                             </div>
                                         </div>
                                         <div class="form-group">
+                                            <label>Stalled torrent timeout (minutes):</label>
+                                            <input type="number" id="torrent-stall-timeout" min="0" step="1" placeholder="10">
+                                            <div class="setting-help-text">
+                                                Give up on a torrent that makes <strong>zero download progress</strong> for this long — a dead magnet stuck on "downloading metadata", or a swarm with no seeders. Without this, a dud torrent ties up a download slot for the full 6-hour limit. <strong>0 disables</strong> (wait the full limit).
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>When a torrent stalls:</label>
+                                            <select id="torrent-stall-action" class="form-select">
+                                                <option value="abandon">Abandon — remove it &amp; its partial data, fail the download</option>
+                                                <option value="pause">Pause — pause it in the client, leave it for me</option>
+                                            </select>
+                                            <div class="setting-help-text">
+                                                Abandon frees the slot so the next source can try. Pause keeps the torrent in your client so you can inspect or resume it manually.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
                                             <label>Status:</label>
                                             <div class="form-actions" style="margin-top: 4px;">
                                                 <button class="test-button" id="torrent-client-test-btn" onclick="testTorrentClientConnection()">

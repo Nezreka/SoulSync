@@ -1128,6 +1128,15 @@ async function loadSettingsData() {
         if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
         if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
         if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        // Stalled-torrent knobs live under download_source but render in the
+        // torrent client section. Timeout is stored in SECONDS, shown in MINUTES.
+        const _tcStall = document.getElementById('torrent-stall-timeout');
+        const _tcStallAct = document.getElementById('torrent-stall-action');
+        if (_tcStall) {
+            const secs = settings.download_source?.torrent_stall_timeout_seconds;
+            _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
+        }
+        if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
         const _ucType = document.getElementById('usenet-client-type');
         const _ucUrl = document.getElementById('usenet-client-url');
         const _ucKey = document.getElementById('usenet-client-api-key');
@@ -2886,6 +2895,14 @@ async function saveSettings(quiet = false) {
             hybrid_order: getHybridOrder(),
             stream_source: document.getElementById('stream-source').value,
             max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
+            // Stalled-torrent knobs (rendered in the torrent client section).
+            // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
+            // 0 stays 0 (disabled).
+            torrent_stall_timeout_seconds: (() => {
+                const m = parseInt(document.getElementById('torrent-stall-timeout')?.value, 10);
+                return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
+            })(),
+            torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless',
