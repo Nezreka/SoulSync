@@ -12547,6 +12547,12 @@ def stream_library_audio():
             return jsonify({"error": "path is required"}), 400
         resolved = _resolve_library_file_path(raw_path)
         if not resolved or not os.path.exists(resolved):
+            # Not on disk — same Navidrome stream fallback as /api/library/play
+            # (#809), so crossfade preload of the NEXT track works for streamed
+            # libraries too. Resolves the song id by path (DB lookup).
+            stream_url = _build_library_stream_url(request.args.get('track_id'), raw_path)
+            if stream_url:
+                return _proxy_stream_url_with_range(stream_url)
             return jsonify({"error": _get_file_not_found_error(raw_path)}), 404
         return _serve_audio_file_with_range(resolved)
     except Exception as e:

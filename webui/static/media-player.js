@@ -1871,7 +1871,10 @@ function npStartCrossfade(nextIdx, next) {
 
     const targetVol = audioPlayer.volume; // fade the new track up to current level
     npXfadeMainVol = targetVol;            // remember to restore on abort
-    xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}&t=${Date.now()}`;
+    // Pass the server song id so a streamed (un-mounted) Navidrome track can
+    // crossfade-preload via the server stream API too (#809).
+    const _xfTid = next.id ? `&track_id=${encodeURIComponent(next.id)}` : '';
+    xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}${_xfTid}&t=${Date.now()}`;
     xa.volume = 0;
     xa.play().then(() => {
         const fadeMs = NP_CROSSFADE_SECONDS * 1000;
