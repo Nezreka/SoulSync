@@ -35645,6 +35645,24 @@ def start_runtime_services():
         logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
 
+        # One-time repair: purge artist album-list cache entries poisoned by
+        # partial watchlist probes (limit=5/max_pages=1 results stored in the
+        # full-discography slot — artist pages showed only the newest handful
+        # of releases for every watchlist artist). The writer is fixed; this
+        # clears what's already bad. Guarded so it runs once per install.
+        try:
+            if not config_manager.get('maintenance.album_cache_purge_v1', False):
+                from core.metadata.cache import get_metadata_cache as _gmc
+                _purged = _gmc().purge_artist_album_lists('spotify')
+                config_manager.set('maintenance.album_cache_purge_v1', True)
+                if _purged:
+                    logger.warning(
+                        "[Startup] Purged %d poisoned artist album-list cache "
+                        "entries (partial watchlist probes); artist pages will "
+                        "refetch full discographies lazily", _purged)
+        except Exception as _purge_err:
+            logger.debug("album cache purge skipped: %s", _purge_err)
+
         # Startup diagnostics: Check and recover stuck flags
         logger.info("Running startup diagnostics...")
         stuck_flags_recovered = check_and_recover_stuck_flags()

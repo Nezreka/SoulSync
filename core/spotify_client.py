@@ -1859,6 +1859,7 @@ class SpotifyClient:
             try:
                 albums = []
                 raw_items = []
+                truncated = False  # did we stop while more pages existed?
                 # Spotify caps artist_albums at 10 per page
                 results = self.sp.artist_albums(artist_id, album_type=album_type, limit=min(limit, 10))
                 pages_fetched = 1
@@ -1871,6 +1872,7 @@ class SpotifyClient:
 
                     # Stop if we've hit the page limit (0 = unlimited)
                     if max_pages and pages_fetched >= max_pages:
+                        truncated = bool(results.get('next'))
                         break
 
                     # Get next batch if available — throttle pagination to respect rate limits
@@ -1893,8 +1895,17 @@ class SpotifyClient:
                             (f" (page limit: {max_pages})" if max_pages else ""))
 
                 # Cache the full artist albums result (wrapped in dict for cache compatibility)
+                # Only cache COMPLETE discographies. The cache key carries no
+                # limit/page info, so a partial probe (the watchlist's
+                # new-release check: limit=5, max_pages=1) stored here used to
+                # POISON the slot — the artist detail page then showed only
+                # the 5-10 newest releases for every watchlist artist until
+                # the 30-day TTL expired ("Taylor Swift has 8 albums, nothing
+                # before 2022"). Individual albums are still cached — they're
+                # complete entities regardless of how many pages we walked.
                 if raw_items:
-                    cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
+                    if not truncated:
+                        cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
                     # Also cache individual albums opportunistically
                     entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                     if entries:
