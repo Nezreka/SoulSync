@@ -1748,12 +1748,21 @@ class WatchlistScanner:
     def _match_to_itunes(self, artist_name: str) -> Optional[str]:
         """Match artist name to iTunes ID using fuzzy name comparison."""
         try:
-            if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
-            else:
-                logger.warning("Cannot match to iTunes - MetadataService not available")
+            # Use the canonical iTunes client like _match_to_deezer/_discogs/
+            # _musicbrainz do. The old path read the PRIVATE _metadata_service
+            # attr (None when the scanner is built from a spotify_client — the
+            # normal web_server wiring) and just gave up — the only matcher
+            # with no fallback — so watchlist iTunes backfills failed wholesale
+            # ("MetadataService not available" ×8, Backfilled 0/8). And even
+            # when set, metadata_service.itunes is the FALLBACK-client slot,
+            # which may actually be a DeezerClient (see _match_to_deezer) —
+            # matching against it could store a Deezer ID as itunes_artist_id.
+            from core.metadata.registry import get_itunes_client
+            client = get_itunes_client()
+            if client is None:
+                logger.warning("Cannot match to iTunes - client unavailable")
                 return None
-
+            results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to iTunes: {e}")
