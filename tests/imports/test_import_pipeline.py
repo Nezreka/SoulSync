@@ -304,3 +304,356 @@ def test_verification_wrapper_applies_quarantine_entry_id_on_integrity_failure(m
         runtime_state.download_tasks.update(original)
         runtime_state.matched_downloads_context.clear()
         runtime_state.matched_downloads_context.update(original_ctx)
+
+
+# ---------------------------------------------------------------------------
+# Next-best-candidate retry on AcoustID / integrity quarantine. When a
+# verification or integrity check quarantines the wrong/broken file, the wrapper
+# asks the monitor to re-run the worker on the next candidate (skipping the bad
+# source) instead of failing the task outright.
+# ---------------------------------------------------------------------------
+
+def _wire_retry_engine(monkeypatch):
+    """Wire monitor's retry globals to capture the worker re-submission."""
+    import core.downloads.monitor as monitor
+
+    submitted = []
+
+    class _Exec:
+        def submit(self, fn, *args):
+            submitted.append(args)
+
+    monkeypatch.setattr(monitor, "missing_download_executor", _Exec())
+    monkeypatch.setattr(monitor, "_download_track_worker", lambda task_id, batch_id: None)
+    monkeypatch.setattr(monitor, "MAX_QUARANTINE_RETRIES", 5)
+    return submitted
+
+
+def _patch_config(monkeypatch, overrides):
+    """Override specific config keys for the monitor's config_manager reads."""
+    import core.downloads.monitor as monitor
+
+    real_get = monitor.config_manager.get
+
+    def fake_get(key, default=None):
+        if key in overrides:
+            return overrides[key]
+        return real_get(key, default)
+
+    monkeypatch.setattr(monitor.config_manager, "get", fake_get)
+
+
+def _run_wrapper_with_quarantine(monkeypatch, flag_setter, task_extra=None):
+    task_id, batch_id, context_key = "rtask", "rbatch", "rctx"
+    context = {"track_info": {}, "task_id": task_id, "batch_id": batch_id}
+
+    monkeypatch.setattr(import_pipeline, "post_process_matched_download", flag_setter)
+
+    original = dict(runtime_state.download_tasks)
+    original_ctx = dict(runtime_state.matched_downloads_context)
+    try:
+        runtime_state.download_tasks.clear()
+        task = {
+            "track_info": {}, "status": "downloading",
+            "username": "hifi", "filename": "123||A - B", "used_sources": set(),
+        }
+        if task_extra:
+            task.update(task_extra)
+        runtime_state.download_tasks[task_id] = task
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context[context_key] = context
+
+        completion = []
+        runtime = types.SimpleNamespace(
+            automation_engine=None,
+            on_download_completed=lambda b, t, success: completion.append((b, t, success)),
+            web_scan_manager=None,
+            repair_worker=None,
+        )
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key, context, "/tmp/source.flac", task_id, batch_id, runtime,
+        )
+        return dict(runtime_state.download_tasks[task_id]), completion, context_key
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(original)
+        runtime_state.matched_downloads_context.clear()
+        runtime_state.matched_downloads_context.update(original_ctx)
+
+
+def test_acoustid_mismatch_requeues_next_candidate(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, completion, context_key = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    # Task goes back to searching for the next candidate — NOT failed.
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_count"] == 1
+    # The quarantined source is flagged so the re-run won't re-pick it.
+    assert "hifi_123||A - B" in task["used_sources"]
+    # Stale download identity cleared; worker re-submitted; no batch failure.
+    assert "download_id" not in task and "username" not in task
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+    # Old context cleaned up (the re-run builds a fresh one for the new pick).
+    assert context_key not in runtime_state.matched_downloads_context
+
+
+def test_requeue_flags_quarantine_retry_for_cached_first(monkeypatch):
+    _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, _, _ = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    # The re-run is flagged so the worker walks cached candidates before
+    # re-searching (cached-first), rather than re-running the full search.
+    assert task["_quarantine_retry"] is True
+
+
+def test_integrity_mismatch_requeues_next_candidate(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_integrity_failure_msg"] = "Duration mismatch: file is 231.0s, expected 271.0s"
+
+    task, completion, _ = _run_wrapper_with_quarantine(monkeypatch, _fake_inner)
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_count"] == 1
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_manual_pick_does_not_requeue_on_mismatch(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_integrity_failure_msg"] = "Duration mismatch"
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _fake_inner, task_extra={"_user_manual_pick": True},
+    )
+
+    # User explicitly chose this file — fail it, don't silently swap.
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_retry_budget_exhausted_fails_task(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    import core.downloads.monitor as monitor
+    monkeypatch.setattr(monitor, "MAX_QUARANTINE_RETRIES", 2)
+
+    def _fake_inner(ck, ctx, fp, runtime, metadata_runtime=None):
+        ctx["_acoustid_quarantined"] = True
+        ctx["_acoustid_failure_msg"] = "wrong song"
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _fake_inner, task_extra={"quarantine_retry_count": 2},
+    )
+
+    # Cap reached — fall through to normal failure handling.
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def _acoustid_quarantine(ck, ctx, fp, runtime, metadata_runtime=None):
+    ctx["_acoustid_quarantined"] = True
+    ctx["_acoustid_failure_msg"] = "wrong song"
+
+
+def test_exhaustive_mode_uses_per_source_budget(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # query_count=2 → budget for source 'hifi' = 2 * 5 = 10; first failure retries.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine, task_extra={"query_count": 2},
+    )
+
+    assert task["status"] == "searching"
+    # Per-source budget tracked separately from the legacy global counter.
+    assert task["quarantine_retry_counts_by_source"] == {"hifi": 1}
+    assert task["quarantine_retry_count"] == 1
+    assert "hifi_123||A - B" in task["used_sources"]
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_exhaustive_source_budget_exhausted_fails(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # hifi already at its full budget (query_count 2 * 5 = 10) → fail, no retry.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 2, "quarantine_retry_counts_by_source": {"hifi": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_exhaustive_budget_is_separate_per_source(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek is already maxed, but the failing download is on hifi — hifi has
+    # its own fresh budget, so the task still retries.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 1, "quarantine_retry_counts_by_source": {"soulseek": 5}},
+    )
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_counts_by_source"] == {"soulseek": 5, "hifi": 1}
+    assert submitted == [("rtask", "rbatch")]
+
+
+def test_exhaustive_soulseek_peer_resolves_to_soulseek(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # A Soulseek peer name (not a streaming source) is bucketed under 'soulseek'.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "filename": "f.flac", "query_count": 1},
+    )
+
+    assert task["status"] == "searching"
+    assert task["quarantine_retry_counts_by_source"] == {"soulseek": 1}
+
+
+def test_exhaustive_budget_defaults_query_count_to_one(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 1,
+    })
+
+    # No query_count on the task → budget defaults to 1 * 1 = 1; hifi already at 1.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"quarantine_retry_counts_by_source": {"hifi": 1}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+
+
+def test_exhaustive_absolute_ceiling_guards_runaway(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    import core.downloads.monitor as monitor
+    monkeypatch.setattr(monitor, "MAX_TOTAL_QUARANTINE_RETRIES", 3)
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 1000,  # per-source budget effectively unbounded
+    })
+
+    # Per-source budget is huge, but the absolute total ceiling (3) still fires.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"query_count": 1, "quarantine_retry_count": 3,
+                    "quarantine_retry_counts_by_source": {"hifi": 0}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+
+
+def _wire_orchestrator(monkeypatch, mode, hybrid_order):
+    """Wire monitor's download_orchestrator so per-source budget exhaustion can
+    decide whether another source remains to fall back to."""
+    import core.downloads.monitor as monitor
+    orch = types.SimpleNamespace(mode=mode, hybrid_order=list(hybrid_order))
+    monkeypatch.setattr(monitor, "download_orchestrator", orch)
+    return orch
+
+
+def test_exhaustive_exhausted_source_switches_in_hybrid(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _wire_orchestrator(monkeypatch, "hybrid", ["soulseek", "hifi"])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek's budget (query_count 2 * 5 = 10) is spent. In hybrid mode the
+    # task switches to the next source instead of failing the whole track.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "query_count": 2,
+                    "quarantine_retry_counts_by_source": {"soulseek": 10}},
+    )
+
+    assert task["status"] == "searching"
+    # The spent source is flagged so the worker excludes it from the next search.
+    assert task["exhausted_download_sources"] == {"soulseek"}
+    # Its per-source counter is NOT pushed past budget — the source is simply done.
+    assert task["quarantine_retry_counts_by_source"]["soulseek"] == 10
+    assert submitted == [("rtask", "rbatch")]
+    assert completion == []
+
+
+def test_exhaustive_all_sources_exhausted_fails_in_hybrid(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    _wire_orchestrator(monkeypatch, "hybrid", ["soulseek", "hifi"])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    # soulseek was exhausted on an earlier attempt; now hifi spends its last
+    # budget too — no fallback source remains, so the task finally fails.
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "hifi", "query_count": 2,
+                    "exhausted_download_sources": {"soulseek"},
+                    "quarantine_retry_counts_by_source": {"hifi": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]
+
+
+def test_exhaustive_single_source_exhausted_fails(monkeypatch):
+    submitted = _wire_retry_engine(monkeypatch)
+    # Single-source mode: nothing to fall back to once the budget is spent.
+    _wire_orchestrator(monkeypatch, "soulseek", [])
+    _patch_config(monkeypatch, {
+        "post_processing.retry_exhaustive": True,
+        "post_processing.retries_per_query": 5,
+    })
+
+    task, completion, _ = _run_wrapper_with_quarantine(
+        monkeypatch, _acoustid_quarantine,
+        task_extra={"username": "DjPeer", "query_count": 2,
+                    "quarantine_retry_counts_by_source": {"soulseek": 10}},
+    )
+
+    assert task["status"] == "failed"
+    assert submitted == []
+    assert completion == [("rbatch", "rtask", False)]

@@ -37,9 +37,226 @@ missing_download_executor = None
 download_orchestrator = None
 _RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
+# Hard ceiling on automatic next-candidate retries after a download was
+# quarantined (AcoustID mismatch / integrity / duration). The natural
+# terminator is used_sources exhaustion — once every candidate the worker can
+# find has been tried, attempt_download_with_candidates returns False and the
+# worker reports a clean failure. This cap is a safety net against a pathological
+# quarantine→retry→quarantine loop (e.g. a source that keeps returning fresh
+# wrong files).
+#
+# Default (non-exhaustive) mode uses this single global cap. The opt-in
+# exhaustive mode (post_processing.retry_exhaustive) instead budgets retries
+# PER SOURCE — see requeue_quarantined_task_for_retry.
+MAX_QUARANTINE_RETRIES = 5
+
+# Absolute runaway guard for exhaustive mode. Per-source budgets are already
+# finite (query_count × retries_per_query, and Soulseek peers all collapse to
+# one 'soulseek' bucket), but this ceiling caps the TOTAL retries across every
+# source so a misbehaving source-resolution can never loop forever.
+MAX_TOTAL_QUARANTINE_RETRIES = 100
+
+# Streaming plugins report their source name as the download's "username"
+# (see download_orchestrator._streaming_sources). Soulseek uses the peer name
+# instead, so anything not in this set is bucketed under 'soulseek' for the
+# per-source retry budget.
+_STREAMING_SOURCE_NAMES = frozenset((
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
+))
+
+
+def _resolve_download_source(username):
+    """Map a download's username to its logical source for per-source budgeting.
+
+    Streaming sources use the source name as username; Soulseek uses the peer
+    name, so every Soulseek peer collapses to a single 'soulseek' bucket.
+    """
+    if username and username in _STREAMING_SOURCE_NAMES:
+        return username
+    return 'soulseek'
+
+
+def _remaining_fallback_sources(exhausted):
+    """Sources in the configured hybrid chain that haven't exhausted their
+    per-source budget yet.
+
+    When a source spends its whole budget (exhaustive mode), the task switches
+    to the next source instead of failing — but only if there *is* another
+    source. Single-source mode has nothing to fall back to, so this returns
+    empty there (and when the orchestrator isn't wired). The returned list
+    drives both the give-up decision here and the worker's search-exclusion on
+    the next attempt (see task_worker: exhausted_download_sources).
+    """
+    orch = download_orchestrator
+    if orch is None or getattr(orch, 'mode', None) != 'hybrid':
+        return []
+    chain = getattr(orch, 'hybrid_order', None) or []
+    blocked = {str(s).lower() for s in exhausted}
+    return [s for s in chain if str(s).lower() not in blocked]
+
 
 def _download_id_key(download_id):
     return f"download_id::{download_id}" if download_id else None
+
+
+def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
+    """Re-queue a task whose download was just quarantined so the worker tries
+    the NEXT best candidate instead of failing outright.
+
+    Called from the post-processing verification wrapper when AcoustID
+    verification or the integrity/duration check quarantines a file. It mirrors
+    the monitor's transfer-error retry path: mark the bad source as used, clear
+    the stale download identity, reset the task to ``searching`` and resubmit
+    the download worker. Because ``used_sources`` is preserved across the
+    re-run, the worker skips the quarantined source and picks the next-best
+    candidate (see ``attempt_download_with_candidates``).
+
+    Returns True if a retry was queued — the caller must then NOT mark the task
+    failed or notify batch completion, since the task is going around again.
+    Returns False when no retry is possible (retry engine unwired, manual pick,
+    cancelled, or retry budget exhausted); the caller falls through to its
+    existing failure handling.
+    """
+    # Opt-out escape hatch — default on. Lets users restore the old
+    # quarantine-and-fail behaviour without a code change.
+    if not config_manager.get('post_processing.retry_next_candidate_on_mismatch', True):
+        return False
+
+    # Retry engine not wired (e.g. manual-import path that never started a
+    # download worker). Nothing to re-run.
+    if missing_download_executor is None or _download_track_worker is None:
+        return False
+
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        # The user explicitly picked this candidate via the candidates modal —
+        # honour their choice rather than silently swapping in another file.
+        # (Matches the monitor's transfer-retry guards.)
+        if task.get('_user_manual_pick'):
+            return False
+        if task.get('status') == 'cancelled':
+            return False
+
+        username = task.get('username')
+        filename = task.get('filename')
+        # No source identity means this wasn't a worker-dispatched download we
+        # can retry — without the "{username}_{filename}" key we can't flag the
+        # bad source as used, so a re-run could re-pick the same file and loop.
+        # Bail and let the caller fail it normally.
+        if not username or not filename:
+            return False
+
+        total_count = task.get('quarantine_retry_count', 0)
+
+        if config_manager.get('post_processing.retry_exhaustive', False):
+            # Exhaustive mode: a SEPARATE budget per source. The budget scales
+            # with the track's own query count (the worker generates a variable
+            # number of search queries per track) × the configured retries per
+            # query. Soulseek candidates are walked first (one per retry), then
+            # the worker's hybrid fallback moves to the next source — each source
+            # spending its own budget. The natural terminator (used_sources
+            # exhaustion → worker clean-fail) still ends most tracks well before
+            # any budget is reached; the budget is the per-source safety ceiling.
+            source = _resolve_download_source(username)
+            retries_per_query = config_manager.get('post_processing.retries_per_query', 5)
+            try:
+                retries_per_query = int(retries_per_query)
+            except (TypeError, ValueError):
+                retries_per_query = 5
+            if retries_per_query < 1:
+                retries_per_query = 1
+
+            query_count = task.get('query_count') or 1
+            if query_count < 1:
+                query_count = 1
+            budget = query_count * retries_per_query
+
+            counts = task.get('quarantine_retry_counts_by_source')
+            if not isinstance(counts, dict):
+                counts = {}
+            source_count = counts.get(source, 0)
+
+            if source_count >= budget:
+                # This source spent its whole budget. Rather than fail the
+                # track outright, mark the source exhausted and fall through to
+                # the next source in the hybrid chain (the worker excludes
+                # exhausted sources from its next search). Only give up once no
+                # fallback source remains — or the absolute ceiling trips.
+                exhausted = set(task.get('exhausted_download_sources') or ())
+                exhausted.add(source)
+                remaining = _remaining_fallback_sources(exhausted)
+                if not remaining:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} exhausted its retry "
+                        f"budget for source '{source}' ({source_count}/{budget}) "
+                        f"and no fallback source remains — giving up, marking failed"
+                    )
+                    return False
+                if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
+                        f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
+                        f"marking failed"
+                    )
+                    return False
+                task['exhausted_download_sources'] = exhausted
+                # Don't push this source's counter past its budget — it's done.
+                # The next source starts spending its own fresh budget when its
+                # first candidate fails verification.
+                attempt_desc = (
+                    f"source '{source}' budget spent ({source_count}/{budget}) "
+                    f"— switching sources (remaining: {', '.join(remaining)})"
+                )
+            else:
+                if total_count >= MAX_TOTAL_QUARANTINE_RETRIES:
+                    logger.warning(
+                        f"[Retry:{trigger}] Task {task_id} hit the absolute retry "
+                        f"ceiling ({MAX_TOTAL_QUARANTINE_RETRIES}) — giving up, "
+                        f"marking failed"
+                    )
+                    return False
+                counts[source] = source_count + 1
+                task['quarantine_retry_counts_by_source'] = counts
+                attempt_desc = f"source '{source}' {source_count + 1}/{budget}"
+        else:
+            # Default mode: a single global cap, conservative and predictable.
+            if total_count >= MAX_QUARANTINE_RETRIES:
+                logger.warning(
+                    f"[Retry:{trigger}] Task {task_id} hit the quarantine-retry cap "
+                    f"({MAX_QUARANTINE_RETRIES}) — giving up, marking failed"
+                )
+                return False
+            attempt_desc = f"{total_count + 1}/{MAX_QUARANTINE_RETRIES}"
+
+        # Mark the quarantined source as used so the re-run won't pick it again.
+        # Uses the same "{username}_{filename}" key the worker dedups against.
+        used_sources = task.get('used_sources', set())
+        used_sources.add(f"{username}_{filename}")
+        task['used_sources'] = used_sources
+
+        task['quarantine_retry_count'] = total_count + 1
+        # Flag the re-run as a quarantine retry so the worker walks the
+        # already-found candidates (cached-first) before re-searching — the
+        # connection was fine, the content was just wrong. Dead-connection /
+        # stuck retries (handled elsewhere in the monitor) deliberately do NOT
+        # set this, so they re-search fresh.
+        task['_quarantine_retry'] = True
+        # Drop the stale download identity + the prior attempt's quarantine link.
+        task.pop('download_id', None)
+        task.pop('username', None)
+        task.pop('filename', None)
+        task.pop('quarantine_entry_id', None)
+        task['status'] = 'searching'
+        task['status_change_time'] = time.time()
+
+    logger.info(
+        f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "
+        f"(attempt {attempt_desc})"
+    )
+    missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+    return True
 
 
 def _is_release_task(task):
