@@ -1930,6 +1930,31 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_name ON discovery_artist_blacklist (artist_name COLLATE NOCASE)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_spotify ON discovery_artist_blacklist (spotify_artist_id)")
 
+            # Unified artist/album/track blocklist (the "proper" blacklist —
+            # distinct from download_blacklist, which is source-file skipping).
+            # ID-keyed across metadata sources so a ban survives a source
+            # switch; profile-scoped; enforced at add_to_wishlist. The old
+            # discovery_artist_blacklist is migrated in below.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,        -- 'artist' | 'album' | 'track'
+                    name TEXT NOT NULL COLLATE NOCASE,
+                    spotify_id TEXT,
+                    itunes_id TEXT,
+                    deezer_id TEXT,
+                    musicbrainz_id TEXT,
+                    parent_name TEXT,                 -- display only (album's/track's artist)
+                    match_status TEXT DEFAULT 'pending',  -- pending | matched (cross-source backfill)
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_profile_type ON blocklist (profile_id, entity_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_spotify ON blocklist (spotify_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_name ON blocklist (name COLLATE NOCASE)")
+            self._migrate_discovery_blacklist_into_blocklist(cursor)
+
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS liked_artists_pool (
@@ -8074,7 +8099,43 @@ class MusicDatabase:
         return presets.get(preset_name, presets["balanced"])
 
     # Wishlist management methods
-    
+
+    def _wishlist_blocklist_reason(self, profile_id, track_data):
+        """Return (entity_type, label) if this wishlist candidate is blocklisted,
+        else None. Pure matching lives in core.blocklist; this just pulls the
+        candidate's active-source IDs out of the payload and asks."""
+        try:
+            from core.blocklist import build_index, candidate_block_reason
+            rows = self.get_blocklist_rows_for_matching(profile_id)
+            if not rows:
+                return None
+            index = build_index(rows)
+            if index.is_empty:
+                return None
+            td = track_data or {}
+            source = (td.get('provider') or td.get('source') or '').strip().lower() or None
+            album = td.get('album') if isinstance(td.get('album'), dict) else {}
+            # Normalise artists to [{'id','name'}] from track + album credits.
+            artists = []
+            for a in (td.get('artists') or []):
+                if isinstance(a, dict):
+                    artists.append({'id': a.get('id'), 'name': a.get('name')})
+                elif a:
+                    artists.append({'id': None, 'name': str(a)})
+            for a in (album.get('artists') or []):
+                if isinstance(a, dict):
+                    artists.append({'id': a.get('id'), 'name': a.get('name')})
+            return candidate_block_reason(
+                index, source=source,
+                track_id=td.get('id'), track_name=td.get('name'),
+                album_id=album.get('id'), album_name=album.get('name'),
+                artists=artists,
+            )
+        except Exception as e:
+            # Never let the blocklist check break a wishlist add — fail open.
+            logger.debug("blocklist guard skipped: %s", e)
+            return None
+
     def add_to_wishlist(
         self,
         spotify_track_data: Dict[str, Any] = None,
@@ -8096,6 +8157,15 @@ class MusicDatabase:
                 track_id = spotify_track_data.get('id')
                 if not track_id:
                     logger.error("Cannot add track to wishlist: missing track ID")
+                    return False
+
+                # Blocklist guard (Phase 1): every auto-acquisition path funnels
+                # through here, so one check blocks a banned artist/album/track
+                # (with artist→album→track cascade) before it can be queued.
+                _blocked = self._wishlist_blocklist_reason(profile_id, spotify_track_data)
+                if _blocked:
+                    logger.info("Skipping wishlist add — %s is blocklisted: '%s'",
+                                _blocked[0], _blocked[1])
                     return False
 
                 from core.library import manual_library_match as _mlm
@@ -10998,15 +11068,196 @@ class MusicDatabase:
             return []
 
     def get_discovery_blacklist_names(self) -> set:
-        """Get set of blacklisted artist names (lowercased) for fast filtering."""
+        """Set of blacklisted artist names (lowercased) for discovery filtering.
+
+        Unions the legacy discovery_artist_blacklist with the new unified
+        blocklist's artist entries (across all profiles), so a ban added via
+        either path filters discovery. The legacy table is migrated into the
+        blocklist on upgrade but kept as a rollback safety net."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
-            return {r[0] for r in cursor.fetchall()}
+            names = {r[0] for r in cursor.fetchall()}
+            try:
+                cursor.execute("SELECT LOWER(name) FROM blocklist WHERE entity_type = 'artist'")
+                names.update(r[0] for r in cursor.fetchall())
+            except Exception as _bl_err:  # noqa: BLE001 — old schema may predate blocklist
+                logger.debug("blocklist union skipped in discovery names: %s", _bl_err)
+            return names
         except Exception as e:
             logger.error(f"Error getting discovery blacklist names: {e}")
             return set()
+
+    # ==================== Blocklist (artist/album/track) ====================
+
+    def _migrate_discovery_blacklist_into_blocklist(self, cursor):
+        """One-time safe migration of the legacy global discovery blacklist into
+        the new profile-scoped blocklist as artist entries.
+
+        Replicated to EVERY existing profile so no existing discovery ban
+        silently stops working under the new per-profile model. Idempotent
+        (skips a (profile, name) already present). The old table is left in
+        place as a rollback safety net."""
+        try:
+            cursor.execute(
+                "SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id "
+                "FROM discovery_artist_blacklist")
+            legacy = cursor.fetchall()
+            if not legacy:
+                return
+            try:
+                cursor.execute("SELECT id FROM profiles")
+                profile_ids = [r[0] for r in cursor.fetchall()] or [1]
+            except Exception:
+                profile_ids = [1]
+
+            migrated = 0
+            for row in legacy:
+                name = row[0]
+                if not name:
+                    continue
+                for pid in profile_ids:
+                    cursor.execute(
+                        "SELECT 1 FROM blocklist WHERE profile_id = ? AND entity_type = 'artist' "
+                        "AND name = ? COLLATE NOCASE LIMIT 1", (pid, name))
+                    if cursor.fetchone():
+                        continue
+                    cursor.execute(
+                        "INSERT INTO blocklist (profile_id, entity_type, name, spotify_id, "
+                        "itunes_id, deezer_id, match_status) VALUES (?, 'artist', ?, ?, ?, ?, 'matched')",
+                        (pid, name, row[1], row[2], row[3]))
+                    migrated += 1
+            if migrated:
+                logger.info("Migrated %d discovery-blacklist artist entr(ies) into the "
+                            "unified blocklist across %d profile(s)", migrated, len(profile_ids))
+        except Exception as e:
+            logger.debug("discovery→blocklist migration skipped: %s", e)
+
+    def add_blocklist_entry(self, profile_id: int, entity_type: str, name: str,
+                            spotify_id: str = None, itunes_id: str = None,
+                            deezer_id: str = None, musicbrainz_id: str = None,
+                            parent_name: str = None) -> Optional[int]:
+        """Add an artist/album/track to the blocklist. Returns the new row id,
+        or an existing row's id if a matching (profile, type, id/name) is already
+        present. match_status starts 'pending' until the backfill resolves the
+        other sources (unless we already have multiple ids)."""
+        if entity_type not in ('artist', 'album', 'track') or not name:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Dedup: same profile+type with any overlapping source id, or same name.
+            cursor.execute(
+                """SELECT id FROM blocklist WHERE profile_id = ? AND entity_type = ?
+                   AND ( (spotify_id IS NOT NULL AND spotify_id = ?)
+                      OR (itunes_id IS NOT NULL AND itunes_id = ?)
+                      OR (deezer_id IS NOT NULL AND deezer_id = ?)
+                      OR (musicbrainz_id IS NOT NULL AND musicbrainz_id = ?)
+                      OR name = ? COLLATE NOCASE ) LIMIT 1""",
+                (profile_id, entity_type, spotify_id, itunes_id, deezer_id, musicbrainz_id, name))
+            existing = cursor.fetchone()
+            if existing:
+                return existing[0]
+            id_count = sum(1 for x in (spotify_id, itunes_id, deezer_id, musicbrainz_id) if x)
+            status = 'matched' if id_count >= 2 else 'pending'
+            cursor.execute(
+                """INSERT INTO blocklist (profile_id, entity_type, name, spotify_id, itunes_id,
+                   deezer_id, musicbrainz_id, parent_name, match_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (profile_id, entity_type, name, spotify_id, itunes_id, deezer_id,
+                 musicbrainz_id, parent_name, status))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error adding blocklist entry: {e}")
+            return None
+
+    def remove_blocklist_entry(self, profile_id: int, entry_id: int) -> bool:
+        """Remove a blocklist entry (scoped to the profile that owns it)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM blocklist WHERE id = ? AND profile_id = ?",
+                           (int(entry_id), profile_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing blocklist entry: {e}")
+            return False
+
+    def get_blocklist(self, profile_id: int, entity_type: str = None) -> list:
+        """List blocklist entries for a profile, newest first."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if entity_type:
+                cursor.execute(
+                    "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                    "musicbrainz_id, parent_name, match_status, created_at FROM blocklist "
+                    "WHERE profile_id = ? AND entity_type = ? ORDER BY created_at DESC",
+                    (profile_id, entity_type))
+            else:
+                cursor.execute(
+                    "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                    "musicbrainz_id, parent_name, match_status, created_at FROM blocklist "
+                    "WHERE profile_id = ? ORDER BY created_at DESC", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist: {e}")
+            return []
+
+    def get_blocklist_rows_for_matching(self, profile_id: int) -> list:
+        """Lightweight rows (entity_type + id columns + name) for building the
+        in-memory match index — used by the add_to_wishlist guard."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT entity_type, name, spotify_id, itunes_id, deezer_id, musicbrainz_id "
+                "FROM blocklist WHERE profile_id = ?", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist match rows: {e}")
+            return []
+
+    def get_blocklist_entries_needing_backfill(self) -> list:
+        """Entries still 'pending' cross-source ID resolution."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                "musicbrainz_id, parent_name FROM blocklist WHERE match_status = 'pending'")
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist backfill entries: {e}")
+            return []
+
+    def update_blocklist_entry_ids(self, entry_id: int, *, spotify_id: str = None,
+                                   itunes_id: str = None, deezer_id: str = None,
+                                   musicbrainz_id: str = None, mark_matched: bool = True) -> bool:
+        """Backfill resolved source IDs onto an entry (only fills NULLs)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            sets, params = [], []
+            for col, val in (("spotify_id", spotify_id), ("itunes_id", itunes_id),
+                             ("deezer_id", deezer_id), ("musicbrainz_id", musicbrainz_id)):
+                if val:
+                    sets.append(f"{col} = COALESCE({col}, ?)")
+                    params.append(val)
+            if mark_matched:
+                sets.append("match_status = 'matched'")
+            if not sets:
+                return False
+            params.append(int(entry_id))
+            cursor.execute(f"UPDATE blocklist SET {', '.join(sets)} WHERE id = ?", params)
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating blocklist entry ids: {e}")
+            return False
 
     # ==================== Liked Artists Pool Methods ====================
 
