@@ -639,6 +639,15 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
 
+            # Migration: download-origin provenance — what TRIGGERED a download
+            # ('watchlist' + artist / 'playlist' + playlist name). Read by the
+            # origin-history modal on the watchlist + sync pages.
+            for _col in ['origin', 'origin_context']:
+                if _col not in lh_cols:
+                    cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to library_history")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
+
             # Auto-import history — tracks auto-import scan results and processing status
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS auto_import_history (
@@ -12129,8 +12138,13 @@ class MusicDatabase:
     def add_library_history_entry(self, event_type, title, artist_name=None, album_name=None,
                                   quality=None, server_source=None, file_path=None, thumb_url=None,
                                   download_source=None, source_track_id=None, source_track_title=None,
-                                  source_filename=None, acoustid_result=None, source_artist=None):
-        """Record a download or import event to the library history table."""
+                                  source_filename=None, acoustid_result=None, source_artist=None,
+                                  origin=None, origin_context=None):
+        """Record a download or import event to the library history table.
+
+        ``origin``/``origin_context`` record what TRIGGERED the download
+        ('watchlist' + artist name, 'playlist' + playlist name) — the
+        origin-history modal reads them. None for manual/unclassified."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -12138,16 +12152,88 @@ class MusicDatabase:
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
                                              quality, server_source, file_path, thumb_url, download_source,
                                              source_track_id, source_track_title, source_filename,
-                                             acoustid_result, source_artist)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             acoustid_result, source_artist, origin, origin_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url,
                   download_source, source_track_id, source_track_title, source_filename,
-                  acoustid_result, source_artist))
+                  acoustid_result, source_artist, origin, origin_context))
             conn.commit()
             return True
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
+
+    def get_download_origin_entries(self, origin, limit=200, offset=0):
+        """Downloads triggered by ``origin`` ('watchlist' / 'playlist'),
+        newest first. Returns (entries, total_count)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM library_history WHERE event_type = 'download' AND origin = ?",
+                (origin,))
+            total = cursor.fetchone()[0]
+            cursor.execute("""
+                SELECT id, title, artist_name, album_name, quality, file_path,
+                       thumb_url, download_source, origin, origin_context, created_at
+                FROM library_history
+                WHERE event_type = 'download' AND origin = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+            """, (origin, int(limit), int(offset)))
+            cols = ['id', 'title', 'artist_name', 'album_name', 'quality', 'file_path',
+                    'thumb_url', 'download_source', 'origin', 'origin_context', 'created_at']
+            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()], total
+        except Exception as e:
+            logger.debug(f"Error querying download origins: {e}")
+            return [], 0
+
+    def get_library_history_rows_by_ids(self, ids):
+        """Fetch history rows (id, file_path, title) for a list of ids."""
+        if not ids:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(ids))
+            cursor.execute(
+                f"SELECT id, file_path, title FROM library_history WHERE id IN ({placeholders})",
+                [int(i) for i in ids])
+            return [{'id': r[0], 'file_path': r[1], 'title': r[2]} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"Error fetching history rows: {e}")
+            return []
+
+    def delete_library_history_rows(self, ids):
+        """Delete history rows by id. Returns the number removed."""
+        if not ids:
+            return 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(ids))
+            cursor.execute(
+                f"DELETE FROM library_history WHERE id IN ({placeholders})",
+                [int(i) for i in ids])
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"Error deleting history rows: {e}")
+            return 0
+
+    def delete_track_by_file_path(self, file_path):
+        """Delete a library track row whose stored path matches. Returns count."""
+        if not file_path:
+            return 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE file_path = ?", (file_path,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"Error deleting track by path: {e}")
+            return 0
 
     def get_library_history(self, event_type=None, page=1, limit=50):
         """Query library history with optional type filter and pagination.

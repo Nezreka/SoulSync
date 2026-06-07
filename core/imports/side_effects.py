@@ -246,6 +246,11 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
 
         acoustid_result = context.get("_acoustid_result", "")
 
+        # What TRIGGERED this download (watchlist scan / playlist sync) —
+        # feeds the origin-history modal. None for manual/unclassified.
+        from core.downloads.origin import derive_download_origin
+        origin, origin_context = derive_download_origin(context)
+
         db = get_database()
         db.add_library_history_entry(
             event_type="download",
@@ -261,6 +266,8 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             source_filename=source_filename,
             acoustid_result=acoustid_result,
             source_artist=source_artist,
+            origin=origin,
+            origin_context=origin_context,
         )
     except Exception as e:
         logger.debug("library history record failed: %s", e)

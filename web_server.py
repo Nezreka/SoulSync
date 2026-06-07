@@ -7561,6 +7561,73 @@ def maintain_search_history():
     except Exception as e:
         logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+# ── Download-origin history (origin modal: watchlist page / sync page) ──
+# Lists downloads by what TRIGGERED them ('watchlist' / 'playlist'), recorded
+# at the import chokepoint via core.downloads.origin. Delete removes the file
+# on disk (resolved through the same container/host path resolver everything
+# else uses), the matching library track row, and the history entries.
+
+@app.route('/api/download-origins')
+def get_download_origins():
+    try:
+        origin = request.args.get('origin', 'watchlist')
+        if origin not in ('watchlist', 'playlist'):
+            return jsonify({'success': False, 'error': 'origin must be watchlist or playlist'}), 400
+        limit = min(500, max(1, int(request.args.get('limit', 200))))
+        offset = max(0, int(request.args.get('offset', 0)))
+        entries, total = get_database().get_download_origin_entries(origin, limit=limit, offset=offset)
+        return jsonify({'success': True, 'origin': origin, 'entries': entries, 'total': total})
+    except Exception as e:
+        logger.error(f"Error listing download origins: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/download-origins/delete', methods=['POST'])
+def delete_download_origins():
+    """Delete origin-history entries; optionally (default) also delete the
+    files on disk and their library track rows."""
+    try:
+        data = request.get_json(silent=True) or {}
+        ids = [int(i) for i in (data.get('ids') or []) if str(i).strip()]
+        if not ids:
+            return jsonify({'success': False, 'error': 'No ids given'}), 400
+        delete_files = bool(data.get('delete_files', True))
+
+        from core.library.path_resolver import resolve_library_file_path
+        db = get_database()
+        rows = db.get_library_history_rows_by_ids(ids)
+        files_deleted, files_missing, file_errors = 0, 0, []
+        failed_ids = set()
+        for row in rows:
+            raw_path = row.get('file_path') or ''
+            if not delete_files or not raw_path:
+                continue
+            resolved = resolve_library_file_path(raw_path, config_manager=config_manager)
+            if resolved and os.path.isfile(resolved):
+                try:
+                    os.remove(resolved)
+                    files_deleted += 1
+                except OSError as e:
+                    file_errors.append(f"{row.get('title') or raw_path}: {e}")
+                    failed_ids.add(row['id'])  # keep the row when the file refuses to go
+                    continue
+            else:
+                files_missing += 1  # already gone — still clean up the rows
+            db.delete_track_by_file_path(raw_path)
+        removed = db.delete_library_history_rows(
+            [r['id'] for r in rows if r['id'] not in failed_ids])
+        return jsonify({
+            'success': True,
+            'removed': removed,
+            'files_deleted': files_deleted,
+            'files_missing': files_missing,
+            'errors': file_errors,
+        })
+    except Exception as e:
+        logger.error(f"Error deleting download origins: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""

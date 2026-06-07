@@ -1089,6 +1089,26 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         f"{track_info.get('name')}"
                     )
 
+                # Download-origin provenance: stamp what TRIGGERED this download
+                # so the history chokepoint can record it (origin-history modal).
+                # Wishlist rows already ride their source_info in track_info
+                # (watchlist_artist_name / playlist_name — the deriver reads
+                # those directly); this stamp covers DIRECT playlist batches,
+                # where the playlist context otherwise only survives in
+                # folder mode.
+                if '_dl_origin' not in track_info and batch_source_playlist_ref and batch_playlist_name:
+                    _prov_si = track_info.get('source_info') or {}
+                    if isinstance(_prov_si, str):
+                        try:
+                            _prov_si = json.loads(_prov_si)
+                        except (json.JSONDecodeError, TypeError):
+                            _prov_si = {}
+                    if not _prov_si.get('watchlist_artist_name'):
+                        track_info['_dl_origin'] = 'playlist'
+                        track_info['_dl_origin_context'] = (
+                            _prov_si.get('playlist_name') or batch_playlist_name
+                        )
+
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
