@@ -8100,10 +8100,15 @@ class MusicDatabase:
 
     # Wishlist management methods
 
-    def _wishlist_blocklist_reason(self, profile_id, track_data):
-        """Return (entity_type, label) if this wishlist candidate is blocklisted,
-        else None. Pure matching lives in core.blocklist; this just pulls the
-        candidate's active-source IDs out of the payload and asks."""
+    def blocklist_reason_for_track(self, profile_id, track_data, source=None):
+        """Return (entity_type, label) if this track is blocklisted for the
+        profile, else None. Shared by the wishlist guard (Phase 1) and the
+        download-queue guard (Phase 2a). Pure matching lives in core.blocklist;
+        this pulls the candidate's source IDs out of the payload and asks.
+
+        ``source`` overrides/falls back to the payload's provider — the
+        download-queue path knows the batch source even when the track dict
+        doesn't carry a 'provider' field."""
         try:
             from core.blocklist import build_index, candidate_block_reason
             rows = self.get_blocklist_rows_for_matching(profile_id)
@@ -8113,7 +8118,8 @@ class MusicDatabase:
             if index.is_empty:
                 return None
             td = track_data or {}
-            source = (td.get('provider') or td.get('source') or '').strip().lower() or None
+            source = ((td.get('provider') or td.get('source') or source or '')
+                      .strip().lower() or None)
             album = td.get('album') if isinstance(td.get('album'), dict) else {}
             # Normalise artists to [{'id','name'}] from track + album credits.
             artists = []
@@ -8162,7 +8168,7 @@ class MusicDatabase:
                 # Blocklist guard (Phase 1): every auto-acquisition path funnels
                 # through here, so one check blocks a banned artist/album/track
                 # (with artist→album→track cascade) before it can be queued.
-                _blocked = self._wishlist_blocklist_reason(profile_id, spotify_track_data)
+                _blocked = self.blocklist_reason_for_track(profile_id, spotify_track_data)
                 if _blocked:
                     logger.info("Skipping wishlist add — %s is blocklisted: '%s'",
                                 _blocked[0], _blocked[1])
