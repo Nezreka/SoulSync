@@ -66371,20 +66371,20 @@ body.em-scroll-lock { overflow: hidden; }
 .track-download-status.download-downloading,
 .track-download-status.download-complete,
 .track-match-status {
-    position: relative;
-    z-index: 0;
+    position: relative;   /* for the hover tooltip ::after — no pill anymore */
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--row-state-fg, rgba(255, 255, 255, 0.65));
 }
 
+/* Pill drawn behind the status text. ONLY the download-status column gets it —
+   the track-match-status variants rendered the z-index:-1 pill behind the
+   library-status cell and looked broken, so they keep just their coloured
+   text (--row-state-fg), no pill. */
 .track-download-status[data-state]::before,
 .track-download-status.download-downloading::before,
-.track-download-status.download-complete::before,
-.track-match-status.match-found::before,
-.track-match-status.match-missing::before,
-.track-match-status.match-checking::before {
+.track-download-status.download-complete::before {
     content: '';
     position: absolute;
     top: 50%;
