@@ -65815,3 +65815,354 @@ body.em-scroll-lock { overflow: hidden; }
 .em-retry-all { margin-left: 4px; }
 .em-hint { font-size: 11px; color: rgba(255,255,255,0.38); flex: 0 0 auto; margin-top: -2px; }
 .em-hint :is(b, strong) { color: rgba(255,255,255,0.6); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MODAL REVAMP — Download modal + Discovery modal (2.6.7 polish pass)
+   Visual-only overrides, appended last so they win the cascade. Functionality
+   and markup untouched. Same design language as the dashboard work: deep
+   glass surfaces, an accent light-edge, kicker typography, calm tables,
+   gradient progress, pill buttons. Theme-aware via --accent-rgb.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared surface ── */
+.download-missing-modal-content,
+.youtube-discovery-modal {
+    position: relative;
+    background:
+        linear-gradient(165deg, rgba(24, 24, 32, 0.97) 0%, rgba(13, 13, 18, 0.985) 60%, rgba(10, 10, 14, 0.99) 100%);
+    backdrop-filter: blur(24px) saturate(1.35);
+    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 24px;
+    box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.65),
+        0 0 60px rgba(var(--accent-rgb), 0.07),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Accent light-edge along the top — the signature of the new surfaces */
+.download-missing-modal-content::before,
+.youtube-discovery-modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 8%;
+    right: 8%;
+    height: 1.5px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.65) 30%,
+        rgba(var(--accent-light-rgb), 0.85) 50%,
+        rgba(var(--accent-rgb), 0.65) 70%,
+        transparent);
+    pointer-events: none;
+    z-index: 3;
+}
+
+/* ── Shared progress language ── */
+.download-missing-modal-content .progress-bar,
+.youtube-discovery-modal .progress-bar-container {
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.5), rgba(255, 255, 255, 0.03));
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.download-missing-modal-content .progress-fill,
+.youtube-discovery-modal .progress-bar-fill {
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.85),
+        rgb(var(--accent-light-rgb)));
+    box-shadow:
+        0 0 14px rgba(var(--accent-rgb), 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition: width 0.45s cubic-bezier(0.34, 1.1, 0.5, 1);
+}
+
+.download-missing-modal-content .progress-label,
+.youtube-discovery-modal .progress-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Shared table language: calm rows, micro-label headers, hover glow ── */
+.download-tracks-table thead th,
+.youtube-discovery-modal .discovery-table thead th {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.38);
+    background: rgba(14, 14, 19, 0.95);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.18);
+    padding: 12px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.download-tracks-table td,
+.youtube-discovery-modal .discovery-table td {
+    padding: 11px 14px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    background: transparent;
+}
+
+.download-tracks-table tbody tr,
+.youtube-discovery-modal .discovery-table tbody tr {
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.download-tracks-table tbody tr:hover,
+.youtube-discovery-modal .discovery-table tbody tr:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.10),
+        rgba(var(--accent-rgb), 0.04) 55%,
+        transparent);
+    box-shadow: inset 2px 0 0 rgba(var(--accent-rgb), 0.55);
+}
+
+/* ── Shared scrollbar ── */
+.download-tracks-table-container::-webkit-scrollbar,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.download-tracks-table-container::-webkit-scrollbar-thumb,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.28);
+    border-radius: 999px;
+}
+
+.download-tracks-table-container::-webkit-scrollbar-thumb:hover,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.5);
+}
+
+.download-tracks-table-container::-webkit-scrollbar-track,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ════════════ Download modal specifics ════════════ */
+
+.download-missing-modal-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Progress strip: the two stacked bars become side-by-side glass cards */
+.download-progress-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 14px 24px;
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.download-missing-modal-content .progress-item {
+    margin: 0;
+    padding: 12px 16px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.download-missing-modal-content .progress-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 9px;
+}
+
+.download-missing-modal-content .progress-label span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* Tracks section toolbar */
+.download-tracks-header {
+    padding: 14px 24px 10px;
+    border-bottom: none;
+}
+
+.download-tracks-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.track-selection-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(var(--accent-light-rgb), 0.9);
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 999px;
+    padding: 3px 12px;
+}
+
+.download-tracks-table {
+    border-collapse: collapse;
+}
+
+/* Accent checkboxes */
+.download-tracks-table input[type="checkbox"],
+.track-select-all {
+    accent-color: rgb(var(--accent-rgb));
+}
+
+/* Footer: glass action bar + pill buttons */
+.download-missing-modal-footer {
+    background: rgba(12, 12, 17, 0.85);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.download-control-btn {
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.5, 1), box-shadow 0.25s, background 0.25s, border-color 0.25s;
+}
+
+.download-control-btn:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.download-control-btn.primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.75));
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.download-control-btn.primary:hover {
+    box-shadow: 0 6px 26px rgba(var(--accent-rgb), 0.5);
+}
+
+.download-control-btn.danger {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.download-control-btn.danger:hover {
+    background: rgba(239, 68, 68, 0.2);
+}
+
+/* ════════════ Discovery modal specifics ════════════ */
+
+/* Kill the legacy red border treatment entirely */
+.youtube-discovery-modal {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.youtube-discovery-modal .modal-header {
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.youtube-discovery-modal .modal-header h2 {
+    font-size: 20px;
+    letter-spacing: -0.01em;
+}
+
+.youtube-discovery-modal .modal-subtitle {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.youtube-discovery-modal .modal-description {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.youtube-discovery-modal .modal-close-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+
+.youtube-discovery-modal .modal-close-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* Progress section becomes a glass card like the download modal's */
+.youtube-discovery-modal .progress-section {
+    margin: 16px 24px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.youtube-discovery-modal .progress-text {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 8px;
+}
+
+.youtube-discovery-modal .discovery-table-container {
+    margin: 0 24px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Footer + pill buttons */
+.youtube-discovery-modal .modal-footer {
+    background: rgba(12, 12, 17, 0.85);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.youtube-discovery-modal .modal-btn {
+    border-radius: 999px;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.5, 1), box-shadow 0.25s, background 0.25s;
+}
+
+.youtube-discovery-modal .modal-btn:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.youtube-discovery-modal .modal-btn-primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.75));
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.youtube-discovery-modal .modal-btn-primary:hover {
+    box-shadow: 0 6px 26px rgba(var(--accent-rgb), 0.5);
+}
