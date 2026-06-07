@@ -2785,6 +2785,43 @@ def get_debug_info():
     return _debug_info_get()
 
 
+# ── Memory-growth diagnostic (#802) ──
+# Opt-in tracemalloc capture, drivable entirely from a browser:
+#   /api/debug/memory/start  -> begin tracing (baseline snapshot)
+#   ...reproduce the growth for a few minutes...
+#   /api/debug/memory/report -> top allocation sites by GROWTH since baseline
+#   /api/debug/memory/stop   -> end tracing, free the trace bookkeeping
+# GET on purpose so a user can paste URLs; tracing costs CPU+memory while
+# active, which is why it never runs by default.
+
+@app.route('/api/debug/memory/start')
+def debug_memory_start():
+    try:
+        from core.diagnostics.memory_tracker import start_tracking
+        return jsonify(start_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/report')
+def debug_memory_report():
+    try:
+        from core.diagnostics.memory_tracker import report
+        top = request.args.get('top', 25, type=int)
+        return jsonify(report(top=max(1, min(top, 100))))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/stop')
+def debug_memory_stop():
+    try:
+        from core.diagnostics.memory_tracker import stop_tracking
+        return jsonify(stop_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/activity/feed')
 def get_activity_feed():
     """Get recent activity feed for dashboard"""
