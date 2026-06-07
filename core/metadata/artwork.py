@@ -289,13 +289,15 @@ def _upgrade_art_url(art_url: str) -> str:
     elif "coverartarchive.org" in art_url:
         # MusicBrainz art arrives as Cover Art Archive thumbnails
         # (/front-250 — see musicbrainz_search._cover_art_url). Upgrade to the
-        # 1200px thumbnail: a huge jump from 240p yet still served by CAA's own
-        # CDN. Deliberately NOT the bare /front original — that redirects to
-        # archive.org, which is flaky (intermittent 500s/timeouts) and can be
-        # multi-MB, nasty to embed in every track. 1200 is the sweet spot of
-        # quality + reliability. `_fetch_art_bytes` falls back to the original
-        # sized URL if /front-1200 is ever refused.
-        return re.sub(r"/front-\d+", "/front-1200", art_url)
+        # bare /front ORIGINAL — native resolution, frequently 3000px+ (#806:
+        # the old /front-1200 cap left MusicBrainz as the one source still
+        # below native while iTunes already shipped 3000x3000 — and bare
+        # /front URLs from release-group lookups bypassed the cap anyway,
+        # so the policy was inconsistent in practice). The original redirects
+        # to archive.org, which can be flaky, so `_fetch_art_bytes` inserts a
+        # /front-1200 midpoint fallback before the original-size URL:
+        # flakiness degrades to the old 1200px behavior, never below it.
+        return re.sub(r"/front(-\d+)?$", "/front", art_url)
     return art_url
 
 
@@ -312,22 +314,27 @@ def _fetch_art_bytes(art_url: str):
     if not art_url:
         return None, None
     upgraded = _upgrade_art_url(art_url)
-    try:
-        with urllib.request.urlopen(upgraded, timeout=10) as response:
-            return response.read(), (response.info().get_content_type() or "image/jpeg")
-    except Exception as fetch_err:
-        if upgraded != art_url:
-            logger.info(
-                "Upgraded art URL refused (%s); retrying original size", fetch_err
-            )
-            try:
-                with urllib.request.urlopen(art_url, timeout=10) as response:
-                    return response.read(), (response.info().get_content_type() or "image/jpeg")
-            except Exception as retry_err:
-                logger.error("Art fetch failed after fallback: %s", retry_err)
-                return None, None
-        logger.error("Art fetch failed: %s", fetch_err)
-        return None, None
+    attempts = [upgraded]
+    # CAA's bare /front original redirects to archive.org, which can be flaky.
+    # Midpoint fallback: the 1200px CDN thumbnail (the pre-#806 behavior),
+    # tried BEFORE the original sized URL so a flaky archive.org degrades to
+    # 1200px — never all the way down to the 250px thumbnail.
+    if "coverartarchive.org" in upgraded and upgraded.endswith("/front"):
+        attempts.append(upgraded + "-1200")
+    if art_url not in attempts:
+        attempts.append(art_url)
+
+    last_err = None
+    for i, candidate in enumerate(attempts):
+        try:
+            with urllib.request.urlopen(candidate, timeout=10) as response:
+                return response.read(), (response.info().get_content_type() or "image/jpeg")
+        except Exception as fetch_err:
+            last_err = fetch_err
+            if i < len(attempts) - 1:
+                logger.info("Art URL refused (%s); falling back to next size", fetch_err)
+    logger.error("Art fetch failed after %d attempt(s): %s", len(attempts), last_err)
+    return None, None
 
 
 def _min_size_art_validator(min_px):
