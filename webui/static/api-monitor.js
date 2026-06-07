@@ -2047,6 +2047,13 @@ async function showWatchlistModal() {
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Download Origins
                         </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-blocklist"
+                                id="watchlist-blocklist-btn"
+                                onclick="openBlocklistModal('artist')"
+                                title="Block artists, albums or tracks from ever being downloaded">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+                            Blocklist
+                        </button>
                     </div>
 
                     ${globalOverrideActive ? `
