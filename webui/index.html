@@ -1018,6 +1018,7 @@
                             <button class="btn btn--sm btn--secondary sync-history-btn auto-sync-manager-btn" onclick="openAutoSyncScheduleModal()" title="Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
                             <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
                             <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                            <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openDownloadOriginsModal('playlist')" title="See every track your playlist syncs downloaded">Download Origins</button>
                         </div>
                     </div>
                 </div>
@@ -8066,6 +8067,7 @@
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
