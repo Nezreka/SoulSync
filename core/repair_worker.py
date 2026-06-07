@@ -1349,11 +1349,23 @@ class RepairWorker:
         art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
 
         embedded = art_result.get('embedded', 0)
+        if art_result.get('read_only_fs'):
+            # Tim's report: a docker ':ro' volume — every write fails EROFS,
+            # the user chmod 777's in vain, and a soft "(read-only?)" hint
+            # wasn't loud enough. Fail the fix with the actual cure.
+            return {'success': False, 'action': 'applied_cover_art',
+                    'error': ('Your music folder is mounted READ-ONLY — the container '
+                              'cannot write to it, and chmod cannot change that. '
+                              "Remove ':ro' from the volume mapping in your docker "
+                              "compose/run (e.g. '/music:/music:ro' → '/music:/music') "
+                              'and recreate the container. (Database thumbnail was '
+                              'still updated.)'),
+                    'art_result': art_result}
         msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
         if art_result.get('cover_written'):
             msg += ' + wrote cover.jpg'
         if embedded == 0 and not art_result.get('cover_written'):
-            # DB updated but nothing reached disk (e.g. read-only mount).
+            # DB updated but nothing reached disk (e.g. permissions).
             msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 

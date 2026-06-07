@@ -15,6 +15,7 @@ Two jobs, both reusing the post-processing standard so the user's
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 from typing import Iterable
 
@@ -111,12 +112,33 @@ def apply_art_to_album_files(
     musicbrainz_release_id). Existing tags are preserved — only art is added.
 
     Returns counts; never raises (unwritable/read-only files are skipped).
+    ``read_only_fs`` is True when the target filesystem itself rejects writes
+    (EROFS — a docker ``:ro`` volume mount; chmod can't fix that) so callers
+    can tell the user the actual cure instead of a generic failure.
     """
-    result = {"embedded": 0, "failed": 0, "skipped": 0, "cover_written": False}
+    result = {"embedded": 0, "failed": 0, "skipped": 0, "cover_written": False,
+              "read_only_fs": False}
     symbols = get_mutagen_symbols()
     paths = [p for p in (file_paths or []) if p]
     if not symbols:
         return result
+
+    # Pre-flight: if the mount is read-only, every save below would fail with
+    # EROFS one by one (Tim's report: a wall of per-file warnings and a 777
+    # chmod that couldn't help). statvfs asks the kernel without writing.
+    probe_dir = folder or (os.path.dirname(paths[0]) if paths else None)
+    if probe_dir:
+        try:
+            if os.statvfs(probe_dir).f_flag & os.ST_RDONLY:
+                logger.warning(
+                    "Art apply skipped: %s is on a READ-ONLY filesystem "
+                    "(docker ':ro' volume mount — chmod cannot fix this)",
+                    probe_dir)
+                result["read_only_fs"] = True
+                result["failed"] = len(paths)
+                return result
+        except OSError:
+            pass  # statvfs unavailable/odd fs — fall through to per-file handling
 
     for fp in paths:
         if not os.path.isfile(fp):
@@ -144,6 +166,8 @@ def apply_art_to_album_files(
                 result["failed"] += 1
         except Exception as exc:
             # Read-only mounts / permission errors land here — skip, don't crash.
+            if getattr(exc, "errno", None) == errno.EROFS:
+                result["read_only_fs"] = True
             logger.warning("Could not embed art into %s: %s", fp, exc)
             result["failed"] += 1
 
@@ -153,5 +177,7 @@ def apply_art_to_album_files(
             download_cover_art(album_info, target_dir, context)
             result["cover_written"] = folder_has_cover_sidecar(target_dir)
         except Exception as exc:
+            if getattr(exc, "errno", None) == errno.EROFS:
+                result["read_only_fs"] = True
             logger.warning("cover.jpg write failed for %s: %s", target_dir, exc)
     return result
