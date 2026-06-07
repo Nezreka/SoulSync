@@ -688,12 +688,20 @@ class SpotifyClient:
             return
         
         try:
+            # Tokens live in the database-backed config store, not a loose
+            # file: config/.spotify_cache sat in /app/config, which is only
+            # persistent when the user's compose maps it — an anonymous
+            # volume is recreated empty on every container pull, so tokens
+            # died nightly while every other setting survived ("it keeps
+            # unauthenticating" daily, wolf39us). The handler imports the
+            # legacy file once if the store is empty.
+            from core.spotify_token_cache import DatabaseTokenCache
             auth_manager = SpotifyOAuth(
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
                 scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                cache_path='config/.spotify_cache'
+                cache_handler=DatabaseTokenCache(config_manager)
             )
             
             self.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
@@ -924,13 +932,12 @@ class SpotifyClient:
         except Exception as e:
             logger.debug("publish_spotify_status disconnect: %s", e)
 
-        cache_path = 'config/.spotify_cache'
         try:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-                logger.info("Deleted Spotify cache file")
+            from core.spotify_token_cache import DatabaseTokenCache
+            DatabaseTokenCache(config_manager).clear()
+            logger.info("Cleared Spotify token cache (database + legacy file)")
         except Exception as e:
-            logger.warning(f"Failed to delete Spotify cache: {e}")
+            logger.warning(f"Failed to clear Spotify token cache: {e}")
 
         logger.info("Spotify client disconnected")
 
