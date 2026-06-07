@@ -126,10 +126,13 @@ def apply_art_to_album_files(
     # Pre-flight: if the mount is read-only, every save below would fail with
     # EROFS one by one (Tim's report: a wall of per-file warnings and a 777
     # chmod that couldn't help). statvfs asks the kernel without writing.
+    # POSIX-only — Windows has no os.statvfs (and no ':ro' bind mounts);
+    # there we skip straight to the per-file path, same as before this fix.
     probe_dir = folder or (os.path.dirname(paths[0]) if paths else None)
-    if probe_dir:
+    _statvfs = getattr(os, "statvfs", None)
+    if probe_dir and _statvfs is not None:
         try:
-            if os.statvfs(probe_dir).f_flag & os.ST_RDONLY:
+            if _statvfs(probe_dir).f_flag & getattr(os, "ST_RDONLY", 1):
                 logger.warning(
                     "Art apply skipped: %s is on a READ-ONLY filesystem "
                     "(docker ':ro' volume mount — chmod cannot fix this)",
