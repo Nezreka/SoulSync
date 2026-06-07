@@ -3011,6 +3011,12 @@ def handle_settings():
     else:  # GET request
         try:
             data = dict(config_manager.config_data)
+            # Never ship the OAuth token payload to the browser — the settings
+            # UI has no field for it and it doesn't belong in devtools/HAR
+            # captures. NOTE: dict() above is a SHALLOW copy of live config
+            # state, so rebuild the section instead of popping in place.
+            if isinstance(data.get('spotify'), dict) and 'token_info' in data['spotify']:
+                data['spotify'] = {k: v for k, v in data['spotify'].items() if k != 'token_info'}
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
             try:
                 data['_source_status'] = download_orchestrator.get_source_status()
