@@ -19,7 +19,6 @@ a large web_server.py helper that will get its own lift in subsequent PRs.
 
 from __future__ import annotations
 
-import logging
 import re
 import traceback
 from dataclasses import dataclass
@@ -27,8 +26,13 @@ from typing import Any, Callable, Optional
 
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from core.spotify_client import Track as SpotifyTrack
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Must live under the soulsync.* namespace — handlers only attach there. The
+# old bare getLogger(__name__) ("core.downloads.task_worker") had no handler,
+# so the entire [Modal Worker] story — search queries, retry walks, candidate
+# decisions — never reached app.log.
+logger = get_logger("downloads.task_worker")
 
 
 def _resolve_worker_source(username):
