@@ -66323,3 +66323,119 @@ body.em-scroll-lock { overflow: hidden; }
         animation: none !important;
     }
 }
+
+/* ── Modal revamp: live track-row states (animation == gauge, in the table) ──
+   The download-status cell carries data-state (set by the renderer); the row
+   carries .row-working while a track is actively searching/downloading/
+   processing. Badges are state-colored pills; only ACTIVE states breathe. */
+
+.track-download-status[data-state] {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--row-state-border, rgba(255, 255, 255, 0.1));
+    background: var(--row-state-bg, rgba(255, 255, 255, 0.04));
+    color: var(--row-state-fg, rgba(255, 255, 255, 0.65));
+    white-space: nowrap;
+}
+
+.track-download-status[data-state="pending"],
+.track-download-status[data-state="cancelled"],
+.track-download-status[data-state="cancelling"] {
+    --row-state-fg: rgba(255, 255, 255, 0.5);
+}
+
+.track-download-status[data-state="searching"],
+.track-download-status[data-state="downloading"] {
+    --row-state-border: rgba(var(--accent-rgb), 0.4);
+    --row-state-bg: rgba(var(--accent-rgb), 0.12);
+    --row-state-fg: rgb(var(--accent-light-rgb));
+}
+
+.track-download-status[data-state="post_processing"] {
+    --row-state-border: rgba(251, 191, 36, 0.35);
+    --row-state-bg: rgba(251, 191, 36, 0.1);
+    --row-state-fg: #fbbf24;
+}
+
+.track-download-status[data-state="completed"] {
+    --row-state-border: rgba(74, 222, 128, 0.35);
+    --row-state-bg: rgba(74, 222, 128, 0.1);
+    --row-state-fg: #4ade80;
+}
+
+.track-download-status[data-state="failed"] {
+    --row-state-border: rgba(239, 68, 68, 0.35);
+    --row-state-bg: rgba(239, 68, 68, 0.1);
+    --row-state-fg: #f87171;
+}
+
+.track-download-status[data-state="quarantined"] {
+    --row-state-border: rgba(251, 146, 60, 0.4);
+    --row-state-bg: rgba(251, 146, 60, 0.1);
+    --row-state-fg: #fb923c;
+}
+
+.track-download-status[data-state="not_found"] {
+    --row-state-fg: rgba(255, 255, 255, 0.4);
+}
+
+/* Only states that are actually WORKING breathe */
+.track-download-status[data-state="searching"],
+.track-download-status[data-state="downloading"],
+.track-download-status[data-state="post_processing"],
+.track-download-status[data-state="cancelling"] {
+    animation: row-state-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes row-state-breathe {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
+/* Match-status cells get the same pill language (classes already existed) */
+.track-match-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.track-match-status.match-found {
+    border: 1px solid rgba(74, 222, 128, 0.35);
+    background: rgba(74, 222, 128, 0.1);
+    color: #4ade80;
+}
+
+.track-match-status.match-missing {
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: rgba(251, 191, 36, 0.1);
+    color: #fbbf24;
+}
+
+.track-match-status.match-checking {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* The actively-working row carries a persistent accent presence — like the
+   hover treatment, but earned by real work instead of the mouse */
+.download-tracks-table tbody tr.row-working {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.08),
+        rgba(var(--accent-rgb), 0.025) 60%,
+        transparent);
+    box-shadow: inset 2.5px 0 0 rgba(var(--accent-rgb), 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .track-download-status[data-state] { animation: none !important; }
+}
