@@ -78,4 +78,41 @@ def titles_plausibly_same(
     return not ta.isdisjoint(tb)
 
 
-__all__ = ["titles_plausibly_same"]
+_QUALIFIER_RE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+
+
+def strip_redundant_context_qualifiers(title: str, *context_texts: str) -> str:
+    """Remove parenthetical/bracket qualifiers that merely restate known context.
+
+    A qualifier whose text appears (word-bounded) in one of ``context_texts``
+    — typically the release's album title, or the other side of a comparison —
+    is album context, not a version difference. #808: the wishlist held
+    'Champagne Supernova (OurVinyl Sessions)' while the library track was the
+    bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)'; the
+    qualifier restated the album, but the length-ratio penalty treated the
+    pair as different songs and the cleanup never recognised the owned
+    edition. Version markers that do NOT appear in any context ('(Live)',
+    '(Remix)' on a studio album) are kept, so their mismatch penalty stands.
+    """
+    if not title:
+        return title
+
+    contexts = [c.casefold() for c in context_texts if c]
+    if not contexts:
+        return title
+
+    def _drop(match: re.Match) -> str:
+        inner = match.group(1).strip().casefold()
+        if not inner:
+            return " "
+        pattern = r"\b" + re.escape(inner) + r"\b"
+        for ctx in contexts:
+            if re.search(pattern, ctx):
+                return " "
+        return match.group(0)
+
+    out = _QUALIFIER_RE.sub(_drop, title)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+__all__ = ["titles_plausibly_same", "strip_redundant_context_qualifiers"]

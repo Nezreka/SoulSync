@@ -7539,6 +7539,31 @@ class MusicDatabase:
                     # Titles differ in length by more than 30% — penalize heavily
                     best_title_similarity *= len_ratio
 
+            # #808: a parenthetical qualifier that merely RESTATES the release
+            # context is album context, not a version difference. Wishlist
+            # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
+            # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
+            # the qualifier appears in the album title, yet the length-ratio
+            # penalty above crushed the pair to ~0.17 and wishlist cleanup
+            # never recognised the owned edition. Strip qualifiers confirmed
+            # by the db album title (or by the other title) and score that
+            # variant with its OWN length guard — genuine version markers
+            # ('(Live)' on a studio album) appear in no context, keep their
+            # qualifier, and keep their penalty.
+            db_album_norm = self._normalize_for_comparison(
+                getattr(db_track, 'album_title', '') or '')
+            from core.text.title_match import strip_redundant_context_qualifiers
+            ctx_search = strip_redundant_context_qualifiers(
+                search_title_norm, db_album_norm, db_title_norm)
+            ctx_db = strip_redundant_context_qualifiers(
+                db_title_norm, db_album_norm, search_title_norm)
+            if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
+                ctx_sim = self._string_similarity(ctx_search, ctx_db)
+                ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
+                if ctx_ratio < 0.7:
+                    ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
+                best_title_similarity = max(best_title_similarity, ctx_sim)
+
             # Word-level guard: SequenceMatcher's char ratio over-credits
             # different songs that share a long substring or only a stopword
             # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
