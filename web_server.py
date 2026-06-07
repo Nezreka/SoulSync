@@ -9201,6 +9201,15 @@ def library_check_tracks():
                     album_entries.append(entry)
                 else:
                     other_entries.append(entry)
+            # #808: when the album gate narrows to NOTHING, the source's album
+            # naming simply doesn't resemble the library's (Deezer's
+            # 'Jillette Johnson | OurVinyl Sessions' vs the library's
+            # 'Champagne Supernova (OurVinyl Sessions)' scores ~0.5). Marking
+            # every track unowned off a failed ALBUM-name comparison is wrong —
+            # fall back to artist-wide title matching, which is exactly the
+            # pre-album-aware behavior and still holds the 0.7 title bar.
+            if not album_entries:
+                album_entries = other_entries
         else:
             other_entries = db_title_entries
 
