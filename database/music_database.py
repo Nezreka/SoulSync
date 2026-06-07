@@ -396,6 +396,7 @@ class MusicDatabase:
 
             # Add per-artist preferred_metadata_source column (migration)
             self._add_watchlist_preferred_metadata_source_column(cursor)
+            self._clear_deezer_ids_stored_as_itunes(cursor)
 
             # Make spotify_artist_id nullable for iTunes-only artists (migration)
             self._fix_watchlist_spotify_id_nullable(cursor)
@@ -2113,6 +2114,38 @@ class MusicDatabase:
                 logger.info("Added preferred_metadata_source column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding preferred_metadata_source column to watchlist_artists: {e}")
+
+    def _clear_deezer_ids_stored_as_itunes(self, cursor):
+        """Repair: watchlist iTunes ids that are actually Deezer ids.
+
+        The watchlist scanner's _match_to_itunes used to search via
+        MetadataService.itunes — which holds the PRIMARY source's client, not
+        iTunes — so with a Deezer primary it stored DEEZER artist ids in
+        itunes_artist_id (verified live: Taylor Swift's "iTunes" id was her
+        Deezer id 12246; real one is 159260351). The backfill only fills
+        EMPTY ids, so these wrong ids would never self-heal. The corruption
+        signature is itunes == deezer (distinct id spaces — a legit equal
+        pair is effectively impossible; worst case is a NULL that re-matches
+        correctly on the next scan). Idempotent: clearing kills the equality.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'itunes_artist_id' not in columns or 'deezer_artist_id' not in columns:
+                return
+            cursor.execute("""
+                UPDATE watchlist_artists SET itunes_artist_id = NULL
+                WHERE itunes_artist_id = deezer_artist_id
+                  AND deezer_artist_id IS NOT NULL AND deezer_artist_id != ''
+            """)
+            if cursor.rowcount:
+                logger.info(
+                    "Cleared %d watchlist iTunes id(s) that were actually Deezer ids "
+                    "(pre-fix _match_to_itunes searched the primary source); they "
+                    "re-match via real iTunes on the next watchlist scan",
+                    cursor.rowcount)
+        except Exception as e:
+            logger.error(f"Error clearing deezer-as-itunes watchlist ids: {e}")
 
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
