@@ -203,3 +203,22 @@ def test_apply_normal_failure_not_flagged_read_only(tmp_path, monkeypatch):
 
     assert res['read_only_fs'] is False      # EACCES is chmod-able, EROFS is not
     assert res['failed'] == 1
+
+
+def test_apply_works_without_statvfs_windows(tmp_path, monkeypatch):
+    """Windows has no os.statvfs — the pre-flight must vanish gracefully,
+    not crash the apply (Boulder runs on Windows)."""
+    f = tmp_path / 'a.mp3'
+    f.write_bytes(b'')
+    saved = []
+    audio = SimpleNamespace(pictures=[], tags=None, add_tags=lambda: None,
+                            save=lambda: saved.append(True))
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
+    monkeypatch.delattr(aa.os, 'statvfs', raising=False)
+
+    res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+
+    assert res['embedded'] == 1 and saved == [True]
+    assert res['read_only_fs'] is False
