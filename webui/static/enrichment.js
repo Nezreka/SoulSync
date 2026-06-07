@@ -3092,21 +3092,34 @@ function _renderFindingDetail(f) {
             if (d.album_title) rows.push(['Album', d.album_title]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
             let artHtml = '';
-            // Show artist image + found artwork side by side
-            if (d.artist_thumb_url || d.found_artwork_url) {
+            // Each found image is independently applyable (Pache711: "fix one,
+            // dismiss the other"). Per-image Apply buttons let the user take the
+            // correct album art and skip a wrong artist image, or vice versa.
+            if (d.artist_thumb_url || d.found_artwork_url || d.found_artist_url) {
                 artHtml += '<div class="repair-finding-media">';
-                if (d.artist_thumb_url) {
-                    artHtml += `<div class="repair-finding-media-card">
-                        <img class="repair-finding-media-img artist" src="${_escFinding(d.artist_thumb_url)}" alt="Artist"
-                             onerror="this.parentElement.style.display='none'" />
-                        <span class="repair-finding-media-label">${_escFinding(d.artist || 'Artist')}</span>
-                    </div>`;
-                }
                 if (d.found_artwork_url) {
                     artHtml += `<div class="repair-finding-media-card">
-                        <img class="repair-finding-media-img" src="${_escFinding(d.found_artwork_url)}" alt="Found artwork"
+                        <img class="repair-finding-media-img" src="${_escFinding(d.found_artwork_url)}" alt="Found album art"
                              onerror="this.parentElement.style.display='none'" />
-                        <span class="repair-finding-media-label">Found Artwork</span>
+                        <span class="repair-finding-media-label">Found Album Art</span>
+                        <button class="repair-art-apply-btn" onclick="applyCoverArtTarget(${f.id}, 'album')">Use for album</button>
+                    </div>`;
+                }
+                // Current artist image (context) — no apply, it's what's there now.
+                if (d.artist_thumb_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img artist" src="${_escFinding(d.artist_thumb_url)}" alt="Current artist art"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">${_escFinding(d.artist || 'Artist')} (current)</span>
+                    </div>`;
+                }
+                // Found artist image — the applyable replacement.
+                if (d.found_artist_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img artist" src="${_escFinding(d.found_artist_url)}" alt="Found artist art"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">Found Artist Art</span>
+                        <button class="repair-art-apply-btn" onclick="applyCoverArtTarget(${f.id}, 'artist')">Use for artist</button>
                     </div>`;
                 }
                 artHtml += '</div>';
@@ -3379,6 +3392,31 @@ async function selectDuplicateToKeep(findingId, keepTrackId) {
     } catch (error) {
         console.error('Error fixing duplicate:', error);
         showToast('Error resolving duplicate', 'error');
+    }
+}
+
+async function applyCoverArtTarget(id, target) {
+    // Per-image apply for a cover-art finding (Pache711). target: 'album' |
+    // 'artist'. Applying either resolves the finding, so picking the correct
+    // image and ignoring the wrong one = "fix one, dismiss the other".
+    try {
+        const response = await fetch(`/api/repair/findings/${id}/fix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fix_action: target }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || `Applied ${target} art`, 'success');
+        } else {
+            showToast(result.error || `Failed to apply ${target} art`, 'error');
+        }
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error applying cover art target:', error);
+        showToast('Error applying art', 'error');
     }
 }
 
