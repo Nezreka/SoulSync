@@ -38,6 +38,10 @@ def _fresh_state() -> Dict[str, Any]:
         "progress": 0,
         "track_info": None,
         "file_path": None,
+        # Set instead of file_path when a library track is played by proxying
+        # the media server's own stream API (Navidrome/Subsonic, #809) rather
+        # than reading the file off disk. /stream/audio proxies this URL.
+        "stream_url": None,
         "error_message": None,
     }
 

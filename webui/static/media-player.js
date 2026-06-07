@@ -2244,7 +2244,11 @@ async function playQueueItem(index) {
                     file_path: track.file_path,
                     title: track.title || '',
                     artist: track.artist || '',
-                    album: track.album || ''
+                    album: track.album || '',
+                    // Server song id (Navidrome/Subsonic) so playback can fall
+                    // back to streaming via the server when the file isn't on
+                    // SoulSync's disk (#809).
+                    track_id: track.id || null
                 })
             });
             const result = await response.json();

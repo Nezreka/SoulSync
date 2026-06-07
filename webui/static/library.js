@@ -8267,7 +8267,10 @@ async function playLibraryTrack(track, albumTitle, artistName) {
                 file_path: track.file_path,
                 title: track.title || '',
                 artist: artistName || '',
-                album: albumTitle || ''
+                album: albumTitle || '',
+                // Server song id so playback can stream via the media server
+                // when the file isn't on SoulSync's disk (#809).
+                track_id: track.id || null
             })
         });
 

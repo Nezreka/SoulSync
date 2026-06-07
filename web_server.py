@@ -11063,6 +11063,43 @@ def _resolve_library_file_path(file_path):
     return None
 
 
+def _build_library_stream_url(track_id, file_path):
+    """Build a media-server stream URL for a library track that isn't on the
+    SoulSync filesystem (#809 — play via the server's API, no disk mount).
+
+    Navidrome/Subsonic only for now (it has a clean token-authed stream
+    endpoint). ``track_id`` is the server's song id (the tracks-table id for a
+    Navidrome row); if missing, look it up by file_path. Returns None when the
+    active server isn't Navidrome or no id resolves."""
+    try:
+        if config_manager.get_active_media_server() != 'navidrome':
+            return None
+        client = media_server_engine.client('navidrome')
+        if not client:
+            return None
+
+        song_id = str(track_id) if track_id else None
+        if not song_id and file_path:
+            # Fall back to a DB lookup by stored path (handles callers that
+            # didn't pass the id).
+            try:
+                db = get_database()
+                with db._get_connection() as conn:
+                    row = conn.cursor().execute(
+                        "SELECT id FROM tracks WHERE file_path = ? AND server_source = 'navidrome' LIMIT 1",
+                        (file_path,)).fetchone()
+                if row:
+                    song_id = str(row[0])
+            except Exception as e:
+                logger.debug("navidrome stream id lookup failed: %s", e)
+        if not song_id:
+            return None
+        return client.build_stream_url(song_id)
+    except Exception as e:
+        logger.debug("build library stream url failed: %s", e)
+        return None
+
+
 def _get_file_not_found_error(file_path):
     """Return a helpful error message when a library file can't be found."""
     active_server = config_manager.get_active_media_server()
@@ -11091,25 +11128,37 @@ def library_play_track():
 
         # Resolve server-side paths (e.g. /mnt/musicBackup/...) to local transfer path
         resolved = _resolve_library_file_path(file_path)
+        stream_url = None
         if resolved:
             file_path = resolved
         else:
-            return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
+            # Not on disk. For a streaming server (Navidrome/Subsonic) we can
+            # play it through the server's own stream API instead of requiring
+            # the library to be mounted into the SoulSync container (#809).
+            stream_url = _build_library_stream_url(data.get('track_id'), file_path)
+            if not stream_url:
+                return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
-        logger.info(f"Library play request: {os.path.basename(file_path)}")
+        if stream_url:
+            logger.info("Library play request (server stream): %s",
+                        data.get('title') or os.path.basename(file_path or ''))
+        else:
+            logger.info(f"Library play request: {os.path.basename(file_path)}")
 
-        # Set THIS listener's stream state to ready with the library file path.
+        # Set THIS listener's stream state to ready. Either a local file_path
+        # (served from disk) or a stream_url (proxied from the media server).
         sess = _current_stream_state()
         with sess.lock:
             sess.update({
                 "status": "ready",
                 "progress": 100,
                 "track_info": {
-                    "title": data.get('title', os.path.basename(file_path)),
+                    "title": data.get('title', os.path.basename(file_path or '')),
                     "artist": data.get('artist', 'Unknown Artist'),
                     "album": data.get('album', 'Unknown Album'),
                 },
-                "file_path": file_path,
+                "file_path": None if stream_url else file_path,
+                "stream_url": stream_url,
                 "error_message": None,
                 "is_library": True
             })
@@ -12359,6 +12408,39 @@ _AUDIO_MIME_TYPES = {
 }
 
 
+def _proxy_stream_url_with_range(stream_url):
+    """Proxy a media-server stream URL to the browser, forwarding the Range
+    header so HTML5 seeking works (#809 — Navidrome/Subsonic playback without a
+    disk mount). Streams the upstream response body through without buffering
+    the whole file."""
+    upstream_headers = {}
+    range_header = request.headers.get('Range')
+    if range_header:
+        upstream_headers['Range'] = range_header
+    try:
+        upstream = requests.get(stream_url, headers=upstream_headers, stream=True, timeout=30)
+    except Exception as e:
+        logger.error(f"Stream proxy upstream error: {e}")
+        return jsonify({"error": "Upstream stream failed"}), 502
+
+    # Pass through the bytes + the headers a media player needs for seeking.
+    passthrough = {}
+    for h in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
+        if h in upstream.headers:
+            passthrough[h] = upstream.headers[h]
+    passthrough.setdefault('Accept-Ranges', 'bytes')
+
+    def _gen():
+        try:
+            for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    return Response(_gen(), status=upstream.status_code, headers=passthrough)
+
+
 def _serve_audio_file_with_range(file_path, mimetype_override=None):
     """Serve an on-disk audio file with HTTP range support (HTML5 seeking).
 
@@ -12430,9 +12512,17 @@ def stream_audio():
     try:
         sess = _current_stream_state()
         with sess.lock:
-            if sess["status"] != "ready" or not sess["file_path"]:
+            if sess["status"] != "ready":
                 return jsonify({"error": "No audio file ready for streaming"}), 404
             file_path = sess["file_path"]
+            stream_url = sess.get("stream_url")
+            if not file_path and not stream_url:
+                return jsonify({"error": "No audio file ready for streaming"}), 404
+
+        # Library track played via the media server's stream API (#809).
+        if stream_url:
+            logger.info("Serving audio via server stream proxy")
+            return _proxy_stream_url_with_range(stream_url)
 
         logger.info(f"Serving audio file: {os.path.basename(file_path)}")
         return _serve_audio_file_with_range(file_path)
