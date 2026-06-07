@@ -143,3 +143,41 @@ def test_discovery_blacklist_migrated_into_blocklist(tmp_path):
         spotify_track_data=_track("t5", "Photograph", "nb-sp", "Nickelback"),
         profile_id=1)
     assert ok is False
+
+
+# ── Phase 2a: shared guard with source fallback (download-queue path) ────────
+
+def test_blocklist_reason_source_fallback(db):
+    """The download-queue guard passes the batch source explicitly because the
+    analysis track dict may not carry a 'provider' field. Uses an ALBUM ban
+    (id-only, no name fallback) to isolate the source-driven ID match."""
+    db.add_blocklist_entry(1, "album", "Scorpion", deezer_id="scorp-dz")
+    track = {"id": "t1", "name": "Nonstop",
+             "artists": [{"id": "drake", "name": "Drake"}],
+             "album": {"id": "scorp-dz", "name": "Scorpion"}}
+    assert db.blocklist_reason_for_track(1, track) is None              # no source → album id can't match
+    assert db.blocklist_reason_for_track(1, track, source="spotify") is None  # wrong source
+    assert db.blocklist_reason_for_track(1, track, source="deezer")     # right source → match
+
+
+def test_artist_name_fallback_works_without_source(db):
+    # Artists DO fall back to name, so a ban matches even when the source is
+    # unknown (covers the cross-source backfill window).
+    db.add_blocklist_entry(1, "artist", "Drake", deezer_id="drake-dz")
+    track = {"id": "t1", "name": "Track", "artists": [{"id": "x", "name": "Drake"}],
+             "album": {"id": "al", "name": "Al"}}
+    assert db.blocklist_reason_for_track(1, track) is not None
+
+
+def test_blocklist_reason_simulates_queue_filter(db):
+    """Mirror what master.py does: filter a missing-tracks list by the guard."""
+    db.add_blocklist_entry(1, "artist", "Blocked Guy", spotify_id="bg-sp")
+    missing = [
+        {"track": {"id": "t1", "name": "Keep Me",
+                   "artists": [{"id": "ok", "name": "Good Artist"}], "album": {"id": "a1", "name": "A"}}},
+        {"track": {"id": "t2", "name": "Drop Me",
+                   "artists": [{"id": "bg-sp", "name": "Blocked Guy"}], "album": {"id": "a2", "name": "B"}}},
+    ]
+    kept = [r for r in missing
+            if not db.blocklist_reason_for_track(1, r["track"], source="spotify")]
+    assert [r["track"]["id"] for r in kept] == ["t1"]
