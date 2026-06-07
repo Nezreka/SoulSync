@@ -493,6 +493,15 @@ class ConfigManager:
                 # editing source.
                 "album_bundle_poll_interval_seconds": 2.0,
                 "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
+                # Stalled-torrent handling (noldevin): abandon a torrent that
+                # makes zero download progress for this long (dead magnet
+                # stuck on "downloading metadata", no seeders) instead of
+                # holding the worker for the full album timeout. 0 disables.
+                "torrent_stall_timeout_seconds": 10 * 60,       # 10 minutes
+                # What to do when a torrent stalls: "abandon" (remove it +
+                # its partial data, fail the download so the next source can
+                # try) or "pause" (pause in the client, leave for the user).
+                "torrent_stall_action": "abandon",
             },
             "post_processing": {
                 # When a download is quarantined (AcoustID mismatch, integrity /
