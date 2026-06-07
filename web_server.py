@@ -34911,6 +34911,23 @@ def _has_active_downloads():
 # Track whether we auto-paused workers so we only resume ones we paused (not user-paused ones)
 _download_auto_paused = set()
 _download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
+_auto_yield_cause = {}            # name -> 'downloads' | 'discovery' (status label for the UI)
+
+
+def _has_active_discovery():
+    """True while any playlist discovery is actively running (any platform)."""
+    from core.enrichment.yield_policy import discovery_state_active
+    try:
+        for states in (tidal_discovery_states, qobuz_discovery_states,
+                       deezer_discovery_states, youtube_playlist_states,
+                       beatport_chart_states, listenbrainz_playlist_states,
+                       spotify_public_discovery_states, itunes_link_discovery_states):
+            for state in list(states.values()):
+                if discovery_state_active(state):
+                    return True
+    except Exception as e:
+        logger.debug("active discovery check failed: %s", e)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -35114,41 +35131,46 @@ def _emit_enrichment_status_loop():
         'repair': lambda: repair_worker,
     }
 
-    # Workers to auto-pause during downloads (rate-limit sensitive services)
-    yield_workers = {
-        'spotify-enrichment': lambda: spotify_enrichment_worker,
-        'lastfm-enrichment': lambda: lastfm_worker,
-        'genius-enrichment': lambda: genius_worker,
-    }
+    # Yield policy: downloads pause EVERYTHING (post-processing touches every
+    # metadata source — measured 4m+/track when MusicBrainz contended with its
+    # own worker); discovery pauses the API-contention five. The name lists +
+    # decision live in core.enrichment.yield_policy (tested); this loop owns
+    # the pause/resume side effects and the user-override bookkeeping.
+    from core.enrichment.yield_policy import ALL_YIELD_WORKERS, worker_yield_reason
+    yield_workers = {name: workers[name] for name in ALL_YIELD_WORKERS if name in workers}
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
 
-        # Auto-pause/resume rate-limited workers during downloads
+        # Auto-pause/resume workers while foreground work runs
         try:
             downloading = _has_active_downloads()
-            if not downloading:
-                _download_yield_override.clear()  # Reset overrides when downloads finish
+            discovering = _has_active_discovery()
+            if not downloading and not discovering:
+                _download_yield_override.clear()  # Reset overrides when work finishes
             for name, get_w in yield_workers.items():
                 w = get_w()
-                if w is None:
+                if w is None or not hasattr(w, 'paused'):
                     continue
-                if downloading and not w.paused and name not in _download_yield_override:
+                reason = worker_yield_reason(name, downloading, discovering)
+                if reason and not w.paused and name not in _download_yield_override:
                     w.paused = True
                     _download_auto_paused.add(name)
-                    logger.debug(f"Auto-paused {name} during active downloads")
-                elif not downloading and name in _download_auto_paused:
+                    _auto_yield_cause[name] = reason
+                    logger.debug(f"Auto-paused {name} during active {reason}")
+                elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause
                     # marker so the next auto-pause/resume cycle behaves normally.
                     config_key = f"{name.replace('-', '_')}_paused"
                     user_paused = config_manager.get(config_key, False)
                     _download_auto_paused.discard(name)
+                    _auto_yield_cause.pop(name, None)
                     if not user_paused:
                         w.paused = False
-                        logger.debug(f"Auto-resumed {name} after downloads finished")
+                        logger.debug(f"Auto-resumed {name} after foreground work finished")
                     else:
-                        logger.debug(f"Downloads finished but {name} remains paused by user")
+                        logger.debug(f"Foreground work finished but {name} remains paused by user")
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
@@ -35158,9 +35180,9 @@ def _emit_enrichment_status_loop():
                 if worker is None:
                     continue
                 status = worker.get_stats()
-                # Flag workers that were auto-paused for downloads
+                # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
-                    status['yield_reason'] = 'downloads'
+                    status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")

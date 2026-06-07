@@ -734,7 +734,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 )
             else:
                 logger.info("[Metadata Input] album_info: None (single track)")
+            _enhance_started = time.time()
             enhance_file_metadata(file_path, context, artist_context, album_info, runtime=metadata_runtime)
+            # The enhancement block is the pipeline's biggest variable cost
+            # (external source lookups) and used to be a silent multi-minute
+            # gap in the log — always say how long it took.
+            logger.info(f"Metadata enhancement took {time.time() - _enhance_started:.1f}s")
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
