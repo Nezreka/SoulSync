@@ -1277,16 +1277,57 @@ class RepairWorker:
             logger.error("Error fixing track number for %s: %s", file_path, e)
             return {'success': False, 'error': str(e)}
 
+    def _fix_artist_art(self, album_id, details):
+        """Apply the found ARTIST image to the album's artist (DB thumb only —
+        artist art has no per-file embed). Pache711: independently applyable
+        from the album art on the same finding."""
+        artist_url = details.get('found_artist_url')
+        if not artist_url:
+            return {'success': False, 'error': 'No artist image found in finding details'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                (artist_url, album_id))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return {'success': False, 'error': 'Artist not found for this album'}
+        finally:
+            if conn:
+                conn.close()
+        return {'success': True, 'action': 'applied_artist_art',
+                'message': 'Applied artist image'}
+
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
-        """Apply found artwork: update the DB thumbnail AND embed art into the
-        album's audio files + write cover.jpg (using the post-processing
-        standard, so the user's album_art_order preference is honored)."""
-        artwork_url = details.get('found_artwork_url')
-        if not artwork_url:
-            return {'success': False, 'error': 'No artwork URL found in finding details'}
+        """Apply found artwork. ``_fix_action`` selects the target (Pache711):
+        'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
+        (the artist's DB image), or 'both'. Defaulting to 'album' keeps the
+        plain "Apply Art" button behaving exactly as before."""
+        target = (details.get('_fix_action') or 'album').strip().lower()
+        if target not in ('album', 'artist', 'both'):
+            target = 'album'
+
         album_id = details.get('album_id') or entity_id
         if not album_id:
             return {'success': False, 'error': 'No album ID associated with this finding'}
+
+        # Artist-only path: nothing to do with album files.
+        if target == 'artist':
+            return self._fix_artist_art(album_id, details)
+
+        artist_result = None
+        if target == 'both':
+            artist_result = self._fix_artist_art(album_id, details)
+
+        artwork_url = details.get('found_artwork_url')
+        if not artwork_url:
+            # 'both' but no album art — report the artist outcome if that ran.
+            if artist_result is not None:
+                return artist_result
+            return {'success': False, 'error': 'No artwork URL found in finding details'}
 
         conn = None
         track_paths = []
@@ -1332,8 +1373,10 @@ class RepairWorker:
 
         if not resolved:
             # Media-server-only album (no local files): DB thumbnail is all we can set.
-            return {'success': True, 'action': 'applied_cover_art',
-                    'message': 'Applied cover art to album (database only — no local files found)'}
+            msg = 'Applied cover art to album (database only — no local files found)'
+            if artist_result is not None and artist_result.get('success'):
+                msg += ' + applied artist image'
+            return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
@@ -1367,6 +1410,8 @@ class RepairWorker:
         if embedded == 0 and not art_result.get('cover_written'):
             # DB updated but nothing reached disk (e.g. permissions).
             msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
+        if artist_result is not None and artist_result.get('success'):
+            msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 
     def _fix_library_retag(self, entity_type, entity_id, file_path, details):
