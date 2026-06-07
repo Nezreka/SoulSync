@@ -6065,7 +6065,9 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.className = 'enhanced-match-search-input';
-    searchInput.placeholder = `Search ${serviceLabels[service] || service}...`;
+    searchInput.placeholder = service === 'musicbrainz'
+        ? `Search ${serviceLabels[service]}… or paste a MusicBrainz ID/URL`
+        : `Search ${serviceLabels[service] || service}...`;
     searchInput.value = defaultQuery;
     searchRow.appendChild(searchInput);
     const searchBtn = document.createElement('button');
