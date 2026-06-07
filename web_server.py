@@ -27976,6 +27976,98 @@ def personalized_update_config(kind, variant=''):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ─── Unified blocklist (artist/album/track) — Phase 1 ───
+# Distinct from /api/library/blacklist (download source skipping). Profile-
+# scoped. On add, the other metadata sources' IDs are resolved synchronously
+# (best-effort) so a ban survives a source switch immediately.
+
+@app.route('/api/blocklist', methods=['GET'])
+def get_blocklist():
+    try:
+        entity_type = request.args.get('entity_type')
+        if entity_type and entity_type not in ('artist', 'album', 'track'):
+            return jsonify({"success": False, "error": "invalid entity_type"}), 400
+        entries = get_database().get_blocklist(get_current_profile_id(), entity_type=entity_type)
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        logger.error(f"Error getting blocklist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist', methods=['POST'])
+def add_blocklist():
+    try:
+        data = request.get_json() or {}
+        entity_type = (data.get('entity_type') or '').strip().lower()
+        name = (data.get('name') or '').strip()
+        if entity_type not in ('artist', 'album', 'track') or not name:
+            return jsonify({"success": False, "error": "entity_type and name are required"}), 400
+
+        # The source the user searched + its id for this item.
+        source = (data.get('source') or '').strip().lower()
+        source_id = (data.get('source_id') or '').strip() or None
+        ids = {'spotify_id': None, 'itunes_id': None, 'deezer_id': None, 'musicbrainz_id': None}
+        col = {'spotify': 'spotify_id', 'itunes': 'itunes_id',
+               'deezer': 'deezer_id', 'musicbrainz': 'musicbrainz_id'}.get(source)
+        if col and source_id:
+            ids[col] = source_id
+
+        # Resolve the OTHER sources now (best-effort) so the ban is cross-source
+        # from the first scan. Failures just leave a source unmatched.
+        try:
+            from core.blocklist.backfill import resolve_missing_ids
+            from core.blocklist.runtime import build_resolvers
+            probe = {'entity_type': entity_type, 'name': name,
+                     'parent_name': data.get('parent_name'), **ids}
+            ids.update(resolve_missing_ids(probe, build_resolvers()))
+        except Exception as e:
+            logger.debug("blocklist add backfill skipped: %s", e)
+
+        new_id = get_database().add_blocklist_entry(
+            get_current_profile_id(), entity_type, name,
+            spotify_id=ids['spotify_id'], itunes_id=ids['itunes_id'],
+            deezer_id=ids['deezer_id'], musicbrainz_id=ids['musicbrainz_id'],
+            parent_name=data.get('parent_name'))
+        if not new_id:
+            return jsonify({"success": False, "error": "Could not add entry"}), 500
+        logger.info("Blocklisted %s '%s'", entity_type, name)
+        return jsonify({"success": True, "id": new_id})
+    except Exception as e:
+        logger.error(f"Error adding blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist/search', methods=['GET'])
+def search_blocklist_candidates():
+    """Search the active metadata source for an artist/album/track to block.
+    Thin wrapper over the manual-match service search so the modal doesn't need
+    to know which source is active."""
+    try:
+        entity_type = (request.args.get('type') or 'artist').strip().lower()
+        if entity_type not in ('artist', 'album', 'track'):
+            return jsonify({"success": False, "error": "invalid type"}), 400
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        from core.metadata.registry import get_primary_source
+        source = get_primary_source() or 'spotify'
+        results = _search_service(source, entity_type, query)
+        return jsonify({"success": True, "source": source, "results": results})
+    except Exception as e:
+        logger.error(f"Error searching blocklist candidates: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist/<int:entry_id>', methods=['DELETE'])
+def remove_blocklist(entry_id):
+    try:
+        ok = get_database().remove_blocklist_entry(get_current_profile_id(), entry_id)
+        return jsonify({"success": ok})
+    except Exception as e:
+        logger.error(f"Error removing blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/artist-blacklist', methods=['GET'])
 def get_discovery_artist_blacklist():
     """Get all blacklisted discovery artists."""
