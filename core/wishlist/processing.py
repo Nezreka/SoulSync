@@ -729,6 +729,19 @@ def _prepare_and_run_manual_wishlist_batch(
             logger.warning(f"[Manual-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
         logger.info(f"[Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
+        # #705: don't burn a search+timeout on tracks that aren't out yet
+        # (watchlist scans add announced albums on purpose). They stay in the
+        # wishlist and start processing the cycle after their release date
+        # passes. An explicit track selection overrides the gate — the user
+        # asked for those specifically.
+        if not track_ids:
+            from core.metadata.release_dates import split_released_unreleased
+            wishlist_tracks, _unreleased = split_released_unreleased(wishlist_tracks)
+            if _unreleased:
+                logger.info(
+                    f"[Manual-Wishlist] Skipping {len(_unreleased)} unreleased track(s) "
+                    f"(future release date) — they'll be searched once released")
+
         if track_ids:
             track_lookup = {}
             for track in wishlist_tracks:
@@ -918,6 +931,17 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 if duplicates_found > 0:
                     logger.warning(f"[Auto-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
                 logger.info(f"[Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
+
+                # #705: skip tracks with a future release date — searching for
+                # them burns a full search+timeout per track, every cycle, for
+                # files that can't exist yet. They stay in the wishlist and
+                # join the cycle automatically once their date passes.
+                from core.metadata.release_dates import split_released_unreleased
+                wishlist_tracks, _unreleased = split_released_unreleased(wishlist_tracks)
+                if _unreleased:
+                    logger.info(
+                        f"[Auto-Wishlist] Skipping {len(_unreleased)} unreleased track(s) "
+                        f"(future release date) — they'll be searched once released")
 
                 # CYCLE FILTERING: Get current cycle and filter tracks by category
                 current_cycle = get_wishlist_cycle(lambda: music_database)
