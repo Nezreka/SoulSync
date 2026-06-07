@@ -164,6 +164,12 @@ class TestFetchArtBytes:
 
     # ── #806: CAA native-res chain — original → 1200px midpoint → thumbnail ──
 
+    @pytest.fixture(autouse=True)
+    def _reset_caa_cooldown(self, monkeypatch):
+        # The negative cache persists module-globally; isolate every test.
+        import core.metadata.artwork as aw
+        monkeypatch.setattr(aw, '_caa_original_down_until', 0.0)
+
     def test_caa_fetches_native_original_first(self, monkeypatch):
         calls = []
 
@@ -217,4 +223,30 @@ class TestFetchArtBytes:
             'https://coverartarchive.org/release/r1/front',
             'https://coverartarchive.org/release/r1/front-1200',
             'https://coverartarchive.org/release/r1/front-250',
+        ]
+
+    def test_caa_outage_cooldown_skips_originals_for_subsequent_fetches(self, monkeypatch):
+        """One archive.org failure puts originals on cooldown: the NEXT track's
+        fetch goes straight to the 1200px CDN — no 10s timeout per track during
+        an outage (art is fetched per track)."""
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            if url.endswith('/front'):
+                raise Exception('archive.org down')
+            return _FakeResponse(b'cdn-1200px')
+
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+
+        # Track 1: pays the failed original once, falls back to 1200.
+        _fetch_art_bytes('https://coverartarchive.org/release/r1/front-250')
+        # Track 2: cooldown active — never touches the original.
+        data, _ = _fetch_art_bytes('https://coverartarchive.org/release/r2/front-250')
+
+        assert data == b'cdn-1200px'
+        assert calls == [
+            'https://coverartarchive.org/release/r1/front',       # track 1 pays once
+            'https://coverartarchive.org/release/r1/front-1200',  # and falls back
+            'https://coverartarchive.org/release/r2/front-1200',  # track 2 skips straight to CDN
         ]
