@@ -3613,13 +3613,24 @@ class WatchlistScanner:
                                 if not album_data or 'tracks' not in album_data:
                                     continue
 
+                                # #705: announced-but-unreleased albums must not reach the
+                                # radar — and worse, their NEGATIVE days_old used to INFLATE
+                                # the recency score (100 - days*7) above every released
+                                # track, which is why Fresh Tape filled up with prereleases.
+                                from core.metadata.release_dates import is_future_release
+                                if is_future_release(album.get('release_date', '')):
+                                    logger.debug(
+                                        f"Release Radar: skipping unreleased album "
+                                        f"'{album.get('album_name', '?')}' ({album.get('release_date')})")
+                                    continue
+
                                 # Calculate days since release for recency score
                                 days_old = 14
                                 try:
                                     release_date_str = album.get('release_date', '')
                                     if release_date_str and len(release_date_str) >= 10:
                                         release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
-                                        days_old = (datetime.now() - release_date).days
+                                        days_old = max(0, (datetime.now() - release_date).days)
                                 except Exception as e:
                                     logger.debug("release-date parse: %s", e)
 
