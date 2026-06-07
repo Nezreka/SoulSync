@@ -115,4 +115,23 @@ def strip_redundant_context_qualifiers(title: str, *context_texts: str) -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
-__all__ = ["titles_plausibly_same", "strip_redundant_context_qualifiers"]
+def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
+    """True when the digit-bearing tokens of two titles differ — 'Vol.4' vs
+    'Vol.4.5', 'Album' vs 'Album 2'. A numeric difference is a different
+    release (volume / part / sequel), never a '(Deluxe)'-style suffix:
+    string similarity ('Vol.4' vs 'Vol.4.5' = 0.97) and token-subset checks
+    both wave these through, which hung volume 4.5's cover art on volume 4
+    (Sokhi). Shared digits on both sides ('1989' vs '1989 (Deluxe)') are
+    fine."""
+    def _digit_tokens(text: str) -> frozenset:
+        tokens = re.sub(r"[^a-z0-9]+", " ", (text or "").casefold()).split()
+        return frozenset(t for t in tokens if any(c.isdigit() for c in t))
+
+    return _digit_tokens(title_a) != _digit_tokens(title_b)
+
+
+__all__ = [
+    "titles_plausibly_same",
+    "strip_redundant_context_qualifiers",
+    "numeric_tokens_differ",
+]

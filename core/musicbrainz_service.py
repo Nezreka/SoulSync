@@ -270,6 +270,16 @@ class MusicBrainzService:
                 # Combine scores - cap at 100
                 confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus + version_bonus))
 
+                # Numeric difference = different release. 'Vol.4' vs 'Vol.4.5'
+                # scores 0.97 string similarity, so a near-identical wrong
+                # volume could win and its MBID then feeds CAA art with NO
+                # downstream validation (CAA is MBID-keyed — Sokhi's wrong
+                # covers). Halving lands any such candidate below the 70 gate
+                # while leaving the exact-volume result untouched.
+                from core.text.title_match import numeric_tokens_differ
+                if numeric_tokens_differ(album_name, mb_title):
+                    confidence = int(confidence * 0.5)
+
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_match = result
