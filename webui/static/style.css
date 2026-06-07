@@ -66325,32 +66325,58 @@ body.em-scroll-lock { overflow: hidden; }
 }
 
 /* ── Modal revamp: live track-row states (animation == gauge, in the table) ──
-   The download-status cell carries data-state (set by the renderer); the row
-   carries .row-working while a track is actively searching/downloading/
-   processing. Badges are state-colored pills; only ACTIVE states breathe. */
+   The download-status cell carries data-state (set by the main renderer; a
+   secondary live-progress writer uses the legacy download-downloading /
+   download-complete classes — both vocabularies are styled). The row carries
+   .row-working while a track is actively searching/downloading/processing.
 
-.track-download-status[data-state] {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 11px;
-    border-radius: 999px;
+   LAYOUT NOTE: these are <td>s — they must stay display:table-cell, so the
+   pill is a centered pseudo-element painted BEHIND the text, not a box model
+   change on the cell itself. State colors are CSS vars on the td; the pseudo
+   reads them. */
+
+.track-download-status[data-state],
+.track-download-status.download-downloading,
+.track-download-status.download-complete,
+.track-match-status {
+    position: relative;
+    z-index: 0;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    border: 1px solid var(--row-state-border, rgba(255, 255, 255, 0.1));
-    background: var(--row-state-bg, rgba(255, 255, 255, 0.04));
     color: var(--row-state-fg, rgba(255, 255, 255, 0.65));
-    white-space: nowrap;
+}
+
+.track-download-status[data-state]::before,
+.track-download-status.download-downloading::before,
+.track-download-status.download-complete::before,
+.track-match-status.match-found::before,
+.track-match-status.match-missing::before,
+.track-match-status.match-checking::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100% - 18px);
+    height: 26px;
+    border-radius: 999px;
+    background: var(--row-state-bg, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--row-state-border, rgba(255, 255, 255, 0.1));
+    z-index: -1;
+    pointer-events: none;
 }
 
 .track-download-status[data-state="pending"],
 .track-download-status[data-state="cancelled"],
-.track-download-status[data-state="cancelling"] {
+.track-download-status[data-state="cancelling"],
+.track-download-status[data-state="not_found"] {
     --row-state-fg: rgba(255, 255, 255, 0.5);
 }
 
 .track-download-status[data-state="searching"],
-.track-download-status[data-state="downloading"] {
+.track-download-status[data-state="downloading"],
+.track-download-status.download-downloading {
     --row-state-border: rgba(var(--accent-rgb), 0.4);
     --row-state-bg: rgba(var(--accent-rgb), 0.12);
     --row-state-fg: rgb(var(--accent-light-rgb));
@@ -66362,7 +66388,8 @@ body.em-scroll-lock { overflow: hidden; }
     --row-state-fg: #fbbf24;
 }
 
-.track-download-status[data-state="completed"] {
+.track-download-status[data-state="completed"],
+.track-download-status.download-complete {
     --row-state-border: rgba(74, 222, 128, 0.35);
     --row-state-bg: rgba(74, 222, 128, 0.1);
     --row-state-fg: #4ade80;
@@ -66380,15 +66407,12 @@ body.em-scroll-lock { overflow: hidden; }
     --row-state-fg: #fb923c;
 }
 
-.track-download-status[data-state="not_found"] {
-    --row-state-fg: rgba(255, 255, 255, 0.4);
-}
-
 /* Only states that are actually WORKING breathe */
 .track-download-status[data-state="searching"],
 .track-download-status[data-state="downloading"],
 .track-download-status[data-state="post_processing"],
-.track-download-status[data-state="cancelling"] {
+.track-download-status[data-state="cancelling"],
+.track-download-status.download-downloading {
     animation: row-state-breathe 1.8s ease-in-out infinite;
 }
 
@@ -66397,33 +66421,21 @@ body.em-scroll-lock { overflow: hidden; }
     50%      { opacity: 0.55; }
 }
 
-/* Match-status cells get the same pill language (classes already existed) */
-.track-match-status {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 11px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
+/* Match-status colors feed the same pill (classes already existed) */
 .track-match-status.match-found {
-    border: 1px solid rgba(74, 222, 128, 0.35);
-    background: rgba(74, 222, 128, 0.1);
-    color: #4ade80;
+    --row-state-border: rgba(74, 222, 128, 0.35);
+    --row-state-bg: rgba(74, 222, 128, 0.1);
+    --row-state-fg: #4ade80;
 }
 
 .track-match-status.match-missing {
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(251, 191, 36, 0.1);
-    color: #fbbf24;
+    --row-state-border: rgba(251, 191, 36, 0.35);
+    --row-state-bg: rgba(251, 191, 36, 0.1);
+    --row-state-fg: #fbbf24;
 }
 
 .track-match-status.match-checking {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.5);
+    --row-state-fg: rgba(255, 255, 255, 0.5);
 }
 
 /* The actively-working row carries a persistent accent presence — like the
