@@ -497,8 +497,12 @@ class ConfigManager:
             "post_processing": {
                 # When a download is quarantined (AcoustID mismatch, integrity /
                 # duration failure), retry the next-best candidate instead of
-                # failing outright. Default off — opt-in.
-                "retry_next_candidate_on_mismatch": False,
+                # failing outright. Default ON (PR #801's documented default —
+                # the monitor reads this with inline default True; this template
+                # said False, so fresh installs silently shipped with the retry
+                # engine off while existing configs got it on. CI caught the
+                # split: its fresh default config failed all 7 requeue tests).
+                "retry_next_candidate_on_mismatch": True,
                 # Opt-in exhaustive retry: budget retries PER SOURCE so every
                 # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
                 # before the track gives up. Default off (single global cap).

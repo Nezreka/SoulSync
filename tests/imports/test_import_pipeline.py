@@ -326,6 +326,18 @@ def _wire_retry_engine(monkeypatch):
     monkeypatch.setattr(monitor, "missing_download_executor", _Exec())
     monkeypatch.setattr(monitor, "_download_track_worker", lambda task_id, batch_id: None)
     monkeypatch.setattr(monitor, "MAX_QUARANTINE_RETRIES", 5)
+
+    # Pin the retry toggle ON instead of reading the runner's ambient config —
+    # CI's fresh default config vs a dev's lived-in config.json must not
+    # decide whether these tests pass (they did: 7 failures, CI-only).
+    real_get = monitor.config_manager.get
+
+    def _pinned_get(key, default=None):
+        if key == "post_processing.retry_next_candidate_on_mismatch":
+            return True
+        return real_get(key, default)
+
+    monkeypatch.setattr(monitor.config_manager, "get", _pinned_get)
     return submitted
 
 
