@@ -52,7 +52,7 @@ SPLIT_MODULES = [
 
 # Other JS files that exist in static/ but are NOT part of the split
 NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
-                "enrichment-manager.js"}
+                "enrichment-manager.js", "origin-history.js"}
 
 # Pre-existing duplicate helper functions that lived in the original monolith.
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
@@ -216,8 +216,10 @@ class TestOnclickCoverage:
             text = _read(_STATIC / module)
             self.all_fns.update(_all_function_decls(text))
 
-        # Also include non-split JS files that are loaded
-        for extra in ("setup-wizard.js", "docs.js", "helper.js", "enrichment-manager.js"):
+        # Also include non-split JS files that are loaded — driven by the
+        # NON_SPLIT_JS registry so a newly added standalone module can't be
+        # silently missing from onclick coverage (origin-history.js was).
+        for extra in sorted(NON_SPLIT_JS):
             path = _STATIC / extra
             if path.exists():
                 self.all_fns.update(_all_function_decls(_read(path)))

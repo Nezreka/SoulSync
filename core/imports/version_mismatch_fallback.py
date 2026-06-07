@@ -26,11 +26,16 @@ quarantine store + re-import dispatch via injected callables.
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from utils.logging_config import get_logger
+
+# Must live under the soulsync.* namespace — handlers only attach there, so a
+# bare getLogger(__name__) sent every line (including the critical "accepting
+# best quarantined candidate as last resort" warning) into the void instead of
+# app.log. Same bug class as the prepare.py fix.
+logger = get_logger("imports.version_fallback")
 
 # Matches the reason string written by acoustid_verification's version gate:
 #   "Version mismatch: expected '<title>' (<exp>) but file is '<title>' (<got>)"
