@@ -494,3 +494,70 @@ class TestDeezerContributorsUpgrade:
 
         assert meta["_artists_list"] == ["Primary"]
         fake_deezer.get_track_details.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Netti93 follow-up: the DIRECT download flow (Search with Deezer ->
+# Download Now via Tidal). Deezer /search returns ONE artist; the full
+# contributors list only exists on /track/<id>. The download context must
+# trigger the contributors upgrade and then honor feat_in_title /
+# artist_separator — pre-fix this only worked after a manual retag.
+# Verified live against Deezer's API for the reported track
+# ('VERLIEBT IN MICH', FAYAN feat. Dalton, id 3526028401).
+# ---------------------------------------------------------------------------
+
+
+def _netti_context():
+    """The exact shape the search page's Deezer result produces, riding a
+    Tidal download (provider identity lives on the candidate, not here)."""
+    return {
+        "track_info": {
+            "id": 3526028401,
+            "name": "VERLIEBT IN MICH",
+            "artists": ["FAYAN"],          # /search: primary only
+            "album": "VERLIEBT IN MICH",
+            "source": "deezer",
+        },
+        "original_search_result": {
+            "username": "tidal", "filename": "x.flac",
+            "title": "VERLIEBT IN MICH", "artist": "FAYAN",
+        },
+        "task_id": "t1",
+    }
+
+
+def _call_extract_netti(cfg_overrides):
+    import core.metadata as metadata_pkg
+    from core.metadata import source as src_module
+
+    deezer = MagicMock()
+    deezer.get_track_details.return_value = {
+        "id": 3526028401,
+        "artists": ["FAYAN", "Dalton"],    # /track/<id> contributors
+    }
+    with patch.object(src_module, "get_config_manager", return_value=_make_cfg(cfg_overrides)), \
+         patch.object(metadata_pkg, "get_deezer_client", return_value=deezer):
+        return src_module.extract_source_metadata(
+            _netti_context(), {"name": "FAYAN"}, {"name": "VERLIEBT IN MICH"})
+
+
+class TestDeezerDirectDownloadFlow:
+    def test_contributors_upgrade_plus_feat_in_title(self):
+        meta = _call_extract_netti({
+            "metadata_enhancement.tags.write_multi_artist": True,
+            "metadata_enhancement.tags.feat_in_title": True,
+            "metadata_enhancement.tags.artist_separator": ";",
+        })
+        assert meta["_artists_list"] == ["FAYAN", "Dalton"]
+        assert meta["artist"] == "FAYAN"                       # primary only
+        assert meta["title"] == "VERLIEBT IN MICH (feat. Dalton)"
+
+    def test_contributors_upgrade_with_separator_join(self):
+        meta = _call_extract_netti({
+            "metadata_enhancement.tags.write_multi_artist": True,
+            "metadata_enhancement.tags.feat_in_title": False,
+            "metadata_enhancement.tags.artist_separator": ";",
+        })
+        assert meta["_artists_list"] == ["FAYAN", "Dalton"]
+        assert meta["artist"] == "FAYAN;Dalton"
+        assert meta["title"] == "VERLIEBT IN MICH"
