@@ -1168,6 +1168,11 @@ async function loadSettingsData() {
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
+        document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
+        document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
+        document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
+        document.getElementById('accept-version-mismatch-fallback').checked = settings.post_processing?.accept_version_mismatch_fallback === true;
+        document.getElementById('version-mismatch-min-count').value = settings.post_processing?.version_mismatch_min_count ?? 2;
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -1708,12 +1713,16 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality profile is Soulseek-only and downloads-tab-only
-    const qualityProfileSection = document.getElementById('quality-profile-section');
-    if (qualityProfileSection) {
+    // Quality profile is Soulseek-only (it only affects Soulseek downloads) and
+    // downloads-tab-only. Gate the WHOLE collapsible tile (#quality-profile-tile
+    // = header + body) as a unit, so it either fully shows (Soulseek active) or
+    // fully hides — never an empty expandable shell (the earlier bug came from
+    // gating only the inner #quality-profile-section).
+    const qualityProfileTile = document.getElementById('quality-profile-tile');
+    if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
         const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileSection.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
     }
 
     if (activeSources.has('tidal')) {
@@ -2996,6 +3005,11 @@ async function saveSettings(quiet = false) {
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
+            retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
+            retry_exhaustive: document.getElementById('retry-exhaustive').checked,
+            retries_per_query: Math.max(1, parseInt(document.getElementById('retries-per-query').value, 10) || 5),
+            accept_version_mismatch_fallback: document.getElementById('accept-version-mismatch-fallback').checked,
+            version_mismatch_min_count: Math.max(1, parseInt(document.getElementById('version-mismatch-min-count').value, 10) || 2),
         },
         library: {
             music_paths: collectMusicPaths(),

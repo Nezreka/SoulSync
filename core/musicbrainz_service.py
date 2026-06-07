@@ -448,31 +448,50 @@ class MusicBrainzService:
         scored.sort(key=lambda x: -x[0])
         best_score, best_mbid, best_mb_score = scored[0]
 
+        # The genuine cross-script match (romaji↔kanji, latin↔cyrillic)
+        # has near-zero LOCAL similarity, so its COMBINED score sinks
+        # below an unrelated same-script decoy — even though MB itself is
+        # certain. "Sawano Hiroyuki": a decoy entity led on combined
+        # (sim 0.82, mb_score 83, combined 0.82 — just under the 0.85 bar)
+        # while the real artist '澤野弘之' had mb_score 100 but combined
+        # 0.30, sorted last. So evaluate the MB-SCORE leader independently
+        # of the combined ranking for the mb-only escape, not scored[0].
+        mb_leader = max(scored, key=lambda x: x[2])  # (combined, mbid, raw_mb)
+        mb_scores_desc = sorted((x[2] for x in scored), reverse=True)
+        mb_unambiguous = len(mb_scores_desc) < 2 or (mb_scores_desc[0] - mb_scores_desc[1]) >= 5
+
         # Trust gate. Two ways to pass:
         #   1. Combined score >= 0.85 (the historical strict bar that
-        #      catches same-script matches)
-        #   2. MB's OWN score is very high (>= 95) AND the result is
-        #      unambiguous (top result clearly leads). Bridges the
-        #      cross-script case where local similarity is near zero
-        #      ("Dmitry Yablonsky" vs "Дмитрий Яблонский" sim ~0)
-        #      but MB's index found a high-confidence match.
+        #      catches same-script matches) → trust the combined leader.
+        #   2. MB's OWN score is very high (>= 95) AND that MB-score leader
+        #      is unambiguous → trust IT. Bridges the cross-script case
+        #      where local similarity is near zero ("Dmitry Yablonsky" vs
+        #      "Дмитрий Яблонский" sim ~0) but MB's index is confident.
         passes_combined = best_score >= 0.85
-        passes_mb_only = best_mb_score >= 95 and (
-            len(scored) < 2 or (scored[0][2] - scored[1][2]) >= 5
-        )
+        passes_mb_only = mb_leader[2] >= 95 and mb_unambiguous
         if not (passes_combined or passes_mb_only):
             logger.debug(
                 "lookup_artist_aliases: best match for %r below trust "
-                "threshold (combined=%.2f, mb_score=%d)",
-                artist_name, best_score, best_mb_score,
+                "threshold (combined=%.2f, best_mb=%d, leader_mb=%d)",
+                artist_name, best_score, best_mb_score, mb_leader[2],
             )
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
+        # Pick the entity to pull aliases from. Combined-strong matches use
+        # the combined leader; the mb-only escape uses the MB-score leader
+        # (which may differ from scored[0] in the cross-script case above).
+        if passes_combined:
+            chosen_mbid, chosen_conf = best_mbid, best_score
+        else:
+            chosen_mbid, chosen_conf = mb_leader[1], mb_leader[2] / 100.0
+
         # Ambiguity detection: when 2+ results both score high (within
         # 0.1 of the best combined), the search hit multiple distinct
         # artists with similar names. Pulling aliases for one could
-        # produce wrong matches. Skip + cache empty.
+        # produce wrong matches. Skip + cache empty. The unambiguous
+        # MB-score leader (passes_mb_only) is exempt — its decisiveness
+        # was already checked via mb_unambiguous.
         if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < 0.1 and not passes_mb_only:
             logger.debug(
                 "lookup_artist_aliases: ambiguous match for %r — top "
@@ -482,10 +501,10 @@ class MusicBrainzService:
             self._save_to_cache('artist_aliases', artist_name, None, None, {'aliases': []}, 0)
             return []
 
-        aliases = self.fetch_artist_aliases(best_mbid)
+        aliases = self.fetch_artist_aliases(chosen_mbid)
         self._save_to_cache(
-            'artist_aliases', artist_name, None, best_mbid,
-            {'aliases': aliases}, int(best_score * 100),
+            'artist_aliases', artist_name, None, chosen_mbid,
+            {'aliases': aliases}, int(chosen_conf * 100),
         )
         return aliases
 

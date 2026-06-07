@@ -4967,6 +4967,18 @@
 
                             </div>
 
+                            <!-- ═══ QUALITY PROFILE ═══ -->
+                            <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
+                                 by settings.js updateSourceVisibility — gating only the inner
+                                 group would leave an empty expandable shell. -->
+                            <div id="quality-profile-tile" data-stg="downloads">
+                            <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Quality Profile</h3>
+                                <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
                             <!-- Quality Profile Settings (Soulseek only) -->
                             <div class="settings-group" id="quality-profile-section" data-stg="downloads">
                                 <h3>🎵 Quality Profile</h3>
@@ -5147,6 +5159,55 @@
                                     When track duration is unavailable, a generous file-size safety net is used instead.
                                 </div>
                             </div>
+
+                            </div><!-- end Quality Profile body -->
+                            </div><!-- end Quality Profile tile -->
+
+                            <!-- ═══ RETRY LOGIC ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Retry Logic</h3>
+                                <span class="settings-section-hint">Next-best candidate, exhaustive per-source retry</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
+                            <div class="settings-group" data-stg="downloads">
+                                <h3>🔁 Retry Logic</h3>
+                                <small class="settings-hint" style="margin-bottom: 10px; display: block;">Controls what happens when a downloaded file is rejected (AcoustID mismatch, wrong version, or duration/integrity failure). Independent of post-processing.</small>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-next-candidate" checked>
+                                        Retry next-best candidate on mismatch
+                                    </label>
+                                    <small class="settings-hint">When a download is quarantined (AcoustID mismatch or duration/integrity failure), automatically try the next-best candidate instead of failing the track. Off = quarantine and fail immediately.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-exhaustive">
+                                        Exhaustive retry (separate budget per source)
+                                    </label>
+                                    <small class="settings-hint">Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="retries-per-query">Retries per query (per source)</label>
+                                    <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                    <small class="settings-hint">In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="accept-version-mismatch-fallback">
+                                        Accept best version mismatch as last resort
+                                    </label>
+                                    <small class="settings-hint">When retries are fully exhausted and <em>every</em> candidate for a track failed the <strong>same</strong> version mismatch (e.g. only an instrumental exists), accept the best (first-tried) one instead of leaving the track missing. Only AcoustID is bypassed — integrity/duration/bit-depth checks still run, so truncated or genuinely wrong files are never let through. Off = leave such tracks failed.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="version-mismatch-min-count">Minimum matching mismatches before accepting</label>
+                                    <input type="number" id="version-mismatch-min-count" min="1" max="20" step="1" value="2" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                    <small class="settings-hint">How many quarantined candidates must have failed the <em>same</em> version mismatch before the last-resort acceptance kicks in. Higher = more confirmation that no correct version exists. Only used when the option above is on.</small>
+                                </div>
+                            </div>
+
+                            </div><!-- end Retry Logic body -->
 
                             <!-- ═══ INDEXERS & DOWNLOADERS ═══ -->
                             <!-- Intro hero — explains the search → fetch flow in one glance -->

@@ -494,6 +494,19 @@ class ConfigManager:
                 "album_bundle_poll_interval_seconds": 2.0,
                 "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
             },
+            "post_processing": {
+                # When a download is quarantined (AcoustID mismatch, integrity /
+                # duration failure), retry the next-best candidate instead of
+                # failing outright. Default off — opt-in.
+                "retry_next_candidate_on_mismatch": False,
+                # Opt-in exhaustive retry: budget retries PER SOURCE so every
+                # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
+                # before the track gives up. Default off (single global cap).
+                "retry_exhaustive": False,
+                # Retries per search query per source in exhaustive mode. The
+                # per-source budget is query_count × this value.
+                "retries_per_query": 5,
+            },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
                 "session": {
