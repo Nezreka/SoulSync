@@ -637,3 +637,66 @@ def test_registry_includes_torrent_and_usenet() -> None:
     names = registry.names()
     assert 'torrent' in names
     assert 'usenet' in names
+
+
+# ---------------------------------------------------------------------------
+# Stalled-torrent handling (noldevin) — the _handle_stalled action path
+# ---------------------------------------------------------------------------
+
+
+def test_handle_stalled_abandon_removes_and_fails():
+    plugin = TorrentDownloadPlugin()
+    with plugin._lock:
+        plugin.active_downloads['d1'] = {'state': 'InProgress, Downloading', 'progress': 0.0}
+
+    adapter = MagicMock()
+    adapter.remove = AsyncMock(return_value=True)
+    adapter.pause = AsyncMock(return_value=True)
+
+    with patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=adapter), \
+         patch('core.download_plugins.torrent.get_stall_timeout', return_value=600):
+        plugin._handle_stalled('d1', 'HASH123', 'abandon')
+
+    adapter.remove.assert_called_once()
+    assert adapter.remove.call_args.kwargs.get('delete_files') is True  # partial junk removed
+    adapter.pause.assert_not_called()
+    row = plugin.active_downloads['d1']
+    assert row['state'] == 'Completed, Errored'
+    assert 'stalled' in (row.get('error') or '').lower()
+    assert 'removed' in (row.get('error') or '').lower()
+
+
+def test_handle_stalled_pause_pauses_and_fails():
+    plugin = TorrentDownloadPlugin()
+    with plugin._lock:
+        plugin.active_downloads['d2'] = {'state': 'InProgress, Downloading', 'progress': 0.0}
+
+    adapter = MagicMock()
+    adapter.remove = AsyncMock(return_value=True)
+    adapter.pause = AsyncMock(return_value=True)
+
+    with patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=adapter), \
+         patch('core.download_plugins.torrent.get_stall_timeout', return_value=600):
+        plugin._handle_stalled('d2', 'HASH456', 'pause')
+
+    adapter.pause.assert_called_once()
+    adapter.remove.assert_not_called()                 # data left for the user
+    row = plugin.active_downloads['d2']
+    assert row['state'] == 'Completed, Errored'
+    assert 'paused' in (row.get('error') or '').lower()
+
+
+def test_handle_stalled_survives_adapter_error():
+    plugin = TorrentDownloadPlugin()
+    with plugin._lock:
+        plugin.active_downloads['d3'] = {'state': 'InProgress, Downloading'}
+
+    adapter = MagicMock()
+    adapter.remove = AsyncMock(side_effect=RuntimeError("client down"))
+
+    with patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=adapter), \
+         patch('core.download_plugins.torrent.get_stall_timeout', return_value=600):
+        plugin._handle_stalled('d3', 'HASH789', 'abandon')   # must not raise
+
+    # Download still fails cleanly even when the client call blew up.
+    assert plugin.active_downloads['d3']['state'] == 'Completed, Errored'
