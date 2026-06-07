@@ -66166,3 +66166,160 @@ body.em-scroll-lock { overflow: hidden; }
 .youtube-discovery-modal .modal-btn-primary:hover {
     box-shadow: 0 6px 26px rgba(var(--accent-rgb), 0.5);
 }
+
+/* ── Modal revamp: the living layer (dashboard-grade motion, all
+   compositor-only: transform/opacity only, one-shots or self-gating) ── */
+
+/* Entrance — a soft rise + settle, once */
+.download-missing-modal-content,
+.youtube-discovery-modal {
+    animation: modal-revamp-enter 0.38s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+@keyframes modal-revamp-enter {
+    0%   { opacity: 0; transform: translateY(12px) scale(0.975); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Header light-sweep — the dashboard signature, same keyframes, same
+   compositor-only strip technique. Headers clip it. */
+.download-missing-modal-header::after,
+.youtube-discovery-modal .modal-header::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 60%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb), 0.05) 40%,
+        rgba(var(--accent-rgb), 0.10) 50%,
+        rgba(var(--accent-rgb), 0.05) 60%,
+        transparent 100%);
+    transform: translateX(-40%);
+    opacity: 0;
+    animation: dashboard-header-sweep 12s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.youtube-discovery-modal .modal-header {
+    overflow: hidden;
+}
+
+/* Progress sheen — a light band scanning the FILL. It lives inside the
+   fill (overflow hidden), so 0% progress shows nothing and a finished bar
+   keeps a gentle pulse of life: the motion is gated by real progress. */
+.download-missing-modal-content .progress-fill,
+.youtube-discovery-modal .progress-bar-fill {
+    position: relative;
+    overflow: hidden;
+}
+
+.download-missing-modal-content .progress-fill::before,
+.youtube-discovery-modal .progress-bar-fill::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 45%;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(255, 255, 255, 0.22) 50%,
+        transparent);
+    transform: translateX(-110%);
+    animation: modal-progress-sheen 2.4s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes modal-progress-sheen {
+    0%   { transform: translateX(-110%); }
+    60%, 100% { transform: translateX(330%); }
+}
+
+/* Hero stat chips — glass cards with per-state color identity */
+.download-dashboard-stats {
+    gap: 10px;
+}
+
+.dashboard-stat {
+    padding: 10px 18px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+    overflow: hidden;
+}
+
+.dashboard-stat::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 15%;
+    right: 15%;
+    height: 1.5px;
+    background: linear-gradient(90deg, transparent, var(--stat-edge, rgba(var(--accent-rgb), 0.7)), transparent);
+}
+
+.dashboard-stat-number {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.dashboard-stat-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.dashboard-stat.stat-found      { --stat-edge: rgba(74, 222, 128, 0.7); }
+.dashboard-stat.stat-found .dashboard-stat-number      { color: #4ade80; }
+.dashboard-stat.stat-missing    { --stat-edge: rgba(251, 191, 36, 0.7); }
+.dashboard-stat.stat-missing .dashboard-stat-number    { color: #fbbf24; }
+.dashboard-stat.stat-downloaded { --stat-edge: rgba(var(--accent-rgb), 0.8); }
+.dashboard-stat.stat-downloaded .dashboard-stat-number { color: rgb(var(--accent-light-rgb)); }
+
+/* Download modal close ✕ matches the discovery one: circular ghost, rotates */
+.download-missing-modal-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+
+.download-missing-modal-close:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* Press feel on every pill */
+.download-control-btn:active,
+.youtube-discovery-modal .modal-btn:active {
+    transform: translateY(0) scale(0.97);
+}
+
+/* Respect reduced motion + the global performance mode */
+@media (prefers-reduced-motion: reduce) {
+    .download-missing-modal-content,
+    .youtube-discovery-modal,
+    .download-missing-modal-header::after,
+    .youtube-discovery-modal .modal-header::after,
+    .download-missing-modal-content .progress-fill::before,
+    .youtube-discovery-modal .progress-bar-fill::before {
+        animation: none !important;
+    }
+}
