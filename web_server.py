@@ -7155,14 +7155,22 @@ def manual_search_for_task(task_id):
         link_track_id = None
         if link:
             _src, _tid = link
-            if _src in valid_source_ids:
-                clean_q, link_err = _resolve_link_track_query(_src, _tid)
-                if clean_q:
-                    query = clean_q
-                    source = _src
-                    link_source, link_track_id = _src, _tid
-                else:
-                    logger.info(f"[Manual Search] link resolve fell back: {link_err}")
+            # A parsed link is unambiguously a Tidal/Qobuz track URL, never a
+            # name a user would type — so if we can't use it, say why clearly
+            # instead of running a useless search of the raw URL text.
+            if _src not in valid_source_ids:
+                return jsonify({
+                    "error": f"{_src.title()} isn't connected — can't resolve a "
+                             f"{_src.title()} link. Connect it in Settings, or search by name."
+                }), 400
+            clean_q, link_err = _resolve_link_track_query(_src, _tid)
+            if not clean_q:
+                return jsonify({
+                    "error": link_err or f"Couldn't resolve that {_src.title()} link."
+                }), 400
+            query = clean_q
+            source = _src
+            link_source, link_track_id = _src, _tid
 
         if source != 'all':
             if source not in valid_source_ids:
