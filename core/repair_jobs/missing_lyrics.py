@@ -114,8 +114,13 @@ class MissingLyricsJob(RepairJob):
             # Option A: only flag tracks LRClib actually has lyrics for. An
             # instrumental returns nothing here and is silently skipped (never
             # re-flagged on future scans).
+            # tracks.duration is stored in MILLISECONDS (schema) — LRClib's
+            # exact-match wants SECONDS, so convert (else exact-match never
+            # hits and it silently falls back to a fuzzier search).
             try:
-                duration_s = int(duration) if duration else None
+                duration_s = int(int(duration) / 1000) if duration else None
+                if duration_s is not None and duration_s <= 0:
+                    duration_s = None
             except (TypeError, ValueError):
                 duration_s = None
             try:
