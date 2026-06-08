@@ -1407,12 +1407,34 @@ class RepairWorker:
                               'mount (NFS/SMB/mergerfs) is read-write, then recreate the '
                               'container. (Database thumbnail was still updated.)'),
                     'art_result': art_result}
-        msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
-        if art_result.get('cover_written'):
-            msg += ' + wrote cover.jpg'
-        if embedded == 0 and not art_result.get('cover_written'):
-            # DB updated but nothing reached disk (e.g. permissions).
-            msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
+        skipped = art_result.get('skipped', 0)
+        failed = art_result.get('failed', 0)
+        cover_written = art_result.get('cover_written')
+
+        wrote_parts = []
+        if embedded:
+            wrote_parts.append(f'embedded into {embedded}/{len(resolved)} file(s)')
+        if cover_written:
+            wrote_parts.append('wrote cover.jpg')
+
+        if wrote_parts:
+            msg = 'Applied cover art: ' + ' + '.join(wrote_parts)
+        elif failed:
+            # Real per-file write failures that were NOT a read-only mount
+            # (genuine EROFS is handled above) — almost always file/folder
+            # permissions or a locked file.
+            msg = (f'Updated database thumbnail, but could not write art to '
+                   f'{failed} file(s) — check file/folder permissions')
+        elif skipped:
+            # Every file already had embedded art and no new cover.jpg was
+            # needed — nothing to do, NOT a failure. This is the case that made
+            # the old "(read-only?)" message fire on perfectly writable
+            # libraries (Boulder on Windows, Sokhi): the files were simply
+            # already arted, so embedded==0 and cover_written==False.
+            msg = f'Cover art already present on all {skipped} file(s) — database thumbnail updated'
+        else:
+            # No file art applied and nothing found to write.
+            msg = 'Updated database thumbnail (no file artwork was applied)'
         if artist_result is not None and artist_result.get('success'):
             msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
