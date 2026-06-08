@@ -1325,7 +1325,11 @@ class RepairWorker:
             artist_result = self._fix_artist_art(album_id, details)
 
         artwork_url = details.get('found_artwork_url')
-        if not artwork_url:
+        # sidecar_from_embedded: the album already has embedded art and just needs
+        # a cover.jpg sidecar — the apply writes it from the existing embedded art,
+        # so no API artwork_url is required (Sokhi #813).
+        sidecar_from_embedded = bool(details.get('sidecar_from_embedded'))
+        if not artwork_url and not sidecar_from_embedded:
             # 'both' but no album art — report the artist outcome if that ran.
             if artist_result is not None:
                 return artist_result

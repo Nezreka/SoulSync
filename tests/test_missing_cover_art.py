@@ -303,13 +303,14 @@ def test_scan_checks_disk_art_on_resolved_path(monkeypatch):
     checked = {}
     monkeypatch.setattr(mca, 'resolve_library_file_path',
                         lambda raw, **k: '/resolved/song.flac' if raw == '/plex/raw/song.flac' else None)
-    monkeypatch.setattr(mca, 'album_has_art_on_disk',
+    monkeypatch.setattr(mca, 'file_has_embedded_art',
                         lambda p: checked.update(path=p) or True)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)  # has cover.jpg too
 
     result = mca.MissingCoverArtJob().scan(context)
 
     assert checked.get('path') == '/resolved/song.flac'   # resolved, not raw
-    assert result.findings_created == 0                    # thumb + disk art → not flagged
+    assert result.findings_created == 0                    # embedded + cover.jpg → not flagged
 
 
 def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
@@ -320,7 +321,8 @@ def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
     context = _make_context(conn)
     monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
     called = []
-    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: called.append(p) or False)
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or False)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: called.append(d) or False)
 
     result = mca.MissingCoverArtJob().scan(context)
 
@@ -328,20 +330,38 @@ def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
     assert called == []                   # never checked art on a None path
 
 
-def test_local_album_with_file_art_not_flagged_despite_empty_thumb(monkeypatch):
-    # Boulder: every album flagged, but "everything has art". Local files HAVE
-    # embedded art; only the DB thumb_url cache is empty. That is NOT missing
-    # cover art — must not be flagged.
+def test_local_album_with_embedded_and_sidecar_not_flagged(monkeypatch):
+    # Has BOTH embedded art AND a cover.jpg — nothing missing, even with an
+    # empty DB thumb cache. (Boulder: don't flag albums that already have art.)
     conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))  # empty thumb
     _add_track(conn, '/music/Album/01.flac')
     context = _make_context(conn)
     monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
-    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: True)  # files have art
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)
 
     result = mca.MissingCoverArtJob().scan(context)
 
-    assert result.findings_created == 0   # has file art → not "missing"
+    assert result.findings_created == 0   # has both → not "missing"
     assert result.skipped == 1
+
+
+def test_embedded_art_but_no_cover_jpg_is_flagged(monkeypatch):
+    # Sokhi: files HAVE embedded art but no cover.jpg sidecar. With cover.jpg
+    # enabled (default), it's flagged so the filler writes the sidecar — even
+    # when the API finds NO art (the apply extracts the embedded art).
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)      # embedded present
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)  # but no cover.jpg
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())  # API finds nothing
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # flagged for the missing sidecar
+    assert context.findings[0]['details']['sidecar_from_embedded'] is True
 
 
 def test_local_album_without_file_art_still_flagged(monkeypatch):
@@ -351,7 +371,8 @@ def test_local_album_without_file_art_still_flagged(monkeypatch):
     _add_track(conn, '/music/Album/01.flac')
     context = _make_context(conn)
     monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
-    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: False)  # no art on disk
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: False)     # no embedded art
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)
     monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
     monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
 
