@@ -963,6 +963,7 @@ class RepairWorker:
             'orphan_file': self._fix_orphan_file,
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
+            'missing_lyrics': self._fix_missing_lyrics,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
@@ -1414,6 +1415,35 @@ class RepairWorker:
             msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 
+    def _fix_missing_lyrics(self, entity_type, entity_id, file_path, details):
+        """Apply a missing-lyrics finding: fetch + write the .lrc sidecar and
+        embed the lyrics, via the same LyricsClient the import pipeline uses."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        try:
+            from core.lyrics_client import lyrics_client
+            duration = details.get('duration')
+            ok = lyrics_client.create_lrc_file(
+                resolved,
+                details.get('track_title') or '',
+                details.get('artist') or '',
+                album_name=details.get('album_title'),
+                duration_seconds=int(duration) if duration else None,
+            )
+        except Exception as e:
+            logger.error("Lyrics fix failed for %s: %s", os.path.basename(raw_path), e)
+            return {'success': False, 'error': str(e)}
+        if not ok:
+            # Lyrics vanished between scan and apply (rare) — report, don't crash.
+            return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
+        return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
+
     def _fix_library_retag(self, entity_type, entity_id, file_path, details):
         """Apply a library re-tag finding: write each track's planned tags in
         place (core.tag_writer.write_tags_to_file) + optionally embed/refresh
@@ -1439,9 +1469,10 @@ class RepairWorker:
 
         from core.repair_jobs.library_retag import apply_track_plans
         res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=(details.get('depth') == 'full'))
+                                full=(details.get('depth') == 'full'),
+                                lyrics_action=details.get('lyrics_action', False))
 
-        if res['written'] == 0 and not res['cover_written']:
+        if res['written'] == 0 and not res['cover_written'] and not res.get('lyrics_written'):
             return {'success': False,
                     'error': 'Nothing could be written — files unreachable or read-only?'}
         msg = f"Re-tagged {res['written']} track(s)"
@@ -3145,7 +3176,7 @@ class RepairWorker:
 
             # Build query for pending fixable findings
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
-                             'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
+                             'missing_cover_art', 'missing_lyrics', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',
