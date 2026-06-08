@@ -964,6 +964,7 @@ class RepairWorker:
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
+            'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
@@ -1444,6 +1445,21 @@ class RepairWorker:
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
+
+    def _fix_expired_download(self, entity_type, entity_id, file_path, details):
+        """Apply an expired-download finding: delete the file + library row +
+        history entry, via the same helper the cleaner's auto mode uses."""
+        from core.repair_jobs.expired_download_cleaner import delete_origin_download
+        entry = {'id': details.get('history_id') or entity_id,
+                 'file_path': details.get('file_path') or file_path}
+        if not entry['id']:
+            return {'success': False, 'error': 'No history id in finding'}
+        res = delete_origin_download(self.db, entry, self._config_manager)
+        if res.get('error'):
+            return {'success': False, 'action': 'deleted_expired',
+                    'error': f"Could not delete file: {res['error']}"}
+        verb = 'deleted file + entry' if res.get('file_deleted') else 'removed entry (file already gone)'
+        return {'success': True, 'action': 'deleted_expired', 'message': f'Expired download — {verb}'}
 
     def _fix_library_retag(self, entity_type, entity_id, file_path, details):
         """Apply a library re-tag finding: write each track's planned tags in
@@ -3179,7 +3195,7 @@ class RepairWorker:
 
             # Build query for pending fixable findings
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
-                             'missing_cover_art', 'missing_lyrics', 'metadata_gap', 'duplicate_tracks',
+                             'missing_cover_art', 'missing_lyrics', 'expired_download', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',
