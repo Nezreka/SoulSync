@@ -12478,6 +12478,30 @@ class MusicDatabase:
             logger.debug(f"Error adding library history entry: {e}")
             return False
 
+    def get_origin_cleanup_candidates(self):
+        """Origin-tracked downloads (watchlist/playlist) annotated with the
+        matching library track's play_count, for the Expired Download Cleaner.
+        play_count is 0 when no library track matches the recorded path
+        (orphan history row → treated as not-listened)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
+                       lh.file_path, lh.title, lh.artist_name,
+                       COALESCE(t.play_count, 0) AS play_count
+                FROM library_history lh
+                LEFT JOIN tracks t ON t.file_path = lh.file_path
+                WHERE lh.event_type = 'download'
+                  AND lh.origin IN ('watchlist', 'playlist')
+            """)
+            cols = ['id', 'origin', 'origin_context', 'created_at',
+                    'file_path', 'title', 'artist_name', 'play_count']
+            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"Error getting origin cleanup candidates: {e}")
+            return []
+
     def get_download_origin_entries(self, origin, limit=200, offset=0):
         """Downloads triggered by ``origin`` ('watchlist' / 'playlist'),
         newest first. Returns (entries, total_count)."""

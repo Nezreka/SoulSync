@@ -2734,7 +2734,7 @@ async function loadRepairFindings() {
             duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
-            missing_lyrics: 'Missing Lyrics',
+            missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
         };
 
@@ -2745,6 +2745,7 @@ async function loadRepairFindings() {
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
             missing_lyrics: 'Apply Lyrics',
+            expired_download: 'Delete',
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
             incomplete_album: 'Auto-Fill',
@@ -2762,6 +2763,7 @@ async function loadRepairFindings() {
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
                 applied_lyrics: 'Lyrics Applied',
+                deleted_expired: 'Deleted',
                 removed_duplicates: 'Duplicates Removed',
             };
             let statusBadge = '';
@@ -3134,6 +3136,13 @@ function _renderFindingDetail(f) {
             if (d.track_title) rows.push(['Track', d.track_title]);
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
+            return _gridRows(rows);
+
+        case 'expired_download':
+            if (d.title) rows.push(['Track', d.title]);
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.origin) rows.push(['Source', `${d.origin}${d.origin_context ? ' — ' + d.origin_context : ''}`]);
+            if (d.file_path) rows.push(['File', d.file_path.split(/[\\/]/).pop()]);
             return _gridRows(rows);
 
         case 'track_number_mismatch':
