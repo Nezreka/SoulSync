@@ -168,11 +168,20 @@ def apply_art_to_album_files(
 
     target_dir = folder or (os.path.dirname(paths[0]) if paths else None)
     if target_dir and os.path.isdir(target_dir):
+        # download_cover_art swallows its own write errors, so a read-only mount
+        # (EROFS) on the cover.jpg sidecar would otherwise go undetected here —
+        # the exact gap that left cover-only albums reporting success on a
+        # read-only filesystem (Sokhi: tracks already had embedded art, so the
+        # embed loop above never tripped EROFS). Pass a capture dict and read
+        # the read-only flag it sets back.
+        cover_ctx = context if isinstance(context, dict) else {}
         try:
-            download_cover_art(album_info, target_dir, context)
+            download_cover_art(album_info, target_dir, cover_ctx)
             result["cover_written"] = folder_has_cover_sidecar(target_dir)
         except Exception as exc:
             if getattr(exc, "errno", None) == errno.EROFS:
                 result["read_only_fs"] = True
             logger.warning("cover.jpg write failed for %s: %s", target_dir, exc)
+        if cover_ctx.get("_cover_read_only"):
+            result["read_only_fs"] = True
     return result

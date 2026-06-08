@@ -194,6 +194,27 @@ def test_apply_flags_erofs_from_actual_write(tmp_path, monkeypatch):
     assert res['failed'] == 2                 # first EROFS fails it + bails the rest
 
 
+def test_cover_only_read_only_is_detected(tmp_path, monkeypatch):
+    """The gap that left Sokhi stuck (#804): tracks already have art so the
+    embed loop is skipped, but the cover.jpg write hits a read-only mount.
+    download_cover_art swallows that EROFS onto the context — apply must still
+    surface read_only_fs (not report a silent success)."""
+    f = tmp_path / 'a.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=['pic'], tags={'ok': 1})  # already has art → embed skipped
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+
+    def _fake_download(album_info, target_dir, ctx):
+        # mimic download_cover_art's EROFS handling: record on context, swallow
+        if isinstance(ctx, dict):
+            ctx['_cover_read_only'] = True
+    monkeypatch.setattr(aa, 'download_cover_art', _fake_download)
+
+    res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+
+    assert res['embedded'] == 0 and res['skipped'] == 1   # nothing embedded
+    assert res['read_only_fs'] is True                    # but read-only surfaced
+
+
 def test_apply_normal_failure_not_flagged_read_only(tmp_path, monkeypatch):
     def _boom():
         raise PermissionError(13, 'Permission denied')

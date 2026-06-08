@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import time
@@ -566,4 +567,14 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
             handle.write(image_data)
         logger.info("Cover art downloaded to: %s", cover_path)
     except Exception as exc:
-        logger.error("Error downloading cover.jpg: %s", exc)
+        # A read-only mount (EROFS) is a "can't write" condition the caller
+        # needs to surface (cover-art filler #804/Tim/Sokhi) — but we must NOT
+        # re-raise (import callers aren't wrapped here). Record it on the
+        # context so callers that care can detect it, instead of just spamming
+        # the log with a swallowed error.
+        if getattr(exc, "errno", None) == errno.EROFS:
+            if isinstance(context, dict):
+                context["_cover_read_only"] = True
+            logger.warning("cover.jpg write blocked — read-only filesystem: %s", cover_path)
+        else:
+            logger.error("Error downloading cover.jpg: %s", exc)
