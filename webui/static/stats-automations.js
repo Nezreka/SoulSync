@@ -1678,6 +1678,12 @@ async function retryFailedMirroredDiscovery(urlHash) {
             state.phase = 'discovering';
             state.status = 'discovering';
             state.discovery_progress = 0;
+            // #815: stamp a baseline so the completion toast can report how many
+            // of these retried tracks were newly found (not just overall matched).
+            state._retryDiscovery = {
+                matchesBefore: state.spotify_matches || 0,
+                retryCount: data.retry_count,
+            };
         }
 
         // Update modal buttons to show discovering state

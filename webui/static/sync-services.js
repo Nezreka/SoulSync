@@ -9248,6 +9248,24 @@ async function startYouTubeDiscovery(urlHash) {
     }
 }
 
+// Discovery-complete toast. For a "Retry Failed" run (#815) it reports how many
+// of the retried tracks were newly found this attempt, instead of the generic
+// message — the baseline is stamped on the state by retryFailedMirroredDiscovery.
+function _discoveryCompleteToast(urlHash) {
+    const st = youtubePlaylistStates[urlHash];
+    const retry = st && st._retryDiscovery;
+    if (retry) {
+        const found = Math.max(0, (st.spotify_matches || 0) - (retry.matchesBefore || 0));
+        const stillFailed = Math.max(0, (retry.retryCount || 0) - found);
+        delete st._retryDiscovery;
+        let msg = `Retry complete: ${found} of ${retry.retryCount} newly found`;
+        if (stillFailed > 0) msg += `, ${stillFailed} still not found`;
+        showToast(msg, found > 0 ? 'success' : 'info');
+        return;
+    }
+    showToast('Discovery complete!', 'success');
+}
+
 function startYouTubeDiscoveryPolling(urlHash) {
     // Stop any existing polling
     if (activeYouTubePollers[urlHash]) {
@@ -9274,7 +9292,7 @@ function startYouTubeDiscoveryPolling(urlHash) {
                 if (st) st.phase = 'discovered';
                 updateYouTubeCardPhase(urlHash, 'discovered');
                 updateYouTubeModalButtons(urlHash, 'discovered');
-                showToast('Discovery complete!', 'success');
+                _discoveryCompleteToast(urlHash);
             }
         };
     }
@@ -9322,7 +9340,7 @@ function startYouTubeDiscoveryPolling(urlHash) {
                 updateYouTubeModalButtons(urlHash, 'discovered');
 
                 console.log('✅ Discovery complete:', urlHash);
-                showToast('Discovery complete!', 'success');
+                _discoveryCompleteToast(urlHash);
             }
 
         } catch (error) {

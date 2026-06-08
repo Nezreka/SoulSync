@@ -59389,7 +59389,11 @@ body.reduce-effects #page-particles-canvas {
 }
 
 .adl-batch-panel.collapsed .adl-batch-active,
-.adl-batch-panel.collapsed .adl-batch-history-section {
+.adl-batch-panel.collapsed .adl-batch-history-section,
+/* The active-batches summary line ("N batches · M downloading · …") is shown
+   via JS and was NOT hidden on collapse, so it overflowed the 44px rail as
+   clipped text (#814). Hide it with the rest of the panel body. */
+.adl-batch-panel.collapsed .adl-batch-summary {
     display: none;
 }
 
