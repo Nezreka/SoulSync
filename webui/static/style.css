@@ -2673,7 +2673,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .helper-first-launch-tip {
     position: fixed;
     bottom: 34px;
-    right: 84px;
+    /* Clear the ? float button (right:24 + 48 wide → left edge ~72px from the
+       right) AND its 8px pulse ring, with margin, so the tip never covers the
+       button (#817). Was 84px — only ~4px off the pulse ring, so they touched. */
+    right: 96px;
     padding: 8px 16px;
     background: rgba(16, 16, 16, 0.95);
     border: 1px solid rgba(var(--accent-rgb), 0.3);
@@ -61935,7 +61938,10 @@ body.reduce-effects .dash-card::after {
 }
 .dash-card:hover {
     border-color: rgba(var(--accent-rgb), 0.35);
-    transform: translateY(-3px);
+    /* No translateY lift: moving the card up on hover pulls its bottom edge off
+       the cursor when you hover that edge, which un-hovers → drops → re-hovers
+       in a rapid flicker loop (#816). The stronger shadow + glow below already
+       reads as "raised" without moving the hit box. */
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.40),
         0 4px 14px rgba(0, 0, 0, 0.22),
@@ -62137,7 +62143,9 @@ body.reduce-effects .dash-card::after {
 
 .qa-tile:hover,
 .qa-tile:focus-visible {
-    transform: translateY(-2px);
+    /* No translateY lift — see .dash-card:hover (#816 hover-flicker). overflow
+       is hidden here so a pseudo-element gap-buffer can't help; the glow/shadow
+       below carries the hover state. */
     border-color: rgba(var(--accent-rgb), 0.32);
     box-shadow:
         0 16px 40px rgba(0, 0, 0, 0.5),
@@ -62310,7 +62318,11 @@ body.reduce-effects .dash-card::after {
     align-items: center;
     justify-content: space-between;
     gap: clamp(4px, 0.5cqw, 8px);
-    opacity: 0.45;
+    /* The flow sits in the bottom row, directly behind the green "Open →" CTA —
+       at 0.45 the accent nodes/line competed with the CTA and read as clutter
+       (#816 "automations looks a bit strange"). Toned to a faint background
+       texture; it still brightens on hover. */
+    opacity: 0.22;
     transition: opacity 0.35s ease;
 }
 
