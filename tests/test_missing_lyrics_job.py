@@ -112,6 +112,23 @@ def test_scan_flags_only_tracks_with_available_lyrics(tmp_path, monkeypatch):
     assert findings[0]["details"]["track_title"] == "Song"   # the instrumental was skipped
 
 
+def test_scan_converts_duration_ms_to_seconds(tmp_path, monkeypatch):
+    # tracks.duration is milliseconds; LRClib wants seconds. The scan must
+    # convert before querying (215000ms → 215s) and store seconds in the finding.
+    t1 = tmp_path / "song.flac"; t1.write_bytes(b"x")
+    rows = [(1, "Song", "Artist", "Album", str(t1), 215000)]   # 215000 ms = 215 s
+    seen = {}
+    fake_client = SimpleNamespace(
+        api=object(),
+        has_remote_lyrics=lambda title, artist, album, dur: seen.update(dur=dur) or True)
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+
+    findings = []
+    MissingLyricsJob().scan(_ctx(_DB(rows), findings))
+    assert seen["dur"] == 215                       # converted to seconds
+    assert findings[0]["details"]["duration"] == 215
+
+
 def test_scan_skips_tracks_that_already_have_lrc(tmp_path, monkeypatch):
     t1 = tmp_path / "song.flac"; t1.write_bytes(b"x")
     (tmp_path / "song.lrc").write_text("[00:01]hi")   # already has lyrics
