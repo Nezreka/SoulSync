@@ -247,3 +247,70 @@ def test_filler_forces_cover_sidecar_write(tmp_path, monkeypatch):
     aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
 
     assert captured.get('force') is True
+
+
+# ── cover.jpg from embedded art (#813/Sokhi: files have art, no sidecar) ──
+
+def test_extract_embedded_art_flac(tmp_path, monkeypatch):
+    f = tmp_path / 'a.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[SimpleNamespace(data=b'IMGBYTES')], tags=None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    assert aa.extract_embedded_art(str(f)) == b'IMGBYTES'
+
+
+def test_extract_embedded_art_none_when_no_pictures(tmp_path, monkeypatch):
+    f = tmp_path / 'a.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[], tags=None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    assert aa.extract_embedded_art(str(f)) is None
+
+
+def test_apply_writes_cover_jpg_from_embedded_art(tmp_path, monkeypatch):
+    # Files already have embedded art, no cover.jpg → apply extracts it and
+    # writes the sidecar WITHOUT an API fetch (consistent + offline).
+    f = tmp_path / '01.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[SimpleNamespace(data=b'EMBEDDED')], tags=None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    dl_called = []
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: dl_called.append(1))
+
+    res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+
+    assert (tmp_path / 'cover.jpg').read_bytes() == b'EMBEDDED'
+    assert res['cover_written'] is True
+    assert dl_called == []          # used embedded art — no API call
+
+
+def test_apply_falls_back_to_download_when_no_embedded(tmp_path, monkeypatch):
+    # No embedded art to extract → fetch the sidecar via download_cover_art.
+    f = tmp_path / '01.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[], tags=None, add_tags=lambda: None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    dl_called = []
+
+    def fake_dl(album_info, target, ctx=None, **k):
+        dl_called.append(1)
+        open(f"{target}/cover.jpg", 'wb').close()
+    monkeypatch.setattr(aa, 'download_cover_art', fake_dl)
+
+    res = aa.apply_art_to_album_files([str(f)], {'album_art_url': 'http://x/y.jpg'},
+                                      {'album_name': 'B'}, folder=str(tmp_path))
+    assert dl_called == [1]          # no embedded art → API fetch
+    assert res['cover_written'] is True
+
+
+def test_apply_skips_cover_when_sidecar_exists(tmp_path, monkeypatch):
+    # cover.jpg already present → don't extract or download.
+    (tmp_path / 'cover.jpg').write_bytes(b'EXISTING')
+    f = tmp_path / '01.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[SimpleNamespace(data=b'X')], tags=None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    dl_called = []
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: dl_called.append(1))
+
+    aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+    assert (tmp_path / 'cover.jpg').read_bytes() == b'EXISTING'   # untouched
+    assert dl_called == []

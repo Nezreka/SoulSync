@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
-from typing import Iterable
+from typing import Iterable, Optional
 
 from core.metadata.artwork import download_cover_art, embed_album_art_metadata
 from core.metadata.common import get_mutagen_symbols
@@ -79,6 +79,38 @@ def _audio_has_art(audio, symbols) -> bool:
         if "metadata_block_picture" in tags:
             return True
     return False
+
+
+def extract_embedded_art(file_path: str) -> Optional[bytes]:
+    """Return the first embedded cover-art image bytes from an audio file, or
+    None. Used to write a cover.jpg sidecar from the album's OWN art — no API
+    call, and the sidecar matches what's embedded (#813/Sokhi)."""
+    if not file_path or not os.path.isfile(file_path):
+        return None
+    symbols = get_mutagen_symbols()
+    if not symbols:
+        return None
+    try:
+        audio = symbols.File(file_path)
+        if audio is None:
+            return None
+        pics = getattr(audio, "pictures", None)   # FLAC / Ogg
+        if pics:
+            return bytes(pics[0].data)
+        if isinstance(audio, symbols.MP4):
+            covr = audio.get("covr")
+            if covr:
+                return bytes(covr[0])
+        tags = getattr(audio, "tags", None)
+        if tags is not None:
+            with contextlib.suppress(Exception):
+                if isinstance(tags, symbols.ID3):
+                    apics = tags.getall("APIC")
+                    if apics:
+                        return bytes(apics[0].data)
+    except Exception as exc:
+        logger.debug("embedded-art extract failed for %s: %s", file_path, exc)
+    return None
 
 
 def album_has_art_on_disk(rep_file_path: str) -> bool:
@@ -167,24 +199,41 @@ def apply_art_to_album_files(
             result["failed"] += 1
 
     target_dir = folder or (os.path.dirname(paths[0]) if paths else None)
-    if target_dir and os.path.isdir(target_dir):
-        # download_cover_art swallows its own write errors, so a read-only mount
-        # (EROFS) on the cover.jpg sidecar would otherwise go undetected here —
-        # the exact gap that left cover-only albums reporting success on a
-        # read-only filesystem (Sokhi: tracks already had embedded art, so the
-        # embed loop above never tripped EROFS). Pass a capture dict and read
-        # the read-only flag it sets back.
-        cover_ctx = context if isinstance(context, dict) else {}
-        try:
-            # force=True: the Cover Art Filler always writes the cover.jpg sidecar,
-            # regardless of the import-time "Download cover.jpg" toggle — running
-            # the art filler is an explicit request for the complete art (Sokhi).
-            download_cover_art(album_info, target_dir, cover_ctx, force=True)
-            result["cover_written"] = folder_has_cover_sidecar(target_dir)
-        except Exception as exc:
-            if getattr(exc, "errno", None) == errno.EROFS:
+    if target_dir and os.path.isdir(target_dir) and not folder_has_cover_sidecar(target_dir):
+        # Prefer the album's OWN embedded art for the cover.jpg sidecar: it's
+        # always present once the files are arted (we may have just embedded it),
+        # needs no API call, and the sidecar matches the files exactly
+        # (#813/Sokhi: files have art, just no cover.jpg). Fall back to a fresh
+        # download only when there's nothing embedded to extract.
+        cover_path = os.path.join(target_dir, "cover.jpg")
+        art_bytes = None
+        for fp in paths:
+            art_bytes = extract_embedded_art(fp)
+            if art_bytes:
+                break
+        if art_bytes:
+            try:
+                with open(cover_path, "wb") as handle:
+                    handle.write(art_bytes)
+                result["cover_written"] = True
+            except OSError as exc:
+                if getattr(exc, "errno", None) == errno.EROFS:
+                    result["read_only_fs"] = True
+                logger.warning("cover.jpg sidecar write failed for %s: %s", target_dir, exc)
+
+        if not result["cover_written"] and not result["read_only_fs"]:
+            # No embedded art to extract → fetch it. download_cover_art swallows
+            # its own write errors, so it records read-only on the context dict
+            # (EROFS detection gap, Sokhi). force=True bypasses the import-time
+            # "Download cover.jpg" toggle — running the filler is an explicit ask.
+            cover_ctx = context if isinstance(context, dict) else {}
+            try:
+                download_cover_art(album_info, target_dir, cover_ctx, force=True)
+                result["cover_written"] = folder_has_cover_sidecar(target_dir)
+            except Exception as exc:
+                if getattr(exc, "errno", None) == errno.EROFS:
+                    result["read_only_fs"] = True
+                logger.warning("cover.jpg write failed for %s: %s", target_dir, exc)
+            if cover_ctx.get("_cover_read_only"):
                 result["read_only_fs"] = True
-            logger.warning("cover.jpg write failed for %s: %s", target_dir, exc)
-        if cover_ctx.get("_cover_read_only"):
-            result["read_only_fs"] = True
     return result
