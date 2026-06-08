@@ -109,7 +109,7 @@ def test_apply_embeds_into_each_file_and_writes_cover(tmp_path, monkeypatch):
     monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda a, m: embed_calls.append(m) or True)
     # download_cover_art is the standard cover.jpg writer — stub it to drop one.
     monkeypatch.setattr(aa, 'download_cover_art',
-                        lambda album_info, folder, ctx=None: open(f"{folder}/cover.jpg", 'wb').close())
+                        lambda album_info, folder, ctx=None, **k: open(f"{folder}/cover.jpg", 'wb').close())
 
     meta = {'artist': 'A', 'album': 'B', 'album_art_url': 'http://x/y.jpg'}
     res = aa.apply_art_to_album_files([str(f1), str(f2)], meta, {'album_name': 'B'}, folder=str(tmp_path))
@@ -203,7 +203,7 @@ def test_cover_only_read_only_is_detected(tmp_path, monkeypatch):
     audio = SimpleNamespace(pictures=['pic'], tags={'ok': 1})  # already has art → embed skipped
     monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
 
-    def _fake_download(album_info, target_dir, ctx):
+    def _fake_download(album_info, target_dir, ctx, **k):
         # mimic download_cover_art's EROFS handling: record on context, swallow
         if isinstance(ctx, dict):
             ctx['_cover_read_only'] = True
@@ -231,3 +231,19 @@ def test_apply_normal_failure_not_flagged_read_only(tmp_path, monkeypatch):
     assert res['failed'] == 1
 
 
+
+
+def test_filler_forces_cover_sidecar_write(tmp_path, monkeypatch):
+    # The Cover Art Filler must write cover.jpg regardless of the import-time
+    # "Download cover.jpg" toggle — so apply passes force=True (Sokhi).
+    f = tmp_path / 'a.mp3'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[], tags={'ok': 1}, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    captured = {}
+    monkeypatch.setattr(aa, 'download_cover_art',
+                        lambda album_info, target_dir, ctx, **k: captured.update(k))
+
+    aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+
+    assert captured.get('force') is True
