@@ -150,31 +150,36 @@ def test_apply_counts_failures_without_raising(tmp_path, monkeypatch):
 # ── read-only filesystem detection (Tim: docker ':ro' mount, Errno 30) ──
 
 
-def test_apply_short_circuits_on_read_only_mount(tmp_path, monkeypatch):
-    """statvfs says the mount is RO -> bail before touching any file, flag
-    read_only_fs so the caller can name the actual cure (remove ':ro')."""
+def test_apply_does_not_trust_statvfs_writable_fs_succeeds(tmp_path, monkeypatch):
+    """Regression (Sokhi): a WRITABLE union/FUSE/NFS mount can misreport
+    ST_RDONLY in statvfs. The apply must NOT use statvfs — it writes anyway,
+    and only the actual write decides. Here the embed succeeds even though
+    statvfs (if it were consulted) would claim read-only."""
     f = tmp_path / 'a.mp3'
     f.write_bytes(b'')
-    audio = SimpleNamespace(pictures=[], tags=None)
+    saved = []
+    audio = SimpleNamespace(pictures=[], tags=None, add_tags=lambda: None,
+                            save=lambda: saved.append(True))
     monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
+    # Even if statvfs lies and says read-only, the write still happens.
     monkeypatch.setattr(aa.os, 'statvfs',
-                        lambda p: SimpleNamespace(f_flag=aa.os.ST_RDONLY))
-    called = []
-    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: called.append(a))
+                        lambda p: SimpleNamespace(f_flag=getattr(aa.os, 'ST_RDONLY', 1)),
+                        raising=False)
 
     res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
 
-    assert res['read_only_fs'] is True
-    assert res['embedded'] == 0 and res['failed'] == 1
-    assert called == []                      # cover.jpg write never attempted
+    assert res['embedded'] == 1 and saved == [True]
+    assert res['read_only_fs'] is False      # statvfs ignored; write succeeded
 
 
-def test_apply_flags_erofs_from_save(tmp_path, monkeypatch):
-    """statvfs passes (overlay quirk) but the save itself raises EROFS ->
-    per-file detection still sets read_only_fs."""
+def test_apply_flags_erofs_from_actual_write(tmp_path, monkeypatch):
+    """read-only is detected from a real EROFS on write (the only honest test),
+    and it fast-fails the remaining files."""
     import errno as _errno
-    f = tmp_path / 'a.mp3'
-    f.write_bytes(b'')
+    f1 = tmp_path / 'a.mp3'; f1.write_bytes(b'')
+    f2 = tmp_path / 'b.mp3'; f2.write_bytes(b'')
 
     def _boom():
         raise OSError(_errno.EROFS, 'Read-only file system')
@@ -183,10 +188,10 @@ def test_apply_flags_erofs_from_save(tmp_path, monkeypatch):
     monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
     monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
 
-    res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
+    res = aa.apply_art_to_album_files([str(f1), str(f2)], {}, {}, folder=str(tmp_path))
 
     assert res['read_only_fs'] is True
-    assert res['failed'] == 1
+    assert res['failed'] == 2                 # first EROFS fails it + bails the rest
 
 
 def test_apply_normal_failure_not_flagged_read_only(tmp_path, monkeypatch):
@@ -205,20 +210,3 @@ def test_apply_normal_failure_not_flagged_read_only(tmp_path, monkeypatch):
     assert res['failed'] == 1
 
 
-def test_apply_works_without_statvfs_windows(tmp_path, monkeypatch):
-    """Windows has no os.statvfs — the pre-flight must vanish gracefully,
-    not crash the apply (Boulder runs on Windows)."""
-    f = tmp_path / 'a.mp3'
-    f.write_bytes(b'')
-    saved = []
-    audio = SimpleNamespace(pictures=[], tags=None, add_tags=lambda: None,
-                            save=lambda: saved.append(True))
-    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
-    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
-    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
-    monkeypatch.delattr(aa.os, 'statvfs', raising=False)
-
-    res = aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
-
-    assert res['embedded'] == 1 and saved == [True]
-    assert res['read_only_fs'] is False
