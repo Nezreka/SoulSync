@@ -449,3 +449,53 @@ def test_resolve_get_album_returning_none_yields_not_found():
     )
     assert res['available'] is False
     assert res['albums'] == []
+
+
+# ── Discogs (#813 — extend paste-link to Discogs) ──────────────────────────
+
+def test_parse_discogs_release_url_strips_slug():
+    out = by_id.parse_metadata_identifier(
+        'https://www.discogs.com/release/678910-Some-Album-Title')
+    assert out == [by_id.LookupTarget('discogs', 'album', '678910')]
+
+
+def test_parse_discogs_master_url_is_album():
+    out = by_id.parse_metadata_identifier(
+        'https://www.discogs.com/master/555-A-Master')
+    assert out == [by_id.LookupTarget('discogs', 'album', '555')]
+
+
+def test_parse_discogs_artist_url():
+    out = by_id.parse_metadata_identifier(
+        'https://www.discogs.com/artist/12345-Some-Artist')
+    assert out == [by_id.LookupTarget('discogs', 'artist', '12345')]
+
+
+def test_parse_discogs_url_no_scheme():
+    out = by_id.parse_metadata_identifier('discogs.com/release/999-X')
+    assert out == [by_id.LookupTarget('discogs', 'album', '999')]
+
+
+def test_resolve_discogs_release_uses_get_album_with_numeric_id():
+    client = _FakeClient(album={'id': '678910', 'name': 'Some Album',
+                                'artists': [{'name': 'Some Artist'}]})
+    res = by_id.resolve_identifier(
+        'https://www.discogs.com/release/678910-Some-Album-Title', deps=None,
+        client_resolver=_resolver_from({'discogs': client}))
+    assert res['available'] is True and res['source'] == 'discogs'
+    assert res['albums'] and res['albums'][0]['name'] == 'Some Album'
+    assert client.album_calls == ['678910']      # numeric id, slug stripped
+
+
+def test_resolve_discogs_artist():
+    client = _FakeClient(artist={'id': '12345', 'name': 'Some Artist'})
+    res = by_id.resolve_identifier(
+        'https://www.discogs.com/artist/12345-Some-Artist', deps=None,
+        client_resolver=_resolver_from({'discogs': client}))
+    assert res['available'] is True and res['source'] == 'discogs'
+    assert res['artists'] and res['artists'][0]['name'] == 'Some Artist'
+    assert client.artist_calls == ['12345']
+
+
+def test_discogs_in_supported_sources():
+    assert 'discogs' in by_id.SUPPORTED_SOURCES
