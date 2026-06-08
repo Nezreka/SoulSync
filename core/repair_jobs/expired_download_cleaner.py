@@ -69,12 +69,13 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'fewer than the keep-threshold (default: played more than once is kept). '
         'It only touches downloads recorded from the Download Origins feature '
         'forward — never your pre-existing or manually-added library.\n\n'
-        'By default it creates findings for you to review and delete. Set '
-        'Auto-delete to true for hands-off cleanup.\n\n'
+        'Dry run is ON by default: it only creates findings for you to review '
+        'and delete — nothing is deleted automatically. Turn Dry run OFF for '
+        'hands-off auto-cleanup.\n\n'
         'Settings:\n'
         '- Watchlist retention / Playlist retention: off, or a window\n'
         '- Keep if played at least: play count that protects a track (default 2)\n'
-        '- Auto-delete: delete automatically instead of creating findings'
+        '- Dry run: ON = findings only (default); OFF = delete automatically'
     )
     icon = 'repair-icon-cleanup'
     default_enabled = False
@@ -83,12 +84,12 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'watchlist_retention': 'off',
         'playlist_retention': 'off',
         'keep_if_played_at_least': 2,
-        'auto_delete': False,
+        'dry_run': True,
     }
     setting_options = {
         'watchlist_retention': RETENTION_OPTIONS,
         'playlist_retention': RETENTION_OPTIONS,
-        'auto_delete': [False, True],
+        'dry_run': [True, False],
     }
     auto_fix = False
 
@@ -110,7 +111,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
             min_plays = int(settings.get('keep_if_played_at_least', 2))
         except (TypeError, ValueError):
             min_plays = 2
-        auto_delete = bool(settings.get('auto_delete', False))
+        dry_run = bool(settings.get('dry_run', True))
 
         candidates = context.db.get_origin_cleanup_candidates()
         if not candidates:
@@ -150,7 +151,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
         for i, entry in enumerate(expired):
             if context.check_stop():
                 return result
-            if auto_delete:
+            if not dry_run:
                 try:
                     res = delete_origin_download(context.db, entry, context.config_manager)
                     if res.get('removed') or res.get('file_deleted'):
@@ -191,7 +192,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
 
         logger.info("[Expired Cleaner] %d candidates, %d expired (%s)",
                     len(candidates), len(expired),
-                    "auto-deleted" if auto_delete else "findings created")
+                    "findings created (dry run)" if dry_run else "auto-deleted")
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
