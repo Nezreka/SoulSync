@@ -769,6 +769,29 @@
   margin-top: 2px;
 }
 
+/* Per-file rejection reasons (quarantine / integrity / match failures) so the
+   "why" shows in the window, not just in the log (#804). */
+.importPageQueueErrors {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.importPageQueueErrors li {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.08);
+  border-left: 2px solid rgba(255, 107, 107, 0.5);
+  padding: 2px 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .importPageQueueProgress {
   width: 120px;
   flex-shrink: 0;
