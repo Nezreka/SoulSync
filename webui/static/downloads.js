@@ -3127,8 +3127,8 @@ function _renderCandidatesModal(data) {
                 <input type="text"
                        class="candidates-manual-search-input"
                        id="candidates-manual-search-input"
-                       placeholder="Search for a different track..."
-                       maxlength="200" />
+                       placeholder="Search, or paste a Tidal / Qobuz track link..."
+                       maxlength="300" />
                 ${sourceControl}
                 <button class="candidates-manual-search-btn"
                         id="candidates-manual-search-btn"

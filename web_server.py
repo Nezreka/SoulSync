@@ -7083,6 +7083,28 @@ def download_selected_candidate(task_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _resolve_link_track_query(source: str, track_id: str):
+    """Resolve a pasted (source, track_id) to a clean "artist title" search
+    query via the source client's get_track (#813). Returns (query, None) or
+    (None, error). Used so a pasted Tidal/Qobuz link runs the source's normal
+    search (proven-downloadable candidates) instead of a hand-built one."""
+    from core.downloads.track_link import query_from_track_payload
+    client = download_orchestrator.client(source) if download_orchestrator else None
+    if not client or not hasattr(client, 'get_track'):
+        return None, f"{source.title()} is not connected"
+    try:
+        raw = client.get_track(track_id)
+    except Exception as e:
+        return None, f"Could not resolve {source.title()} track: {e}"
+    if not raw:
+        return None, f"{source.title()} track {track_id} not found"
+
+    query = query_from_track_payload(source, raw)
+    if not query:
+        return None, f"Could not read the track title from {source.title()}"
+    return query, None
+
+
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
 def manual_search_for_task(task_id):
     """Run a user-driven search against one (or all) configured download
@@ -7121,6 +7143,26 @@ def manual_search_for_task(task_id):
 
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
+
+        # Pasted streaming-source track link (#813): resolve it to a clean
+        # "artist title" query and search ONLY that source, then bubble the
+        # exact track to the top. Falls back to a normal text search if the
+        # source isn't connected or the link can't be resolved — so the user is
+        # never worse off than typing the query themselves.
+        from core.downloads.track_link import parse_download_track_link
+        link = parse_download_track_link(query)
+        link_source = None
+        link_track_id = None
+        if link:
+            _src, _tid = link
+            if _src in valid_source_ids:
+                clean_q, link_err = _resolve_link_track_query(_src, _tid)
+                if clean_q:
+                    query = clean_q
+                    source = _src
+                    link_source, link_track_id = _src, _tid
+                else:
+                    logger.info(f"[Manual Search] link resolve fell back: {link_err}")
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -7181,6 +7223,13 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
+                    # Pasted-link exact match: bubble the track whose id matches
+                    # the link to the top so the user sees the exact version
+                    # first (graceful no-op if ids don't line up).
+                    if src_name == link_source and link_track_id and tracks:
+                        tracks = sorted(
+                            tracks,
+                            key=lambda t: str(getattr(t, 'id', '')) != str(link_track_id))
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
