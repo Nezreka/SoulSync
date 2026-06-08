@@ -326,3 +326,46 @@ def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
 
     assert result.findings_created == 0   # thumb present, disk unknown → not flagged
     assert called == []                   # never checked art on a None path
+
+
+def test_local_album_with_file_art_not_flagged_despite_empty_thumb(monkeypatch):
+    # Boulder: every album flagged, but "everything has art". Local files HAVE
+    # embedded art; only the DB thumb_url cache is empty. That is NOT missing
+    # cover art — must not be flagged.
+    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))  # empty thumb
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: True)  # files have art
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # has file art → not "missing"
+    assert result.skipped == 1
+
+
+def test_local_album_without_file_art_still_flagged(monkeypatch):
+    # Local album whose files genuinely lack art → still flagged (real case).
+    # Give it a source id + findable art so a finding is created when flagged.
+    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: False)  # no art on disk
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # files lack art → flagged
+
+
+def test_media_server_only_album_empty_thumb_still_flagged(monkeypatch):
+    # No local files (media-server-only) + empty thumb → DB thumb is the only
+    # art, so still flag it.
+    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))  # no track added
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # media-server-only + empty thumb → flagged
