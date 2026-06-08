@@ -470,9 +470,17 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         return False
 
 
-def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
+def download_cover_art(album_info: dict, target_dir: str, context: dict = None, force: bool = False):
+    """Write cover.jpg into ``target_dir``.
+
+    ``force`` bypasses the import-time "Download cover.jpg to album folder"
+    toggle — used by the Cover Art Filler, whose whole job is to add cover art
+    (if you explicitly run the filler you want the sidecar regardless of the
+    auto-import preference). The import pipeline calls this WITHOUT force, so it
+    still honors the user's setting.
+    """
     cfg = get_config_manager()
-    if cfg.get("metadata_enhancement.cover_art_download", True) is False:
+    if not force and cfg.get("metadata_enhancement.cover_art_download", True) is False:
         return
 
     try:

@@ -176,7 +176,10 @@ def apply_art_to_album_files(
         # the read-only flag it sets back.
         cover_ctx = context if isinstance(context, dict) else {}
         try:
-            download_cover_art(album_info, target_dir, cover_ctx)
+            # force=True: the Cover Art Filler always writes the cover.jpg sidecar,
+            # regardless of the import-time "Download cover.jpg" toggle — running
+            # the art filler is an explicit request for the complete art (Sokhi).
+            download_cover_art(album_info, target_dir, cover_ctx, force=True)
             result["cover_written"] = folder_has_cover_sidecar(target_dir)
         except Exception as exc:
             if getattr(exc, "errno", None) == errno.EROFS:
