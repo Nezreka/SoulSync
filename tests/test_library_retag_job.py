@@ -392,4 +392,5 @@ def test_apply_art_only_plan_skips_when_cover_download_fails(tmp_path, monkeypat
         cover_action='replace', cover_url='http://art/cover.jpg',
     )
 
-    assert res == {'written': 0, 'failed': 0, 'skipped': 1, 'cover_written': False}
+    assert res == {'written': 0, 'failed': 0, 'skipped': 1, 'cover_written': False,
+                   'lyrics_written': 0}

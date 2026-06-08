@@ -28,6 +28,44 @@ class LyricsClient:
             logger.error(f"Error initializing LRClib API: {e}")
             self.api = None
 
+    def _fetch_remote_lyrics(self, track_name: str, artist_name: str,
+                             album_name: str = None, duration_seconds: int = None):
+        """LRClib fetch — exact match (with duration) then search fallback.
+        Returns the lyrics_data object or None. Shared by create_lrc_file and
+        has_remote_lyrics so the fetch strategy lives in one place."""
+        if not self.api:
+            return None
+        lyrics_data = None
+        # Strategy 1: Exact match with duration (most accurate)
+        if duration_seconds and album_name:
+            try:
+                lyrics_data = self.api.get_lyrics(
+                    track_name=track_name, artist_name=artist_name,
+                    album_name=album_name, duration=duration_seconds)
+            except Exception as e:
+                logger.debug(f"Exact match failed: {e}")
+        # Strategy 2: Search without duration
+        if not lyrics_data:
+            try:
+                search_results = self.api.search_lyrics(
+                    track_name=track_name, artist_name=artist_name)
+                if search_results:
+                    lyrics_data = search_results[0]
+            except Exception as e:
+                logger.debug(f"Search fallback failed: {e}")
+        return lyrics_data
+
+    def has_remote_lyrics(self, track_name: str, artist_name: str,
+                          album_name: str = None, duration_seconds: int = None) -> bool:
+        """True if LRClib has (synced OR plain) lyrics for this track, without
+        writing anything. Powers the Missing Lyrics maintenance job's scan so
+        it only surfaces tracks that are actually fixable (instrumentals return
+        nothing → never flagged)."""
+        data = self._fetch_remote_lyrics(track_name, artist_name, album_name, duration_seconds)
+        if not data:
+            return False
+        return bool(getattr(data, 'synced_lyrics', None) or getattr(data, 'plain_lyrics', None))
+
     def create_lrc_file(self, audio_file_path: str, track_name: str, artist_name: str,
                        album_name: str = None, duration_seconds: int = None) -> bool:
         """
@@ -79,37 +117,8 @@ class LyricsClient:
 
             # Fetch lyrics from LRClib
             logger.debug(f"Fetching lyrics for: {artist_name} - {track_name}")
-
-            lyrics_data = None
-
-            # Strategy 1: Exact match with duration (most accurate)
-            if duration_seconds and album_name:
-                try:
-                    logger.debug(f"Trying exact match: {track_name} by {artist_name} from {album_name} ({duration_seconds}s)")
-                    lyrics_data = self.api.get_lyrics(
-                        track_name=track_name,
-                        artist_name=artist_name,
-                        album_name=album_name,
-                        duration=duration_seconds
-                    )
-                    if lyrics_data:
-                        logger.debug("Exact match found!")
-                except Exception as e:
-                    logger.debug(f"Exact match failed: {e}")
-
-            # Strategy 2: Search without duration
-            if not lyrics_data:
-                try:
-                    logger.debug(f"Trying search: {track_name} by {artist_name}")
-                    search_results = self.api.search_lyrics(
-                        track_name=track_name,
-                        artist_name=artist_name
-                    )
-                    if search_results:
-                        lyrics_data = search_results[0]  # Take first result
-                        logger.debug(f"Search found {len(search_results)} results, using first")
-                except Exception as e:
-                    logger.debug(f"Search fallback failed: {e}")
+            lyrics_data = self._fetch_remote_lyrics(
+                track_name, artist_name, album_name, duration_seconds)
 
             # No lyrics found
             if not lyrics_data:

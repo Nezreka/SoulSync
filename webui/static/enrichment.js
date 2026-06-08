@@ -2734,6 +2734,7 @@ async function loadRepairFindings() {
             duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
+            missing_lyrics: 'Missing Lyrics',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
         };
 
@@ -2743,6 +2744,7 @@ async function loadRepairFindings() {
             orphan_file: 'Resolve',
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
+            missing_lyrics: 'Apply Lyrics',
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
             incomplete_album: 'Auto-Fill',
@@ -2759,6 +2761,7 @@ async function loadRepairFindings() {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
+                applied_lyrics: 'Lyrics Applied',
                 removed_duplicates: 'Duplicates Removed',
             };
             let statusBadge = '';
@@ -3126,6 +3129,12 @@ function _renderFindingDetail(f) {
             }
             artHtml += _gridRows(rows);
             return artHtml;
+
+        case 'missing_lyrics':
+            if (d.track_title) rows.push(['Track', d.track_title]);
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album_title) rows.push(['Album', d.album_title]);
+            return _gridRows(rows);
 
         case 'track_number_mismatch':
             if (d.album_title) rows.push(['Album', d.album_title]);
