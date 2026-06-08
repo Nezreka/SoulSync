@@ -84,6 +84,26 @@ def resolve_duration_tolerance(value: Any) -> Optional[float]:
     return parsed
 
 
+def expected_duration_for_check(expected_ms: Any, is_local_import: bool) -> Optional[int]:
+    """The expected duration (ms) to run the duration-agreement leg against,
+    or None to skip that leg.
+
+    The duration check exists to catch BROKEN slskd TRANSFERS (truncated /
+    wrong-file downloads). A local/manual import is the user's own already-
+    tagged file being sorted, not a transfer — duration-agreeing it against a
+    re-resolved release is meaningless and produces false quarantines (#804:
+    Coldplay "Yellow" album file, 269s, false-rejected against a *single*
+    edition's 266s). So for local imports we skip the duration leg; the
+    size + mutagen-parse legs still run and catch genuinely broken files.
+    """
+    if is_local_import:
+        return None
+    try:
+        return int(expected_ms) or None
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class IntegrityResult:
     """Outcome of an integrity check.

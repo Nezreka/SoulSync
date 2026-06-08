@@ -32,7 +32,7 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.imports.file_integrity import check_audio_integrity, resolve_duration_tolerance
+from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
 from core.imports.quarantine import (
@@ -254,6 +254,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             _expected_duration_ms = int(_duration_track.get("duration_ms", 0) or 0) or None
         except Exception:
             _expected_duration_ms = None
+        # Local/manual imports are the user's own files, not slskd transfers —
+        # skip the duration-agreement leg (it would false-quarantine a file that
+        # drifts from a re-resolved release; #804). Size + parse legs still run.
+        _is_local_import = bool(context.get('is_local_import')) if isinstance(context, dict) else False
+        _expected_duration_ms = expected_duration_for_check(_expected_duration_ms, _is_local_import)
+        if _is_local_import and _expected_duration_ms is None:
+            logger.debug("[Integrity] Local import — duration-agreement leg skipped for %s", _basename)
 
         # User-configurable tolerance override. None = use built-in
         # auto-scaled defaults (3s normal / 5s for tracks >10min). Set
