@@ -104,11 +104,19 @@ def test_scan_protects_watched_artist():
     assert findings == []   # still watched → protected
 
 
-def test_scan_auto_delete_mode():
+def test_scan_dry_run_default_is_findings_only():
+    # No dry_run in settings → defaults to True → findings, never deletes.
+    db = _DB([_cand(1, created=OLD, path="/music/x.flac")])
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '2mo'}, findings))
+    assert res.findings_created == 1 and db.deleted_history == []   # nothing deleted
+
+
+def test_scan_auto_delete_when_dry_run_off():
     db = _DB([_cand(1, created=OLD, path="/music/x.flac")])
     findings = []
     res = ExpiredDownloadCleanerJob().scan(_ctx(
-        db, {'playlist_retention': '2mo', 'auto_delete': True}, findings))
+        db, {'playlist_retention': '2mo', 'dry_run': False}, findings))
     assert findings == []                       # no findings in auto mode
     assert res.auto_fixed == 1
     assert 1 in db.deleted_history             # history row removed
