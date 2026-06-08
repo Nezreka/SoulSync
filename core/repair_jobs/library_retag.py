@@ -126,19 +126,25 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
 
         # Lyrics: fetch/refresh the .lrc for this track (independent of tag write
         # success — a track with no tag changes may still be missing lyrics).
+        # Query metadata comes from the plan's READ-only lyrics_meta (never
+        # db_data, so nothing here can leak into a tag write). Falls back to
+        # db_data for plans that predate lyrics_meta.
         if _lyrics_client:
-            try:
-                dur = db_data.get('duration') or db_data.get('duration_seconds')
-                if lyrics_client_wrote := _lyrics_client.create_lrc_file(
-                    fp,
-                    db_data.get('title') or db_data.get('track_title') or '',
-                    db_data.get('artist') or db_data.get('artist_name') or '',
-                    album_name=db_data.get('album') or db_data.get('album_title'),
-                    duration_seconds=int(dur) if dur else None,
-                ):
-                    result['lyrics_written'] += 1
-            except Exception as e:
-                logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
+            lm = tp.get('lyrics_meta') or {}
+            title = lm.get('title') or db_data.get('title') or ''
+            artist = lm.get('artist') or db_data.get('artist') or ''
+            if title:
+                try:
+                    dur = lm.get('duration') or db_data.get('duration')
+                    wrote = _lyrics_client.create_lrc_file(
+                        fp, title, artist,
+                        album_name=lm.get('album') or db_data.get('album'),
+                        duration_seconds=int(dur) if dur else None,
+                    )
+                    if wrote:
+                        result['lyrics_written'] += 1
+                except Exception as e:
+                    logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
 
     if cover_action and cover_data and last_dir:
         try:
@@ -425,18 +431,22 @@ class LibraryRetagJob(RepairJob):
                 unmatched.append(lib['title'] or os.path.basename(lib['file_path']))
                 # No source match means no re-tag — but album cover art and/or
                 # lyrics still apply to the file, so those modes include an
-                # art/lyrics-only plan (empty db_data → apply writes no tags).
+                # art/lyrics-only plan (empty db_data → apply writes NO tags).
                 if cover_action or lyrics_action:
-                    track_plans.append({
+                    plan_row = {
                         'file_path': rp,
                         'track_id': lib['id'],
                         'title': lib['title'],
                         'changes': [],
-                        # Carry the library title/artist so lyrics fetch has a query
-                        # even when there's no source match to build db_data from.
-                        'db_data': ({'title': lib.get('title'), 'artist': artist_name}
-                                    if lyrics_action else {}),
-                    })
+                        'db_data': {},   # never write tags for an unmatched track
+                    }
+                    if lyrics_action:
+                        # READ-only metadata for the lyrics query — kept OUT of
+                        # db_data so it can never be written as tags.
+                        plan_row['lyrics_meta'] = {
+                            'title': lib.get('title'), 'artist': artist_name,
+                            'album': album_title}
+                    track_plans.append(plan_row)
                 continue
             current = _read_current_tags(rp)
             plan = plan_track(current, src, album_meta, mode=mode)
@@ -453,6 +463,11 @@ class LibraryRetagJob(RepairJob):
                     'changes': plan['changes'],
                     'db_data': db_data,
                 }
+                if lyrics_action:
+                    # READ-only lyrics query metadata (never written as tags).
+                    tp['lyrics_meta'] = {
+                        'title': lib.get('title'), 'artist': artist_name,
+                        'album': album_title}
                 if depth == 'full':
                     tp['full_meta'] = _build_full_meta(
                         db_data, src, album_title, artist_name, lib['title'])
