@@ -281,3 +281,48 @@ def test_result_matches_unit():
     # no artist on result → require exact title
     assert m({'title': 'Album'}, 'Album', 'Artist')
     assert not m({'title': 'Album Deluxe'}, 'Album', 'Artist')
+
+
+# ── disk-art check must run on the RESOLVED path (flags-every-album bug) ──
+
+def _add_track(conn, path):
+    conn.execute(
+        "INSERT INTO tracks (id, album_id, file_path, disc_number, track_number) "
+        "VALUES (1, 1, ?, 1, 1)", (path,))
+    conn.commit()
+
+
+def test_scan_checks_disk_art_on_resolved_path(monkeypatch):
+    # Album already has a DB thumb (db not missing) and a track whose DB path
+    # only resolves via mapping. The disk-art check must run on the RESOLVED
+    # path — checking the raw path would fail on path-mapped setups and flag
+    # the whole library while the apply (which resolves) finds art present.
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/plex/raw/song.flac')
+    context = _make_context(conn)
+    checked = {}
+    monkeypatch.setattr(mca, 'resolve_library_file_path',
+                        lambda raw, **k: '/resolved/song.flac' if raw == '/plex/raw/song.flac' else None)
+    monkeypatch.setattr(mca, 'album_has_art_on_disk',
+                        lambda p: checked.update(path=p) or True)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert checked.get('path') == '/resolved/song.flac'   # resolved, not raw
+    assert result.findings_created == 0                    # thumb + disk art → not flagged
+
+
+def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
+    # An unreachable file (resolve → None) must NOT be claimed as "missing disk
+    # art" — we can't know, so don't false-flag. (Album has a thumb already.)
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/gone/song.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
+    called = []
+    monkeypatch.setattr(mca, 'album_has_art_on_disk', lambda p: called.append(p) or False)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # thumb present, disk unknown → not flagged
+    assert called == []                   # never checked art on a None path
