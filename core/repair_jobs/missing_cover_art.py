@@ -4,6 +4,7 @@ import os
 import re
 
 from core.metadata.art_apply import album_has_art_on_disk
+from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -137,6 +138,8 @@ class MissingCoverArtJob(RepairJob):
             context.update_progress(0, total)
 
         logger.info("Found %d albums missing cover art", total)
+        download_folder = (context.config_manager.get('soulseek.download_path', '')
+                           if context.config_manager else None)
 
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
@@ -160,7 +163,20 @@ class MissingCoverArtJob(RepairJob):
             # Art can be missing in the DB (no thumb_url) and/or on disk (no
             # embedded art and no cover.jpg). Skip albums that already have both.
             db_missing = not (str(album_thumb).strip() if album_thumb else '')
-            disk_missing = bool(rep_path) and not album_has_art_on_disk(rep_path)
+            # Resolve the representative path the SAME way the apply does
+            # (_fix_missing_cover_art) before checking disk art. Checking the raw
+            # DB path would fail on any path-mapped setup (docker mounts, a
+            # Plex/SoulSync path mismatch) — the file isn't found, album art
+            # reads as "missing", and EVERY album gets flagged while the apply
+            # (which resolves) then finds the art already present. Unresolvable →
+            # treat as no-local-file (don't claim disk-missing).
+            resolved_rep = resolve_library_file_path(
+                rep_path,
+                transfer_folder=getattr(context, 'transfer_folder', None),
+                download_folder=download_folder,
+                config_manager=context.config_manager,
+            ) if rep_path else None
+            disk_missing = bool(resolved_rep) and not album_has_art_on_disk(resolved_rep)
             if not db_missing and not disk_missing:
                 result.skipped += 1
                 continue
