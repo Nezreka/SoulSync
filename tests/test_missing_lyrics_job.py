@@ -185,9 +185,29 @@ def test_apply_track_plans_lyrics_action(tmp_path, monkeypatch):
             seen.update(title=title) or True)
     monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
 
-    plans = [{"file_path": str(audio), "db_data": {"title": "Song", "artist": "Artist"}}]
+    plans = [{"file_path": str(audio), "db_data": {},
+              "lyrics_meta": {"title": "Song", "artist": "Artist", "album": "Album"}}]
     res = library_retag.apply_track_plans(plans, lyrics_action=True)
     assert res["lyrics_written"] == 1 and seen["title"] == "Song"
+
+
+def test_apply_track_plans_lyrics_never_writes_tags(tmp_path, monkeypatch):
+    # The lyrics query must come from lyrics_meta, NOT db_data — so an
+    # unmatched track (db_data={}) gets lyrics fetched but NO tags written.
+    from core.repair_jobs import library_retag
+    audio = tmp_path / "t.flac"; audio.write_bytes(b"x")
+    written = []
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda fp, db_data, **k: written.append(db_data) or {"success": True})
+    monkeypatch.setattr("core.lyrics_client.lyrics_client",
+                        SimpleNamespace(create_lrc_file=lambda *a, **k: True))
+
+    plans = [{"file_path": str(audio), "db_data": {},
+              "lyrics_meta": {"title": "Song", "artist": "Artist", "album": "Al"}}]
+    res = library_retag.apply_track_plans(plans, lyrics_action=True)
+    assert res["lyrics_written"] == 1
+    # write_tags_to_file was called with an EMPTY db_data — no title/artist leaked in.
+    assert written == [{}]
 
 
 def test_apply_track_plans_no_lyrics_when_disabled(tmp_path, monkeypatch):

@@ -1465,6 +1465,8 @@ class RepairWorker:
             plan = {'file_path': rp, 'db_data': t.get('db_data') or {}}
             if t.get('full_meta'):
                 plan['full_meta'] = t['full_meta']
+            if t.get('lyrics_meta'):
+                plan['lyrics_meta'] = t['lyrics_meta']   # read-only lyrics query metadata
             resolved_plans.append(plan)
 
         from core.repair_jobs.library_retag import apply_track_plans
