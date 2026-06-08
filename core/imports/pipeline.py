@@ -62,6 +62,7 @@ from core.runtime_state import (
 )
 from core.metadata.artwork import download_cover_art
 from core.metadata.common import wipe_source_tags
+from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.metadata.enrichment import enhance_file_metadata
 from core.imports.paths import (
     build_final_path_for_track,
@@ -590,7 +591,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except Exception as meta_err:
                 import traceback
                 pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-                wipe_source_tags(file_path)
+                if should_wipe_tags_on_enhancement_failure(has_clean_metadata):
+                    wipe_source_tags(file_path)
+                else:
+                    logger.warning(
+                        "[Metadata] Enhancement failed but import has clean/matched metadata — "
+                        "preserving the file's existing tags (not wiping): %s",
+                        os.path.basename(file_path))
 
             logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
             safe_move_file(file_path, final_path)
@@ -785,7 +792,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-            wipe_source_tags(file_path)
+            if should_wipe_tags_on_enhancement_failure(has_clean_metadata):
+                wipe_source_tags(file_path)
+            else:
+                logger.warning(
+                    "[Metadata] Enhancement failed but import has clean/matched metadata — "
+                    "preserving the file's existing tags (not wiping): %s",
+                    os.path.basename(file_path))
 
         _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
         if isinstance(_enhance_source_info, str):
