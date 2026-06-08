@@ -189,8 +189,13 @@ def test_missing_cover_art_uses_configured_art_sources(monkeypatch):
     result = mca.MissingCoverArtJob().scan(context)
 
     assert result.findings_created == 1
+    # ALBUM art came from the configured order — the album source-priority loop
+    # was skipped (if it had run, the URL would be the fake client's art).
     assert findings[0]['details']['found_artwork_url'] == 'https://configured/art.jpg'
-    assert consulted == []  # source-priority loop skipped when configured art wins
+    # Artist-art search (Pache711) is a SEPARATE lookup that does consult the
+    # sources; the fake client has no search_artists, so it finds nothing and
+    # no artist target is offered.
+    assert findings[0]['details']['found_artist_url'] is None
 
 
 def test_missing_cover_art_uses_primary_when_prefer_unset(monkeypatch):

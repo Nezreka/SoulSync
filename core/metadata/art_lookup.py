@@ -132,6 +132,18 @@ def _album_matches(req_artist, req_album, got_artist, got_album) -> bool:
         return False
     if not (ra <= ga or ga <= ra):
         return False
+    # Sokhi: the subset tolerance exists for '(Deluxe)'/'- Remastered'
+    # suffixes, but a NUMERIC difference is a different release, not a
+    # suffix. 'B小町 …CD Vol.4' normalizes to {b,tv,cd,vol,4} — a subset of
+    # Vol.4.5's {b,tv,cd,vol,4,5} — so volume 4 was hanging volume 4.5's
+    # cover. Any number present on only ONE side (volume, part, sequel,
+    # remaster year) rejects the match; the resolver then falls through to
+    # the next source / the download's own art, which is the designed cost
+    # of a false reject here. (Shared rule — the MusicBrainz release matcher
+    # applies the same guard so the MBID-keyed CAA path can't slip either.)
+    from core.text.title_match import numeric_tokens_differ
+    if numeric_tokens_differ(req_album, got_album):
+        return False
     ta, tg = _significant_tokens(req_artist), _significant_tokens(got_artist)
     if not ta:
         return True                      # requested artist unknown -> album match suffices

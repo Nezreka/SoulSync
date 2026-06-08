@@ -53,6 +53,18 @@
     let orbs = [];
     let sparks = [];             // particle emissions from active orbs
     let inflows = [];            // pulses traveling from active orbs into the hub
+    let ripples = [];            // impact rings where a pulse lands on the nucleus
+    const MAX_RIPPLES = 24;
+
+    // ── Sleep/wake ──
+    // With zero workers active (and no pulses in flight) for SLEEP_AFTER_MS,
+    // the system drowses: nucleus dims to embers, spokes fade, drift slows to
+    // a crawl. First sign of work snaps it awake (~0.3s) with a ripple bloom
+    // from the nucleus. The idle/busy contrast is what makes activity read.
+    const SLEEP_AFTER_MS = 75000;
+    let sleepLevel = 0;          // 0 awake .. 1 asleep (eased, never snaps)
+    let lastActivityAt = performance.now();
+    let wakeBurstDone = true;
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
@@ -103,6 +115,13 @@
                 homeX: 0, homeY: 0,
                 visible: true,
                 phase: Math.random() * Math.PI * 2,
+                // Pseudo-3D orbital depth: z oscillates -1 (behind the nucleus,
+                // smaller + dimmer) to +1 (in front, larger + brighter). Pure
+                // draw-time effect — the force physics stay 2D.
+                z: 0,
+                zPhase: Math.random() * Math.PI * 2,
+                zSpeed: 0.22 + Math.random() * 0.18,
+                kick: 0,              // excitement-kick energy (decays)
                 active: false,
                 statusSeen: false,    // has a real WS status arrived for this worker?
                 lastProcessed: 0,     // cumulative matched+not_found seen last update
@@ -117,7 +136,7 @@
         });
 
         computeHomes();
-        scatterOrbs();
+        centerOrbs();
 
         dashboardHeader.addEventListener('mouseenter', onMouseEnter);
         dashboardHeader.addEventListener('mouseleave', onMouseLeave);
@@ -137,15 +156,22 @@
         });
     }
 
-    function scatterOrbs() {
+    function centerOrbs() {
+        // Spawn the whole cluster dead-center and let the physics bloom it
+        // outward. Positions EVERY orb (visible or not): the old random
+        // scatter skipped not-yet-visible orbs, so on page load they all sat
+        // at the canvas origin and drifted in from the top-left corner.
         if (!canvas) return;
         const w = canvas.clientWidth || 600;
         const h = canvas.clientHeight || 80;
 
         orbs.forEach(orb => {
-            if (!orb.visible) return;
-            orb.x = ORB_RADIUS + Math.random() * (w - ORB_DIAMETER);
-            orb.y = ORB_RADIUS + Math.random() * (h - ORB_DIAMETER);
+            // A few px of jitter so the separation force can split the stack
+            // (it ignores pairs closer than 0.1px).
+            orb.x = w / 2 + (Math.random() - 0.5) * 6;
+            orb.y = h / 2 + (Math.random() - 0.5) * 6;
+            orb.vx = (Math.random() - 0.5) * 0.6;
+            orb.vy = (Math.random() - 0.5) * 0.6;
         });
     }
 
@@ -281,10 +307,63 @@
         });
     }
 
-    function updateInflows() {
+    function updateInflows(hub) {
         for (let i = inflows.length - 1; i >= 0; i--) {
-            inflows[i].t += inflows[i].speed;
-            if (inflows[i].t >= 1) inflows.splice(i, 1);
+            const p = inflows[i];
+            p.t += p.speed;
+            if (p.t >= 1) {
+                // The pulse lands: ripple + a couple of debris sparks at the
+                // contact point on the nucleus rim, so the hub visibly absorbs
+                // it instead of the dot just vanishing.
+                if (hub) {
+                    const dx = hub.x - p.orb.x, dy = hub.y - p.orb.y;
+                    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const ux = dx / d, uy = dy / d;
+                    const rim = ORB_RADIUS + 4;
+                    emitImpact(hub.x - ux * rim, hub.y - uy * rim, p.color, ux, uy);
+                }
+                inflows.splice(i, 1);
+            }
+        }
+    }
+
+    // ── Impact ripples (pulse → nucleus contact) ──
+
+    function emitImpact(x, y, color, dirX, dirY) {
+        if (ripples.length < MAX_RIPPLES) {
+            ripples.push({ x, y, color, age: 0, life: 26 + Math.random() * 8 });
+        }
+        // Two debris sparks splash back roughly the way the pulse came, fanned.
+        for (let i = 0; i < 2 && sparks.length < MAX_SPARKS; i++) {
+            const spread = (Math.random() - 0.5) * 1.6;
+            const cos = Math.cos(spread), sin = Math.sin(spread);
+            const rx = -(dirX * cos - dirY * sin);
+            const ry = -(dirX * sin + dirY * cos);
+            const speed = 0.5 + Math.random() * 0.7;
+            sparks.push({
+                x, y, vx: rx * speed, vy: ry * speed,
+                life: 0.8, decay: 0.03 + Math.random() * 0.02,
+                color, radius: 1 + Math.random() * 1.2,
+            });
+        }
+    }
+
+    function updateRipples() {
+        for (let i = ripples.length - 1; i >= 0; i--) {
+            if (++ripples[i].age >= ripples[i].life) ripples.splice(i, 1);
+        }
+    }
+
+    function drawRipples(ctx) {
+        for (const rp of ripples) {
+            if (rp.age < 0) continue;              // staggered (wake bloom)
+            const t = rp.age / rp.life;            // 0 → 1
+            const [r, g, b] = rp.color;
+            ctx.beginPath();
+            ctx.arc(rp.x, rp.y, 3 + t * 11, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(1 - t) * 0.45})`;
+            ctx.lineWidth = 1.5 * (1 - t) + 0.5;
+            ctx.stroke();
         }
     }
 
@@ -298,6 +377,22 @@
             const y = p.orb.y + (hub.y - p.orb.y) * e;
             const alpha = 0.55 * (1 - Math.abs(p.t - 0.5) * 0.6); // fade in/out at the ends
             const radius = 2.2;
+
+            // Comet tail — ghost positions at trailing t values. The path is
+            // parametric, so no position history is needed; the same easing
+            // evaluated slightly in the past gives a tail that stretches as
+            // the pulse accelerates into the hub.
+            for (let i = 3; i >= 1; i--) {
+                const tt = p.t - i * p.speed * 2.4;
+                if (tt <= 0) continue;
+                const te = tt * tt;
+                const tx = p.orb.x + (hub.x - p.orb.x) * te;
+                const ty = p.orb.y + (hub.y - p.orb.y) * te;
+                ctx.beginPath();
+                ctx.arc(tx, ty, Math.max(0.4, radius * (1 - i * 0.24)), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * (1 - i / 4) * 0.5})`;
+                ctx.fill();
+            }
 
             drawGlow(ctx, x, y, radius * 3, r, g, b, alpha * 0.5);
 
@@ -322,6 +417,10 @@
         canvas.style.opacity = '1';
         canvas.style.display = '';
         resizeCanvas();
+        // Dashboard (re)activation: the canvas just got its real size — init may
+        // have run while the header was hidden (0x0), leaving positions stale.
+        // Bloom the cluster from dead center instead of wherever that left them.
+        centerOrbs();
         startLoop();
     }
 
@@ -365,6 +464,7 @@
         resizeCanvas();
         computeHomes();
         inflows = [];   // drop in-flight pulses; positions are about to jump
+        ripples = [];
         orbs.forEach(orb => {
             orb.x = orb.homeX;
             orb.y = orb.homeY;
@@ -467,6 +567,10 @@
         if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
+        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
+        // difference is invisible, and the canvas GPU cost drops by two thirds
+        // for the hours the dashboard sits idle. Wakes re-run every frame.
+        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
@@ -483,12 +587,47 @@
         if (frameCount % 30 === 0) {
             orbs.forEach(orb => {
                 orb.visible = orb.el.offsetParent !== null;
-                orb.active = orb.btn ? orb.btn.classList.contains('active') : false;
+                const nowActive = orb.btn ? orb.btn.classList.contains('active') : false;
+                if (nowActive && !orb.active && !orb.hub) {
+                    // Excitement kick: a freshly-woken worker jolts into motion
+                    // (brief overspeed + size wobble + a few sparks) instead of
+                    // just getting brighter. Decays in physics/draw.
+                    const ang = Math.random() * Math.PI * 2;
+                    orb.vx += Math.cos(ang) * 1.6;
+                    orb.vy += Math.sin(ang) * 1.6;
+                    orb.kick = 1.0;
+                    for (let i = 0; i < 3; i++) {
+                        emitSpark(orb, orb.rainbow ? getRainbowColor(time) : null);
+                    }
+                }
+                orb.active = nowActive;
             });
         }
 
         const visibleOrbs = orbs.filter(o => o.visible);
         const hub = visibleOrbs.find(o => o.hub);
+
+        // Sleep/wake bookkeeping (see declarations for the design).
+        if (visibleOrbs.some(o => !o.hub && o.active) || inflows.length) {
+            lastActivityAt = performance.now();
+        }
+        if (performance.now() - lastActivityAt > SLEEP_AFTER_MS) {
+            sleepLevel = Math.min(1, sleepLevel + 0.004);   // ~4s drowse-in
+            wakeBurstDone = false;
+        } else {
+            if (!wakeBurstDone && sleepLevel > 0.4 && hub) {
+                // Wake bloom: three staggered rings out of the nucleus.
+                for (let i = 0; i < 3 && ripples.length < MAX_RIPPLES; i++) {
+                    ripples.push({
+                        x: hub.x, y: hub.y,
+                        color: hub.rainbow ? getRainbowColor(time) : hub.color,
+                        age: -i * 6, life: 30,
+                    });
+                }
+            }
+            wakeBurstDone = true;
+            sleepLevel = Math.max(0, sleepLevel - 0.05);    // fast wake (~0.3s)
+        }
 
         if (state === 'orbs' || state === 'collapsing') {
             updatePhysics(visibleOrbs, w, h);
@@ -535,7 +674,8 @@
             }
         }
         updateSparks();
-        updateInflows();
+        updateInflows(hub);
+        updateRipples();
 
         // Draw
         ctx.clearRect(0, 0, w, h);
@@ -543,6 +683,7 @@
         drawConnections(ctx, visibleOrbs, time);
         drawSparks(ctx);
         drawInflows(ctx, hub);
+        drawRipples(ctx);
         drawOrbs(ctx, visibleOrbs, time);
     }
 
@@ -591,8 +732,10 @@
             orb.vx *= 0.993;
             orb.vy *= 0.993;
 
-            // Speed cap — active orbs move a bit faster
-            const maxSpeed = orb.active ? 0.8 : 0.5;
+            // Speed cap — active orbs move a bit faster; an excitement kick
+            // briefly lifts the cap so the jolt actually darts, then decays.
+            orb.kick = (orb.kick || 0) * 0.94;
+            const maxSpeed = (orb.active ? 0.8 : 0.5) * (1 + orb.kick * 2);
             const speed = Math.sqrt(orb.vx * orb.vx + orb.vy * orb.vy);
             if (speed > maxSpeed) {
                 const scale = maxSpeed / speed;
@@ -613,9 +756,11 @@
                 }
             }
 
-            // Move
-            orb.x += orb.vx;
-            orb.y += orb.vy;
+            // Move — asleep, the drift slows to a crawl (velocities keep
+            // integrating so motion stays continuous through wake)
+            const drowse = 1 - sleepLevel * 0.75;
+            orb.x += orb.vx * drowse;
+            orb.y += orb.vy * drowse;
 
             // Boundary bounce
             if (orb.x < ORB_RADIUS) { orb.x = ORB_RADIUS; orb.vx *= -0.7; }
@@ -651,8 +796,24 @@
     // ── Drawing ──
 
     function drawOrbs(ctx, visible, time) {
+        // ── Depth pass ──
+        // Each worker orb drifts on a slow z-oscillation; the hub sits at z=0.
+        // Painter's order (back → front) makes orbs visibly pass BEHIND the
+        // nucleus and swing back in front — the flat drift reads as an atom.
+        // The effect eases out during the hover-expand morph so orbs land on
+        // their buttons at natural size.
+        const depthFade = state === 'expanding' ? (1 - expandProgress) : 1;
         for (const orb of visible) {
+            orb.z = orb.hub ? 0 : Math.sin(time * orb.zSpeed + orb.zPhase) * depthFade;
+        }
+        const ordered = [...visible].sort((a, b) => a.z - b.z);
+
+        for (const orb of ordered) {
             const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
+            // -1 (back): ~18% smaller, dimmer. +1 (front): ~18% larger, full.
+            // Sleep folds in as a further global dim (embers, not blackout).
+            const dScale = 1 + orb.z * 0.18;
+            const dAlpha = (0.78 + 0.22 * ((orb.z + 1) / 2)) * (1 - sleepLevel * 0.45);
 
             // ── The hub: an energy-reactive nucleus ──
             // Calm + dim when nothing's running; bigger, brighter and faster
@@ -675,9 +836,12 @@
                 const hg = Math.round(g + (60 - g) * tint);
                 const hb = Math.round(b + (60 - b) * tint);
 
-                // Wide ambient glow — steady, only gently lifting with energy
+                // Wide ambient glow — steady, only gently lifting with energy.
+                // Asleep, the nucleus dims to embers.
+                const ember = 1 - sleepLevel * 0.55;
                 const glowR = hubR * (4 + energy * 1.5);
-                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb, 0.16 + energy * 0.16 + slow * 0.04 + stress * 0.08);
+                drawGlow(ctx, orb.x, orb.y, glowR, hr, hg, hb,
+                    (0.16 + energy * 0.16 + slow * 0.04 + stress * 0.08) * ember);
 
                 if (hubImageReady) {
                     // SoulSync logo as the nucleus — fit to the pulsing radius while
@@ -688,7 +852,7 @@
                     const dw = natW * fit;
                     const dh = natH * fit;
                     ctx.save();
-                    ctx.globalAlpha = Math.min(1, 0.9 + energy * 0.1 + slow * 0.03);
+                    ctx.globalAlpha = Math.min(1, 0.9 + energy * 0.1 + slow * 0.03) * (1 - sleepLevel * 0.35);
                     ctx.drawImage(hubImage, orb.x - dw / 2, orb.y - dh / 2, dw, dh);
                     ctx.restore();
                 } else {
@@ -737,26 +901,30 @@
             if (orb.active) {
                 baseRadius += 2 * Math.sin(time * 3 + orb.phase);
             }
+            // Excitement-kick wobble: fast, shallow, gone in under a second
+            if (orb.kick > 0.02) {
+                baseRadius += orb.kick * 2.5 * Math.sin(time * 14 + orb.phase);
+            }
 
-            // Scale up during expand transition
-            const currentRadius = state === 'expanding'
+            // Scale up during expand transition; depth scales the whole orb
+            const currentRadius = (state === 'expanding'
                 ? baseRadius + expandProgress * 4
-                : baseRadius;
+                : baseRadius) * dScale;
 
             // Inactive orbs are dimmer
             const activeMult = orb.active ? 1.0 : 0.45;
 
             // Outer glow — much larger and brighter for active
             const glowRadius = orb.active ? currentRadius * 5 : currentRadius * 3;
-            const glowAlpha = orb.active
+            const glowAlpha = (orb.active
                 ? (0.25 + pulse * 0.2) * activeMult
-                : (0.06 + pulse * 0.03) * activeMult;
+                : (0.06 + pulse * 0.03) * activeMult) * dAlpha;
             drawGlow(ctx, orb.x, orb.y, glowRadius, r, g, b, glowAlpha);
 
             // Core
-            const coreAlpha = orb.active
+            const coreAlpha = (orb.active
                 ? 0.85 + pulse * 0.15
-                : (0.3 + pulse * 0.08) * activeMult;
+                : (0.3 + pulse * 0.08) * activeMult) * dAlpha;
             ctx.beginPath();
             ctx.arc(orb.x, orb.y, Math.max(1, currentRadius), 0, Math.PI * 2);
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${coreAlpha})`;
@@ -804,9 +972,9 @@
                 const dx = hub.x - orb.x;
                 const dy = hub.y - orb.y;
                 const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                // Gentle traveling pulse along each spoke
+                // Gentle traveling pulse along each spoke (fades while asleep)
                 const flow = 0.5 + 0.5 * Math.sin(time * 2 - dist * 0.05);
-                const alpha = 0.10 + flow * 0.10 + (orb.active ? 0.06 : 0);
+                const alpha = (0.10 + flow * 0.10 + (orb.active ? 0.06 : 0)) * (1 - sleepLevel * 0.7);
                 ctx.beginPath();
                 ctx.moveTo(hub.x, hub.y);
                 ctx.lineTo(orb.x, orb.y);
@@ -829,7 +997,7 @@
                     const activePair = a.active && b.active;
                     const anyActive = a.active || b.active;
                     const baseAlpha = activePair ? 0.3 : (anyActive ? 0.2 : 0.15);
-                    const alpha = (1 - dist / CONNECTION_DIST) * baseAlpha;
+                    const alpha = (1 - dist / CONNECTION_DIST) * baseAlpha * (1 - sleepLevel * 0.7);
 
                     const [r1, g1, b1] = a.rainbow ? getRainbowColor(time) : a.color;
                     const [r2, g2, b2] = b.rainbow ? getRainbowColor(time) : b.color;
@@ -908,12 +1076,14 @@
             computeHomes();
             resizeCanvas();
             sparks = [];
+            ripples = [];
             enterOrbState();
         } else if (!onDashboard && wasDashboard) {
             if (collapseDelay) { clearTimeout(collapseDelay); collapseDelay = null; }
             stopLoop();
             state = 'idle';
             sparks = [];
+            ripples = [];
             orbs.forEach(orb => {
                 orb.el.classList.remove('worker-orb-hidden', 'worker-orb-reveal');
             });

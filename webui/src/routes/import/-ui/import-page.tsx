@@ -160,6 +160,15 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
       <div className={styles.importPageQueueInfo}>
         <div className={styles.importPageQueueName}>{entry.label}</div>
         <div className={styles.importPageQueueDetail}>{entry.sublabel}</div>
+        {entry.errors.length > 0 && (
+          <ul className={styles.importPageQueueErrors}>
+            {entry.errors.map((err, i) => (
+              <li key={i} title={err}>
+                {err}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className={styles.importPageQueueProgress}>
         <div className={styles.importPageQueueBar}>

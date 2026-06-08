@@ -15,6 +15,7 @@ Two jobs, both reusing the post-processing standard so the user's
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 from typing import Iterable
 
@@ -111,8 +112,19 @@ def apply_art_to_album_files(
     musicbrainz_release_id). Existing tags are preserved — only art is added.
 
     Returns counts; never raises (unwritable/read-only files are skipped).
+    ``read_only_fs`` is True when the target filesystem itself rejects writes
+    (a real EROFS from an actual write — a ':ro' volume, a read-only host/NFS/
+    SMB mount, or a read-only underlying fs) so callers can tell the user the
+    real cause instead of a generic failure.
+
+    NOTE: read-only is detected from an ACTUAL write raising EROFS, never from
+    statvfs/mount flags — union/FUSE/network filesystems (mergerfs, rclone,
+    NFS) common in self-hosted setups misreport those flags, which would
+    false-block a perfectly writable library (Sokhi: read-only error with no
+    ':ro' in compose). The write itself is the only honest test.
     """
-    result = {"embedded": 0, "failed": 0, "skipped": 0, "cover_written": False}
+    result = {"embedded": 0, "failed": 0, "skipped": 0, "cover_written": False,
+              "read_only_fs": False}
     symbols = get_mutagen_symbols()
     paths = [p for p in (file_paths or []) if p]
     if not symbols:
@@ -144,6 +156,13 @@ def apply_art_to_album_files(
                 result["failed"] += 1
         except Exception as exc:
             # Read-only mounts / permission errors land here — skip, don't crash.
+            # A real EROFS = the mount is read-only; flag it and stop trying the
+            # rest (fast-fail without the unreliable statvfs guess).
+            if getattr(exc, "errno", None) == errno.EROFS:
+                result["read_only_fs"] = True
+                logger.warning("Could not embed art into %s: read-only filesystem", fp)
+                result["failed"] += len(paths) - paths.index(fp)  # remaining all fail too
+                break
             logger.warning("Could not embed art into %s: %s", fp, exc)
             result["failed"] += 1
 
@@ -153,5 +172,7 @@ def apply_art_to_album_files(
             download_cover_art(album_info, target_dir, context)
             result["cover_written"] = folder_has_cover_sidecar(target_dir)
         except Exception as exc:
+            if getattr(exc, "errno", None) == errno.EROFS:
+                result["read_only_fs"] = True
             logger.warning("cover.jpg write failed for %s: %s", target_dir, exc)
     return result

@@ -830,6 +830,36 @@ class MetadataCache:
             logger.error(f"Cache health stats error: {e}")
             return {}
 
+    def purge_artist_album_lists(self, source: str = 'spotify') -> int:
+        """One-time repair: delete cached artist-ALBUM-LIST entries.
+
+        Partial watchlist probes (limit=5, max_pages=1) used to be stored in
+        the same unqualified ``<artist>_albums_<types>`` slot the artist
+        detail page reads, so every watchlist artist's page showed only the
+        newest handful of releases. The writer is fixed to skip truncated
+        fetches; this clears the already-poisoned entries (30-day TTL would
+        otherwise keep them for weeks). Lists rebuild lazily on the next
+        artist-page visit. Returns the number of entries removed."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM metadata_cache_entities "
+                    "WHERE source = ? AND entity_type = 'artist' "
+                    "AND entity_id LIKE '%\\_albums\\_%' ESCAPE '\\'",
+                    (source,),
+                )
+                count = cursor.rowcount
+                conn.commit()
+                return count
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("artist album-list purge failed: %s", e)
+            return 0
+
     def clear(self, source: str = None, entity_type: str = None) -> int:
         """Clear cache entries. Optional filters by source and/or entity_type."""
         try:

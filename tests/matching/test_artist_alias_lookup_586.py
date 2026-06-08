@@ -191,6 +191,35 @@ def test_trust_gate_rejects_when_two_high_mb_scores_tie(service):
     assert aliases == []
 
 
+def test_trust_gate_uses_mb_score_leader_not_combined_leader(service):
+    # Production case "Sawano Hiroyuki": a same-script DECOY entity leads on
+    # COMBINED score (high local sim, mb_score 83) but sits just under the
+    # 0.85 combined bar, while the genuine cross-script artist has mb_score
+    # 100 and ~0 local sim → lowest combined, sorted last. The mb-only escape
+    # must evaluate the MB-SCORE leader, not scored[0] (the combined leader),
+    # otherwise it inspects mb_score 83 < 95 and wrongly returns [].
+    service._calculate_similarity = (
+        lambda a, b: 0.82 if b == 'SawanoHiroyuki[nZk]' else 0.0
+    )
+    service.mb_client.search_artist.return_value = [
+        {'id': 'mbid-decoy', 'name': 'SawanoHiroyuki[nZk]', 'score': 83},
+        {'id': 'mbid-canonical', 'name': '澤野弘之', 'score': 100},
+    ]
+
+    def get_artist(mbid, **kwargs):
+        if mbid == 'mbid-canonical':
+            return {'name': '澤野弘之', 'aliases': [{'name': 'Hiroyuki Sawano'}]}
+        return {'name': 'SawanoHiroyuki[nZk]', 'aliases': []}
+    service.mb_client.get_artist.side_effect = get_artist
+
+    aliases = service.lookup_artist_aliases('Sawano Hiroyuki')
+    # The canonical kanji name must come back (its alias set was fetched).
+    assert '澤野弘之' in aliases
+    # And we must have fetched the MB-score leader, not the decoy.
+    service.mb_client.get_artist.assert_called_once()
+    assert service.mb_client.get_artist.call_args.args[0] == 'mbid-canonical'
+
+
 def test_trust_gate_passes_combined_score_when_local_sim_strong(service):
     # Same-script case from #442 — local sim high. Should still pass
     # (no regression on the existing path).

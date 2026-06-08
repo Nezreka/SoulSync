@@ -504,7 +504,8 @@ def test_process_single_import_file_resolves_and_posts_context(tmp_path):
     assert outcome == ("ok", "Song")
     assert len(post_calls) == 1
     assert post_calls[0][0].startswith("import_single_")
-    assert post_calls[0][1] == {"track": {"name": "Song"}, "artist": {"name": "Artist"}}
+    assert post_calls[0][1] == {"track": {"name": "Song"}, "artist": {"name": "Artist"},
+                                "is_local_import": True}
     assert post_calls[0][2] == str(audio_file)
 
 

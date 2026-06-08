@@ -19,7 +19,6 @@ a large web_server.py helper that will get its own lift in subsequent PRs.
 
 from __future__ import annotations
 
-import logging
 import re
 import traceback
 from dataclasses import dataclass
@@ -27,8 +26,72 @@ from typing import Any, Callable, Optional
 
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from core.spotify_client import Track as SpotifyTrack
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Must live under the soulsync.* namespace — handlers only attach there. The
+# old bare getLogger(__name__) ("core.downloads.task_worker") had no handler,
+# so the entire [Modal Worker] story — search queries, retry walks, candidate
+# decisions — never reached app.log.
+logger = get_logger("downloads.task_worker")
+
+
+def _resolve_worker_source(username):
+    """Logical source bucket for a candidate's username (Soulseek peers all
+    collapse to 'soulseek'; streaming sources keep their name). Mirrors the
+    monitor's resolver — imported lazily to avoid an import cycle."""
+    try:
+        from core.downloads.monitor import _resolve_download_source
+        return _resolve_download_source(username)
+    except Exception:
+        return 'soulseek'
+
+
+def _cand_user_file(candidate):
+    """Read (username, filename) from a candidate that may be a TrackResult
+    object or a plain dict (tests / cached raw rows)."""
+    if isinstance(candidate, dict):
+        return candidate.get('username'), candidate.get('filename')
+    return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
+
+
+def _try_cached_candidates(task_id, batch_id, track, deps):
+    """Quarantine-retry fast path: attempt the already-found candidates before
+    re-searching anything.
+
+    When a verified-bad file is re-queued, the connection was fine (the file
+    downloaded, it was just the wrong/broken content) — so the next-best pick is
+    almost always already sitting in ``cached_candidates``. Walk those (skipping
+    sources already tried or budget-exhausted) and hand them to the normal
+    download path. Returns True if a download was started; False to fall through
+    to a fresh search (which only happens for a not-yet-searched source).
+    """
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task:
+            return False
+        cached = list(task.get('cached_candidates') or [])
+        used = set(task.get('used_sources') or ())
+        exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
+
+    remaining = []
+    for c in cached:
+        uname, fname = _cand_user_file(c)
+        if not uname or not fname:
+            continue
+        if f"{uname}_{fname}" in used:
+            continue
+        if _resolve_worker_source(uname).lower() in exhausted:
+            continue
+        remaining.append(c)
+
+    if not remaining:
+        return False
+
+    logger.info(
+        f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
+        f"candidate(s) before re-searching (task {task_id})"
+    )
+    return deps.attempt_download_with_candidates(task_id, remaining, track, batch_id)
 
 
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
@@ -92,6 +155,7 @@ class TaskWorkerDeps:
     attempt_download_with_candidates: Callable    # (task_id, candidates, track, batch_id) -> bool
     on_download_completed: Callable               # (batch_id, task_id, success) -> None
     recover_worker_slot: Callable                 # (batch_id, task_id) -> None
+    try_version_mismatch_fallback: Optional[Callable] = None  # (title, artist, task_id, batch_id) -> bool
 
 
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
@@ -206,6 +270,26 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     download_tasks[task_id]['used_sources'] = set()
                 # Else: keep existing used_sources to avoid retrying same failed hosts
 
+        # Cached-first quarantine retry. The monitor sets ``_quarantine_retry``
+        # when a verified-bad file is re-queued; in that case we walk the
+        # already-found candidates before re-searching (the connection was fine,
+        # just the content was wrong). A NON-quarantine entry (fresh download, or
+        # the monitor's dead-connection/stuck retry) instead starts a new search
+        # generation: clear the searched-source memory so each source can be
+        # searched fresh again.
+        with tasks_lock:
+            _t = download_tasks.get(task_id, {})
+            is_quarantine_retry = bool(_t.pop('_quarantine_retry', False))
+            if not is_quarantine_retry:
+                _t.pop('searched_queries', None)
+        if is_quarantine_retry and _try_cached_candidates(task_id, batch_id, track, deps):
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                deps.store_batch_source(batch_id, used_username, used_filename)
+            return
+
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
@@ -277,12 +361,40 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 seen.add(query.lower())
 
         search_queries = unique_queries
+        # Expose the query count so the quarantine-retry budget (exhaustive mode)
+        # can size each source's budget as query_count × retries_per_query.
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['query_count'] = len(search_queries)
         logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
         logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
         all_raw_results = []  # Collect raw results across queries for candidate review modal
+        # Sources whose per-source quarantine-retry budget is spent (exhaustive
+        # mode). The monitor sets this when a source gives up; we exclude those
+        # sources from the hybrid search so the chain falls through to the next
+        # source instead of re-fetching the same exhausted one (e.g. Soulseek
+        # keeps returning fresh wrong peers — once its budget is gone, switch to
+        # HiFi/Tidal/…). See monitor.requeue_quarantined_task_for_retry.
+        #
+        # On a quarantine retry we do NOT exclude a source just because it was
+        # searched once: the first run only ran ONE query before starting a
+        # download, so the later queries (e.g. "artist + album") have never hit
+        # that source yet and may surface the correct upload. Instead we remember
+        # which QUERIES already ran (``searched_queries``) and skip re-running
+        # only those — their candidates are walked via the cached-first path
+        # above. The not-yet-searched queries still search the same source, so
+        # every query is exhausted per source before the chain switches sources.
+        # Fresh / dead-connection runs cleared searched_queries above, so they
+        # search everything again.
+        with tasks_lock:
+            _t = download_tasks.get(task_id, {})
+            _exhausted_sources = [str(s) for s in (_t.get('exhausted_download_sources') or ())]
+            _searched_queries = (
+                set(_t.get('searched_queries') or ()) if is_quarantine_retry else set()
+            )
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -294,6 +406,17 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
+
+            # Cached-first: a query already run last generation has its candidates
+            # sitting in cache (walked above) — re-searching it is the wasteful
+            # repeat the cached-first design removes. Skip it; the not-yet-run
+            # queries below still search this source.
+            if is_quarantine_retry and query in _searched_queries:
+                logger.debug(
+                    f"[Modal Worker] Skipping already-searched query '{query}' "
+                    f"(candidates served from cache) for task {task_id}"
+                )
+                continue
 
             logger.debug(f"[Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
             logger.debug(f"About to call soulseek search for task {task_id}")
@@ -319,9 +442,13 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                         _exclude_for_hybrid_album = ['torrent', 'usenet']
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
+                # Fold in budget-exhausted sources (per-source quarantine retry).
+                _exclude_sources = list(_exhausted_sources)
+                if _exclude_for_hybrid_album:
+                    _exclude_sources.extend(_exclude_for_hybrid_album)
                 # Perform search with timeout
                 tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
-                    query, timeout=30, exclude_sources=_exclude_for_hybrid_album,
+                    query, timeout=30, exclude_sources=_exclude_sources or None,
                 ))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
@@ -330,6 +457,16 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     if task_id not in download_tasks:
                         logger.info(f"[Modal Worker] Task {task_id} was deleted after search returned")
                         return
+                    # Remember this query ran so a later quarantine retry skips
+                    # re-searching it (its candidates are walked via cached-first).
+                    # Recorded regardless of result count: re-running a query is
+                    # deterministic, so a query that returned nothing won't return
+                    # anything new next time either.
+                    _sq = download_tasks[task_id].get('searched_queries')
+                    if not isinstance(_sq, set):
+                        _sq = set()
+                    _sq.add(query)
+                    download_tasks[task_id]['searched_queries'] = _sq
                     if download_tasks[task_id]['status'] == 'cancelled':
                         logger.warning(f"[Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
                         # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
@@ -352,7 +489,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                 logger.warning(f"[Modal Worker] Task {task_id} cancelled before processing candidates")
                                 # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                                 return
-                            # Store candidates for retry fallback (like GUI)
+                            # Store candidates for retry fallback (like GUI). A
+                            # later quarantine retry walks these via cached-first
+                            # and skips re-searching this query (searched_queries).
                             download_tasks[task_id]['cached_candidates'] = candidates
 
                         # Try to download with these candidates
@@ -414,7 +553,12 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # (which was definitely tried). If the first was skipped (unconfigured),
                 # the orchestrator would have tried the second — but trying it again is
                 # harmless (streaming sources return fast).
-                remaining_sources = [s for s in hybrid_order[1:] if s in source_clients and source_clients[s]]
+                _exhausted_lower = {s.lower() for s in _exhausted_sources}
+                remaining_sources = [
+                    s for s in hybrid_order[1:]
+                    if s in source_clients and source_clients[s]
+                    and s.lower() not in _exhausted_lower
+                ]
                 if remaining_sources:
                     logger.warning(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
 
@@ -433,6 +577,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             fb_candidates = deps.get_valid_candidates(fb_results, track, fb_query)
                             if fb_candidates:
                                 logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
+                                with tasks_lock:
+                                    if task_id in download_tasks:
+                                        download_tasks[task_id]['cached_candidates'] = fb_candidates
                                 success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
                                     return
@@ -447,6 +594,15 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
 
         # If we get here, all search queries and hybrid fallbacks failed
         logger.warning(f"[Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
+
+        # Last-resort: quarantine retry with no new candidates — the retry search
+        # exhausted all sources.  If the setting is enabled, accept the best
+        # already-quarantined candidate rather than leaving the track missing.
+        if is_quarantine_retry and deps.try_version_mismatch_fallback:
+            _fallback_artist = track.artists[0] if track.artists else ''
+            if deps.try_version_mismatch_fallback(track.name, _fallback_artist, task_id, batch_id):
+                return  # fallback re-dispatched; batch completion handled by reprocess thread
+
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'not_found'

@@ -312,7 +312,7 @@
             <!-- Dashboard Page -->
             <div class="page" id="dashboard-page">
                 <div class="page-shell dashboard-container">
-                    <div class="dashboard-header">
+                    <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                         <div class="header-text">
                             <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>System Dashboard</span></h2>
                             <p class="header-subtitle">Monitor your music system health and manage operations</p>
@@ -1018,6 +1018,7 @@
                             <button class="btn btn--sm btn--secondary sync-history-btn auto-sync-manager-btn" onclick="openAutoSyncScheduleModal()" title="Schedule mirrored playlists to refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
                             <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openManualLibraryMatchTool()" title="Manually link source tracks to library tracks">Library Match</button>
                             <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                            <button class="btn btn--sm btn--secondary sync-history-btn" onclick="openDownloadOriginsModal('playlist')" title="See every track your playlist syncs downloaded">Download Origins</button>
                         </div>
                     </div>
                 </div>
@@ -2325,7 +2326,7 @@
                 <!-- List View -->
                 <div class="automations-list-view" id="automations-list-view">
                     <div class="page-shell automations-container">
-                        <div class="dashboard-header">
+                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                             <div class="header-text">
                                 <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
                                 <p class="header-subtitle">Configure scheduled tasks and automated workflows</p>
@@ -3700,7 +3701,7 @@
             <div class="page" id="playlist-explorer-page">
                 <div class="page-shell explorer-container">
                     <!-- Header (compact) -->
-                    <div class="dashboard-header" style="margin-bottom: 12px;">
+                    <div class="dashboard-header" style="margin-bottom: 12px;"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                         <div class="header-text">
                             <h2 class="header-title"><img src="/static/explorer.png" class="page-header-icon" alt=""><span>Playlist Explorer</span></h2>
                         </div>
@@ -3802,7 +3803,7 @@
             <!-- Settings Page -->
             <div class="page" id="settings-page">
                 <div class="page-shell">
-                <div class="dashboard-header">
+                <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
                         <p class="header-subtitle">Configure services, downloads, and preferences</p>
@@ -4966,6 +4967,18 @@
 
                             </div>
 
+                            <!-- ═══ QUALITY PROFILE ═══ -->
+                            <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
+                                 by settings.js updateSourceVisibility — gating only the inner
+                                 group would leave an empty expandable shell. -->
+                            <div id="quality-profile-tile" data-stg="downloads">
+                            <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Quality Profile</h3>
+                                <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
                             <!-- Quality Profile Settings (Soulseek only) -->
                             <div class="settings-group" id="quality-profile-section" data-stg="downloads">
                                 <h3>🎵 Quality Profile</h3>
@@ -5147,6 +5160,55 @@
                                 </div>
                             </div>
 
+                            </div><!-- end Quality Profile body -->
+                            </div><!-- end Quality Profile tile -->
+
+                            <!-- ═══ RETRY LOGIC ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Retry Logic</h3>
+                                <span class="settings-section-hint">Next-best candidate, exhaustive per-source retry</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+
+                            <div class="settings-group" data-stg="downloads">
+                                <h3>🔁 Retry Logic</h3>
+                                <small class="settings-hint" style="margin-bottom: 10px; display: block;">Controls what happens when a downloaded file is rejected (AcoustID mismatch, wrong version, or duration/integrity failure). Independent of post-processing.</small>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-next-candidate" checked>
+                                        Retry next-best candidate on mismatch
+                                    </label>
+                                    <small class="settings-hint">When a download is quarantined (AcoustID mismatch or duration/integrity failure), automatically try the next-best candidate instead of failing the track. Off = quarantine and fail immediately.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="retry-exhaustive">
+                                        Exhaustive retry (separate budget per source)
+                                    </label>
+                                    <small class="settings-hint">Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="retries-per-query">Retries per query (per source)</label>
+                                    <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                    <small class="settings-hint">In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="accept-version-mismatch-fallback">
+                                        Accept best version mismatch as last resort
+                                    </label>
+                                    <small class="settings-hint">When retries are fully exhausted and <em>every</em> candidate for a track failed the <strong>same</strong> version mismatch (e.g. only an instrumental exists), accept the best (first-tried) one instead of leaving the track missing. Only AcoustID is bypassed — integrity/duration/bit-depth checks still run, so truncated or genuinely wrong files are never let through. Off = leave such tracks failed.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="version-mismatch-min-count">Minimum matching mismatches before accepting</label>
+                                    <input type="number" id="version-mismatch-min-count" min="1" max="20" step="1" value="2" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                    <small class="settings-hint">How many quarantined candidates must have failed the <em>same</em> version mismatch before the last-resort acceptance kicks in. Higher = more confirmation that no correct version exists. Only used when the option above is on.</small>
+                                </div>
+                            </div>
+
+                            </div><!-- end Retry Logic body -->
+
                             <!-- ═══ INDEXERS & DOWNLOADERS ═══ -->
                             <!-- Intro hero — explains the search → fetch flow in one glance -->
                             <div class="settings-group ind-hero" data-stg="indexers">
@@ -5285,6 +5347,23 @@
                                             <input type="text" id="torrent-client-save-path" placeholder="leave blank to use the client's default">
                                             <div class="setting-help-text">
                                                 Override where the torrent client writes downloads. This path is on the <strong>torrent client's</strong> machine, not SoulSync's.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Stalled torrent timeout (minutes):</label>
+                                            <input type="number" id="torrent-stall-timeout" min="0" step="1" placeholder="10">
+                                            <div class="setting-help-text">
+                                                Give up on a torrent that makes <strong>zero download progress</strong> for this long — a dead magnet stuck on "downloading metadata", or a swarm with no seeders. Without this, a dud torrent ties up a download slot for the full 6-hour limit. <strong>0 disables</strong> (wait the full limit).
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>When a torrent stalls:</label>
+                                            <select id="torrent-stall-action" class="form-select">
+                                                <option value="abandon">Abandon — remove it &amp; its partial data, fail the download</option>
+                                                <option value="pause">Pause — pause it in the client, leave it for me</option>
+                                            </select>
+                                            <div class="setting-help-text">
+                                                Abandon frees the slot so the next source can try. Pause keeps the torrent in your client so you can inspect or resume it manually.
                                             </div>
                                         </div>
                                         <div class="form-group">
@@ -6924,6 +7003,14 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             Global Settings
                         </button>
+                        <button class="btn btn--secondary" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download Origins
+                        </button>
+                        <button class="btn btn--secondary" id="watchlist-page-blocklist-btn" onclick="openBlocklistModal('artist')" title="Block artists, albums or tracks from ever being downloaded">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+                            Blocklist
+                        </button>
                     </div>
 
                     <!-- Global override banner -->
@@ -8066,6 +8153,8 @@
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>

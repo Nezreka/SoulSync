@@ -46,13 +46,17 @@ def spotify_free_installed() -> bool:
     return _installed_cache
 
 
-def should_use_free_fallback(authenticated: bool, rate_limited: bool) -> bool:
+def should_use_free_fallback(authenticated: bool, rate_limited: bool,
+                             budget_exhausted: bool = False) -> bool:
     """The per-request gate: the no-creds SpotipyFree source may serve a request
-    ONLY when official Spotify can't — i.e. the user has no Spotify auth, or
-    we're currently rate-limited. When authed AND healthy the official path
-    returns before any fallback, so this never opens.
+    ONLY when official Spotify can't — i.e. the user has no Spotify auth, we're
+    currently rate-limited, OR the worker's self-imposed real-API daily budget
+    is spent. The daily budget is a real-API ban protection; once it's hit, the
+    free source (which isn't subject to it) is the natural place to keep going,
+    so a Spotify-Free user is never paused by the budget. When authed AND
+    healthy AND under budget, the official path returns before any fallback.
     """
-    return (not authenticated) or rate_limited
+    return (not authenticated) or rate_limited or budget_exhausted
 
 
 def should_offer_spotify_metadata(authenticated: bool, free_available: bool) -> bool:

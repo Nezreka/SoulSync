@@ -963,6 +963,8 @@ class RepairWorker:
             'orphan_file': self._fix_orphan_file,
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
+            'missing_lyrics': self._fix_missing_lyrics,
+            'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
@@ -1277,16 +1279,57 @@ class RepairWorker:
             logger.error("Error fixing track number for %s: %s", file_path, e)
             return {'success': False, 'error': str(e)}
 
+    def _fix_artist_art(self, album_id, details):
+        """Apply the found ARTIST image to the album's artist (DB thumb only —
+        artist art has no per-file embed). Pache711: independently applyable
+        from the album art on the same finding."""
+        artist_url = details.get('found_artist_url')
+        if not artist_url:
+            return {'success': False, 'error': 'No artist image found in finding details'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                (artist_url, album_id))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return {'success': False, 'error': 'Artist not found for this album'}
+        finally:
+            if conn:
+                conn.close()
+        return {'success': True, 'action': 'applied_artist_art',
+                'message': 'Applied artist image'}
+
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
-        """Apply found artwork: update the DB thumbnail AND embed art into the
-        album's audio files + write cover.jpg (using the post-processing
-        standard, so the user's album_art_order preference is honored)."""
-        artwork_url = details.get('found_artwork_url')
-        if not artwork_url:
-            return {'success': False, 'error': 'No artwork URL found in finding details'}
+        """Apply found artwork. ``_fix_action`` selects the target (Pache711):
+        'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
+        (the artist's DB image), or 'both'. Defaulting to 'album' keeps the
+        plain "Apply Art" button behaving exactly as before."""
+        target = (details.get('_fix_action') or 'album').strip().lower()
+        if target not in ('album', 'artist', 'both'):
+            target = 'album'
+
         album_id = details.get('album_id') or entity_id
         if not album_id:
             return {'success': False, 'error': 'No album ID associated with this finding'}
+
+        # Artist-only path: nothing to do with album files.
+        if target == 'artist':
+            return self._fix_artist_art(album_id, details)
+
+        artist_result = None
+        if target == 'both':
+            artist_result = self._fix_artist_art(album_id, details)
+
+        artwork_url = details.get('found_artwork_url')
+        if not artwork_url:
+            # 'both' but no album art — report the artist outcome if that ran.
+            if artist_result is not None:
+                return artist_result
+            return {'success': False, 'error': 'No artwork URL found in finding details'}
 
         conn = None
         track_paths = []
@@ -1332,8 +1375,10 @@ class RepairWorker:
 
         if not resolved:
             # Media-server-only album (no local files): DB thumbnail is all we can set.
-            return {'success': True, 'action': 'applied_cover_art',
-                    'message': 'Applied cover art to album (database only — no local files found)'}
+            msg = 'Applied cover art to album (database only — no local files found)'
+            if artist_result is not None and artist_result.get('success'):
+                msg += ' + applied artist image'
+            return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
@@ -1349,13 +1394,72 @@ class RepairWorker:
         art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
 
         embedded = art_result.get('embedded', 0)
+        if art_result.get('read_only_fs'):
+            # The music folder is genuinely read-only at the OS level (the
+            # write raised EROFS). Most common cause is a docker ':ro' volume,
+            # but it can also be a read-only host mount (NFS/SMB exported ro),
+            # a mergerfs/union read-only branch, or the library mounted from
+            # another container as read-only — chmod can't change any of these.
+            return {'success': False, 'action': 'applied_cover_art',
+                    'error': ('Your music folder is READ-ONLY — the container cannot '
+                              'write to it (chmod cannot change this). Check that the '
+                              "volume isn't mapped ':ro', and that the underlying host "
+                              'mount (NFS/SMB/mergerfs) is read-write, then recreate the '
+                              'container. (Database thumbnail was still updated.)'),
+                    'art_result': art_result}
         msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
         if art_result.get('cover_written'):
             msg += ' + wrote cover.jpg'
         if embedded == 0 and not art_result.get('cover_written'):
-            # DB updated but nothing reached disk (e.g. read-only mount).
+            # DB updated but nothing reached disk (e.g. permissions).
             msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
+        if artist_result is not None and artist_result.get('success'):
+            msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
+
+    def _fix_missing_lyrics(self, entity_type, entity_id, file_path, details):
+        """Apply a missing-lyrics finding: fetch + write the .lrc sidecar and
+        embed the lyrics, via the same LyricsClient the import pipeline uses."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        try:
+            from core.lyrics_client import lyrics_client
+            duration = details.get('duration')
+            ok = lyrics_client.create_lrc_file(
+                resolved,
+                details.get('track_title') or '',
+                details.get('artist') or '',
+                album_name=details.get('album_title'),
+                duration_seconds=int(duration) if duration else None,
+            )
+        except Exception as e:
+            logger.error("Lyrics fix failed for %s: %s", os.path.basename(raw_path), e)
+            return {'success': False, 'error': str(e)}
+        if not ok:
+            # Lyrics vanished between scan and apply (rare) — report, don't crash.
+            return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
+        return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
+
+    def _fix_expired_download(self, entity_type, entity_id, file_path, details):
+        """Apply an expired-download finding: delete the file + library row +
+        history entry, via the same helper the cleaner's auto mode uses."""
+        from core.repair_jobs.expired_download_cleaner import delete_origin_download
+        entry = {'id': details.get('history_id') or entity_id,
+                 'file_path': details.get('file_path') or file_path}
+        if not entry['id']:
+            return {'success': False, 'error': 'No history id in finding'}
+        res = delete_origin_download(self.db, entry, self._config_manager)
+        if res.get('error'):
+            return {'success': False, 'action': 'deleted_expired',
+                    'error': f"Could not delete file: {res['error']}"}
+        verb = 'deleted file + entry' if res.get('file_deleted') else 'removed entry (file already gone)'
+        return {'success': True, 'action': 'deleted_expired', 'message': f'Expired download — {verb}'}
 
     def _fix_library_retag(self, entity_type, entity_id, file_path, details):
         """Apply a library re-tag finding: write each track's planned tags in
@@ -1378,13 +1482,16 @@ class RepairWorker:
             plan = {'file_path': rp, 'db_data': t.get('db_data') or {}}
             if t.get('full_meta'):
                 plan['full_meta'] = t['full_meta']
+            if t.get('lyrics_meta'):
+                plan['lyrics_meta'] = t['lyrics_meta']   # read-only lyrics query metadata
             resolved_plans.append(plan)
 
         from core.repair_jobs.library_retag import apply_track_plans
         res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=(details.get('depth') == 'full'))
+                                full=(details.get('depth') == 'full'),
+                                lyrics_action=details.get('lyrics_action', False))
 
-        if res['written'] == 0 and not res['cover_written']:
+        if res['written'] == 0 and not res['cover_written'] and not res.get('lyrics_written'):
             return {'success': False,
                     'error': 'Nothing could be written — files unreachable or read-only?'}
         msg = f"Re-tagged {res['written']} track(s)"
@@ -3088,7 +3195,7 @@ class RepairWorker:
 
             # Build query for pending fixable findings
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
-                             'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
+                             'missing_cover_art', 'missing_lyrics', 'expired_download', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',

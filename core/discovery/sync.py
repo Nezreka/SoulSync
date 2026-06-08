@@ -524,12 +524,12 @@ def run_sync_task(
         # don't want persisted to app.log.
         _synced = getattr(result, 'synced_tracks', 0)
         logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
-        # In reconcile mode the whole point (#792) is to NOT touch the playlist's
-        # existing image — pushing the source image here would re-clobber a
-        # user's custom poster every sync, the exact bug reconcile fixes. So skip
-        # the auto image push for reconcile (the playlist keeps its own art).
-        if sync_mode == 'reconcile':
-            logger.info("[PLAYLIST IMAGE] reconcile mode — preserving existing playlist image")
+        # Modes that edit a playlist in place (reconcile #792, append #811) must
+        # NOT push the source image — doing so re-clobbers a user's custom poster
+        # every sync, the exact bug these modes exist to avoid. Only the
+        # destructive 'replace' (recreate-from-scratch) pushes the image.
+        if sync_mode in ('reconcile', 'append'):
+            logger.info(f"[PLAYLIST IMAGE] {sync_mode} mode — preserving existing playlist image")
         elif playlist_image_url and _synced > 0:
             try:
                 active_server = deps.config_manager.get_active_media_server()

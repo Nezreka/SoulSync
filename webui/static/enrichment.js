@@ -461,14 +461,16 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     // Spotify Free source — treat it as running, not stuck (#798 bridge).
     const bridgingFree = data.using_free === true;
     const rateLimitedStuck = isRateLimited && !bridgingFree;
-    const budgetExhausted = data.daily_budget && data.daily_budget.exhausted;
+    // Budget is a real-API cap; when bridging to free it no longer applies, so
+    // only treat the budget as a stop when we're NOT serving via free (#798).
+    const budgetStuck = (data.daily_budget && data.daily_budget.exhausted) && !bridgingFree;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
     if (data.paused) {
         button.classList.add('paused');
     } else if (notAuthenticated) {
         button.classList.add('no-auth');
-    } else if (rateLimitedStuck || budgetExhausted) {
+    } else if (rateLimitedStuck || budgetStuck) {
         button.classList.add('paused');
     } else if (data.idle) {
         button.classList.add('complete');
@@ -485,7 +487,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
         else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
         else if (rateLimitedStuck) { tooltipStatus.textContent = 'Rate Limited'; }
         else if (bridgingFree) { tooltipStatus.textContent = 'Running (Spotify Free)'; }
-        else if (budgetExhausted) { tooltipStatus.textContent = 'Daily Limit Reached'; }
+        else if (budgetStuck) { tooltipStatus.textContent = 'Daily Limit Reached'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
@@ -502,7 +504,7 @@ function updateSpotifyEnrichmentStatusFromData(data) {
             tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
         } else if (bridgingFree && data.current_item && data.current_item.name) {
             tooltipCurrent.textContent = `Now: ${data.current_item.name} (via Spotify Free)`;
-        } else if (budgetExhausted) {
+        } else if (budgetStuck) {
             const resets = data.daily_budget.resets_in_seconds || 0;
             const hours = Math.floor(resets / 3600);
             const mins = Math.floor((resets % 3600) / 60);
@@ -2732,6 +2734,7 @@ async function loadRepairFindings() {
             duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
+            missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
         };
 
@@ -2741,6 +2744,8 @@ async function loadRepairFindings() {
             orphan_file: 'Resolve',
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
+            missing_lyrics: 'Apply Lyrics',
+            expired_download: 'Delete',
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
             incomplete_album: 'Auto-Fill',
@@ -2757,6 +2762,8 @@ async function loadRepairFindings() {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
+                applied_lyrics: 'Lyrics Applied',
+                deleted_expired: 'Deleted',
                 removed_duplicates: 'Duplicates Removed',
             };
             let statusBadge = '';
@@ -2929,13 +2936,19 @@ function _renderFindingDetail(f) {
             }
             // Per-track old → new diff (cap the rendered list so huge albums stay sane).
             changed.slice(0, 40).forEach(t => {
-                const label = t.title || (t.file_path || '').split(/[\\/]/).pop();
+                const fname = (t.file_path || '').split(/[\\/]/).pop();
+                const label = t.title || fname || 'Unknown';
                 const rows = Object.entries(t.changes).map(([field, c]) => [
                     field.replace(/_/g, ' '),
                     `${(c.old === '' || c.old == null) ? '∅' : c.old}   →   ${c.new}`,
                     'highlight',
                 ]);
                 html += `<div style="margin:8px 0 2px;font-weight:600">${_escFinding(label)}</div>`;
+                // Show the physical filename so a wrong match is easy to spot before
+                // applying (skip when the label already IS the filename, i.e. no title).
+                if (fname && fname !== label) {
+                    html += `<div class="repair-finding-meta" style="margin:0 0 4px;opacity:.7;word-break:break-all">📄 ${_escFinding(fname)}</div>`;
+                }
                 html += _gridRows(rows);
             });
             if (changed.length > 40) {
@@ -3084,27 +3097,53 @@ function _renderFindingDetail(f) {
             if (d.album_title) rows.push(['Album', d.album_title]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
             let artHtml = '';
-            // Show artist image + found artwork side by side
-            if (d.artist_thumb_url || d.found_artwork_url) {
+            // Each found image is independently applyable (Pache711: "fix one,
+            // dismiss the other"). Per-image Apply buttons let the user take the
+            // correct album art and skip a wrong artist image, or vice versa.
+            if (d.artist_thumb_url || d.found_artwork_url || d.found_artist_url) {
                 artHtml += '<div class="repair-finding-media">';
-                if (d.artist_thumb_url) {
-                    artHtml += `<div class="repair-finding-media-card">
-                        <img class="repair-finding-media-img artist" src="${_escFinding(d.artist_thumb_url)}" alt="Artist"
-                             onerror="this.parentElement.style.display='none'" />
-                        <span class="repair-finding-media-label">${_escFinding(d.artist || 'Artist')}</span>
-                    </div>`;
-                }
                 if (d.found_artwork_url) {
                     artHtml += `<div class="repair-finding-media-card">
-                        <img class="repair-finding-media-img" src="${_escFinding(d.found_artwork_url)}" alt="Found artwork"
+                        <img class="repair-finding-media-img" src="${_escFinding(d.found_artwork_url)}" alt="Found album art"
                              onerror="this.parentElement.style.display='none'" />
-                        <span class="repair-finding-media-label">Found Artwork</span>
+                        <span class="repair-finding-media-label">Found Album Art</span>
+                        <button class="repair-art-apply-btn" onclick="applyCoverArtTarget(${f.id}, 'album')">Use for album</button>
+                    </div>`;
+                }
+                // Current artist image (context) — no apply, it's what's there now.
+                if (d.artist_thumb_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img artist" src="${_escFinding(d.artist_thumb_url)}" alt="Current artist art"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">${_escFinding(d.artist || 'Artist')} (current)</span>
+                    </div>`;
+                }
+                // Found artist image — the applyable replacement.
+                if (d.found_artist_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img artist" src="${_escFinding(d.found_artist_url)}" alt="Found artist art"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">Found Artist Art</span>
+                        <button class="repair-art-apply-btn" onclick="applyCoverArtTarget(${f.id}, 'artist')">Use for artist</button>
                     </div>`;
                 }
                 artHtml += '</div>';
             }
             artHtml += _gridRows(rows);
             return artHtml;
+
+        case 'missing_lyrics':
+            if (d.track_title) rows.push(['Track', d.track_title]);
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album_title) rows.push(['Album', d.album_title]);
+            return _gridRows(rows);
+
+        case 'expired_download':
+            if (d.title) rows.push(['Track', d.title]);
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.origin) rows.push(['Source', `${d.origin}${d.origin_context ? ' — ' + d.origin_context : ''}`]);
+            if (d.file_path) rows.push(['File', d.file_path.split(/[\\/]/).pop()]);
+            return _gridRows(rows);
 
         case 'track_number_mismatch':
             if (d.album_title) rows.push(['Album', d.album_title]);
@@ -3371,6 +3410,31 @@ async function selectDuplicateToKeep(findingId, keepTrackId) {
     } catch (error) {
         console.error('Error fixing duplicate:', error);
         showToast('Error resolving duplicate', 'error');
+    }
+}
+
+async function applyCoverArtTarget(id, target) {
+    // Per-image apply for a cover-art finding (Pache711). target: 'album' |
+    // 'artist'. Applying either resolves the finding, so picking the correct
+    // image and ignoring the wrong one = "fix one, dismiss the other".
+    try {
+        const response = await fetch(`/api/repair/findings/${id}/fix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fix_action: target }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || `Applied ${target} art`, 'success');
+        } else {
+            showToast(result.error || `Failed to apply ${target} art`, 'error');
+        }
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error applying cover art target:', error);
+        showToast('Error applying art', 'error');
     }
 }
 

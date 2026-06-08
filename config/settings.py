@@ -493,6 +493,32 @@ class ConfigManager:
                 # editing source.
                 "album_bundle_poll_interval_seconds": 2.0,
                 "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
+                # Stalled-torrent handling (noldevin): abandon a torrent that
+                # makes zero download progress for this long (dead magnet
+                # stuck on "downloading metadata", no seeders) instead of
+                # holding the worker for the full album timeout. 0 disables.
+                "torrent_stall_timeout_seconds": 10 * 60,       # 10 minutes
+                # What to do when a torrent stalls: "abandon" (remove it +
+                # its partial data, fail the download so the next source can
+                # try) or "pause" (pause in the client, leave for the user).
+                "torrent_stall_action": "abandon",
+            },
+            "post_processing": {
+                # When a download is quarantined (AcoustID mismatch, integrity /
+                # duration failure), retry the next-best candidate instead of
+                # failing outright. Default ON (PR #801's documented default —
+                # the monitor reads this with inline default True; this template
+                # said False, so fresh installs silently shipped with the retry
+                # engine off while existing configs got it on. CI caught the
+                # split: its fresh default config failed all 7 requeue tests).
+                "retry_next_candidate_on_mismatch": True,
+                # Opt-in exhaustive retry: budget retries PER SOURCE so every
+                # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
+                # before the track gives up. Default off (single global cap).
+                "retry_exhaustive": False,
+                # Retries per search query per source in exhaustive mode. The
+                # per-source budget is query_count × this value.
+                "retries_per_query": 5,
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"

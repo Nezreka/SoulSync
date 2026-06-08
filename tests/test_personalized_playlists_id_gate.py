@@ -68,6 +68,13 @@ class _FakeDatabase:
             CREATE TABLE discovery_artist_blacklist (
                 artist_name TEXT PRIMARY KEY
             );
+            -- Unified blocklist — discovery filtering now unions artist bans
+            -- from here too (Phase 1 blocklist). Minimal shape for the subquery.
+            CREATE TABLE blocklist (
+                id INTEGER PRIMARY KEY,
+                entity_type TEXT,
+                name TEXT
+            );
             -- Minimal `tracks` table: exists so the `exclude_owned`
             -- subquery in `_select_discovery_tracks` can join. Real
             -- schema has many more columns; we only need the source-id

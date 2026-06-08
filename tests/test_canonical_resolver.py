@@ -193,3 +193,103 @@ def test_score_is_rounded():
         source_priority=PRIORITY,
     )
     assert out["score"] == round(out["score"], 4)
+
+
+# ── #767-2: expand to alternate editions when the linked one clearly misfits ──
+#
+# The reported bug: a 1-track single was enriched against the *deluxe* album, so
+# every linked source ID points at the 10-track deluxe. The single is never a
+# candidate, so it can never be chosen — and the deluxe scores so badly (0.1,
+# below the 0.5 floor) that nothing gets pinned and the organizer falls back to
+# the stored deluxe ID. The fix: when no LINKED edition clears the floor, fetch
+# the source's other editions of the same release and score those too.
+
+SINGLE_FILE = [{"duration_ms": 129_000, "title": "Scatterbrain"}]  # owns the 2:09 single
+# 10-track deluxe; "Scatterbrain" sits at track 2 (2:10, within ±3s of the file).
+DELUXE_10 = (
+    [{"duration_ms": 200_000, "title": "Intro"}]
+    + [{"duration_ms": 130_000, "title": "Scatterbrain"}]
+    + [{"duration_ms": 180_000 + i * 5_000, "title": f"Deluxe {i+1}"} for i in range(8)]
+)
+SINGLE_RELEASE = [{"duration_ms": 129_000, "title": "Scatterbrain", "track_number": 1}]
+
+
+def _alternates(table):
+    """fetch_alternates backed by a {(source, album_id): [release, ...]} table.
+    Each release is {'album_id', 'tracks'} — a sibling edition from that source."""
+    def fetch(source, album_id):
+        return table.get((source, album_id)) or []
+    return fetch
+
+
+def test_expands_to_alternate_edition_when_linked_misfits():
+    # Only linked id is the deluxe; user actually owns the single.
+    alt_table = {
+        ("spotify", "sp_deluxe"): [
+            {"album_id": "sp_single", "tracks": SINGLE_RELEASE},
+            {"album_id": "sp_deluxe", "tracks": DELUXE_10},  # the edition we already have
+        ],
+    }
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_deluxe"},
+        file_tracks=list(SINGLE_FILE),
+        fetch_tracklist=_fetcher({("spotify", "sp_deluxe"): DELUXE_10}),
+        fetch_alternates=_alternates(alt_table),
+        source_priority=PRIORITY,
+    )
+    assert out is not None, "deluxe alone scores 0.1 (below floor) — must expand"
+    assert out["source"] == "spotify" and out["album_id"] == "sp_single"
+    assert out["score"] > 0.9
+
+
+def test_does_not_expand_when_linked_edition_fits():
+    # Linked edition fits the files (score ~1.0) -> NEVER fetch alternates (cost
+    # guard + zero behaviour change for the 95% common case).
+    calls = []
+
+    def spy(source, album_id):
+        calls.append((source, album_id))
+        return [{"album_id": "sp_other", "tracks": DELUXE_10}]
+
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_std"},
+        file_tracks=list(STD),
+        fetch_tracklist=_fetcher({("spotify", "sp_std"): STD}),
+        fetch_alternates=spy,
+        source_priority=PRIORITY,
+    )
+    assert out["source"] == "spotify" and out["album_id"] == "sp_std"
+    assert calls == [], "must not fetch alternates when the linked edition already fits"
+
+
+def test_expansion_dedupes_alternates_against_linked():
+    # The alternates list re-offers the linked deluxe; it must not be double-scored
+    # and must not crash. The exact-fit single still wins.
+    alt_table = {
+        ("spotify", "sp_deluxe"): [
+            {"album_id": "sp_deluxe", "tracks": DELUXE_10},   # dup of the linked one
+            {"album_id": "sp_single", "tracks": SINGLE_RELEASE},
+        ],
+    }
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_deluxe"},
+        file_tracks=list(SINGLE_FILE),
+        fetch_tracklist=_fetcher({("spotify", "sp_deluxe"): DELUXE_10}),
+        fetch_alternates=_alternates(alt_table),
+        source_priority=PRIORITY,
+    )
+    assert out["album_id"] == "sp_single"
+    ids = [c["album_id"] for c in out["candidates"]]
+    assert ids.count("sp_deluxe") == 1, "linked edition must be scored exactly once"
+
+
+def test_no_expansion_when_alternates_not_provided():
+    # Backward-compat: without a fetch_alternates callable, behaviour is exactly
+    # as before — the misfit deluxe stays unresolved (None).
+    out = resolve_canonical_for_album(
+        album_source_ids={"spotify": "sp_deluxe"},
+        file_tracks=list(SINGLE_FILE),
+        fetch_tracklist=_fetcher({("spotify", "sp_deluxe"): DELUXE_10}),
+        source_priority=PRIORITY,
+    )
+    assert out is None

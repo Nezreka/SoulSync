@@ -386,6 +386,30 @@ class NavidromeClient(MediaServerClient):
             params['size'] = str(size)
         return f"{self.base_url}/rest/getCoverArt?{urlencode(params)}"
 
+    def build_stream_url(self, track_id, max_bitrate=0) -> Optional[str]:
+        """Absolute, Subsonic-authenticated ``/rest/stream`` URL for a song.
+
+        Lets SoulSync play a Navidrome library track by proxying the server's
+        own stream API — so playback works WITHOUT mounting the music into the
+        SoulSync container (#809: SoulSync otherwise reads library files off
+        disk, which fails when the user hasn't mirror-mounted the library).
+        ``max_bitrate`` 0 = no transcode (original file). Returns None when not
+        connected / no id."""
+        if not self.base_url or not track_id:
+            return None
+        if not self.username or not self.password:
+            return None
+        salt = secrets.token_hex(8)
+        token = hashlib.md5((self.password + salt).encode()).hexdigest()
+        params = {
+            'u': self.username, 't': token, 's': salt,
+            'v': '1.16.1', 'c': 'SoulSync',
+            'id': str(track_id),
+        }
+        if max_bitrate and int(max_bitrate) > 0:
+            params['maxBitRate'] = str(int(max_bitrate))
+        return f"{self.base_url}/rest/stream?{urlencode(params)}"
+
     # Subsonic endpoints that modify data — use POST to avoid URL length limits
     _WRITE_ENDPOINTS = frozenset({
         'createPlaylist', 'updatePlaylist', 'deletePlaylist',
