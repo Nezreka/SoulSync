@@ -65,7 +65,19 @@ class JellyfinAlbum:
         self.title = jellyfin_data.get('Name', 'Unknown Album')
         self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
         self._artist_id = jellyfin_data.get('AlbumArtists', [{}])[0].get('Id', '') if jellyfin_data.get('AlbumArtists') else ''
-        
+        # Album cover image, mirroring JellyfinArtist.thumb — so the library
+        # scan stores albums.thumb_url instead of leaving it empty. Without
+        # this, EVERY album reads back with no thumb, the web UI shows blank
+        # art, and the Cover Art Filler flags the entire library as "missing
+        # cover art" (it became the only thing populating the column).
+        self.thumb = self._get_album_image_url()
+
+    def _get_album_image_url(self) -> Optional[str]:
+        """Jellyfin/Emby album primary image URL (same shape as the artist one)."""
+        if not self.ratingKey:
+            return None
+        return f"/Items/{self.ratingKey}/Images/Primary"
+
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
             return None
@@ -73,7 +85,7 @@ class JellyfinAlbum:
             return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         except:
             return None
-    
+
     def artist(self) -> Optional[JellyfinArtist]:
         """Get the album artist"""
         if self._artist_id:
