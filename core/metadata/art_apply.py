@@ -113,8 +113,15 @@ def apply_art_to_album_files(
 
     Returns counts; never raises (unwritable/read-only files are skipped).
     ``read_only_fs`` is True when the target filesystem itself rejects writes
-    (EROFS — a docker ``:ro`` volume mount; chmod can't fix that) so callers
-    can tell the user the actual cure instead of a generic failure.
+    (a real EROFS from an actual write — a ':ro' volume, a read-only host/NFS/
+    SMB mount, or a read-only underlying fs) so callers can tell the user the
+    real cause instead of a generic failure.
+
+    NOTE: read-only is detected from an ACTUAL write raising EROFS, never from
+    statvfs/mount flags — union/FUSE/network filesystems (mergerfs, rclone,
+    NFS) common in self-hosted setups misreport those flags, which would
+    false-block a perfectly writable library (Sokhi: read-only error with no
+    ':ro' in compose). The write itself is the only honest test.
     """
     result = {"embedded": 0, "failed": 0, "skipped": 0, "cover_written": False,
               "read_only_fs": False}
@@ -122,26 +129,6 @@ def apply_art_to_album_files(
     paths = [p for p in (file_paths or []) if p]
     if not symbols:
         return result
-
-    # Pre-flight: if the mount is read-only, every save below would fail with
-    # EROFS one by one (Tim's report: a wall of per-file warnings and a 777
-    # chmod that couldn't help). statvfs asks the kernel without writing.
-    # POSIX-only — Windows has no os.statvfs (and no ':ro' bind mounts);
-    # there we skip straight to the per-file path, same as before this fix.
-    probe_dir = folder or (os.path.dirname(paths[0]) if paths else None)
-    _statvfs = getattr(os, "statvfs", None)
-    if probe_dir and _statvfs is not None:
-        try:
-            if _statvfs(probe_dir).f_flag & getattr(os, "ST_RDONLY", 1):
-                logger.warning(
-                    "Art apply skipped: %s is on a READ-ONLY filesystem "
-                    "(docker ':ro' volume mount — chmod cannot fix this)",
-                    probe_dir)
-                result["read_only_fs"] = True
-                result["failed"] = len(paths)
-                return result
-        except OSError:
-            pass  # statvfs unavailable/odd fs — fall through to per-file handling
 
     for fp in paths:
         if not os.path.isfile(fp):
@@ -169,8 +156,13 @@ def apply_art_to_album_files(
                 result["failed"] += 1
         except Exception as exc:
             # Read-only mounts / permission errors land here — skip, don't crash.
+            # A real EROFS = the mount is read-only; flag it and stop trying the
+            # rest (fast-fail without the unreliable statvfs guess).
             if getattr(exc, "errno", None) == errno.EROFS:
                 result["read_only_fs"] = True
+                logger.warning("Could not embed art into %s: read-only filesystem", fp)
+                result["failed"] += len(paths) - paths.index(fp)  # remaining all fail too
+                break
             logger.warning("Could not embed art into %s: %s", fp, exc)
             result["failed"] += 1
 

@@ -1394,16 +1394,17 @@ class RepairWorker:
 
         embedded = art_result.get('embedded', 0)
         if art_result.get('read_only_fs'):
-            # Tim's report: a docker ':ro' volume — every write fails EROFS,
-            # the user chmod 777's in vain, and a soft "(read-only?)" hint
-            # wasn't loud enough. Fail the fix with the actual cure.
+            # The music folder is genuinely read-only at the OS level (the
+            # write raised EROFS). Most common cause is a docker ':ro' volume,
+            # but it can also be a read-only host mount (NFS/SMB exported ro),
+            # a mergerfs/union read-only branch, or the library mounted from
+            # another container as read-only — chmod can't change any of these.
             return {'success': False, 'action': 'applied_cover_art',
-                    'error': ('Your music folder is mounted READ-ONLY — the container '
-                              'cannot write to it, and chmod cannot change that. '
-                              "Remove ':ro' from the volume mapping in your docker "
-                              "compose/run (e.g. '/music:/music:ro' → '/music:/music') "
-                              'and recreate the container. (Database thumbnail was '
-                              'still updated.)'),
+                    'error': ('Your music folder is READ-ONLY — the container cannot '
+                              'write to it (chmod cannot change this). Check that the '
+                              "volume isn't mapped ':ro', and that the underlying host "
+                              'mount (NFS/SMB/mergerfs) is read-write, then recreate the '
+                              'container. (Database thumbnail was still updated.)'),
                     'art_result': art_result}
         msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
         if art_result.get('cover_written'):
