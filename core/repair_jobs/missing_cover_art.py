@@ -176,8 +176,21 @@ class MissingCoverArtJob(RepairJob):
                 download_folder=download_folder,
                 config_manager=context.config_manager,
             ) if rep_path else None
-            disk_missing = bool(resolved_rep) and not album_has_art_on_disk(resolved_rep)
-            if not db_missing and not disk_missing:
+            has_local = bool(resolved_rep)
+            disk_missing = has_local and not album_has_art_on_disk(resolved_rep)
+            # An album whose FILES already have art is not "missing cover art",
+            # even if the DB thumb_url cache happens to be empty — the library
+            # shows the file art either way. So for a local album, flag only when
+            # the files actually lack art. db_missing alone matters only for
+            # media-server-only albums (no local files), where the DB thumb is
+            # the sole art. Without this, every local album with an empty
+            # thumb_url got flagged despite having perfectly good embedded art
+            # (Boulder: "flags every album, but everything has art").
+            if has_local:
+                needs_fix = disk_missing
+            else:
+                needs_fix = db_missing
+            if not needs_fix:
                 result.skipped += 1
                 continue
 
