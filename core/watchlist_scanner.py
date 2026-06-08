@@ -1313,6 +1313,19 @@ class WatchlistScanner:
                             logger.info("Skipping album with placeholder tracks: %s", album_name)
                             continue
                         if not self._should_include_release(len(tracks), artist):
+                            # Make the type-filter skip visible — otherwise a user
+                            # with "Albums" toggled off just sees missing tracks
+                            # with no explanation (Sokhi #815-adjacent: 14 singles,
+                            # 0 albums because include_albums was off).
+                            _n = len(tracks)
+                            _kind = 'album' if _n >= 7 else ('EP' if _n >= 4 else 'single')
+                            logger.info(
+                                "Skipping %s '%s' (%d tracks) — release type filter "
+                                "(albums=%s, eps=%s, singles=%s) excludes it",
+                                _kind, album_name, _n,
+                                getattr(artist, 'include_albums', True),
+                                getattr(artist, 'include_eps', True),
+                                getattr(artist, 'include_singles', True))
                             continue
 
                         album_image_url = ''
