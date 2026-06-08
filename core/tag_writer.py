@@ -390,13 +390,12 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             if art_ok:
                 written.append('cover_art')
 
-        # Save
-        if isinstance(audio.tags, ID3):
-            audio.save(v1=0, v2_version=4)
-        elif isinstance(audio, FLAC):
-            audio.save(deleteid3=True)
-        else:
-            audio.save()
+        # Save — atomically (#819): write into a temp copy + atomic replace so an
+        # interrupted/OOM-killed save can never truncate the user's file. Same
+        # format kwargs as before, just routed through the shared atomic helper.
+        from types import SimpleNamespace
+        from core.metadata.common import save_audio_file
+        save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile))
 
         return {'success': True, 'written_fields': written}
 
