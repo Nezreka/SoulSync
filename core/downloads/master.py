@@ -608,6 +608,34 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             if skipped > 0:
                 logger.warning(f"[Content Filter] Filtered out {skipped} explicit track(s) from download queue")
 
+        # Blocklist (Phase 2a): drop banned artists/albums/tracks before queueing,
+        # so a blocked item can't slip in via playlist sync / album download /
+        # discography. Same ID-cascade brain as the wishlist guard (Phase 1) —
+        # the only other auto-acquisition path. Skipped when the user confirmed
+        # "download anyway" at the modal (Phase 2b override).
+        _ignore_blocklist = False
+        with tasks_lock:
+            if batch_id in download_batches:
+                _ignore_blocklist = download_batches[batch_id].get('ignore_blocklist', False)
+        if not _ignore_blocklist:
+            try:
+                _bl_before = len(missing_tracks)
+                _bl_kept = []
+                for res in missing_tracks:
+                    reason = db.blocklist_reason_for_track(
+                        batch_profile_id, res.get('track', {}), source=batch_source)
+                    if reason:
+                        logger.info("[Blocklist] Skipping %s '%s' from download queue (%s blocked)",
+                                    reason[0], res.get('track', {}).get('name', '?'), reason[0])
+                    else:
+                        _bl_kept.append(res)
+                if len(_bl_kept) != _bl_before:
+                    logger.info("[Blocklist] Filtered out %d blocklisted track(s) from download queue",
+                                _bl_before - len(_bl_kept))
+                missing_tracks = _bl_kept
+            except Exception as _bl_err:
+                logger.debug("blocklist queue filter skipped: %s", _bl_err)
+
         with tasks_lock:
             if batch_id in download_batches:
                 download_batches[batch_id]['analysis_results'] = analysis_results
@@ -1088,6 +1116,26 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                         f"[Debug] Task Creation - playlist folder mode NOT enabled for: "
                         f"{track_info.get('name')}"
                     )
+
+                # Download-origin provenance: stamp what TRIGGERED this download
+                # so the history chokepoint can record it (origin-history modal).
+                # Wishlist rows already ride their source_info in track_info
+                # (watchlist_artist_name / playlist_name — the deriver reads
+                # those directly); this stamp covers DIRECT playlist batches,
+                # where the playlist context otherwise only survives in
+                # folder mode.
+                if '_dl_origin' not in track_info and batch_source_playlist_ref and batch_playlist_name:
+                    _prov_si = track_info.get('source_info') or {}
+                    if isinstance(_prov_si, str):
+                        try:
+                            _prov_si = json.loads(_prov_si)
+                        except (json.JSONDecodeError, TypeError):
+                            _prov_si = {}
+                    if not _prov_si.get('watchlist_artist_name'):
+                        track_info['_dl_origin'] = 'playlist'
+                        track_info['_dl_origin_context'] = (
+                            _prov_si.get('playlist_name') or batch_playlist_name
+                        )
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,

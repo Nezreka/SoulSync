@@ -181,6 +181,27 @@ def test_album_matches_unknown_requested_artist_allows_album_match():
     assert art_lookup._album_matches("", "1989", "Taylor Swift", "1989")
 
 
+def test_album_matches_rejects_numeric_difference():
+    """Sokhi: same series, different volume number. CJK strips to latin
+    tokens, so Vol.4 was a token-subset of Vol.4.5 and inherited its art.
+    A number on only one side = a different release, never a suffix."""
+    A = "B小町"
+    assert not art_lookup._album_matches(
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4",
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4.5")
+    assert not art_lookup._album_matches(
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.2",
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.2.5")
+    # Sequels are different albums too.
+    assert not art_lookup._album_matches("Artist", "Album", "Artist", "Album 2")
+    # Identical volume numbers still match.
+    assert art_lookup._album_matches(
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4",
+        A, "B小町 - TVアニメ「【推しの子】」キャラクターソングCD Vol.4")
+    # Numeric token shared by BOTH sides keeps non-numeric suffix tolerance.
+    assert art_lookup._album_matches("Taylor Swift", "1989", "Taylor Swift", "1989 (Deluxe)")
+
+
 # ---------------------------------------------------------------------------
 # build_art_lookup — caching + guarding
 # ---------------------------------------------------------------------------

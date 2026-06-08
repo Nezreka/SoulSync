@@ -1748,12 +1748,21 @@ class WatchlistScanner:
     def _match_to_itunes(self, artist_name: str) -> Optional[str]:
         """Match artist name to iTunes ID using fuzzy name comparison."""
         try:
-            if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
-            else:
-                logger.warning("Cannot match to iTunes - MetadataService not available")
+            # Use the canonical iTunes client like _match_to_deezer/_discogs/
+            # _musicbrainz do. The old path read the PRIVATE _metadata_service
+            # attr (None when the scanner is built from a spotify_client — the
+            # normal web_server wiring) and just gave up — the only matcher
+            # with no fallback — so watchlist iTunes backfills failed wholesale
+            # ("MetadataService not available" ×8, Backfilled 0/8). And even
+            # when set, metadata_service.itunes is the FALLBACK-client slot,
+            # which may actually be a DeezerClient (see _match_to_deezer) —
+            # matching against it could store a Deezer ID as itunes_artist_id.
+            from core.metadata.registry import get_itunes_client
+            client = get_itunes_client()
+            if client is None:
+                logger.warning("Cannot match to iTunes - client unavailable")
                 return None
-
+            results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to iTunes: {e}")
@@ -3613,13 +3622,24 @@ class WatchlistScanner:
                                 if not album_data or 'tracks' not in album_data:
                                     continue
 
+                                # #705: announced-but-unreleased albums must not reach the
+                                # radar — and worse, their NEGATIVE days_old used to INFLATE
+                                # the recency score (100 - days*7) above every released
+                                # track, which is why Fresh Tape filled up with prereleases.
+                                from core.metadata.release_dates import is_future_release
+                                if is_future_release(album.get('release_date', '')):
+                                    logger.debug(
+                                        f"Release Radar: skipping unreleased album "
+                                        f"'{album.get('album_name', '?')}' ({album.get('release_date')})")
+                                    continue
+
                                 # Calculate days since release for recency score
                                 days_old = 14
                                 try:
                                     release_date_str = album.get('release_date', '')
                                     if release_date_str and len(release_date_str) >= 10:
                                         release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
-                                        days_old = (datetime.now() - release_date).days
+                                        days_old = max(0, (datetime.now() - release_date).days)
                                 except Exception as e:
                                     logger.debug("release-date parse: %s", e)
 

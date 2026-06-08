@@ -12,6 +12,7 @@ finding. The apply handler lives in repair_worker (_fix_library_retag).
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.library.retag_planner import (
     MODE_FILL_MISSING,
     MODE_OVERWRITE,
@@ -71,14 +72,19 @@ def _run_full_enrich(file_path, full_meta) -> bool:
         return False
 
 
-def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False) -> dict:
-    """Write each plan's tags in place (+ optionally embed/refresh cover art),
-    reusing tag_writer.write_tags_to_file. ``file_path`` on each plan must be a
-    real, reachable path (caller resolves Docker paths). Shared by the dry-run=
-    False auto-apply and the repair_worker fix handler. Never raises.
-    """
+def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False,
+                      lyrics_action=False) -> dict:
+    """Write each plan's tags in place (+ optionally embed/refresh cover art,
+    + optionally fetch/refresh .lrc lyrics), reusing tag_writer.write_tags_to_file.
+    ``file_path`` on each plan must be a real, reachable path (caller resolves
+    Docker paths). Shared by the dry-run=False auto-apply and the repair_worker
+    fix handler. Never raises.
+
+    ``lyrics_action`` (Sokhi): when True, after a track's tags are written, fetch
+    + write its .lrc and embed the lyrics — the same LyricsClient the import
+    pipeline uses (fetch if missing, re-embed if a sidecar already exists)."""
     import os as _os
-    result = {'written': 0, 'failed': 0, 'skipped': 0, 'cover_written': False}
+    result = {'written': 0, 'failed': 0, 'skipped': 0, 'cover_written': False, 'lyrics_written': 0}
     embed_cover = bool(cover_action and cover_url)
     cover_data = None
     if embed_cover:
@@ -89,12 +95,20 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
             logger.debug("retag cover download failed: %s", e)
     embed_cover = embed_cover and cover_data is not None
 
+    _lyrics_client = None
+    if lyrics_action:
+        try:
+            from core.lyrics_client import lyrics_client as _lyrics_client
+        except Exception as e:
+            logger.debug("retag lyrics client unavailable: %s", e)
+            _lyrics_client = None
+
     from core.tag_writer import write_tags_to_file
     last_dir = None
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
-        if not fp or not _os.path.isfile(fp) or (not db_data and not embed_cover):
+        if not fp or not _os.path.isfile(fp) or (not db_data and not embed_cover and not _lyrics_client):
             result['skipped'] += 1
             continue
         try:
@@ -109,6 +123,28 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
         except Exception as e:
             logger.warning("retag write failed for %s: %s", fp, e)
             result['failed'] += 1
+
+        # Lyrics: fetch/refresh the .lrc for this track (independent of tag write
+        # success — a track with no tag changes may still be missing lyrics).
+        # Query metadata comes from the plan's READ-only lyrics_meta (never
+        # db_data, so nothing here can leak into a tag write). Falls back to
+        # db_data for plans that predate lyrics_meta.
+        if _lyrics_client:
+            lm = tp.get('lyrics_meta') or {}
+            title = lm.get('title') or db_data.get('title') or ''
+            artist = lm.get('artist') or db_data.get('artist') or ''
+            if title:
+                try:
+                    dur = lm.get('duration') or db_data.get('duration')
+                    wrote = _lyrics_client.create_lrc_file(
+                        fp, title, artist,
+                        album_name=lm.get('album') or db_data.get('album'),
+                        duration_seconds=int(dur) if dur else None,
+                    )
+                    if wrote:
+                        result['lyrics_written'] += 1
+                except Exception as e:
+                    logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
 
     if cover_action and cover_data and last_dir:
         try:
@@ -223,12 +259,14 @@ class LibraryRetagJob(RepairJob):
         'depth': 'light',
         'mode': MODE_OVERWRITE,
         'cover_art': 'replace',
+        'lyrics': 'skip',
         'source': 'auto',
     }
     setting_options = {
         'depth': ['light', 'full'],
         'mode': [MODE_OVERWRITE, MODE_FILL_MISSING],
         'cover_art': ['replace', 'fill_missing', 'skip'],
+        'lyrics': ['fetch', 'skip'],
         'source': ['auto', 'spotify', 'itunes', 'deezer', 'musicbrainz'],
     }
     auto_fix = True
@@ -251,6 +289,7 @@ class LibraryRetagJob(RepairJob):
         settings = self._get_settings(context)
         mode = settings.get('mode', MODE_OVERWRITE)
         cover_mode = settings.get('cover_art', 'replace')
+        lyrics_action = (settings.get('lyrics', 'skip') or 'skip').lower() == 'fetch'
         dry_run = settings.get('dry_run', True)
         depth = settings.get('depth', 'light')
         source_order = self._source_order(settings)
@@ -300,7 +339,8 @@ class LibraryRetagJob(RepairJob):
 
             try:
                 self._scan_album(context, result, album_id, album_title, artist_name,
-                                 source, album_source_id, mode, cover_mode, dry_run, depth)
+                                 source, album_source_id, mode, cover_mode, dry_run, depth,
+                                 lyrics_action=lyrics_action)
             except Exception as e:
                 logger.debug("Library re-tag: album %s failed: %s", album_id, e)
                 result.errors += 1
@@ -312,7 +352,8 @@ class LibraryRetagJob(RepairJob):
         return result
 
     def _scan_album(self, context, result, album_id, album_title, artist_name,
-                    source, album_source_id, mode, cover_mode, dry_run=True, depth='light'):
+                    source, album_source_id, mode, cover_mode, dry_run=True, depth='light',
+                    lyrics_action=False):
         # Local tracks for this album.
         with context.db._get_connection() as conn:
             cur = conn.cursor()
@@ -366,43 +407,90 @@ class LibraryRetagJob(RepairJob):
         cover_action = self._cover_action(cover_mode, cover_url, library_tracks)
 
         pairs = match_source_tracks(source_tracks, library_tracks)
+        download_folder = (context.config_manager.get('soulseek.download_path', '')
+                           if context.config_manager else None)
         track_plans = []
         unmatched = []
+        unreachable = 0
         for lib, src in pairs:
+            # Resolve container/host path mismatches the same way the apply
+            # handler does. The old bare os.path.isfile() on the raw DB path
+            # failed for EVERY track on path-mapped setups (Docker mounts), so
+            # cover-mode scans produced "(0 track(s))" findings that the apply
+            # then rejected with "No tracks to re-tag in finding".
+            rp = resolve_library_file_path(
+                lib['file_path'],
+                transfer_folder=getattr(context, 'transfer_folder', None),
+                download_folder=download_folder,
+                config_manager=context.config_manager,
+            )
+            if not rp:
+                unreachable += 1
+                continue  # genuinely unreachable from this process
             if src is None:
                 unmatched.append(lib['title'] or os.path.basename(lib['file_path']))
+                # No source match means no re-tag — but album cover art and/or
+                # lyrics still apply to the file, so those modes include an
+                # art/lyrics-only plan (empty db_data → apply writes NO tags).
+                if cover_action or lyrics_action:
+                    plan_row = {
+                        'file_path': rp,
+                        'track_id': lib['id'],
+                        'title': lib['title'],
+                        'changes': [],
+                        'db_data': {},   # never write tags for an unmatched track
+                    }
+                    if lyrics_action:
+                        # READ-only metadata for the lyrics query — kept OUT of
+                        # db_data so it can never be written as tags.
+                        plan_row['lyrics_meta'] = {
+                            'title': lib.get('title'), 'artist': artist_name,
+                            'album': album_title}
+                    track_plans.append(plan_row)
                 continue
-            if not os.path.isfile(lib['file_path']):
-                continue  # not reachable at the stored path — skip (apply resolves paths)
-            current = _read_current_tags(lib['file_path'])
+            current = _read_current_tags(rp)
             plan = plan_track(current, src, album_meta, mode=mode)
-            # Include a track when its tags change, OR when there's a cover action
-            # to apply to it (db_data may be empty — apply embeds art either way).
-            if plan['changes'] or cover_action:
+            # Include a track when its tags change, OR there's a cover action,
+            # OR lyrics are being fetched (db_data may be empty — apply still
+            # embeds art / writes the .lrc).
+            if plan['changes'] or cover_action or lyrics_action:
                 db_data = plan['db_data']
                 _add_source_ids(db_data, source, album_source_id, src)
                 tp = {
-                    'file_path': lib['file_path'],
+                    'file_path': rp,
                     'track_id': lib['id'],
                     'title': lib['title'],
                     'changes': plan['changes'],
                     'db_data': db_data,
                 }
+                if lyrics_action:
+                    # READ-only lyrics query metadata (never written as tags).
+                    tp['lyrics_meta'] = {
+                        'title': lib.get('title'), 'artist': artist_name,
+                        'album': album_title}
                 if depth == 'full':
                     tp['full_meta'] = _build_full_meta(
                         db_data, src, album_title, artist_name, lib['title'])
                 track_plans.append(tp)
 
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])
-        if not tag_change_tracks and not cover_action:
+        if (not tag_change_tracks and not cover_action and not lyrics_action) or not track_plans:
+            # Nothing actionable. The second clause covers cover-action albums
+            # where no track is reachable/included — creating a finding there
+            # gives an unappliable "(0 track(s))" entry.
+            if cover_action and not track_plans:
+                logger.debug(
+                    "Library re-tag: album %s skipped — cover action but no usable tracks "
+                    "(%d unreachable, %d unmatched)", album_id, unreachable, len(unmatched))
             result.skipped += 1
             return
 
         # Not dry-run: apply the tags in place now (the track paths were already
         # isfile-checked above) and count it as an auto-fix — no finding.
         if not dry_run:
-            res = apply_track_plans(track_plans, cover_action, cover_url, full=(depth == 'full'))
-            if res['written'] or res['cover_written']:
+            res = apply_track_plans(track_plans, cover_action, cover_url, full=(depth == 'full'),
+                                    lyrics_action=lyrics_action)
+            if res['written'] or res['cover_written'] or res.get('lyrics_written'):
                 result.auto_fixed += 1
             else:
                 result.errors += 1
@@ -419,7 +507,14 @@ class LibraryRetagJob(RepairJob):
         desc = (f'Album "{album_title}" by {artist_name or "Unknown"} would be re-tagged from '
                 f'{source} ({", ".join(summary_bits)}).')
         if unmatched:
-            desc += f' {len(unmatched)} track(s) could not be matched to the source and are left untouched.'
+            desc += (f' {len(unmatched)} track(s) could not be matched to the source — '
+                     f'tags left untouched{" (cover art still applied)" if cover_action else ""}.')
+        if unreachable:
+            desc += f' {unreachable} track(s) not reachable on disk and skipped.'
+
+        # Cover-only findings say so instead of the puzzling "(0 track(s))".
+        title_what = (f'{tag_change_tracks} track(s)' if tag_change_tracks
+                      else f'cover art, {len(track_plans)} track(s)')
 
         if context.create_finding:
             inserted = context.create_finding(
@@ -429,7 +524,7 @@ class LibraryRetagJob(RepairJob):
                 entity_type='album',
                 entity_id=str(album_id),
                 file_path=None,
-                title=f'Re-tag: {album_title or "Unknown"} ({tag_change_tracks} track(s))',
+                title=f'Re-tag: {album_title or "Unknown"} ({title_what})',
                 description=desc,
                 details={
                     'album_id': album_id,
@@ -442,6 +537,7 @@ class LibraryRetagJob(RepairJob):
                     'cover_mode': cover_mode,
                     'cover_url': cover_url,
                     'cover_action': cover_action,
+                    'lyrics_action': lyrics_action,
                     'tracks': track_plans,        # each carries its db_data for a deterministic apply
                     'unmatched': unmatched,
                 },

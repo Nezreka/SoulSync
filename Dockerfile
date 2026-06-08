@@ -29,6 +29,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# yt-dlp must track YouTube faster than its stable channel ships — stable can
+# lag months behind a breaking YouTube change while extraction is broken
+# ("Requested format is not available"). Build images with the NIGHTLY channel.
+# COMMIT_SHA is referenced in the RUN so CI's layer cache (cache-from: gha)
+# busts on every new commit — otherwise this layer could pin a stale "nightly"
+# for months, silently defeating its purpose.
+ARG COMMIT_SHA=""
+RUN echo "yt-dlp nightly for build ${COMMIT_SHA}" && \
+    pip install --no-cache-dir -U --pre "yt-dlp[default]"
+
 # Stage 2: Runtime — only runtime dependencies, no build tools
 FROM python:3.11-slim
 
@@ -44,13 +54,24 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set working directory
 WORKDIR /app
 
-# Install runtime-only system dependencies (no gcc/build tools)
+# Install runtime-only system dependencies (no gcc/build tools).
+# unzip is needed by the Deno installer below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
     libchromaprint-tools \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Deno — JavaScript runtime for yt-dlp. YouTube gates its downloadable formats
+# behind JS challenges (nsig); without a JS runtime, yt-dlp's extraction is
+# deprecated and streams / music-video downloads fail with "Requested format
+# is not available". Deno is yt-dlp's default-enabled runtime; the official
+# installer auto-detects amd64/arm64. `deno --version` fails the build early
+# if the install ever breaks.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
+    deno --version
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync

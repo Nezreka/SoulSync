@@ -68,6 +68,11 @@ from core.download_plugins.album_bundle import (
     resolve_reported_save_path,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.download_plugins.torrent_stall import (
+    StallTracker,
+    get_stall_action,
+    get_stall_timeout,
+)
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from core.prowlarr_client import (
     DEFAULT_MUSIC_CATEGORIES,
@@ -305,6 +310,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # but the same tolerance keeps a one-off connection failure
         # from killing an otherwise-healthy download.
         misses = TransientMissCounter()
+        # Stalled-torrent handling (noldevin): give up early on a torrent
+        # making zero progress (dead magnet stuck on metadata, no seeders)
+        # instead of holding this worker for the full album deadline. Read
+        # per-download so a settings change applies to in-flight torrents.
+        stall = StallTracker(get_stall_timeout())
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
@@ -345,9 +355,36 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 self._mark_error(download_id, status.error or "Torrent client reported error")
                 return
 
+            if stall.is_stalled(status.downloaded, status.state, time.monotonic()):
+                self._handle_stalled(download_id, torrent_hash, get_stall_action())
+                return
+
             time.sleep(_POLL_INTERVAL_SECONDS)
 
         self._mark_error(download_id, "Torrent download timed out")
+
+    def _handle_stalled(self, download_id: str, torrent_hash: str, action: str) -> None:
+        """A torrent made no progress past the stall timeout. Abandon it
+        (remove from client + delete its partial data) or pause it for the
+        user, then fail the download so the worker frees up."""
+        adapter = get_active_torrent_adapter()
+        timeout_min = round(get_stall_timeout() / 60, 1)
+        if adapter is not None:
+            try:
+                if action == "pause":
+                    run_async(adapter.pause(torrent_hash))
+                else:
+                    # delete_files: a stalled torrent's partial data is junk
+                    # (often just a metadata stub) — don't leave it on disk.
+                    run_async(adapter.remove(torrent_hash, delete_files=True))
+            except Exception as e:
+                logger.warning("Stalled-torrent %s on %s failed: %s",
+                               action, torrent_hash[:8] if torrent_hash else "?", e)
+        verb = "paused" if action == "pause" else "removed"
+        self._mark_error(
+            download_id,
+            f"Torrent stalled (no progress for {timeout_min} min) — {verb}",
+        )
 
     def _finalize_download(self, download_id: str, save_path: Optional[str]) -> None:
         """Adapter said complete. Walk the directory + pick the

@@ -32,10 +32,15 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.imports.file_integrity import check_audio_integrity, resolve_duration_tolerance
+from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
-from core.imports.quarantine import entry_id_from_quarantined_filename
+from core.imports.quarantine import (
+    approve_quarantine_entry,
+    entry_id_from_quarantined_filename,
+    list_quarantine_entries,
+)
+from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
 from core.imports.side_effects import (
     emit_track_downloaded,
     record_download_provenance,
@@ -57,6 +62,7 @@ from core.runtime_state import (
 )
 from core.metadata.artwork import download_cover_art
 from core.metadata.common import wipe_source_tags
+from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.metadata.enrichment import enhance_file_metadata
 from core.imports.paths import (
     build_final_path_for_track,
@@ -107,6 +113,30 @@ def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
     with tasks_lock:
         if task_id in download_tasks:
             download_tasks[task_id]['quarantine_entry_id'] = entry_id
+
+
+def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
+    """Ask the download monitor to re-run this task on its next-best candidate.
+
+    Thin lazy-import wrapper around
+    ``core.downloads.monitor.requeue_quarantined_task_for_retry``. Imported
+    lazily (and defensively) so the post-processing pipeline stays importable on
+    its own — the monitor's retry globals are wired by web_server at startup, and
+    manual-import callers that never started a download worker simply get False.
+    Returns True when a retry was queued (caller must not mark the task failed).
+    """
+    if not task_id:
+        return False
+    try:
+        from core.downloads.monitor import requeue_quarantined_task_for_retry
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(f"next-candidate retry unavailable ({trigger}): {exc}")
+        return False
+    try:
+        return requeue_quarantined_task_for_retry(task_id, batch_id, trigger)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"next-candidate retry failed ({trigger}): {exc}")
+        return False
 
 
 def import_rejection_reason(context: dict) -> str | None:
@@ -178,6 +208,19 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     f"{os.path.basename(existing_final)}"
                 )
                 return
+            # File was intentionally moved to quarantine by a concurrent/earlier
+            # post-process call — this is a stale duplicate dispatch, not a race.
+            # _mark_task_quarantined sets _quarantine_entry_id for every quarantine
+            # trigger (AcoustID, integrity, bit-depth).  The quarantine entry and
+            # its retry are already in flight; don't overwrite the task state with
+            # a spurious race-guard failure.
+            if context.get('_quarantine_entry_id'):
+                logger.debug(
+                    f"[Race Guard] Source gone but already quarantined (entry %s) — stale duplicate call, ignoring: "
+                    f"{os.path.basename(file_path)}",
+                    context['_quarantine_entry_id'],
+                )
+                return
             logger.error(
                 f"[Race Guard] Source file gone and no known destination — marking as failed: "
                 f"{os.path.basename(file_path)}"
@@ -211,6 +254,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             _expected_duration_ms = int(_duration_track.get("duration_ms", 0) or 0) or None
         except Exception:
             _expected_duration_ms = None
+        # Local/manual imports are the user's own files, not slskd transfers —
+        # skip the duration-agreement leg (it would false-quarantine a file that
+        # drifts from a re-resolved release; #804). Size + parse legs still run.
+        _is_local_import = bool(context.get('is_local_import')) if isinstance(context, dict) else False
+        _expected_duration_ms = expected_duration_for_check(_expected_duration_ms, _is_local_import)
+        if _is_local_import and _expected_duration_ms is None:
+            logger.debug("[Integrity] Local import — duration-agreement leg skipped for %s", _basename)
 
         # User-configurable tolerance override. None = use built-in
         # auto-scaled defaults (3s normal / 5s for tracks >10min). Set
@@ -548,7 +598,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             except Exception as meta_err:
                 import traceback
                 pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-                wipe_source_tags(file_path)
+                if should_wipe_tags_on_enhancement_failure(has_clean_metadata):
+                    wipe_source_tags(file_path)
+                else:
+                    logger.warning(
+                        "[Metadata] Enhancement failed but import has clean/matched metadata — "
+                        "preserving the file's existing tags (not wiping): %s",
+                        os.path.basename(file_path))
 
             logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
             safe_move_file(file_path, final_path)
@@ -734,11 +790,22 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 )
             else:
                 logger.info("[Metadata Input] album_info: None (single track)")
+            _enhance_started = time.time()
             enhance_file_metadata(file_path, context, artist_context, album_info, runtime=metadata_runtime)
+            # The enhancement block is the pipeline's biggest variable cost
+            # (external source lookups) and used to be a silent multi-minute
+            # gap in the log — always say how long it took.
+            logger.info(f"Metadata enhancement took {time.time() - _enhance_started:.1f}s")
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-            wipe_source_tags(file_path)
+            if should_wipe_tags_on_enhancement_failure(has_clean_metadata):
+                wipe_source_tags(file_path)
+            else:
+                logger.warning(
+                    "[Metadata] Enhancement failed but import has clean/matched metadata — "
+                    "preserving the file's existing tags (not wiping): %s",
+                    os.path.basename(file_path))
 
         _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
         if isinstance(_enhance_source_info, str):
@@ -961,6 +1028,53 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             post_process_locks.pop(context_key, None)
 
 
+def _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
+    """Opt-in last resort once AcoustID retries are exhausted: accept the best
+    quarantined version-mismatch candidate for this track instead of failing.
+
+    Delegates the decision + safety rules to
+    ``core.imports.version_mismatch_fallback`` (version-mismatch only, all the
+    same matched version, >= min_count, AcoustID-only bypass). Returns True when
+    a candidate was accepted and re-dispatched — the caller then skips marking
+    the task failed.
+    """
+    try:
+        download_path = docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        )
+        quarantine_dir = os.path.join(download_path, 'ss_quarantine')
+        restore_dir = os.path.join(download_path, 'Transfer')
+        expected_title = get_import_clean_title(context, default='')
+        expected_artist = get_import_clean_artist(context, default='')
+        if not expected_title or not expected_artist:
+            return False
+
+        def _reprocess(restored_path, ctx, tid, bid):
+            new_key = f"vmfallback_{tid}_{int(time.time())}"
+            threading.Thread(
+                target=lambda: post_process_matched_download_with_verification(
+                    new_key, ctx, restored_path, tid, bid, runtime, metadata_runtime
+                ),
+                daemon=True,
+            ).start()
+
+        return try_accept_version_mismatch_fallback(
+            quarantine_dir=quarantine_dir,
+            restore_dir=restore_dir,
+            expected_title=expected_title,
+            expected_artist=expected_artist,
+            task_id=task_id,
+            batch_id=batch_id,
+            config_get=config_manager.get,
+            list_entries=list_quarantine_entries,
+            approve_entry=approve_quarantine_entry,
+            reprocess=_reprocess,
+        )
+    except Exception as exc:
+        pp_logger.debug("[Version-Mismatch Fallback] skipped due to error: %s", exc)
+        return False
+
+
 def post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
 
@@ -992,6 +1106,21 @@ def post_process_matched_download_with_verification(context_key, context, file_p
 
         if context.get('_acoustid_quarantined'):
             failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
+            # Before failing outright, try the next-best candidate. The wrong
+            # file was just quarantined; re-running the worker (with the bad
+            # source flagged used) picks the runner-up match instead.
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'acoustid'):
+                logger.info(
+                    f"AcoustID mismatch for task {task_id} — retrying next-best candidate: {failure_msg}"
+                )
+                return
+            # Retries exhausted. Opt-in last resort: if every quarantined
+            # candidate for this track failed the SAME version mismatch (e.g. all
+            # instrumental), accept the best one rather than leaving it missing.
+            if _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
+                return
             logger.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
             with tasks_lock:
                 if task_id in download_tasks:
@@ -1000,9 +1129,6 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _eid = context.get('_quarantine_entry_id')
                     if _eid:
                         download_tasks[task_id]['quarantine_entry_id'] = _eid
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
             _notify_download_completed(batch_id, task_id, success=False)
             return
 
@@ -1044,6 +1170,16 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # source files failed integrity and were quarantined.
         if context.get('_integrity_failure_msg'):
             failure_msg = context.get('_integrity_failure_msg', 'unknown')
+            # Integrity/duration mismatch (truncated transfer, wrong-length cut,
+            # etc). Same treatment as an AcoustID mismatch: quarantine the bad
+            # file and retry the next-best candidate before failing.
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'integrity'):
+                logger.info(
+                    f"Integrity check failed for task {task_id} — retrying next-best candidate: {failure_msg}"
+                )
+                return
             logger.error(
                 f"Task {task_id} failed integrity check — marking failed: {failure_msg}"
             )
@@ -1056,9 +1192,6 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _eid = context.get('_quarantine_entry_id')
                     if _eid:
                         download_tasks[task_id]['quarantine_entry_id'] = _eid
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
             _notify_download_completed(batch_id, task_id, success=False)
             return
 

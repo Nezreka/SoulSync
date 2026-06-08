@@ -78,4 +78,60 @@ def titles_plausibly_same(
     return not ta.isdisjoint(tb)
 
 
-__all__ = ["titles_plausibly_same"]
+_QUALIFIER_RE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+
+
+def strip_redundant_context_qualifiers(title: str, *context_texts: str) -> str:
+    """Remove parenthetical/bracket qualifiers that merely restate known context.
+
+    A qualifier whose text appears (word-bounded) in one of ``context_texts``
+    — typically the release's album title, or the other side of a comparison —
+    is album context, not a version difference. #808: the wishlist held
+    'Champagne Supernova (OurVinyl Sessions)' while the library track was the
+    bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)'; the
+    qualifier restated the album, but the length-ratio penalty treated the
+    pair as different songs and the cleanup never recognised the owned
+    edition. Version markers that do NOT appear in any context ('(Live)',
+    '(Remix)' on a studio album) are kept, so their mismatch penalty stands.
+    """
+    if not title:
+        return title
+
+    contexts = [c.casefold() for c in context_texts if c]
+    if not contexts:
+        return title
+
+    def _drop(match: re.Match) -> str:
+        inner = match.group(1).strip().casefold()
+        if not inner:
+            return " "
+        pattern = r"\b" + re.escape(inner) + r"\b"
+        for ctx in contexts:
+            if re.search(pattern, ctx):
+                return " "
+        return match.group(0)
+
+    out = _QUALIFIER_RE.sub(_drop, title)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
+    """True when the digit-bearing tokens of two titles differ — 'Vol.4' vs
+    'Vol.4.5', 'Album' vs 'Album 2'. A numeric difference is a different
+    release (volume / part / sequel), never a '(Deluxe)'-style suffix:
+    string similarity ('Vol.4' vs 'Vol.4.5' = 0.97) and token-subset checks
+    both wave these through, which hung volume 4.5's cover art on volume 4
+    (Sokhi). Shared digits on both sides ('1989' vs '1989 (Deluxe)') are
+    fine."""
+    def _digit_tokens(text: str) -> frozenset:
+        tokens = re.sub(r"[^a-z0-9]+", " ", (text or "").casefold()).split()
+        return frozenset(t for t in tokens if any(c.isdigit() for c in t))
+
+    return _digit_tokens(title_a) != _digit_tokens(title_b)
+
+
+__all__ = [
+    "titles_plausibly_same",
+    "strip_redundant_context_qualifiers",
+    "numeric_tokens_differ",
+]

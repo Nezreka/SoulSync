@@ -471,6 +471,22 @@ body:not(.reduce-effects) .nav-button.active:hover {
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+/* Reduce-effects mode keeps the sidebar hover/active highlight — the
+   feedback matters for navigation — but only the CHEAP parts: a flat
+   background + border-color change (the base already reserves a 1px
+   transparent border, so no layout shift). The expensive full-effects
+   bits (gradient, transform/translateX, multi-layer box-shadow) stay
+   off so hovering doesn't trigger compositing/repaint churn. */
+body.reduce-effects .nav-button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+body.reduce-effects .nav-button.active:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
 .nav-icon {
     width: 40px;
     height: 40px;
@@ -8447,27 +8463,41 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Ambient light sweep — clip-path keeps it inside the header without overflow:hidden */
-.dashboard-header::before {
-    content: '';
+/* Header sweep — a soft accent band drifting across the header. Implemented
+ * as a real child strip translated inside an overflow-clipped wrap (NOT an
+ * animated background-position on a pseudo): transform+opacity stay on the
+ * compositor, while background-position repainted the full-width band every
+ * frame for half of every 12s cycle. Same visuals, ~zero paint. */
+.dashboard-header-sweep {
     position: absolute;
     inset: 0;
+    overflow: hidden;
+    border-radius: 24px 24px 0 0;
     pointer-events: none;
-    background-image: linear-gradient(90deg,
+}
+
+.dashboard-header-sweep span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 60%;
+    background: linear-gradient(90deg,
         transparent 0%,
         rgba(var(--accent-rgb), 0.04) 40%,
         rgba(var(--accent-rgb), 0.08) 50%,
         rgba(var(--accent-rgb), 0.04) 60%,
         transparent 100%);
-    background-size: 60% 100%;
-    background-repeat: no-repeat;
+    transform: translateX(-40%);
+    opacity: 0;
     animation: dashboard-header-sweep 12s ease-in-out infinite;
-    clip-path: inset(0 0 0 0 round 24px 24px 0 0);
+    will-change: transform, opacity;
 }
 
 @keyframes dashboard-header-sweep {
-    0%, 100% { background-position: -60% 0; opacity: 0; }
+    0%, 100% { transform: translateX(-40%); opacity: 0; }
     10% { opacity: 1; }
-    50% { background-position: 160% 0; opacity: 1; }
+    50% { transform: translateX(106.7%); opacity: 1; }
     60% { opacity: 0; }
 }
 
@@ -53447,6 +53477,22 @@ tr.tag-diff-same {
     line-height: 1.3;
     font-weight: 500;
 }
+/* Per-image apply button on cover-art findings (Pache711: fix one or the other) */
+.repair-art-apply-btn {
+    padding: 5px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid rgba(74, 222, 128, 0.4);
+    background: rgba(74, 222, 128, 0.12);
+    color: #4ade80;
+    cursor: pointer;
+    transition: background 0.18s ease, transform 0.18s ease;
+}
+.repair-art-apply-btn:hover {
+    background: rgba(74, 222, 128, 0.22);
+    transform: translateY(-1px);
+}
 
 /* Play button for findings */
 .repair-finding-play-btn {
@@ -62186,28 +62232,34 @@ body.reduce-effects .dash-card::after {
 /* Hero playhead — slow vertical accent line that drifts across the
    equalizer like a now-playing scrubber. Fades in/out at the edges so
    the loop reset isn't visible. */
+/* GPU note: this used to animate `left`, which re-lays-out and repaints every
+ * frame for the whole 9s loop. The pseudo is now a full-width strip whose
+ * 1.5px line is a STATIC background (background-size positioned at center),
+ * and only transform/opacity animate — compositor-only, identical look. */
 .qa-tile--hero .qa-tile__bg::after {
     content: '';
     position: absolute;
     inset: auto 0 0 0;
     height: 65%;
-    width: 1.5px;
-    background: linear-gradient(180deg,
-        transparent 0%,
-        rgba(var(--accent-rgb), 0.7) 40%,
-        rgba(var(--accent-rgb), 0.7) 85%,
-        transparent 100%);
+    background:
+        linear-gradient(180deg,
+            transparent 0%,
+            rgba(var(--accent-rgb), 0.7) 40%,
+            rgba(var(--accent-rgb), 0.7) 85%,
+            transparent 100%)
+        50% 0 / 1.5px 100% no-repeat;
     filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.35));
     opacity: 0;
+    transform: translateX(-54%);
     animation: qa-playhead 9s linear infinite;
     pointer-events: none;
 }
 
 @keyframes qa-playhead {
-    0%   { left: -4%; opacity: 0; }
+    0%   { transform: translateX(-54%); opacity: 0; }
     10%  { opacity: 0.5; }
     85%  { opacity: 0.5; }
-    100% { left: 102%; opacity: 0; }
+    100% { transform: translateX(52%); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -62259,6 +62311,7 @@ body.reduce-effects .dash-card::after {
 }
 
 .qa-flow-node {
+    position: relative;
     width: clamp(16px, 1.4cqw + 8px, 24px);
     aspect-ratio: 1;
     border: 1.5px solid rgba(var(--accent-rgb), 0.6);
@@ -62267,9 +62320,23 @@ body.reduce-effects .dash-card::after {
     flex-shrink: 0;
 }
 
-.qa-flow-node:nth-of-type(1) { animation: qa-flow-pulse 3.2s ease-in-out infinite; }
-.qa-flow-node:nth-of-type(2) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -1.07s; }
-.qa-flow-node:nth-of-type(3) { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -2.13s; }
+/* GPU note: the node pulse used to animate background + box-shadow (repaint
+ * every frame, forever, x3 nodes). The bright state is painted once on a
+ * pseudo and only its opacity breathes. */
+.qa-flow-node::after {
+    content: '';
+    position: absolute;
+    inset: -1.5px;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.4);
+    box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.18);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.qa-flow-node:nth-of-type(1)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; }
+.qa-flow-node:nth-of-type(2)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -1.07s; }
+.qa-flow-node:nth-of-type(3)::after { animation: qa-flow-pulse 3.2s ease-in-out infinite; animation-delay: -2.13s; }
 
 .qa-flow-line {
     position: relative;
@@ -62309,17 +62376,37 @@ body.reduce-effects .dash-card::after {
 }
 
 @keyframes qa-flow-pulse {
-    0%, 100% { background: rgba(var(--accent-rgb), 0.1); box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
-    50%      { background: rgba(var(--accent-rgb), 0.5); box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.18); }
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .qa-tile--auto:hover .qa-tile__flow,
 .qa-tile--auto:focus-visible .qa-tile__flow { opacity: 0.85; }
 
+/* ── Live amplification (animation == gauge) ──
+ * Each tile's signature animation SURGES while its subsystem is actually
+ * working — sync pipeline running, a tool/scan/repair job running, an
+ * automation firing. core.js toggles .is-live from the live socket events;
+ * idle keeps the exact calm look these tiles always had. Purely additive. */
+.qa-tile--sync.is-live .qa-tile__eq { opacity: 0.65; }
+.qa-tile--sync.is-live .qa-tile__eq span { animation-duration: 1.1s; }
+.qa-tile--sync.is-live .qa-tile__bg::after { animation-duration: 4s; }
+.qa-tile--sync.is-live .qa-tile__pulse::after { animation-duration: 0.9s; }
+
+.qa-tile--tools.is-live .qa-tile__gear {
+    color: rgba(var(--accent-rgb), 0.16);
+    animation-duration: 7s;
+}
+
+.qa-tile--auto.is-live .qa-tile__flow { opacity: 0.85; }
+.qa-tile--auto.is-live .qa-flow-node::after { animation-duration: 1.3s; }
+.qa-tile--auto.is-live .qa-flow-line::before { animation-duration: 1.3s; }
+
 @media (prefers-reduced-motion: reduce) {
     .qa-tile__eq span,
     .qa-tile__gear,
     .qa-flow-node,
+    .qa-flow-node::after,
     .qa-tile__pulse::after { animation: none !important; }
 }
 
@@ -63083,23 +63170,61 @@ body.reduce-effects .dash-card::after {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
-.rate-eq.active .rate-eq-avatar {
-    animation: rate-eq-avatar-halo 2.8s ease-in-out infinite;
+/* Daily-budget ring — a conic progress rim hugging the avatar disc's inner
+ * edge, filling as the day's API budget is spent. Color comes from JS
+ * (green → amber → red, purple when bridged to Spotify Free). Drawn inside
+ * the disc because the avatar clips overflow. */
+.rate-eq-avatar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(
+        var(--eq-budget-color, #4ade80) calc(var(--eq-budget, 0) * 360deg),
+        transparent 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 2.5px));
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+    z-index: 2;
 }
 
-@keyframes rate-eq-avatar-halo {
-    0%, 100% {
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.25),
-            0 4px 14px color-mix(in srgb, var(--eq-accent) 30%, transparent),
-            0 0 0 0 color-mix(in srgb, var(--eq-accent) 35%, transparent);
-    }
-    50% {
-        box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.3),
-            0 4px 18px color-mix(in srgb, var(--eq-accent) 55%, transparent),
-            0 0 0 5px color-mix(in srgb, var(--eq-accent) 12%, transparent);
-    }
+.rate-eq.has-budget .rate-eq-avatar::after {
+    opacity: 0.95;
+}
+
+/* Avatar halo / warn — GPU note: these used to animate box-shadow and
+ * filter:brightness directly on the avatar, which forces a repaint every
+ * frame, forever, on every active bar. The bright state is now painted ONCE
+ * onto wrap pseudo-elements and only their OPACITY breathes — same visuals,
+ * compositor-only. The wrap exists because the avatar clips its overflow. */
+.rate-eq-avatar-wrap {
+    position: relative;
+    margin: 0 auto;
+    width: fit-content;
+    flex: 0 0 auto;
+}
+
+.rate-eq-avatar-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow:
+        0 4px 18px color-mix(in srgb, var(--eq-accent) 55%, transparent),
+        0 0 0 5px color-mix(in srgb, var(--eq-accent) 12%, transparent);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.rate-eq.active .rate-eq-avatar-wrap::before {
+    animation: rate-eq-halo-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes rate-eq-halo-breathe {
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .rate-eq:hover .rate-eq-avatar {
@@ -63110,12 +63235,29 @@ body.reduce-effects .dash-card::after {
     background:
         radial-gradient(circle at 30% 25%, #ffb4b4, #ef4444 55%, #7a1a1a 100%);
     border-color: rgba(239, 68, 68, 0.5);
-    animation: rate-eq-avatar-warn 1.1s ease-in-out infinite;
 }
 
-@keyframes rate-eq-avatar-warn {
-    0%, 100% { filter: brightness(1); }
-    50%      { filter: brightness(1.35); }
+/* The brightness(1.35) warn pulse, as a white wash whose opacity breathes */
+.rate-eq-avatar-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%,
+        rgba(255, 255, 255, 0.30),
+        rgba(255, 255, 255, 0.10) 70%);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.rate-eq.rate-limited .rate-eq-avatar-wrap::after {
+    animation: rate-eq-warn-breathe 1.1s ease-in-out infinite;
+}
+
+@keyframes rate-eq-warn-breathe {
+    0%, 100% { opacity: 0; }
+    50%      { opacity: 1; }
 }
 
 .rate-eq:focus-visible {
@@ -63242,6 +63384,120 @@ body.reduce-effects .dash-card::after {
     opacity: 0.85;
 }
 
+/* Peak-hold tick — sticks at the recent maximum and slowly falls, like a
+ * hardware VU meter's peak LED. Position (bottom %) is driven from JS;
+ * only visible while it's meaningfully above the live fill so idle bars
+ * don't carry a stray line. */
+.rate-eq-peak {
+    position: absolute;
+    left: 10%;
+    right: 10%;
+    bottom: 4%;
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--eq-accent) 55%, white 45%);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--eq-accent) 70%, transparent);
+    opacity: 0;
+    transition: bottom 0.9s linear, opacity 0.4s;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rate-eq-peak.visible {
+    opacity: 0.75;
+}
+
+/* Cooldown drain — while a service is rate-limit banned, the track shows a
+ * red column that DRAINS as the ban ticks down plus an m:ss countdown.
+ * "Back in 4:00", not just "something's red". JS drives the fill height
+ * (remaining/total) and timer text; .cooldown gates visibility. */
+.rate-eq-cooldown {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+    z-index: 3;
+}
+
+.rate-eq.cooldown .rate-eq-cooldown {
+    opacity: 1;
+}
+
+.rate-eq.cooldown .rate-eq-fill,
+.rate-eq.cooldown .rate-eq-peak {
+    opacity: 0.18;  /* the live VU yields the stage to the countdown */
+}
+
+.rate-eq-cooldown-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 100%;
+    background: linear-gradient(180deg,
+        rgba(239, 68, 68, 0.55) 0%,
+        rgba(239, 68, 68, 0.28) 60%,
+        rgba(239, 68, 68, 0.12) 100%);
+    border-radius: 0 0 11px 11px;
+    box-shadow: inset 0 1px 0 rgba(255, 120, 120, 0.5);
+    transition: height 0.9s linear;
+}
+
+.rate-eq-cooldown-time {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 200, 200, 0.95);
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+}
+
+/* Call embers — tiny accent sparks rising off the fill tip, spawned per
+ * socket update in proportion to real traffic. Motion == actual API calls. */
+.rate-eq-ember {
+    position: absolute;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--eq-accent) 60%, white 40%);
+    box-shadow: 0 0 6px var(--eq-accent);
+    pointer-events: none;
+    animation: rate-eq-ember-rise 1.4s ease-out forwards;
+    z-index: 1;
+}
+
+@keyframes rate-eq-ember-rise {
+    0%   { opacity: 0; transform: translate(0, 0) scale(1); }
+    15%  { opacity: 0.9; }
+    100% { opacity: 0; transform: translate(var(--ember-drift, 0px), -26px) scale(0.4); }
+}
+
+/* Recovery flash — the moment a ban expires the track blinks back alive */
+.rate-eq.recovered .rate-eq-track {
+    animation: rate-eq-recovered 1.2s ease-out;
+}
+
+@keyframes rate-eq-recovered {
+    0% {
+        border-color: rgba(74, 222, 128, 0.9);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 0 26px rgba(74, 222, 128, 0.55);
+    }
+    100% {
+        border-color: rgba(255, 255, 255, 0.06);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            inset 0 -10px 24px rgba(0, 0, 0, 0.35);
+    }
+}
+
 /* Vertical shimmer scan — runs continuously when active */
 .rate-eq-shimmer {
     position: absolute;
@@ -63268,21 +63524,23 @@ body.reduce-effects .dash-card::after {
 }
 
 /* Active state — fill pulses subtly so the "alive" services radiate */
+/* Active-fill breathing — GPU note: this used to animate the fill's
+ * box-shadow (repaint every frame on every active bar, forever). The glow is
+ * now STATIC at the old animation's midpoint and the breathing moved to the
+ * tip's opacity, which composites for free. Reads the same at a glance. */
 .rate-eq.active .rate-eq-fill {
-    animation: rate-eq-pulse 2.4s ease-in-out infinite;
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
+        0 0 25px color-mix(in srgb, var(--eq-accent) 42%, transparent);
 }
 
-@keyframes rate-eq-pulse {
-    0%, 100% {
-        box-shadow:
-            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
-            0 0 18px color-mix(in srgb, var(--eq-accent) 30%, transparent);
-    }
-    50% {
-        box-shadow:
-            inset 0 1px 0 color-mix(in srgb, var(--eq-accent) 65%, white 35%),
-            0 0 32px color-mix(in srgb, var(--eq-accent) 55%, transparent);
-    }
+.rate-eq.active .rate-eq-tip {
+    animation: rate-eq-tip-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes rate-eq-tip-breathe {
+    0%, 100% { opacity: 0.6; }
+    50%      { opacity: 1; }
 }
 
 /* Peak-flash — fires on a real upward step in cpm between socket
@@ -65589,3 +65847,961 @@ body.em-scroll-lock { overflow: hidden; }
 .em-retry-all { margin-left: 4px; }
 .em-hint { font-size: 11px; color: rgba(255,255,255,0.38); flex: 0 0 auto; margin-top: -2px; }
 .em-hint :is(b, strong) { color: rgba(255,255,255,0.6); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MODAL REVAMP — Download modal + Discovery modal (2.6.7 polish pass)
+   Visual-only overrides, appended last so they win the cascade. Functionality
+   and markup untouched. Same design language as the dashboard work: deep
+   glass surfaces, an accent light-edge, kicker typography, calm tables,
+   gradient progress, pill buttons. Theme-aware via --accent-rgb.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared surface ── */
+.download-missing-modal-content,
+.youtube-discovery-modal {
+    position: relative;
+    background:
+        linear-gradient(165deg, rgba(24, 24, 32, 0.97) 0%, rgba(13, 13, 18, 0.985) 60%, rgba(10, 10, 14, 0.99) 100%);
+    backdrop-filter: blur(24px) saturate(1.35);
+    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 24px;
+    box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.65),
+        0 0 60px rgba(var(--accent-rgb), 0.07),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Accent light-edge along the top — the signature of the new surfaces */
+.download-missing-modal-content::before,
+.youtube-discovery-modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 8%;
+    right: 8%;
+    height: 1.5px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.65) 30%,
+        rgba(var(--accent-light-rgb), 0.85) 50%,
+        rgba(var(--accent-rgb), 0.65) 70%,
+        transparent);
+    pointer-events: none;
+    z-index: 3;
+}
+
+/* ── Shared progress language ── */
+.download-missing-modal-content .progress-bar,
+.youtube-discovery-modal .progress-bar-container {
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.5), rgba(255, 255, 255, 0.03));
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.download-missing-modal-content .progress-fill,
+.youtube-discovery-modal .progress-bar-fill {
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.85),
+        rgb(var(--accent-light-rgb)));
+    box-shadow:
+        0 0 14px rgba(var(--accent-rgb), 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition: width 0.45s cubic-bezier(0.34, 1.1, 0.5, 1);
+}
+
+.download-missing-modal-content .progress-label,
+.youtube-discovery-modal .progress-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Shared table language: calm rows, micro-label headers, hover glow ── */
+.download-tracks-table thead th,
+.youtube-discovery-modal .discovery-table thead th {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.38);
+    background: rgba(14, 14, 19, 0.95);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.18);
+    padding: 12px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.download-tracks-table td,
+.youtube-discovery-modal .discovery-table td {
+    padding: 11px 14px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    background: transparent;
+}
+
+.download-tracks-table tbody tr,
+.youtube-discovery-modal .discovery-table tbody tr {
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.download-tracks-table tbody tr:hover,
+.youtube-discovery-modal .discovery-table tbody tr:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.10),
+        rgba(var(--accent-rgb), 0.04) 55%,
+        transparent);
+    box-shadow: inset 2px 0 0 rgba(var(--accent-rgb), 0.55);
+}
+
+/* ── Shared scrollbar ── */
+.download-tracks-table-container::-webkit-scrollbar,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.download-tracks-table-container::-webkit-scrollbar-thumb,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.28);
+    border-radius: 999px;
+}
+
+.download-tracks-table-container::-webkit-scrollbar-thumb:hover,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.5);
+}
+
+.download-tracks-table-container::-webkit-scrollbar-track,
+.youtube-discovery-modal .discovery-table-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* ════════════ Download modal specifics ════════════ */
+
+.download-missing-modal-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Progress strip: the two stacked bars become side-by-side glass cards */
+.download-progress-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 14px 24px;
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.download-missing-modal-content .progress-item {
+    margin: 0;
+    padding: 12px 16px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.download-missing-modal-content .progress-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 9px;
+}
+
+.download-missing-modal-content .progress-label span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* Tracks section toolbar */
+.download-tracks-header {
+    padding: 14px 24px 10px;
+    border-bottom: none;
+}
+
+.download-tracks-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.track-selection-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(var(--accent-light-rgb), 0.9);
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 999px;
+    padding: 3px 12px;
+}
+
+.download-tracks-table {
+    border-collapse: collapse;
+}
+
+/* Accent checkboxes */
+.download-tracks-table input[type="checkbox"],
+.track-select-all {
+    accent-color: rgb(var(--accent-rgb));
+}
+
+/* Footer: glass action bar + pill buttons */
+.download-missing-modal-footer {
+    background: rgba(12, 12, 17, 0.85);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.download-control-btn {
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.5, 1), box-shadow 0.25s, background 0.25s, border-color 0.25s;
+}
+
+.download-control-btn:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.download-control-btn.primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.75));
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.download-control-btn.primary:hover {
+    box-shadow: 0 6px 26px rgba(var(--accent-rgb), 0.5);
+}
+
+.download-control-btn.danger {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.download-control-btn.danger:hover {
+    background: rgba(239, 68, 68, 0.2);
+}
+
+/* ════════════ Discovery modal specifics ════════════ */
+
+/* Kill the legacy red border treatment entirely */
+.youtube-discovery-modal {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.youtube-discovery-modal .modal-header {
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.youtube-discovery-modal .modal-header h2 {
+    font-size: 20px;
+    letter-spacing: -0.01em;
+}
+
+.youtube-discovery-modal .modal-subtitle {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.youtube-discovery-modal .modal-description {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.youtube-discovery-modal .modal-close-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+
+.youtube-discovery-modal .modal-close-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* Progress section becomes a glass card like the download modal's */
+.youtube-discovery-modal .progress-section {
+    margin: 16px 24px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.youtube-discovery-modal .progress-text {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 8px;
+}
+
+.youtube-discovery-modal .discovery-table-container {
+    margin: 0 24px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Footer + pill buttons */
+.youtube-discovery-modal .modal-footer {
+    background: rgba(12, 12, 17, 0.85);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.youtube-discovery-modal .modal-btn {
+    border-radius: 999px;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.5, 1), box-shadow 0.25s, background 0.25s;
+}
+
+.youtube-discovery-modal .modal-btn:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.youtube-discovery-modal .modal-btn-primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.75));
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.youtube-discovery-modal .modal-btn-primary:hover {
+    box-shadow: 0 6px 26px rgba(var(--accent-rgb), 0.5);
+}
+
+/* ── Modal revamp: the living layer (dashboard-grade motion, all
+   compositor-only: transform/opacity only, one-shots or self-gating) ── */
+
+/* Entrance — a soft rise + settle, once */
+.download-missing-modal-content,
+.youtube-discovery-modal {
+    animation: modal-revamp-enter 0.38s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+@keyframes modal-revamp-enter {
+    0%   { opacity: 0; transform: translateY(12px) scale(0.975); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Header light-sweep — the dashboard signature, same keyframes, same
+   compositor-only strip technique. Headers clip it. */
+.download-missing-modal-header::after,
+.youtube-discovery-modal .modal-header::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 60%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb), 0.05) 40%,
+        rgba(var(--accent-rgb), 0.10) 50%,
+        rgba(var(--accent-rgb), 0.05) 60%,
+        transparent 100%);
+    transform: translateX(-40%);
+    opacity: 0;
+    animation: dashboard-header-sweep 12s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.youtube-discovery-modal .modal-header {
+    overflow: hidden;
+}
+
+/* Progress sheen — a light band scanning the FILL. It lives inside the
+   fill (overflow hidden), so 0% progress shows nothing and a finished bar
+   keeps a gentle pulse of life: the motion is gated by real progress. */
+.download-missing-modal-content .progress-fill,
+.youtube-discovery-modal .progress-bar-fill {
+    position: relative;
+    overflow: hidden;
+}
+
+.download-missing-modal-content .progress-fill::before,
+.youtube-discovery-modal .progress-bar-fill::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 45%;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(255, 255, 255, 0.22) 50%,
+        transparent);
+    transform: translateX(-110%);
+    animation: modal-progress-sheen 2.4s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes modal-progress-sheen {
+    0%   { transform: translateX(-110%); }
+    60%, 100% { transform: translateX(330%); }
+}
+
+/* Hero stat chips — glass cards with per-state color identity */
+.download-dashboard-stats {
+    gap: 10px;
+}
+
+.dashboard-stat {
+    padding: 10px 18px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+    overflow: hidden;
+}
+
+.dashboard-stat::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 15%;
+    right: 15%;
+    height: 1.5px;
+    background: linear-gradient(90deg, transparent, var(--stat-edge, rgba(var(--accent-rgb), 0.7)), transparent);
+}
+
+.dashboard-stat-number {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.dashboard-stat-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.dashboard-stat.stat-found      { --stat-edge: rgba(74, 222, 128, 0.7); }
+.dashboard-stat.stat-found .dashboard-stat-number      { color: #4ade80; }
+.dashboard-stat.stat-missing    { --stat-edge: rgba(251, 191, 36, 0.7); }
+.dashboard-stat.stat-missing .dashboard-stat-number    { color: #fbbf24; }
+.dashboard-stat.stat-downloaded { --stat-edge: rgba(var(--accent-rgb), 0.8); }
+.dashboard-stat.stat-downloaded .dashboard-stat-number { color: rgb(var(--accent-light-rgb)); }
+
+/* Download modal close ✕ matches the discovery one: circular ghost, rotates */
+.download-missing-modal-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+
+.download-missing-modal-close:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* Press feel on every pill */
+.download-control-btn:active,
+.youtube-discovery-modal .modal-btn:active {
+    transform: translateY(0) scale(0.97);
+}
+
+/* Respect reduced motion + the global performance mode */
+@media (prefers-reduced-motion: reduce) {
+    .download-missing-modal-content,
+    .youtube-discovery-modal,
+    .download-missing-modal-header::after,
+    .youtube-discovery-modal .modal-header::after,
+    .download-missing-modal-content .progress-fill::before,
+    .youtube-discovery-modal .progress-bar-fill::before {
+        animation: none !important;
+    }
+}
+
+/* ── Modal revamp: live track-row states (animation == gauge, in the table) ──
+   The download-status cell carries data-state (set by the main renderer; a
+   secondary live-progress writer uses the legacy download-downloading /
+   download-complete classes — both vocabularies are styled). The row carries
+   .row-working while a track is actively searching/downloading/processing.
+
+   LAYOUT NOTE: these are <td>s — they must stay display:table-cell, so the
+   pill is a centered pseudo-element painted BEHIND the text, not a box model
+   change on the cell itself. State colors are CSS vars on the td; the pseudo
+   reads them. */
+
+.track-download-status[data-state],
+.track-download-status.download-downloading,
+.track-download-status.download-complete,
+.track-match-status {
+    position: relative;   /* for the hover tooltip ::after — no pill anymore */
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--row-state-fg, rgba(255, 255, 255, 0.65));
+}
+
+/* Pill drawn behind the status text. ONLY the download-status column gets it —
+   the track-match-status variants rendered the z-index:-1 pill behind the
+   library-status cell and looked broken, so they keep just their coloured
+   text (--row-state-fg), no pill. */
+.track-download-status[data-state]::before,
+.track-download-status.download-downloading::before,
+.track-download-status.download-complete::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100% - 18px);
+    height: 26px;
+    border-radius: 999px;
+    background: var(--row-state-bg, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--row-state-border, rgba(255, 255, 255, 0.1));
+    z-index: -1;
+    pointer-events: none;
+}
+
+.track-download-status[data-state="pending"],
+.track-download-status[data-state="cancelled"],
+.track-download-status[data-state="cancelling"],
+.track-download-status[data-state="not_found"] {
+    --row-state-fg: rgba(255, 255, 255, 0.5);
+}
+
+.track-download-status[data-state="searching"],
+.track-download-status[data-state="downloading"],
+.track-download-status.download-downloading {
+    --row-state-border: rgba(var(--accent-rgb), 0.4);
+    --row-state-bg: rgba(var(--accent-rgb), 0.12);
+    --row-state-fg: rgb(var(--accent-light-rgb));
+}
+
+.track-download-status[data-state="post_processing"] {
+    --row-state-border: rgba(251, 191, 36, 0.35);
+    --row-state-bg: rgba(251, 191, 36, 0.1);
+    --row-state-fg: #fbbf24;
+}
+
+.track-download-status[data-state="completed"],
+.track-download-status.download-complete {
+    --row-state-border: rgba(74, 222, 128, 0.35);
+    --row-state-bg: rgba(74, 222, 128, 0.1);
+    --row-state-fg: #4ade80;
+}
+
+.track-download-status[data-state="failed"] {
+    --row-state-border: rgba(239, 68, 68, 0.35);
+    --row-state-bg: rgba(239, 68, 68, 0.1);
+    --row-state-fg: #f87171;
+}
+
+.track-download-status[data-state="quarantined"] {
+    --row-state-border: rgba(251, 146, 60, 0.4);
+    --row-state-bg: rgba(251, 146, 60, 0.1);
+    --row-state-fg: #fb923c;
+}
+
+/* Only states that are actually WORKING breathe */
+.track-download-status[data-state="searching"],
+.track-download-status[data-state="downloading"],
+.track-download-status[data-state="post_processing"],
+.track-download-status[data-state="cancelling"],
+.track-download-status.download-downloading {
+    animation: row-state-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes row-state-breathe {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
+/* Match-status colors feed the same pill (classes already existed) */
+.track-match-status.match-found {
+    --row-state-border: rgba(74, 222, 128, 0.35);
+    --row-state-bg: rgba(74, 222, 128, 0.1);
+    --row-state-fg: #4ade80;
+}
+
+.track-match-status.match-missing {
+    --row-state-border: rgba(251, 191, 36, 0.35);
+    --row-state-bg: rgba(251, 191, 36, 0.1);
+    --row-state-fg: #fbbf24;
+}
+
+.track-match-status.match-checking {
+    --row-state-fg: rgba(255, 255, 255, 0.5);
+}
+
+/* The actively-working row carries a persistent accent presence — like the
+   hover treatment, but earned by real work instead of the mouse */
+.download-tracks-table tbody tr.row-working {
+    background: linear-gradient(90deg,
+        rgba(var(--accent-rgb), 0.08),
+        rgba(var(--accent-rgb), 0.025) 60%,
+        transparent);
+    box-shadow: inset 2.5px 0 0 rgba(var(--accent-rgb), 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .track-download-status[data-state] { animation: none !important; }
+}
+
+/* ── Download Origins modal (watchlist / playlist provenance) ── */
+
+.origin-modal {
+    position: relative;
+    width: 860px;
+    max-width: 94vw;
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    background:
+        linear-gradient(165deg, rgba(24, 24, 32, 0.97) 0%, rgba(13, 13, 18, 0.985) 60%, rgba(10, 10, 14, 0.99) 100%);
+    backdrop-filter: blur(24px) saturate(1.35);
+    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 24px;
+    box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.65),
+        0 0 60px rgba(var(--accent-rgb), 0.07),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: modal-revamp-enter 0.38s cubic-bezier(0.22, 1.2, 0.36, 1);
+    overflow: hidden;
+}
+
+.origin-modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 8%;
+    right: 8%;
+    height: 1.5px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.65) 30%,
+        rgba(var(--accent-light-rgb), 0.85) 50%,
+        rgba(var(--accent-rgb), 0.65) 70%,
+        transparent);
+    pointer-events: none;
+    z-index: 3;
+}
+
+.origin-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.origin-modal-title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.origin-modal-sub {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.origin-modal-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+
+.origin-modal-close:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+.origin-modal-tabs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.origin-tab {
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.origin-tab:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.origin-tab.active {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
+    border-color: rgba(var(--accent-light-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 3px 14px rgba(var(--accent-rgb), 0.3);
+}
+
+.origin-tab-count {
+    opacity: 0.75;
+    font-weight: 500;
+}
+
+.origin-toolbar {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.origin-select-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+}
+
+.origin-select-all input,
+.origin-entry-check {
+    accent-color: rgb(var(--accent-rgb));
+}
+
+.origin-delete-btn {
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, opacity 0.2s;
+}
+
+.origin-delete-btn:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.22);
+}
+
+.origin-delete-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.origin-modal-body {
+    overflow-y: auto;
+    padding: 10px 16px 16px;
+    flex: 1;
+    min-height: 220px;
+}
+
+.origin-modal-body::-webkit-scrollbar { width: 8px; }
+.origin-modal-body::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.28);
+    border-radius: 999px;
+}
+.origin-modal-body::-webkit-scrollbar-track { background: transparent; }
+
+.origin-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.origin-entry .origin-entry-check {
+    flex: 0 0 auto;
+}
+
+.origin-context-badge {
+    flex: 0 0 auto;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.1);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.origin-modal-loading,
+.origin-modal-empty {
+    padding: 48px 24px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+}
+
+.origin-row-delete {
+    border-color: rgba(248, 113, 113, 0.4) !important;
+    color: #f87171 !important;
+}
+
+/* ── Blocklist modal (artist/album/track bans) ── */
+.blocklist-modal {
+    position: relative;
+    width: 640px;
+    max-width: 94vw;
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(165deg, rgba(24,24,32,0.97) 0%, rgba(13,13,18,0.985) 60%, rgba(10,10,14,0.99) 100%);
+    backdrop-filter: blur(24px) saturate(1.35);
+    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 24px;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.65), 0 0 60px rgba(var(--accent-rgb),0.07), inset 0 1px 0 rgba(255,255,255,0.05);
+    animation: modal-revamp-enter 0.38s cubic-bezier(0.22,1.2,0.36,1);
+    overflow: hidden;
+}
+.blocklist-modal::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 8%; right: 8%;
+    height: 1.5px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb),0.65) 30%, rgba(var(--accent-light-rgb),0.85) 50%, rgba(var(--accent-rgb),0.65) 70%, transparent);
+    pointer-events: none;
+    z-index: 3;
+}
+.blocklist-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.blocklist-modal-title { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+.blocklist-modal-sub { margin: 3px 0 0; font-size: 12px; color: rgba(255,255,255,0.4); max-width: 460px; }
+.blocklist-modal-close {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.7); cursor: pointer;
+    transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+.blocklist-modal-close:hover { background: rgba(239,68,68,0.18); color: #fff; transform: rotate(90deg); }
+.blocklist-tabs { display: flex; gap: 8px; padding: 12px 24px 0; }
+.blocklist-tab {
+    padding: 7px 16px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.6); font-size: 12.5px; font-weight: 600; cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.blocklist-tab:hover { background: rgba(255,255,255,0.07); }
+.blocklist-tab.active {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.9), rgba(var(--accent-rgb),0.65));
+    border-color: rgba(var(--accent-light-rgb),0.4); color: #fff;
+    box-shadow: 0 3px 14px rgba(var(--accent-rgb),0.3);
+}
+.blocklist-search-row { position: relative; padding: 14px 24px 8px; }
+.blocklist-search-input {
+    width: 100%; padding: 11px 38px 11px 14px; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+    color: #fff; font-size: 13.5px; outline: none;
+    transition: border-color 0.2s, background 0.2s;
+}
+.blocklist-search-input:focus { border-color: rgba(var(--accent-rgb),0.5); background: rgba(255,255,255,0.06); }
+.blocklist-search-spinner {
+    position: absolute; right: 36px; top: 50%; width: 15px; height: 15px;
+    margin-top: -3px; border-radius: 50%; opacity: 0;
+    border: 2px solid rgba(var(--accent-rgb),0.25); border-top-color: rgb(var(--accent-rgb));
+}
+.blocklist-search-spinner.spinning { opacity: 1; animation: spin 0.7s linear infinite; }
+.blocklist-search-results { max-height: 230px; overflow-y: auto; padding: 0 16px; }
+.blocklist-row, .blocklist-current-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 8px; border-radius: 12px;
+    transition: background 0.15s;
+}
+.blocklist-row:hover { background: rgba(255,255,255,0.04); }
+.blocklist-row-img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
+.blocklist-row-img.artist { border-radius: 50%; }
+.blocklist-row-img.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.05); font-size: 18px;
+}
+.blocklist-row-info { flex: 1; min-width: 0; }
+.blocklist-row-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blocklist-row-extra { font-size: 11.5px; color: rgba(255,255,255,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blocklist-block-btn {
+    flex: 0 0 auto; padding: 6px 16px; border-radius: 999px;
+    border: 1px solid rgba(239,68,68,0.4); background: rgba(239,68,68,0.12);
+    color: #fca5a5; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: background 0.18s, transform 0.18s;
+}
+.blocklist-block-btn:hover { background: rgba(239,68,68,0.24); transform: translateY(-1px); }
+.blocklist-current-label {
+    padding: 12px 24px 6px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.35);
+    border-top: 1px solid rgba(255,255,255,0.05); margin-top: 6px;
+}
+.blocklist-current { flex: 1; overflow-y: auto; padding: 0 16px 16px; min-height: 80px; }
+.blocklist-current-row:hover { background: rgba(255,255,255,0.03); }
+.blocklist-match { flex: 0 0 auto; font-size: 11px; font-weight: 700; }
+.blocklist-match.matched { color: rgb(var(--accent-light-rgb)); }
+.blocklist-match.pending { color: rgba(255,255,255,0.3); animation: bl-pulse 1.6s ease-in-out infinite; }
+@keyframes bl-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 0.8; } }
+.blocklist-unblock-btn {
+    flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.55); cursor: pointer; font-size: 12px;
+    transition: background 0.18s, color 0.18s;
+}
+.blocklist-unblock-btn:hover { background: rgba(239,68,68,0.18); color: #fff; }
+.blocklist-empty { padding: 26px 16px; text-align: center; color: rgba(255,255,255,0.4); font-size: 12.5px; }
+.blocklist-search-results::-webkit-scrollbar, .blocklist-current::-webkit-scrollbar { width: 8px; }
+.blocklist-search-results::-webkit-scrollbar-thumb, .blocklist-current::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.28); border-radius: 999px; }

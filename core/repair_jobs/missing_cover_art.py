@@ -203,6 +203,12 @@ class MissingCoverArtJob(RepairJob):
                         log_line=f'Found art: {title or "Unknown"}',
                         log_type='success'
                     )
+                # Also search for an artist image so the finding can offer it as
+                # an independently-applyable target (Pache711). Searched even
+                # when the artist already has art, so a wrong existing image can
+                # be swapped; the UI only surfaces it when it differs from the
+                # current one.
+                found_artist_url = self._find_artist_art(artist_name, source_priority)
                 # Create finding for user to approve
                 if context.create_finding:
                     try:
@@ -222,6 +228,13 @@ class MissingCoverArtJob(RepairJob):
                                 'found_artwork_url': artwork_url,
                                 'spotify_album_id': spotify_album_id,
                                 'artist_thumb_url': artist_thumb or None,
+                                # Found artist image (None if none matched, or it
+                                # equals the current one — nothing to offer then).
+                                'found_artist_url': (
+                                    found_artist_url
+                                    if found_artist_url and found_artist_url != artist_thumb
+                                    else None
+                                ),
                                 # Where the files live + what was missing, so the
                                 # apply can embed into the audio + write cover.jpg.
                                 'album_folder': os.path.dirname(rep_path) if rep_path else None,
@@ -285,6 +298,34 @@ class MissingCoverArtJob(RepairJob):
                             return artwork_url
         except Exception as e:
             logger.debug("%s art lookup failed for '%s': %s", source.capitalize(), title, e)
+        return None
+
+    def _find_artist_art(self, artist_name, source_priority):
+        """Search the configured sources for an artist image, in priority
+        order. Returns the first confidently name-matched artist image URL,
+        or None. Mirrors _try_source but for artists (Pache711: let the
+        Cover Art Filler offer artist art as its own fixable target)."""
+        if not artist_name:
+            return None
+        for source in source_priority:
+            client = get_client_for_source(source)
+            if not client or not hasattr(client, 'search_artists'):
+                continue
+            try:
+                for res in (client.search_artists(artist_name, limit=5) or []):
+                    r_name = getattr(res, 'name', None)
+                    if isinstance(res, dict):
+                        r_name = res.get('name')
+                    # Exact significant-word match — never hang a wrong artist
+                    # photo on someone just because the search was fuzzy.
+                    if not r_name or _name_tokens(r_name) != _name_tokens(artist_name):
+                        continue
+                    url = self._extract_artwork_url(res)
+                    if url:
+                        return url
+            except Exception as e:
+                logger.debug("%s artist-art lookup failed for '%s': %s",
+                             source.capitalize(), artist_name, e)
         return None
 
     @staticmethod

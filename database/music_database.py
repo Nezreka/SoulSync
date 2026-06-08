@@ -396,6 +396,7 @@ class MusicDatabase:
 
             # Add per-artist preferred_metadata_source column (migration)
             self._add_watchlist_preferred_metadata_source_column(cursor)
+            self._clear_deezer_ids_stored_as_itunes(cursor)
 
             # Make spotify_artist_id nullable for iTunes-only artists (migration)
             self._fix_watchlist_spotify_id_nullable(cursor)
@@ -638,6 +639,15 @@ class MusicDatabase:
                 if _col not in lh_cols:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
+
+            # Migration: download-origin provenance — what TRIGGERED a download
+            # ('watchlist' + artist / 'playlist' + playlist name). Read by the
+            # origin-history modal on the watchlist + sync pages.
+            for _col in ['origin', 'origin_context']:
+                if _col not in lh_cols:
+                    cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to library_history")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
 
             # Auto-import history — tracks auto-import scan results and processing status
             cursor.execute("""
@@ -1920,6 +1930,31 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_name ON discovery_artist_blacklist (artist_name COLLATE NOCASE)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_spotify ON discovery_artist_blacklist (spotify_artist_id)")
 
+            # Unified artist/album/track blocklist (the "proper" blacklist —
+            # distinct from download_blacklist, which is source-file skipping).
+            # ID-keyed across metadata sources so a ban survives a source
+            # switch; profile-scoped; enforced at add_to_wishlist. The old
+            # discovery_artist_blacklist is migrated in below.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,        -- 'artist' | 'album' | 'track'
+                    name TEXT NOT NULL COLLATE NOCASE,
+                    spotify_id TEXT,
+                    itunes_id TEXT,
+                    deezer_id TEXT,
+                    musicbrainz_id TEXT,
+                    parent_name TEXT,                 -- display only (album's/track's artist)
+                    match_status TEXT DEFAULT 'pending',  -- pending | matched (cross-source backfill)
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_profile_type ON blocklist (profile_id, entity_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_spotify ON blocklist (spotify_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_name ON blocklist (name COLLATE NOCASE)")
+            self._migrate_discovery_blacklist_into_blocklist(cursor)
+
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS liked_artists_pool (
@@ -2104,6 +2139,38 @@ class MusicDatabase:
                 logger.info("Added preferred_metadata_source column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding preferred_metadata_source column to watchlist_artists: {e}")
+
+    def _clear_deezer_ids_stored_as_itunes(self, cursor):
+        """Repair: watchlist iTunes ids that are actually Deezer ids.
+
+        The watchlist scanner's _match_to_itunes used to search via
+        MetadataService.itunes — which holds the PRIMARY source's client, not
+        iTunes — so with a Deezer primary it stored DEEZER artist ids in
+        itunes_artist_id (verified live: Taylor Swift's "iTunes" id was her
+        Deezer id 12246; real one is 159260351). The backfill only fills
+        EMPTY ids, so these wrong ids would never self-heal. The corruption
+        signature is itunes == deezer (distinct id spaces — a legit equal
+        pair is effectively impossible; worst case is a NULL that re-matches
+        correctly on the next scan). Idempotent: clearing kills the equality.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'itunes_artist_id' not in columns or 'deezer_artist_id' not in columns:
+                return
+            cursor.execute("""
+                UPDATE watchlist_artists SET itunes_artist_id = NULL
+                WHERE itunes_artist_id = deezer_artist_id
+                  AND deezer_artist_id IS NOT NULL AND deezer_artist_id != ''
+            """)
+            if cursor.rowcount:
+                logger.info(
+                    "Cleared %d watchlist iTunes id(s) that were actually Deezer ids "
+                    "(pre-fix _match_to_itunes searched the primary source); they "
+                    "re-match via real iTunes on the next watchlist scan",
+                    cursor.rowcount)
+        except Exception as e:
+            logger.error(f"Error clearing deezer-as-itunes watchlist ids: {e}")
 
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
@@ -7530,6 +7597,31 @@ class MusicDatabase:
                     # Titles differ in length by more than 30% — penalize heavily
                     best_title_similarity *= len_ratio
 
+            # #808: a parenthetical qualifier that merely RESTATES the release
+            # context is album context, not a version difference. Wishlist
+            # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
+            # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
+            # the qualifier appears in the album title, yet the length-ratio
+            # penalty above crushed the pair to ~0.17 and wishlist cleanup
+            # never recognised the owned edition. Strip qualifiers confirmed
+            # by the db album title (or by the other title) and score that
+            # variant with its OWN length guard — genuine version markers
+            # ('(Live)' on a studio album) appear in no context, keep their
+            # qualifier, and keep their penalty.
+            db_album_norm = self._normalize_for_comparison(
+                getattr(db_track, 'album_title', '') or '')
+            from core.text.title_match import strip_redundant_context_qualifiers
+            ctx_search = strip_redundant_context_qualifiers(
+                search_title_norm, db_album_norm, db_title_norm)
+            ctx_db = strip_redundant_context_qualifiers(
+                db_title_norm, db_album_norm, search_title_norm)
+            if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
+                ctx_sim = self._string_similarity(ctx_search, ctx_db)
+                ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
+                if ctx_ratio < 0.7:
+                    ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
+                best_title_similarity = max(best_title_similarity, ctx_sim)
+
             # Word-level guard: SequenceMatcher's char ratio over-credits
             # different songs that share a long substring or only a stopword
             # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
@@ -8007,7 +8099,49 @@ class MusicDatabase:
         return presets.get(preset_name, presets["balanced"])
 
     # Wishlist management methods
-    
+
+    def blocklist_reason_for_track(self, profile_id, track_data, source=None):
+        """Return (entity_type, label) if this track is blocklisted for the
+        profile, else None. Shared by the wishlist guard (Phase 1) and the
+        download-queue guard (Phase 2a). Pure matching lives in core.blocklist;
+        this pulls the candidate's source IDs out of the payload and asks.
+
+        ``source`` overrides/falls back to the payload's provider — the
+        download-queue path knows the batch source even when the track dict
+        doesn't carry a 'provider' field."""
+        try:
+            from core.blocklist import build_index, candidate_block_reason
+            rows = self.get_blocklist_rows_for_matching(profile_id)
+            if not rows:
+                return None
+            index = build_index(rows)
+            if index.is_empty:
+                return None
+            td = track_data or {}
+            source = ((td.get('provider') or td.get('source') or source or '')
+                      .strip().lower() or None)
+            album = td.get('album') if isinstance(td.get('album'), dict) else {}
+            # Normalise artists to [{'id','name'}] from track + album credits.
+            artists = []
+            for a in (td.get('artists') or []):
+                if isinstance(a, dict):
+                    artists.append({'id': a.get('id'), 'name': a.get('name')})
+                elif a:
+                    artists.append({'id': None, 'name': str(a)})
+            for a in (album.get('artists') or []):
+                if isinstance(a, dict):
+                    artists.append({'id': a.get('id'), 'name': a.get('name')})
+            return candidate_block_reason(
+                index, source=source,
+                track_id=td.get('id'), track_name=td.get('name'),
+                album_id=album.get('id'), album_name=album.get('name'),
+                artists=artists,
+            )
+        except Exception as e:
+            # Never let the blocklist check break a wishlist add — fail open.
+            logger.debug("blocklist guard skipped: %s", e)
+            return None
+
     def add_to_wishlist(
         self,
         spotify_track_data: Dict[str, Any] = None,
@@ -8029,6 +8163,15 @@ class MusicDatabase:
                 track_id = spotify_track_data.get('id')
                 if not track_id:
                     logger.error("Cannot add track to wishlist: missing track ID")
+                    return False
+
+                # Blocklist guard (Phase 1): every auto-acquisition path funnels
+                # through here, so one check blocks a banned artist/album/track
+                # (with artist→album→track cascade) before it can be queued.
+                _blocked = self.blocklist_reason_for_track(profile_id, spotify_track_data)
+                if _blocked:
+                    logger.info("Skipping wishlist add — %s is blocklisted: '%s'",
+                                _blocked[0], _blocked[1])
                     return False
 
                 from core.library import manual_library_match as _mlm
@@ -10931,15 +11074,196 @@ class MusicDatabase:
             return []
 
     def get_discovery_blacklist_names(self) -> set:
-        """Get set of blacklisted artist names (lowercased) for fast filtering."""
+        """Set of blacklisted artist names (lowercased) for discovery filtering.
+
+        Unions the legacy discovery_artist_blacklist with the new unified
+        blocklist's artist entries (across all profiles), so a ban added via
+        either path filters discovery. The legacy table is migrated into the
+        blocklist on upgrade but kept as a rollback safety net."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
-            return {r[0] for r in cursor.fetchall()}
+            names = {r[0] for r in cursor.fetchall()}
+            try:
+                cursor.execute("SELECT LOWER(name) FROM blocklist WHERE entity_type = 'artist'")
+                names.update(r[0] for r in cursor.fetchall())
+            except Exception as _bl_err:  # noqa: BLE001 — old schema may predate blocklist
+                logger.debug("blocklist union skipped in discovery names: %s", _bl_err)
+            return names
         except Exception as e:
             logger.error(f"Error getting discovery blacklist names: {e}")
             return set()
+
+    # ==================== Blocklist (artist/album/track) ====================
+
+    def _migrate_discovery_blacklist_into_blocklist(self, cursor):
+        """One-time safe migration of the legacy global discovery blacklist into
+        the new profile-scoped blocklist as artist entries.
+
+        Replicated to EVERY existing profile so no existing discovery ban
+        silently stops working under the new per-profile model. Idempotent
+        (skips a (profile, name) already present). The old table is left in
+        place as a rollback safety net."""
+        try:
+            cursor.execute(
+                "SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id "
+                "FROM discovery_artist_blacklist")
+            legacy = cursor.fetchall()
+            if not legacy:
+                return
+            try:
+                cursor.execute("SELECT id FROM profiles")
+                profile_ids = [r[0] for r in cursor.fetchall()] or [1]
+            except Exception:
+                profile_ids = [1]
+
+            migrated = 0
+            for row in legacy:
+                name = row[0]
+                if not name:
+                    continue
+                for pid in profile_ids:
+                    cursor.execute(
+                        "SELECT 1 FROM blocklist WHERE profile_id = ? AND entity_type = 'artist' "
+                        "AND name = ? COLLATE NOCASE LIMIT 1", (pid, name))
+                    if cursor.fetchone():
+                        continue
+                    cursor.execute(
+                        "INSERT INTO blocklist (profile_id, entity_type, name, spotify_id, "
+                        "itunes_id, deezer_id, match_status) VALUES (?, 'artist', ?, ?, ?, ?, 'matched')",
+                        (pid, name, row[1], row[2], row[3]))
+                    migrated += 1
+            if migrated:
+                logger.info("Migrated %d discovery-blacklist artist entr(ies) into the "
+                            "unified blocklist across %d profile(s)", migrated, len(profile_ids))
+        except Exception as e:
+            logger.debug("discovery→blocklist migration skipped: %s", e)
+
+    def add_blocklist_entry(self, profile_id: int, entity_type: str, name: str,
+                            spotify_id: str = None, itunes_id: str = None,
+                            deezer_id: str = None, musicbrainz_id: str = None,
+                            parent_name: str = None) -> Optional[int]:
+        """Add an artist/album/track to the blocklist. Returns the new row id,
+        or an existing row's id if a matching (profile, type, id/name) is already
+        present. match_status starts 'pending' until the backfill resolves the
+        other sources (unless we already have multiple ids)."""
+        if entity_type not in ('artist', 'album', 'track') or not name:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Dedup: same profile+type with any overlapping source id, or same name.
+            cursor.execute(
+                """SELECT id FROM blocklist WHERE profile_id = ? AND entity_type = ?
+                   AND ( (spotify_id IS NOT NULL AND spotify_id = ?)
+                      OR (itunes_id IS NOT NULL AND itunes_id = ?)
+                      OR (deezer_id IS NOT NULL AND deezer_id = ?)
+                      OR (musicbrainz_id IS NOT NULL AND musicbrainz_id = ?)
+                      OR name = ? COLLATE NOCASE ) LIMIT 1""",
+                (profile_id, entity_type, spotify_id, itunes_id, deezer_id, musicbrainz_id, name))
+            existing = cursor.fetchone()
+            if existing:
+                return existing[0]
+            id_count = sum(1 for x in (spotify_id, itunes_id, deezer_id, musicbrainz_id) if x)
+            status = 'matched' if id_count >= 2 else 'pending'
+            cursor.execute(
+                """INSERT INTO blocklist (profile_id, entity_type, name, spotify_id, itunes_id,
+                   deezer_id, musicbrainz_id, parent_name, match_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (profile_id, entity_type, name, spotify_id, itunes_id, deezer_id,
+                 musicbrainz_id, parent_name, status))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error adding blocklist entry: {e}")
+            return None
+
+    def remove_blocklist_entry(self, profile_id: int, entry_id: int) -> bool:
+        """Remove a blocklist entry (scoped to the profile that owns it)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM blocklist WHERE id = ? AND profile_id = ?",
+                           (int(entry_id), profile_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing blocklist entry: {e}")
+            return False
+
+    def get_blocklist(self, profile_id: int, entity_type: str = None) -> list:
+        """List blocklist entries for a profile, newest first."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if entity_type:
+                cursor.execute(
+                    "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                    "musicbrainz_id, parent_name, match_status, created_at FROM blocklist "
+                    "WHERE profile_id = ? AND entity_type = ? ORDER BY created_at DESC",
+                    (profile_id, entity_type))
+            else:
+                cursor.execute(
+                    "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                    "musicbrainz_id, parent_name, match_status, created_at FROM blocklist "
+                    "WHERE profile_id = ? ORDER BY created_at DESC", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist: {e}")
+            return []
+
+    def get_blocklist_rows_for_matching(self, profile_id: int) -> list:
+        """Lightweight rows (entity_type + id columns + name) for building the
+        in-memory match index — used by the add_to_wishlist guard."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT entity_type, name, spotify_id, itunes_id, deezer_id, musicbrainz_id "
+                "FROM blocklist WHERE profile_id = ?", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist match rows: {e}")
+            return []
+
+    def get_blocklist_entries_needing_backfill(self) -> list:
+        """Entries still 'pending' cross-source ID resolution."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, profile_id, entity_type, name, spotify_id, itunes_id, deezer_id, "
+                "musicbrainz_id, parent_name FROM blocklist WHERE match_status = 'pending'")
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blocklist backfill entries: {e}")
+            return []
+
+    def update_blocklist_entry_ids(self, entry_id: int, *, spotify_id: str = None,
+                                   itunes_id: str = None, deezer_id: str = None,
+                                   musicbrainz_id: str = None, mark_matched: bool = True) -> bool:
+        """Backfill resolved source IDs onto an entry (only fills NULLs)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            sets, params = [], []
+            for col, val in (("spotify_id", spotify_id), ("itunes_id", itunes_id),
+                             ("deezer_id", deezer_id), ("musicbrainz_id", musicbrainz_id)):
+                if val:
+                    sets.append(f"{col} = COALESCE({col}, ?)")
+                    params.append(val)
+            if mark_matched:
+                sets.append("match_status = 'matched'")
+            if not sets:
+                return False
+            params.append(int(entry_id))
+            cursor.execute(f"UPDATE blocklist SET {', '.join(sets)} WHERE id = ?", params)
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating blocklist entry ids: {e}")
+            return False
 
     # ==================== Liked Artists Pool Methods ====================
 
@@ -12129,8 +12453,13 @@ class MusicDatabase:
     def add_library_history_entry(self, event_type, title, artist_name=None, album_name=None,
                                   quality=None, server_source=None, file_path=None, thumb_url=None,
                                   download_source=None, source_track_id=None, source_track_title=None,
-                                  source_filename=None, acoustid_result=None, source_artist=None):
-        """Record a download or import event to the library history table."""
+                                  source_filename=None, acoustid_result=None, source_artist=None,
+                                  origin=None, origin_context=None):
+        """Record a download or import event to the library history table.
+
+        ``origin``/``origin_context`` record what TRIGGERED the download
+        ('watchlist' + artist name, 'playlist' + playlist name) — the
+        origin-history modal reads them. None for manual/unclassified."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -12138,16 +12467,112 @@ class MusicDatabase:
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
                                              quality, server_source, file_path, thumb_url, download_source,
                                              source_track_id, source_track_title, source_filename,
-                                             acoustid_result, source_artist)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             acoustid_result, source_artist, origin, origin_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url,
                   download_source, source_track_id, source_track_title, source_filename,
-                  acoustid_result, source_artist))
+                  acoustid_result, source_artist, origin, origin_context))
             conn.commit()
             return True
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
+
+    def get_origin_cleanup_candidates(self):
+        """Origin-tracked downloads (watchlist/playlist) annotated with the
+        matching library track's play_count, for the Expired Download Cleaner.
+        play_count is 0 when no library track matches the recorded path
+        (orphan history row → treated as not-listened)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
+                       lh.file_path, lh.title, lh.artist_name,
+                       COALESCE(t.play_count, 0) AS play_count
+                FROM library_history lh
+                LEFT JOIN tracks t ON t.file_path = lh.file_path
+                WHERE lh.event_type = 'download'
+                  AND lh.origin IN ('watchlist', 'playlist')
+            """)
+            cols = ['id', 'origin', 'origin_context', 'created_at',
+                    'file_path', 'title', 'artist_name', 'play_count']
+            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"Error getting origin cleanup candidates: {e}")
+            return []
+
+    def get_download_origin_entries(self, origin, limit=200, offset=0):
+        """Downloads triggered by ``origin`` ('watchlist' / 'playlist'),
+        newest first. Returns (entries, total_count)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM library_history WHERE event_type = 'download' AND origin = ?",
+                (origin,))
+            total = cursor.fetchone()[0]
+            cursor.execute("""
+                SELECT id, title, artist_name, album_name, quality, file_path,
+                       thumb_url, download_source, origin, origin_context, created_at
+                FROM library_history
+                WHERE event_type = 'download' AND origin = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+            """, (origin, int(limit), int(offset)))
+            cols = ['id', 'title', 'artist_name', 'album_name', 'quality', 'file_path',
+                    'thumb_url', 'download_source', 'origin', 'origin_context', 'created_at']
+            return [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()], total
+        except Exception as e:
+            logger.debug(f"Error querying download origins: {e}")
+            return [], 0
+
+    def get_library_history_rows_by_ids(self, ids):
+        """Fetch history rows (id, file_path, title) for a list of ids."""
+        if not ids:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(ids))
+            cursor.execute(
+                f"SELECT id, file_path, title FROM library_history WHERE id IN ({placeholders})",
+                [int(i) for i in ids])
+            return [{'id': r[0], 'file_path': r[1], 'title': r[2]} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"Error fetching history rows: {e}")
+            return []
+
+    def delete_library_history_rows(self, ids):
+        """Delete history rows by id. Returns the number removed."""
+        if not ids:
+            return 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(ids))
+            cursor.execute(
+                f"DELETE FROM library_history WHERE id IN ({placeholders})",
+                [int(i) for i in ids])
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"Error deleting history rows: {e}")
+            return 0
+
+    def delete_track_by_file_path(self, file_path):
+        """Delete a library track row whose stored path matches. Returns count."""
+        if not file_path:
+            return 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE file_path = ?", (file_path,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"Error deleting track by path: {e}")
+            return 0
 
     def get_library_history(self, event_type=None, page=1, limit=50):
         """Query library history with optional type filter and pagination.

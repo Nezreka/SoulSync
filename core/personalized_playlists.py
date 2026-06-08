@@ -225,7 +225,7 @@ class PersonalizedPlaylistsService:
                 FROM discovery_pool
                 WHERE source = ?
                   AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
-                  AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+                  AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
                   {owned_clause}
                   {extra_where}
                 ORDER BY {order_by}
@@ -818,7 +818,7 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE (artist_name LIKE ? OR track_name LIKE ?) AND source = ?
-                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (f'%{category}%', f'%{category}%', active_source, limit))

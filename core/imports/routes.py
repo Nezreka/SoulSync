@@ -329,6 +329,8 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                 total_discs=total_discs,
                 source=source,
             )
+            if isinstance(context, dict):
+                context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
 
             try:
                 runtime.post_process_matched_download(context_key, context, file_path)
@@ -425,6 +427,7 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             override_source=manual_match_source,
         )
         context = runtime.normalize_import_context(resolved["context"])
+        context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
         artist_data = runtime.get_import_context_artist(context)
         track_data = runtime.get_import_track_info(context)
         final_title = track_data.get("name", title)

@@ -364,6 +364,49 @@ def test_playlist_image_uploaded_to_jellyfin(patched_db):
     assert jf.image_calls == [('PJF', 'https://img/y.png')]
 
 
+def test_append_mode_preserves_playlist_image(patched_db):
+    """Append edits in place — it must NOT re-push the source image over the
+    user's custom poster (#811)."""
+    jf = _FakeJellyfin()
+    cfg = _FakeConfig(server='jellyfin')
+    result = _FakeSyncResult(synced_tracks=3)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
+
+    ds.run_sync_task('pA', 'PA', [_track()],
+                     playlist_image_url='https://img/a.png', deps=deps, sync_mode='append')
+
+    assert jf.image_calls == []   # preserved, not clobbered
+
+
+def test_reconcile_mode_preserves_playlist_image(patched_db):
+    """Reconcile likewise preserves the image (#792)."""
+    jf = _FakeJellyfin()
+    cfg = _FakeConfig(server='jellyfin')
+    result = _FakeSyncResult(synced_tracks=3)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
+
+    ds.run_sync_task('pR', 'PR', [_track()],
+                     playlist_image_url='https://img/r.png', deps=deps, sync_mode='reconcile')
+
+    assert jf.image_calls == []
+
+
+def test_replace_mode_still_pushes_playlist_image(patched_db):
+    """Replace recreates from scratch, so it does push the source image."""
+    jf = _FakeJellyfin()
+    cfg = _FakeConfig(server='jellyfin')
+    result = _FakeSyncResult(synced_tracks=3)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
+
+    ds.run_sync_task('pRep', 'PRep', [_track()],
+                     playlist_image_url='https://img/rep.png', deps=deps, sync_mode='replace')
+
+    assert jf.image_calls == [('PRep', 'https://img/rep.png')]
+
+
 def test_no_image_upload_when_zero_synced(patched_db):
     """synced_tracks == 0 → no playlist image upload."""
     plex = _FakePlex()

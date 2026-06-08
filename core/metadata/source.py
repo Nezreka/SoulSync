@@ -90,11 +90,19 @@ def _bounded_cache_set(cache, key, value, max_entries: int) -> None:
 
 
 def _call_source_lookup(label: str, func, *args, **kwargs):
+    # Timed: these lookups are where import post-processing silently stalls
+    # when an upstream is sick or contended (measured 4m+/track against a
+    # degraded MusicBrainz). A slow source must NAME itself in the log.
+    started = time.time()
     try:
         return func(*args, **kwargs)
     except _SOURCE_NETWORK_EXCEPTIONS as exc:
         logger.warning("%s lookup failed (network): %s", label, exc)
         return None
+    finally:
+        elapsed = time.time() - started
+        if elapsed > 2.0:
+            logger.warning("%s lookup took %.1fs — upstream slow or contended", label, elapsed)
 
 
 SOURCE_TAG_CONFIG = {

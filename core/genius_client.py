@@ -16,8 +16,24 @@ _rate_limit_backoff = 0  # Extra backoff seconds after 429
 _rate_limit_until = 0    # Timestamp until which all calls should wait
 
 
+class GeniusRateLimitedError(requests.exceptions.RequestException):
+    """Raised IMMEDIATELY while Genius is inside a 429 backoff window.
+
+    Subclasses RequestException so every existing caller (the import
+    pipeline's source lookups, the enrichment worker's per-item guards)
+    already treats it as a plain network failure: log one line, skip
+    Genius, move on. Lyrics/metadata garnish — nothing is allowed to WAIT
+    for it."""
+
+
 def rate_limited(func):
-    """Decorator to enforce rate limiting on Genius API calls with exponential backoff on 429"""
+    """Decorator to enforce rate limiting on Genius API calls.
+
+    The 429 backoff is a fail-fast GATE, not a sleep. The old version
+    slept the backoff in the calling thread — while HOLDING the API lock,
+    so every other Genius caller queued behind it — and then re-raised
+    anyway. The import pipeline measurably napped 2x120s per track
+    ("Genius track lookup took 242.4s") for lookups that still failed."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         global _last_api_call_time, _rate_limit_backoff, _rate_limit_until
@@ -25,11 +41,12 @@ def rate_limited(func):
         with _api_call_lock:
             current_time = time.time()
 
-            # If in backoff period from a previous 429, wait it out
+            # Inside a backoff window: fail fast, never wait.
             if current_time < _rate_limit_until:
-                wait = _rate_limit_until - current_time
-                logger.debug(f"Genius rate limit backoff: waiting {wait:.1f}s")
-                time.sleep(wait)
+                remaining = _rate_limit_until - current_time
+                raise GeniusRateLimitedError(
+                    f"Genius in 429 backoff for another {remaining:.0f}s — skipping"
+                )
 
             time_since_last_call = time.time() - _last_api_call_time
             if time_since_last_call < MIN_API_INTERVAL:
@@ -48,11 +65,11 @@ def rate_limited(func):
             return result
         except Exception as e:
             if "429" in str(e) or "rate limit" in str(e).lower():
-                # Exponential backoff: 30s → 60s → 120s (cap at 120s)
+                # Open the gate: 30s → 60s → 120s (cap). Callers fail fast
+                # against it instead of sleeping here.
                 _rate_limit_backoff = min(120, max(30, _rate_limit_backoff * 2) if _rate_limit_backoff else 30)
                 _rate_limit_until = time.time() + _rate_limit_backoff
-                logger.warning(f"Genius 429 rate limit — backing off {_rate_limit_backoff}s")
-                time.sleep(_rate_limit_backoff)
+                logger.warning(f"Genius 429 rate limit — gating calls for {_rate_limit_backoff}s")
             raise e
     return wrapper
 

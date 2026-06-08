@@ -471,6 +471,14 @@ class Album:
             artist_ids=[artist['id'] for artist in album_data['artists']]
         )
 
+# The web UI's virtual "Liked Songs" playlist id. There is NO real playlist
+# behind a user's liked songs — Spotify serves them via /me/tracks (saved
+# tracks), and passing this id to the playlist endpoint 400s with
+# "Unsupported URL / URI". Anything resolving playlists by id must special-case
+# it (get_playlist_by_id does).
+LIKED_SONGS_PLAYLIST_ID = "spotify:liked-songs"
+
+
 @dataclass
 class Playlist:
     id: str
@@ -494,6 +502,32 @@ class Playlist:
             tracks=tracks,
             total_tracks=(playlist_data.get('tracks') or playlist_data.get('items') or {}).get('total', 0)
         )
+
+def describe_spotify_unavailable(*, configured: bool, rate_limited: bool,
+                                 ban_seconds_left: int = 0, in_cooldown: bool = False,
+                                 cooldown_seconds_left: int = 0, has_token: bool = True) -> str:
+    """Human reason Spotify can't serve a request right now.
+
+    ``is_spotify_authenticated()`` returns False for five distinct reasons, but
+    every API call site logged the same bare "Not authenticated with Spotify" —
+    so a rate-limit ban looked like a logout. This maps the real state to a
+    clear message (priority matches is_spotify_authenticated): not-configured →
+    rate-limited → post-ban cooldown → no-token → unknown probe failure. Pure.
+    """
+    if not configured:
+        return "Spotify not configured (add credentials in Settings)"
+    if rate_limited:
+        if ban_seconds_left and ban_seconds_left > 0:
+            return f"Spotify rate-limited — ban ~{max(1, round(ban_seconds_left / 60))}m left (not a logout)"
+        return "Spotify rate-limited — waiting out a ban (not a logout)"
+    if in_cooldown:
+        if cooldown_seconds_left and cooldown_seconds_left > 0:
+            return f"Spotify post-ban cooldown — ~{cooldown_seconds_left}s left (not a logout)"
+        return "Spotify post-ban cooldown (not a logout)"
+    if not has_token:
+        return "Spotify not connected — no saved token; re-authenticate in Settings"
+    return "Spotify auth check failed (token refresh may have failed — see debug log)"
+
 
 class SpotifyClient:
     def __init__(self):
@@ -612,9 +646,12 @@ class SpotifyClient:
         term covers the brief window before the auth cache refreshes. When authed
         + healthy the official path returns first, so this never opens.
 
-        Two activations fall out of this: a no-auth user who chose Spotify Free
-        (free is their source), and a connected user mid-rate-limit (free bridges
-        the ban) — see _free_wanted()."""
+        Three activations fall out of this: a no-auth user who chose Spotify
+        Free (free is their source), a connected user mid-rate-limit (free
+        bridges the ban), and a connected user who has spent the enrichment
+        worker's real-API daily budget (``_budget_exhausted_use_free``, set by
+        the worker) — so a Spotify-Free user is never paused by the budget, it
+        just switches to the uncapped free source. See _free_wanted()."""
         from core.spotify_free_metadata import should_use_free_fallback
         if not self._free_available():
             return False
@@ -622,7 +659,10 @@ class SpotifyClient:
             authed = self.is_spotify_authenticated()
         except Exception:
             authed = False
-        return should_use_free_fallback(authed, _is_globally_rate_limited())
+        return should_use_free_fallback(
+            authed, _is_globally_rate_limited(),
+            getattr(self, '_budget_exhausted_use_free', False),
+        )
 
     @property
     def _free_meta(self):
@@ -648,12 +688,20 @@ class SpotifyClient:
             return
         
         try:
+            # Tokens live in the database-backed config store, not a loose
+            # file: config/.spotify_cache sat in /app/config, which is only
+            # persistent when the user's compose maps it — an anonymous
+            # volume is recreated empty on every container pull, so tokens
+            # died nightly while every other setting survived ("it keeps
+            # unauthenticating" daily, wolf39us). The handler imports the
+            # legacy file once if the store is empty.
+            from core.spotify_token_cache import DatabaseTokenCache
             auth_manager = SpotifyOAuth(
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
                 scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                cache_path='config/.spotify_cache'
+                cache_handler=DatabaseTokenCache(config_manager)
             )
             
             self.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
@@ -842,6 +890,28 @@ class SpotifyClient:
 
         return result
 
+    def _auth_unavailable_reason(self) -> str:
+        """Real reason an API call can't reach Spotify right now, for logging —
+        distinguishes a rate-limit ban / cooldown from a genuine logout instead
+        of the old catch-all 'Not authenticated'. Side-effect-free: reads the
+        cached token (no refresh, no API probe)."""
+        has_token = True
+        try:
+            if self.sp is not None:
+                ch = getattr(self.sp.auth_manager, 'cache_handler', None)
+                has_token = ch is None or ch.get_cached_token() is not None
+        except Exception:
+            has_token = True  # unknown → don't wrongly claim "not connected"
+        rl = _get_rate_limit_info() if _is_globally_rate_limited() else None
+        return describe_spotify_unavailable(
+            configured=self.sp is not None,
+            rate_limited=_is_globally_rate_limited(),
+            ban_seconds_left=(rl or {}).get('remaining_seconds', 0) or 0,
+            in_cooldown=_is_in_post_ban_cooldown(),
+            cooldown_seconds_left=_get_post_ban_cooldown_remaining() or 0,
+            has_token=has_token,
+        )
+
     def disconnect(self):
         """Disconnect Spotify: clear client, delete cache, invalidate auth cache, clear rate limit"""
         import os
@@ -862,13 +932,12 @@ class SpotifyClient:
         except Exception as e:
             logger.debug("publish_spotify_status disconnect: %s", e)
 
-        cache_path = 'config/.spotify_cache'
         try:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-                logger.info("Deleted Spotify cache file")
+            from core.spotify_token_cache import DatabaseTokenCache
+            DatabaseTokenCache(config_manager).clear()
+            logger.info("Cleared Spotify token cache (database + legacy file)")
         except Exception as e:
-            logger.warning(f"Failed to delete Spotify cache: {e}")
+            logger.warning(f"Failed to clear Spotify token cache: {e}")
 
         logger.info("Spotify client disconnected")
 
@@ -909,7 +978,7 @@ class SpotifyClient:
     @rate_limited
     def get_user_playlists(self) -> List[Playlist]:
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
         
         if not self._ensure_user_id():
@@ -954,7 +1023,7 @@ class SpotifyClient:
     def get_user_playlists_metadata_only(self) -> List[Playlist]:
         """Get playlists without fetching all track details for faster loading"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
         
         if not self._ensure_user_id():
@@ -1027,7 +1096,7 @@ class SpotifyClient:
     def get_saved_tracks_count(self) -> int:
         """Get the total count of user's saved/liked songs without fetching all tracks"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return 0
 
         try:
@@ -1046,7 +1115,7 @@ class SpotifyClient:
     def get_saved_tracks(self) -> List[Track]:
         """Fetch all user's saved/liked songs from Spotify"""
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
 
         tracks = []
@@ -1097,7 +1166,7 @@ class SpotifyClient:
             List of dicts with album metadata ready for DB upsert.
         """
         if not self.is_spotify_authenticated():
-            logger.error("Not authenticated with Spotify")
+            logger.error("Spotify request skipped — %s", self._auth_unavailable_reason())
             return []
 
         albums = []
@@ -1233,14 +1302,55 @@ class SpotifyClient:
     def get_playlist_by_id(self, playlist_id: str) -> Optional[Playlist]:
         if not self.is_spotify_authenticated():
             return None
-        
+
+        # "Liked Songs" is virtual — no playlist URI exists for it, so the
+        # playlist endpoint 400s ("Unsupported URL / URI"). Serve it from the
+        # saved-tracks endpoint instead, so mirrored playlists / anything that
+        # re-resolves by stored id can refresh it like a normal playlist.
+        if playlist_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs'):
+            return self._liked_songs_as_playlist()
+
         try:
             playlist_data = self.sp.playlist(playlist_id)
             tracks = self._get_playlist_tracks(playlist_id)
             return Playlist.from_spotify_playlist(playlist_data, tracks)
-            
+
         except Exception as e:
             logger.error(f"Error fetching playlist {playlist_id}: {e}")
+            return None
+
+    def _liked_songs_as_playlist(self) -> Optional[Playlist]:
+        """Build a ``Playlist`` for the virtual Liked Songs collection from the
+        saved-tracks endpoint (the only API that serves it)."""
+        try:
+            tracks = self.get_saved_tracks()
+            if not tracks:
+                # get_saved_tracks swallows fetch errors into [] — indistinguishable
+                # from "no likes". The virtual playlist is only offered when likes
+                # exist, so treat empty as a FAILED refresh (None) rather than hand
+                # the sync a valid-looking empty playlist it might mirror by
+                # clearing the server-side copy.
+                logger.error("Liked Songs resolve: saved-tracks fetch returned nothing — treating as failed refresh")
+                return None
+            owner = 'You'
+            try:
+                info = self.get_user_info()
+                if info and info.get('display_name'):
+                    owner = info['display_name']
+            except Exception:  # noqa: S110 — owner label is cosmetic; default stands
+                pass
+            return Playlist(
+                id=LIKED_SONGS_PLAYLIST_ID,
+                name='Liked Songs',
+                description='Your liked songs on Spotify',
+                owner=owner,
+                public=False,
+                collaborative=False,
+                tracks=tracks,
+                total_tracks=len(tracks),
+            )
+        except Exception as e:
+            logger.error(f"Error building Liked Songs playlist: {e}")
             return None
     
     @rate_limited
@@ -1756,6 +1866,7 @@ class SpotifyClient:
             try:
                 albums = []
                 raw_items = []
+                truncated = False  # did we stop while more pages existed?
                 # Spotify caps artist_albums at 10 per page
                 results = self.sp.artist_albums(artist_id, album_type=album_type, limit=min(limit, 10))
                 pages_fetched = 1
@@ -1768,6 +1879,7 @@ class SpotifyClient:
 
                     # Stop if we've hit the page limit (0 = unlimited)
                     if max_pages and pages_fetched >= max_pages:
+                        truncated = bool(results.get('next'))
                         break
 
                     # Get next batch if available — throttle pagination to respect rate limits
@@ -1790,8 +1902,17 @@ class SpotifyClient:
                             (f" (page limit: {max_pages})" if max_pages else ""))
 
                 # Cache the full artist albums result (wrapped in dict for cache compatibility)
+                # Only cache COMPLETE discographies. The cache key carries no
+                # limit/page info, so a partial probe (the watchlist's
+                # new-release check: limit=5, max_pages=1) stored here used to
+                # POISON the slot — the artist detail page then showed only
+                # the 5-10 newest releases for every watchlist artist until
+                # the 30-day TTL expired ("Taylor Swift has 8 albums, nothing
+                # before 2022"). Individual albums are still cached — they're
+                # complete entities regardless of how many pages we walked.
                 if raw_items:
-                    cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
+                    if not truncated:
+                        cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
                     # Also cache individual albums opportunistically
                     entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                     if entries:

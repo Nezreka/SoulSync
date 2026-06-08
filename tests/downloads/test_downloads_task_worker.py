@@ -45,6 +45,7 @@ class _FakeClient:
         self._results = results if results is not None else []
         self.mode = mode
         self.search_calls = []
+        self.exclude_calls = []  # exclude_sources arg per search() call
         self._client_map = {}
         for k, v in (subclients or {}).items():
             if k in self._CLIENT_NAMES:
@@ -58,6 +59,7 @@ class _FakeClient:
 
     async def search(self, query, timeout=30, exclude_sources=None):
         self.search_calls.append((query, timeout))
+        self.exclude_calls.append(exclude_sources)
         return (self._results, None)
 
 
@@ -504,6 +506,190 @@ def test_hybrid_fallback_skipped_when_mode_not_hybrid():
     tw.download_track_worker('t1', 'b1', deps)
     # Fallback didn't run — youtube never searched
     assert yt.search_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Cached-first quarantine retry: walk already-found candidates before any
+# re-search; never re-search a source whose candidates are spent (only switch
+# to a not-yet-searched source). See task_worker cached-first phase.
+# ---------------------------------------------------------------------------
+
+class _Cand:
+    def __init__(self, username, filename):
+        self.username = username
+        self.filename = filename
+
+
+def test_quarantine_retry_tries_cached_candidates_without_searching():
+    _seed_task(
+        _quarantine_retry=True,
+        cached_candidates=[_Cand('peerA', 'f1.flac'), _Cand('peerB', 'f2.flac')],
+        used_sources={'peerA_f1.flac'},  # peerA already tried
+    )
+    attempted = []
+
+    def _attempt(task_id, candidates, track, batch_id):
+        attempted.append([getattr(c, 'filename', None) for c in candidates])
+        return True
+
+    sk = _FakeClient(results=['should-not-be-used'])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['q1']),
+        attempt_download_with_candidates=_attempt,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    # No search performed — cached candidates used directly.
+    assert sk.search_calls == []
+    # Only the unused candidate (peerB) was passed to attempt.
+    assert attempted == [['f2.flac']]
+
+
+def test_quarantine_retry_skips_cached_from_exhausted_source():
+    # hifi is budget-exhausted; its cached candidate must be skipped, soulseek's tried.
+    _seed_task(
+        _quarantine_retry=True,
+        cached_candidates=[_Cand('hifi', 'h.flac'), _Cand('peerB', 'f2.flac')],
+        used_sources=set(),
+        exhausted_download_sources={'hifi'},
+    )
+    attempted = []
+
+    def _attempt(task_id, candidates, track, batch_id):
+        attempted.append([getattr(c, 'username', None) for c in candidates])
+        return True
+
+    sk = _FakeClient(results=['x'])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['q1']),
+        attempt_download_with_candidates=_attempt,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert sk.search_calls == []
+    assert attempted == [['peerB']]  # hifi candidate excluded
+
+
+# A track_info that yields exactly the engine queries (no artist → no
+# first-word legacy query; name equals a query → track-only query dedupes away),
+# so the generated query set is deterministic for cached-first assertions.
+_SOLO_TRACK = {'id': 'sp-1', 'name': 'Solo', 'artists': [],
+               'album': 'A', 'duration_ms': 1000}
+
+
+def test_quarantine_retry_searches_unsearched_query_without_excluding_source():
+    # Cache spent + 'Solo' already searched, but 'q2' is NOT yet searched. The
+    # retry must search q2 against the SAME source (no source-level exclusion) so
+    # every query is exhausted per source before the chain switches sources
+    # (lazy multi-query retry).
+    _seed_task(
+        track_info=dict(_SOLO_TRACK),
+        _quarantine_retry=True,
+        cached_candidates=[_Cand('peerA', 'f1.flac')],
+        used_sources={'peerA_f1.flac'},
+        searched_queries={'Solo'},
+    )
+    sk = _FakeClient(results=[], mode='hybrid',
+                     subclients={'hybrid_order': ['soulseek', 'hifi']})
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['Solo', 'q2']),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    # Only q2 was searched — 'Solo' skipped because its candidates were cached.
+    assert [c[0] for c in sk.search_calls] == ['q2']
+    # Soulseek NOT excluded: the not-yet-searched query still hits it.
+    assert all((not ex) or 'soulseek' not in ex for ex in sk.exclude_calls)
+
+
+def test_quarantine_retry_skips_already_searched_query_no_research():
+    # The only generated query is already searched and cache spent → it is NOT
+    # re-searched (its candidates live in cache). This is the wasteful repeat the
+    # cached-first design removes.
+    _seed_task(
+        track_info=dict(_SOLO_TRACK),
+        _quarantine_retry=True,
+        cached_candidates=[_Cand('peerA', 'f1.flac')],
+        used_sources={'peerA_f1.flac'},
+        searched_queries={'Solo'},
+    )
+    sk = _FakeClient(results=[], mode='hybrid',
+                     subclients={'hybrid_order': ['soulseek', 'hifi']})
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['Solo']),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert sk.search_calls == []  # 'Solo' not re-searched
+
+
+def test_quarantine_retry_still_excludes_budget_exhausted_source():
+    # A source whose per-source budget is spent (exhaustive mode) stays excluded
+    # so the chain falls through to the next source.
+    _seed_task(
+        _quarantine_retry=True,
+        cached_candidates=[],
+        searched_queries=set(),
+        exhausted_download_sources={'soulseek'},
+    )
+    sk = _FakeClient(results=[], mode='hybrid',
+                     subclients={'hybrid_order': ['soulseek', 'hifi']})
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['q1']),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert sk.search_calls
+    assert all(ex and 'soulseek' in ex for ex in sk.exclude_calls)
+
+
+def test_search_records_searched_queries():
+    # Every query the worker actually runs is recorded so a later quarantine
+    # retry can skip re-searching it.
+    _seed_task(status='pending')
+    sk = _FakeClient(results=['r1'])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['q1']),
+        get_valid_candidates=lambda r, t, q: [],  # no candidates → loop completes
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert 'q1' in download_tasks['t1'].get('searched_queries', set())
+
+
+def test_non_quarantine_run_resets_searched_queries():
+    # A fresh / dead-connection retry starts a new search generation: the stale
+    # searched-query memory is cleared so every query can be searched again.
+    _seed_task(
+        track_info=dict(_SOLO_TRACK),
+        cached_candidates=[],
+        searched_queries={'stale-q'},
+    )
+    sk = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['Solo']),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    sq = download_tasks['t1'].get('searched_queries', set())
+    assert 'stale-q' not in sq   # stale generation cleared
+    assert 'Solo' in sq          # current generation recorded fresh
+
+
+def test_non_quarantine_run_ignores_cached_first_and_searches():
+    # A fresh (non-quarantine) run must NOT use cached-first — it searches.
+    _seed_task(
+        cached_candidates=[_Cand('peerA', 'f1.flac')],
+        used_sources=set(),
+    )
+    sk = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=sk,
+        matching=_FakeMatchEngine(queries=['q1']),
+        attempt_download_with_candidates=lambda *a, **kw: False,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert sk.search_calls  # searched, did not short-circuit on cache
 
 
 # ---------------------------------------------------------------------------

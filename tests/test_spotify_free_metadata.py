@@ -60,6 +60,18 @@ def test_gate_open_when_no_auth_and_rate_limited():
     assert should_use_free_fallback(authenticated=False, rate_limited=True) is True
 
 
+def test_gate_open_when_budget_exhausted_even_if_authed_and_healthy():
+    # #758-follow-up: the real-API daily budget is spent, but the user has
+    # Spotify Free — switch to the uncapped free source instead of pausing.
+    assert should_use_free_fallback(authenticated=True, rate_limited=False,
+                                    budget_exhausted=True) is True
+
+
+def test_gate_closed_when_authed_healthy_and_under_budget():
+    assert should_use_free_fallback(authenticated=True, rate_limited=False,
+                                    budget_exhausted=False) is False
+
+
 # ---------------------------------------------------------------------------
 # should_offer_spotify_metadata — the availability gate the callers use
 # ---------------------------------------------------------------------------

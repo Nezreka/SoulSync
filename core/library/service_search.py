@@ -59,9 +59,64 @@ def _detect_provider(items, client):
     return 'spotify'
 
 
+def _mb_direct_lookup(entity_type, mbid):
+    """Confirm a pasted MusicBrainz MBID by fetching that exact entity.
+    Returns a one-item result list (same shape as the search path) so the
+    modal shows it for confirmation, or [] if the ID doesn't resolve."""
+    if not mb_worker or not mb_worker.mb_service:
+        raise ValueError("MusicBrainz worker not initialized")
+    mb_client = mb_worker.mb_service.mb_client
+
+    if entity_type == 'artist':
+        a = mb_client.get_artist(mbid)
+        if not a:
+            return []
+        extra = a.get('disambiguation') or a.get('country') or a.get('type') or ''
+        return [{'id': a['id'], 'name': a.get('name', ''), 'image': None,
+                 'extra': f"Direct ID match{' · ' + extra if extra else ''}"}]
+
+    if entity_type == 'album':
+        # A pasted album ID may be a release OR a release-group — try release
+        # first (what the matcher stores), fall back to release-group.
+        r = mb_client.get_release(mbid) or mb_client.get_release_group(mbid)
+        if not r:
+            return []
+        artists = ', '.join(ac.get('name', '') for ac in r.get('artist-credit', []) if isinstance(ac, dict))
+        cover_url = f"https://coverartarchive.org/release/{r['id']}/front-250" if r.get('id') else None
+        bits = ' · '.join(b for b in (artists, r.get('date', '')) if b)
+        return [{'id': r['id'], 'name': r.get('title', ''), 'image': cover_url,
+                 'extra': f"Direct ID match{' · ' + bits if bits else ''}"}]
+
+    if entity_type == 'track':
+        rec = mb_client.get_recording(mbid)
+        if not rec:
+            return []
+        artists = ', '.join(ac.get('name', '') for ac in rec.get('artist-credit', []) if isinstance(ac, dict))
+        return [{'id': rec['id'], 'name': rec.get('title', ''), 'image': None,
+                 'extra': f"Direct ID match{' · ' + artists if artists else ''}"}]
+    return []
+
+
 def _search_service(service, entity_type, query):
     """Search a service and return normalized results."""
     import requests as req_lib
+
+    # Direct-ID fast path (Ashh): if the user pasted an exact service ID
+    # (e.g. a MusicBrainz MBID for a release the top-8 fuzzy search missed),
+    # confirm it by direct lookup and return just that entity. A failed
+    # lookup falls through to the normal search, so a paste that merely
+    # LOOKS like an ID can't dead-end the modal.
+    from core.library.direct_id import extract_direct_id
+    direct_id = extract_direct_id(service, entity_type, query)
+    if direct_id:
+        try:
+            if service == 'musicbrainz':
+                hit = _mb_direct_lookup(entity_type, direct_id)
+                if hit:
+                    return hit
+        except Exception as e:
+            logger.debug("Direct-ID lookup failed for %s %s: %s", service, direct_id, e)
+        # fall through to fuzzy search
 
     if service == 'spotify':
         if not spotify_enrichment_worker or not spotify_enrichment_worker.client:

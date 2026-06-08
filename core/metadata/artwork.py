@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import urllib.request
 from ipaddress import ip_address
 from urllib.parse import quote, urlparse
@@ -289,45 +290,73 @@ def _upgrade_art_url(art_url: str) -> str:
     elif "coverartarchive.org" in art_url:
         # MusicBrainz art arrives as Cover Art Archive thumbnails
         # (/front-250 — see musicbrainz_search._cover_art_url). Upgrade to the
-        # 1200px thumbnail: a huge jump from 240p yet still served by CAA's own
-        # CDN. Deliberately NOT the bare /front original — that redirects to
-        # archive.org, which is flaky (intermittent 500s/timeouts) and can be
-        # multi-MB, nasty to embed in every track. 1200 is the sweet spot of
-        # quality + reliability. `_fetch_art_bytes` falls back to the original
-        # sized URL if /front-1200 is ever refused.
-        return re.sub(r"/front-\d+", "/front-1200", art_url)
+        # bare /front ORIGINAL — native resolution, frequently 3000px+ (#806:
+        # the old /front-1200 cap left MusicBrainz as the one source still
+        # below native while iTunes already shipped 3000x3000 — and bare
+        # /front URLs from release-group lookups bypassed the cap anyway,
+        # so the policy was inconsistent in practice). The original redirects
+        # to archive.org, which can be flaky, so `_fetch_art_bytes` inserts a
+        # /front-1200 midpoint fallback before the original-size URL:
+        # flakiness degrades to the old 1200px behavior, never below it.
+        return re.sub(r"/front(-\d+)?$", "/front", art_url)
     return art_url
+
+
+# Negative cache for CAA originals: art is fetched PER TRACK, and the bare
+# /front original rides archive.org. During an archive.org outage every track
+# would otherwise pay a 10s timeout before falling back — a 12-track album
+# would eat +2 minutes. One failure puts originals on cooldown; fetches go
+# straight to the 1200px CDN (the pre-#806 behavior, full speed) until then.
+_caa_original_down_until = 0.0
+_CAA_ORIGINAL_COOLDOWN_S = 600
 
 
 def _fetch_art_bytes(art_url: str):
     """Fetch artwork bytes at the highest resolution the source serves.
 
-    Upgrades the URL via `_upgrade_art_url`, then fetches. If the upgraded
-    (larger) size is refused by the CDN, retry once with the original URL so
-    we never regress vs. the un-upgraded behavior. Empirically the upgrade
-    works for every album tested; the fallback just defends the edge case.
+    Upgrades the URL via `_upgrade_art_url`, then walks a fallback chain so a
+    refused size degrades gracefully and never regresses below the original
+    URL's behavior. For Cover Art Archive that chain is
+    original (/front) -> 1200px CDN thumbnail -> the original sized URL.
 
     Returns `(image_data, mime_type)` or `(None, None)` on failure.
     """
+    global _caa_original_down_until
     if not art_url:
         return None, None
     upgraded = _upgrade_art_url(art_url)
-    try:
-        with urllib.request.urlopen(upgraded, timeout=10) as response:
-            return response.read(), (response.info().get_content_type() or "image/jpeg")
-    except Exception as fetch_err:
-        if upgraded != art_url:
-            logger.info(
-                "Upgraded art URL refused (%s); retrying original size", fetch_err
-            )
-            try:
-                with urllib.request.urlopen(art_url, timeout=10) as response:
-                    return response.read(), (response.info().get_content_type() or "image/jpeg")
-            except Exception as retry_err:
-                logger.error("Art fetch failed after fallback: %s", retry_err)
-                return None, None
-        logger.error("Art fetch failed: %s", fetch_err)
-        return None, None
+    is_caa_original = "coverartarchive.org" in upgraded and upgraded.endswith("/front")
+
+    attempts = []
+    if not (is_caa_original and time.time() < _caa_original_down_until):
+        attempts.append(upgraded)
+    if is_caa_original:
+        # Midpoint fallback: the 1200px CDN thumbnail (the pre-#806 behavior),
+        # tried BEFORE the original sized URL so a flaky archive.org degrades
+        # to 1200px — never all the way down to the 250px thumbnail.
+        attempts.append(upgraded + "-1200")
+    if art_url not in attempts:
+        attempts.append(art_url)
+
+    last_err = None
+    for i, candidate in enumerate(attempts):
+        try:
+            with urllib.request.urlopen(candidate, timeout=10) as response:
+                return response.read(), (response.info().get_content_type() or "image/jpeg")
+        except Exception as fetch_err:
+            last_err = fetch_err
+            if is_caa_original and candidate == upgraded:
+                # archive.org refused the original — cool down so the next
+                # tracks of this batch skip straight to the CDN thumbnail.
+                _caa_original_down_until = time.time() + _CAA_ORIGINAL_COOLDOWN_S
+                logger.info(
+                    "CAA original refused (%s); using 1200px CDN for the next %d min",
+                    fetch_err, _CAA_ORIGINAL_COOLDOWN_S // 60,
+                )
+            elif i < len(attempts) - 1:
+                logger.info("Art URL refused (%s); falling back to next size", fetch_err)
+    logger.error("Art fetch failed after %d attempt(s): %s", len(attempts), last_err)
+    return None, None
 
 
 def _min_size_art_validator(min_px):

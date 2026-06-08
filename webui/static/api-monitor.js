@@ -229,12 +229,17 @@ function _renderEqualizerBars(grid, data) {
                        <span class="rate-eq-avatar-glyph">${fallbackGlyph}</span>
                    </div>`;
             bar.innerHTML = `
-                ${avatar}
+                <div class="rate-eq-avatar-wrap">${avatar}</div>
                 <div class="rate-eq-track">
                     <div class="rate-eq-ticks"></div>
                     <div class="rate-eq-fill">
                         <div class="rate-eq-shimmer"></div>
                         <div class="rate-eq-tip"></div>
+                    </div>
+                    <div class="rate-eq-peak"></div>
+                    <div class="rate-eq-cooldown">
+                        <div class="rate-eq-cooldown-fill"></div>
+                        <div class="rate-eq-cooldown-time"></div>
                     </div>
                     <div class="rate-eq-value">0</div>
                 </div>
@@ -274,6 +279,26 @@ function _renderEqualizerBars(grid, data) {
 
         const fill = bar.querySelector('.rate-eq-fill');
         if (fill) fill.style.height = `${pct * 100}%`;
+
+        // Peak-hold tick — the VU-meter idiom: a thin marker sticks at the
+        // recent maximum, holds ~1.2s, then falls a few %/update until it
+        // rests on the live fill. A burst stays readable after it's over.
+        const nowTs = performance.now();
+        let peak = prev.peak ?? pct;
+        let peakAt = prev.peakAt ?? nowTs;
+        if (pct >= peak) {
+            peak = pct;
+            peakAt = nowTs;
+        } else if (nowTs - peakAt > 1200) {
+            peak = Math.max(pct, peak - 0.045);
+        }
+        const peakEl = bar.querySelector('.rate-eq-peak');
+        if (peakEl) {
+            peakEl.style.bottom = `${peak * 100}%`;
+            // Only show while meaningfully above the live fill — idle bars
+            // shouldn't carry a stray line.
+            peakEl.classList.toggle('visible', peak > pct + 0.015 && peak > 0.06);
+        }
 
         // The reflection puddle (CSS ::after on the track) fades in
         // proportional to the real (unclamped) rate so idle services
@@ -329,7 +354,83 @@ function _renderEqualizerBars(grid, data) {
         bar.classList.toggle('active', value > 0 || wStatus === 'running');
         bar.classList.toggle('rate-limited', isRateLimited);
 
-        _eqDisplay[svc] = { value, pct };
+        // Cooldown drain — a ban isn't just "red", it's a COUNTDOWN. The
+        // payload only carries seconds remaining, so latch the largest value
+        // seen this ban as the denominator; the red column then drains away
+        // as the ban ticks down and the timer shows m:ss until recovery.
+        const rlRemaining = isRateLimited ? Math.max(0, Math.round(d.rl_remaining || 0)) : 0;
+        let rlTotal = prev.rlTotal || 0;
+        const cooling = rlRemaining > 0;
+        if (cooling) {
+            rlTotal = Math.max(rlTotal, rlRemaining);
+            const cdFill = bar.querySelector('.rate-eq-cooldown-fill');
+            if (cdFill) cdFill.style.height = `${(rlRemaining / rlTotal) * 100}%`;
+            const cdTime = bar.querySelector('.rate-eq-cooldown-time');
+            if (cdTime) {
+                const m = Math.floor(rlRemaining / 60);
+                const s = String(rlRemaining % 60).padStart(2, '0');
+                cdTime.textContent = `${m}:${s}`;
+            }
+        } else {
+            rlTotal = 0;
+            // Recovery moment: the ban just ended — flash the bar back alive.
+            if (prev.cooling) {
+                bar.classList.remove('recovered');
+                void bar.offsetWidth;  // restart the animation
+                bar.classList.add('recovered');
+                window.setTimeout(() => bar.classList.remove('recovered'), 1300);
+            }
+        }
+        bar.classList.toggle('cooldown', cooling);
+
+        // Call embers: tiny accent sparks rise off the fill tip, spawned per
+        // socket update in proportion to REAL traffic — motion strictly means
+        // API calls are happening right now. Suppressed during cooldown and
+        // under reduced-effects.
+        if (!window._reduceEffectsActive && !cooling && realPct > 0.03) {
+            _spawnEmbers(bar, pct, realPct > 0.6 ? 3 : realPct > 0.25 ? 2 : 1);
+        }
+
+        // Daily-budget ring (Spotify is the only service with a real daily
+        // cap): a conic rim inside the avatar disc fills as the budget is
+        // spent — green → amber → red, purple once the worker has bridged
+        // to Spotify Free for the rest of the day.
+        const budget = worker.daily_budget;
+        if (budget && budget.limit > 0) {
+            const bPct = Math.min(1, (budget.used || 0) / budget.limit);
+            const bridged = !!worker.using_free && !!budget.exhausted;
+            bar.classList.add('has-budget');
+            bar.style.setProperty('--eq-budget', String(Math.max(bPct, 0.02)));
+            bar.style.setProperty('--eq-budget-color',
+                bridged ? '#a78bfa' : bPct < 0.7 ? '#4ade80' : bPct < 0.95 ? '#fbbf24' : '#ef4444');
+            const avatar = bar.querySelector('.rate-eq-avatar');
+            if (avatar) {
+                avatar.title = bridged
+                    ? `Daily budget spent — running on Spotify Free (${budget.used}/${budget.limit})`
+                    : `Daily API budget: ${budget.used}/${budget.limit}`;
+            }
+        } else {
+            bar.classList.remove('has-budget');
+        }
+
+        _eqDisplay[svc] = { value, pct, peak, peakAt, rlTotal, cooling };
+    }
+}
+
+// Spawn ember particles at a bar's fill tip. Self-removing DOM sparks with
+// a per-bar live cap so a busy hour can't accumulate nodes.
+function _spawnEmbers(bar, pct, count) {
+    const track = bar.querySelector('.rate-eq-track');
+    if (!track || track.querySelectorAll('.rate-eq-ember').length > 6) return;
+    for (let i = 0; i < count; i++) {
+        const e = document.createElement('span');
+        e.className = 'rate-eq-ember';
+        e.style.left = `${20 + Math.random() * 60}%`;
+        e.style.bottom = `${Math.min(96, pct * 100)}%`;
+        e.style.setProperty('--ember-drift', `${(Math.random() - 0.5) * 14}px`);
+        e.style.animationDuration = `${1.1 + Math.random() * 0.7}s`;
+        e.addEventListener('animationend', () => e.remove());
+        track.appendChild(e);
     }
 }
 
@@ -1938,6 +2039,20 @@ async function showWatchlistModal() {
                                 onclick="openWatchlistGlobalSettingsModal()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             ${globalOverrideActive ? 'Global Override ON' : 'Global Settings'}
+                        </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-origins"
+                                id="watchlist-download-origins-btn"
+                                onclick="openDownloadOriginsModal('watchlist')"
+                                title="See every track your watchlist downloaded">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download Origins
+                        </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-blocklist"
+                                id="watchlist-blocklist-btn"
+                                onclick="openBlocklistModal('artist')"
+                                title="Block artists, albums or tracks from ever being downloaded">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+                            Blocklist
                         </button>
                     </div>
 

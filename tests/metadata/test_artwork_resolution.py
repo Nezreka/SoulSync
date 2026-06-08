@@ -45,26 +45,24 @@ class TestUpgradeArtUrl:
         url = 'https://cdn-images.dzcdn.net/images/cover/abc/1000x1000-000000-80-0-0.jpg'
         assert '1900x1900' in _upgrade_art_url(url)
 
-    def test_caa_thumbnail_upgraded_to_1200(self):
-        # MusicBrainz art arrives as the /front-250 thumbnail; upgrade to the
-        # 1200px CDN thumbnail (NOT the flaky bare /front original).
+    def test_caa_thumbnail_upgraded_to_native_original(self):
+        # #806: MusicBrainz art arrives as the /front-250 thumbnail; upgrade
+        # to the bare /front ORIGINAL (native res, frequently 3000px+).
+        # Flakiness of the original is handled by _fetch_art_bytes' 1200px
+        # midpoint fallback, not by capping the URL here.
         url = 'https://coverartarchive.org/release/abc-123/front-250'
-        assert _upgrade_art_url(url) == 'https://coverartarchive.org/release/abc-123/front-1200'
+        assert _upgrade_art_url(url) == 'https://coverartarchive.org/release/abc-123/front'
 
-    def test_caa_500_scope_and_idempotent(self):
+    def test_caa_all_sizes_and_scopes_upgrade_to_original(self):
         assert _upgrade_art_url('https://coverartarchive.org/release/x/front-500') \
-            == 'https://coverartarchive.org/release/x/front-1200'
-        # release-group scope works the same.
+            == 'https://coverartarchive.org/release/x/front'
+        assert _upgrade_art_url('https://coverartarchive.org/release/x/front-1200') \
+            == 'https://coverartarchive.org/release/x/front'
+        # release-group scope works the same (the URL shape from #806).
         assert _upgrade_art_url('https://coverartarchive.org/release-group/y/front-250') \
-            == 'https://coverartarchive.org/release-group/y/front-1200'
-        # Idempotent — an already-1200 URL stays put.
-        assert _upgrade_art_url('https://coverartarchive.org/release-group/y/front-1200') \
-            == 'https://coverartarchive.org/release-group/y/front-1200'
+            == 'https://coverartarchive.org/release-group/y/front'
 
-    def test_caa_bare_front_left_alone(self):
-        # The bare /front original is intentionally NOT what we want; the
-        # sized-thumbnail regex doesn't touch it (and it never reaches the
-        # helper in practice — _cover_art_url always emits /front-250).
+    def test_caa_bare_front_idempotent(self):
         url = 'https://coverartarchive.org/release/abc/front'
         assert _upgrade_art_url(url) == url
 
@@ -163,3 +161,92 @@ class TestFetchArtBytes:
     def test_empty_url_returns_none(self):
         assert _fetch_art_bytes('') == (None, None)
         assert _fetch_art_bytes(None) == (None, None)
+
+    # ── #806: CAA native-res chain — original → 1200px midpoint → thumbnail ──
+
+    @pytest.fixture(autouse=True)
+    def _reset_caa_cooldown(self, monkeypatch):
+        # The negative cache persists module-globally; isolate every test.
+        import core.metadata.artwork as aw
+        monkeypatch.setattr(aw, '_caa_original_down_until', 0.0)
+
+    def test_caa_fetches_native_original_first(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            return _FakeResponse(b'native-3000px')
+
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+
+        data, _ = _fetch_art_bytes('https://coverartarchive.org/release/r1/front-250')
+
+        assert data == b'native-3000px'
+        assert calls == ['https://coverartarchive.org/release/r1/front']
+
+    def test_caa_flaky_original_degrades_to_1200_not_250(self, monkeypatch):
+        """archive.org flakiness lands on the old 1200px behavior — the
+        midpoint sits BEFORE the tiny original thumbnail in the chain."""
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            if url.endswith('/front'):
+                raise Exception('503 archive.org is having a day')
+            return _FakeResponse(b'cdn-1200px')
+
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+
+        data, _ = _fetch_art_bytes('https://coverartarchive.org/release/r1/front-250')
+
+        assert data == b'cdn-1200px'
+        assert calls == [
+            'https://coverartarchive.org/release/r1/front',
+            'https://coverartarchive.org/release/r1/front-1200',
+        ]
+
+    def test_caa_full_chain_ends_at_the_original_thumbnail(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            if url.endswith('/front') or url.endswith('-1200'):
+                raise Exception('refused')
+            return _FakeResponse(b'tiny-250px')
+
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+
+        data, _ = _fetch_art_bytes('https://coverartarchive.org/release/r1/front-250')
+
+        assert data == b'tiny-250px'
+        assert calls == [
+            'https://coverartarchive.org/release/r1/front',
+            'https://coverartarchive.org/release/r1/front-1200',
+            'https://coverartarchive.org/release/r1/front-250',
+        ]
+
+    def test_caa_outage_cooldown_skips_originals_for_subsequent_fetches(self, monkeypatch):
+        """One archive.org failure puts originals on cooldown: the NEXT track's
+        fetch goes straight to the 1200px CDN — no 10s timeout per track during
+        an outage (art is fetched per track)."""
+        calls = []
+
+        def fake_urlopen(url, timeout=None):
+            calls.append(url)
+            if url.endswith('/front'):
+                raise Exception('archive.org down')
+            return _FakeResponse(b'cdn-1200px')
+
+        monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+
+        # Track 1: pays the failed original once, falls back to 1200.
+        _fetch_art_bytes('https://coverartarchive.org/release/r1/front-250')
+        # Track 2: cooldown active — never touches the original.
+        data, _ = _fetch_art_bytes('https://coverartarchive.org/release/r2/front-250')
+
+        assert data == b'cdn-1200px'
+        assert calls == [
+            'https://coverartarchive.org/release/r1/front',       # track 1 pays once
+            'https://coverartarchive.org/release/r1/front-1200',  # and falls back
+            'https://coverartarchive.org/release/r2/front-1200',  # track 2 skips straight to CDN
+        ]

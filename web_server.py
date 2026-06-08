@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.7"
+_SOULSYNC_BASE_VERSION = "2.6.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -2785,6 +2785,43 @@ def get_debug_info():
     return _debug_info_get()
 
 
+# ── Memory-growth diagnostic (#802) ──
+# Opt-in tracemalloc capture, drivable entirely from a browser:
+#   /api/debug/memory/start  -> begin tracing (baseline snapshot)
+#   ...reproduce the growth for a few minutes...
+#   /api/debug/memory/report -> top allocation sites by GROWTH since baseline
+#   /api/debug/memory/stop   -> end tracing, free the trace bookkeeping
+# GET on purpose so a user can paste URLs; tracing costs CPU+memory while
+# active, which is why it never runs by default.
+
+@app.route('/api/debug/memory/start')
+def debug_memory_start():
+    try:
+        from core.diagnostics.memory_tracker import start_tracking
+        return jsonify(start_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/report')
+def debug_memory_report():
+    try:
+        from core.diagnostics.memory_tracker import report
+        top = request.args.get('top', 25, type=int)
+        return jsonify(report(top=max(1, min(top, 100))))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/stop')
+def debug_memory_stop():
+    try:
+        from core.diagnostics.memory_tracker import stop_tracking
+        return jsonify(stop_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/activity/feed')
 def get_activity_feed():
     """Get recent activity feed for dashboard"""
@@ -2974,6 +3011,12 @@ def handle_settings():
     else:  # GET request
         try:
             data = dict(config_manager.config_data)
+            # Never ship the OAuth token payload to the browser — the settings
+            # UI has no field for it and it doesn't belong in devtools/HAR
+            # captures. NOTE: dict() above is a SHALLOW copy of live config
+            # state, so rebuild the section instead of popping in place.
+            if isinstance(data.get('spotify'), dict) and 'token_info' in data['spotify']:
+                data['spotify'] = {k: v for k, v in data['spotify'].items() if k != 'token_info'}
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
             try:
                 data['_source_status'] = download_orchestrator.get_source_status()
@@ -6109,6 +6152,25 @@ def start_download():
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
+            # Blocklist guard (Phase 2b): a manual download is source-file-centric
+            # (no metadata IDs), so this matches the blocked ARTIST by name. The
+            # frontend shows "blocked — download anyway?" and re-POSTs with
+            # ignore_blocklist=true on confirm.
+            if not data.get('ignore_blocklist'):
+                try:
+                    _dl_artist = data.get('artist')
+                    if _dl_artist and _dl_artist != 'Unknown':
+                        _reason = get_database().blocklist_reason_for_track(
+                            get_current_profile_id(),
+                            {'name': data.get('title'), 'artists': [{'name': _dl_artist}]})
+                        if _reason:
+                            return jsonify({
+                                "success": False, "blocked": True,
+                                "blocked_entity_type": _reason[0], "blocked_name": _reason[1],
+                            }), 409
+                except Exception as _bl_err:
+                    logger.debug("manual download blocklist check skipped: %s", _bl_err)
+
             download_id = run_async(download_orchestrator.download(username, filename, file_size))
             logger.info(f"Download ID returned: {download_id}")
 
@@ -7524,6 +7586,73 @@ def maintain_search_history():
     except Exception as e:
         logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+# ── Download-origin history (origin modal: watchlist page / sync page) ──
+# Lists downloads by what TRIGGERED them ('watchlist' / 'playlist'), recorded
+# at the import chokepoint via core.downloads.origin. Delete removes the file
+# on disk (resolved through the same container/host path resolver everything
+# else uses), the matching library track row, and the history entries.
+
+@app.route('/api/download-origins')
+def get_download_origins():
+    try:
+        origin = request.args.get('origin', 'watchlist')
+        if origin not in ('watchlist', 'playlist'):
+            return jsonify({'success': False, 'error': 'origin must be watchlist or playlist'}), 400
+        limit = min(500, max(1, int(request.args.get('limit', 200))))
+        offset = max(0, int(request.args.get('offset', 0)))
+        entries, total = get_database().get_download_origin_entries(origin, limit=limit, offset=offset)
+        return jsonify({'success': True, 'origin': origin, 'entries': entries, 'total': total})
+    except Exception as e:
+        logger.error(f"Error listing download origins: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/download-origins/delete', methods=['POST'])
+def delete_download_origins():
+    """Delete origin-history entries; optionally (default) also delete the
+    files on disk and their library track rows."""
+    try:
+        data = request.get_json(silent=True) or {}
+        ids = [int(i) for i in (data.get('ids') or []) if str(i).strip()]
+        if not ids:
+            return jsonify({'success': False, 'error': 'No ids given'}), 400
+        delete_files = bool(data.get('delete_files', True))
+
+        from core.library.path_resolver import resolve_library_file_path
+        db = get_database()
+        rows = db.get_library_history_rows_by_ids(ids)
+        files_deleted, files_missing, file_errors = 0, 0, []
+        failed_ids = set()
+        for row in rows:
+            raw_path = row.get('file_path') or ''
+            if not delete_files or not raw_path:
+                continue
+            resolved = resolve_library_file_path(raw_path, config_manager=config_manager)
+            if resolved and os.path.isfile(resolved):
+                try:
+                    os.remove(resolved)
+                    files_deleted += 1
+                except OSError as e:
+                    file_errors.append(f"{row.get('title') or raw_path}: {e}")
+                    failed_ids.add(row['id'])  # keep the row when the file refuses to go
+                    continue
+            else:
+                files_missing += 1  # already gone — still clean up the rows
+            db.delete_track_by_file_path(raw_path)
+        removed = db.delete_library_history_rows(
+            [r['id'] for r in rows if r['id'] not in failed_ids])
+        return jsonify({
+            'success': True,
+            'removed': removed,
+            'files_deleted': files_deleted,
+            'files_missing': files_missing,
+            'errors': file_errors,
+        })
+    except Exception as e:
+        logger.error(f"Error deleting download origins: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -9097,6 +9226,15 @@ def library_check_tracks():
                     album_entries.append(entry)
                 else:
                     other_entries.append(entry)
+            # #808: when the album gate narrows to NOTHING, the source's album
+            # naming simply doesn't resemble the library's (Deezer's
+            # 'Jillette Johnson | OurVinyl Sessions' vs the library's
+            # 'Champagne Supernova (OurVinyl Sessions)' scores ~0.5). Marking
+            # every track unowned off a failed ALBUM-name comparison is wrong —
+            # fall back to artist-wide title matching, which is exactly the
+            # pre-album-aware behavior and still holds the 0.7 title bar.
+            if not album_entries:
+                album_entries = other_entries
         else:
             other_entries = db_title_entries
 
@@ -10944,6 +11082,43 @@ def _resolve_library_file_path(file_path):
     return None
 
 
+def _build_library_stream_url(track_id, file_path):
+    """Build a media-server stream URL for a library track that isn't on the
+    SoulSync filesystem (#809 — play via the server's API, no disk mount).
+
+    Navidrome/Subsonic only for now (it has a clean token-authed stream
+    endpoint). ``track_id`` is the server's song id (the tracks-table id for a
+    Navidrome row); if missing, look it up by file_path. Returns None when the
+    active server isn't Navidrome or no id resolves."""
+    try:
+        if config_manager.get_active_media_server() != 'navidrome':
+            return None
+        client = media_server_engine.client('navidrome')
+        if not client:
+            return None
+
+        song_id = str(track_id) if track_id else None
+        if not song_id and file_path:
+            # Fall back to a DB lookup by stored path (handles callers that
+            # didn't pass the id).
+            try:
+                db = get_database()
+                with db._get_connection() as conn:
+                    row = conn.cursor().execute(
+                        "SELECT id FROM tracks WHERE file_path = ? AND server_source = 'navidrome' LIMIT 1",
+                        (file_path,)).fetchone()
+                if row:
+                    song_id = str(row[0])
+            except Exception as e:
+                logger.debug("navidrome stream id lookup failed: %s", e)
+        if not song_id:
+            return None
+        return client.build_stream_url(song_id)
+    except Exception as e:
+        logger.debug("build library stream url failed: %s", e)
+        return None
+
+
 def _get_file_not_found_error(file_path):
     """Return a helpful error message when a library file can't be found."""
     active_server = config_manager.get_active_media_server()
@@ -10972,25 +11147,37 @@ def library_play_track():
 
         # Resolve server-side paths (e.g. /mnt/musicBackup/...) to local transfer path
         resolved = _resolve_library_file_path(file_path)
+        stream_url = None
         if resolved:
             file_path = resolved
         else:
-            return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
+            # Not on disk. For a streaming server (Navidrome/Subsonic) we can
+            # play it through the server's own stream API instead of requiring
+            # the library to be mounted into the SoulSync container (#809).
+            stream_url = _build_library_stream_url(data.get('track_id'), file_path)
+            if not stream_url:
+                return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
-        logger.info(f"Library play request: {os.path.basename(file_path)}")
+        if stream_url:
+            logger.info("Library play request (server stream): %s",
+                        data.get('title') or os.path.basename(file_path or ''))
+        else:
+            logger.info(f"Library play request: {os.path.basename(file_path)}")
 
-        # Set THIS listener's stream state to ready with the library file path.
+        # Set THIS listener's stream state to ready. Either a local file_path
+        # (served from disk) or a stream_url (proxied from the media server).
         sess = _current_stream_state()
         with sess.lock:
             sess.update({
                 "status": "ready",
                 "progress": 100,
                 "track_info": {
-                    "title": data.get('title', os.path.basename(file_path)),
+                    "title": data.get('title', os.path.basename(file_path or '')),
                     "artist": data.get('artist', 'Unknown Artist'),
                     "album": data.get('album', 'Unknown Album'),
                 },
-                "file_path": file_path,
+                "file_path": None if stream_url else file_path,
+                "stream_url": stream_url,
                 "error_message": None,
                 "is_library": True
             })
@@ -12240,6 +12427,39 @@ _AUDIO_MIME_TYPES = {
 }
 
 
+def _proxy_stream_url_with_range(stream_url):
+    """Proxy a media-server stream URL to the browser, forwarding the Range
+    header so HTML5 seeking works (#809 — Navidrome/Subsonic playback without a
+    disk mount). Streams the upstream response body through without buffering
+    the whole file."""
+    upstream_headers = {}
+    range_header = request.headers.get('Range')
+    if range_header:
+        upstream_headers['Range'] = range_header
+    try:
+        upstream = requests.get(stream_url, headers=upstream_headers, stream=True, timeout=30)
+    except Exception as e:
+        logger.error(f"Stream proxy upstream error: {e}")
+        return jsonify({"error": "Upstream stream failed"}), 502
+
+    # Pass through the bytes + the headers a media player needs for seeking.
+    passthrough = {}
+    for h in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
+        if h in upstream.headers:
+            passthrough[h] = upstream.headers[h]
+    passthrough.setdefault('Accept-Ranges', 'bytes')
+
+    def _gen():
+        try:
+            for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    return Response(_gen(), status=upstream.status_code, headers=passthrough)
+
+
 def _serve_audio_file_with_range(file_path, mimetype_override=None):
     """Serve an on-disk audio file with HTTP range support (HTML5 seeking).
 
@@ -12311,9 +12531,17 @@ def stream_audio():
     try:
         sess = _current_stream_state()
         with sess.lock:
-            if sess["status"] != "ready" or not sess["file_path"]:
+            if sess["status"] != "ready":
                 return jsonify({"error": "No audio file ready for streaming"}), 404
             file_path = sess["file_path"]
+            stream_url = sess.get("stream_url")
+            if not file_path and not stream_url:
+                return jsonify({"error": "No audio file ready for streaming"}), 404
+
+        # Library track played via the media server's stream API (#809).
+        if stream_url:
+            logger.info("Serving audio via server stream proxy")
+            return _proxy_stream_url_with_range(stream_url)
 
         logger.info(f"Serving audio file: {os.path.basename(file_path)}")
         return _serve_audio_file_with_range(file_path)
@@ -12338,6 +12566,12 @@ def stream_library_audio():
             return jsonify({"error": "path is required"}), 400
         resolved = _resolve_library_file_path(raw_path)
         if not resolved or not os.path.exists(resolved):
+            # Not on disk — same Navidrome stream fallback as /api/library/play
+            # (#809), so crossfade preload of the NEXT track works for streamed
+            # libraries too. Resolves the song id by path (DB lookup).
+            stream_url = _build_library_stream_url(request.args.get('track_id'), raw_path)
+            if stream_url:
+                return _proxy_stream_url_with_range(stream_url)
             return jsonify({"error": _get_file_not_found_error(raw_path)}), 404
         return _serve_audio_file_with_range(resolved)
     except Exception as e:
@@ -16896,6 +17130,53 @@ def _run_post_processing_worker(task_id, batch_id):
 from core.downloads import task_worker as _downloads_task_worker
 
 
+def _try_version_mismatch_fallback_for_worker(expected_title, expected_artist, task_id, batch_id):
+    """Called by the download worker when a quarantine-retry search finds no
+    candidates.  Delegates to version_mismatch_fallback so the best already-
+    quarantined version-mismatch candidate is accepted rather than giving up."""
+    import threading
+    import time
+    from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
+    from core.imports.quarantine import approve_quarantine_entry, list_quarantine_entries
+    from config.settings import config_manager
+    from core.imports.paths import docker_resolve_path
+    import os
+    try:
+        download_path = docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        )
+        quarantine_dir = os.path.join(download_path, 'ss_quarantine')
+        restore_dir = os.path.join(download_path, 'Transfer')
+
+        def _reprocess(restored_path, ctx, tid, bid):
+            new_key = f"vmfallback_{tid}_{int(time.time())}"
+            threading.Thread(
+                target=lambda: _post_process_matched_download_with_verification(
+                    new_key, ctx, restored_path, tid, bid
+                ),
+                daemon=True,
+            ).start()
+
+        return try_accept_version_mismatch_fallback(
+            quarantine_dir=quarantine_dir,
+            restore_dir=restore_dir,
+            expected_title=expected_title,
+            expected_artist=expected_artist,
+            task_id=task_id,
+            batch_id=batch_id,
+            config_get=config_manager.get,
+            list_entries=list_quarantine_entries,
+            approve_entry=approve_quarantine_entry,
+            reprocess=_reprocess,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug(
+            "[Version-Mismatch Fallback] worker-path skipped due to error: %s", exc
+        )
+        return False
+
+
 def _build_task_worker_deps():
     """Build TaskWorkerDeps bundle from web_server.py globals on each call."""
     return _downloads_task_worker.TaskWorkerDeps(
@@ -16909,6 +17190,7 @@ def _build_task_worker_deps():
         attempt_download_with_candidates=_attempt_download_with_candidates,
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
+        try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
     )
 
 
@@ -18884,9 +19166,36 @@ def start_missing_tracks_process(playlist_id):
     # album-download modal. Stored on the batch and propagated per-track by
     # the master worker so AcoustID never quarantines this request's files.
     skip_acoustid = bool(data.get('skip_acoustid', False))
+    # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
+    ignore_blocklist = bool(data.get('ignore_blocklist', False))
 
     if not tracks:
         return jsonify({"success": False, "error": "No tracks provided"}), 400
+
+    # Blocklist up-front check (Phase 2b): if the WHOLE album or artist being
+    # downloaded is blocklisted, stop here with a clear, actionable response
+    # instead of silently dropping every track in the per-track filter (2a) and
+    # leaving an empty batch. Scattered single-track bans still fall through to
+    # the per-track filter. The modal re-POSTs with ignore_blocklist=true after
+    # the user confirms "download anyway".
+    if not ignore_blocklist and (album_context or artist_context):
+        try:
+            _bsrc = _downloads_history.detect_sync_source(playlist_id)
+            _synthetic = {
+                'album': {'id': (album_context or {}).get('id'),
+                          'name': (album_context or {}).get('name')},
+                'artists': [{'id': (artist_context or {}).get('id'),
+                             'name': (artist_context or {}).get('name')}],
+            }
+            _reason = get_database().blocklist_reason_for_track(
+                get_current_profile_id(), _synthetic, source=_bsrc)
+            if _reason:
+                return jsonify({
+                    "success": False, "blocked": True,
+                    "blocked_entity_type": _reason[0], "blocked_name": _reason[1],
+                }), 409
+        except Exception as _bl_err:
+            logger.debug("blocklist up-front check skipped: %s", _bl_err)
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
@@ -18945,6 +19254,9 @@ def start_missing_tracks_process(playlist_id):
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
             'ignore_manual_matches': ignore_manual_matches,
+            # Blocklist override (Phase 2b) — the user confirmed "download anyway"
+            # at the modal, so the per-track filter (2a) skips this batch.
+            'ignore_blocklist': ignore_blocklist,
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
@@ -27713,6 +28025,98 @@ def personalized_update_config(kind, variant=''):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ─── Unified blocklist (artist/album/track) — Phase 1 ───
+# Distinct from /api/library/blacklist (download source skipping). Profile-
+# scoped. On add, the other metadata sources' IDs are resolved synchronously
+# (best-effort) so a ban survives a source switch immediately.
+
+@app.route('/api/blocklist', methods=['GET'])
+def get_blocklist():
+    try:
+        entity_type = request.args.get('entity_type')
+        if entity_type and entity_type not in ('artist', 'album', 'track'):
+            return jsonify({"success": False, "error": "invalid entity_type"}), 400
+        entries = get_database().get_blocklist(get_current_profile_id(), entity_type=entity_type)
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        logger.error(f"Error getting blocklist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist', methods=['POST'])
+def add_blocklist():
+    try:
+        data = request.get_json() or {}
+        entity_type = (data.get('entity_type') or '').strip().lower()
+        name = (data.get('name') or '').strip()
+        if entity_type not in ('artist', 'album', 'track') or not name:
+            return jsonify({"success": False, "error": "entity_type and name are required"}), 400
+
+        # The source the user searched + its id for this item.
+        source = (data.get('source') or '').strip().lower()
+        source_id = (data.get('source_id') or '').strip() or None
+        ids = {'spotify_id': None, 'itunes_id': None, 'deezer_id': None, 'musicbrainz_id': None}
+        col = {'spotify': 'spotify_id', 'itunes': 'itunes_id',
+               'deezer': 'deezer_id', 'musicbrainz': 'musicbrainz_id'}.get(source)
+        if col and source_id:
+            ids[col] = source_id
+
+        # Resolve the OTHER sources now (best-effort) so the ban is cross-source
+        # from the first scan. Failures just leave a source unmatched.
+        try:
+            from core.blocklist.backfill import resolve_missing_ids
+            from core.blocklist.runtime import build_resolvers
+            probe = {'entity_type': entity_type, 'name': name,
+                     'parent_name': data.get('parent_name'), **ids}
+            ids.update(resolve_missing_ids(probe, build_resolvers()))
+        except Exception as e:
+            logger.debug("blocklist add backfill skipped: %s", e)
+
+        new_id = get_database().add_blocklist_entry(
+            get_current_profile_id(), entity_type, name,
+            spotify_id=ids['spotify_id'], itunes_id=ids['itunes_id'],
+            deezer_id=ids['deezer_id'], musicbrainz_id=ids['musicbrainz_id'],
+            parent_name=data.get('parent_name'))
+        if not new_id:
+            return jsonify({"success": False, "error": "Could not add entry"}), 500
+        logger.info("Blocklisted %s '%s'", entity_type, name)
+        return jsonify({"success": True, "id": new_id})
+    except Exception as e:
+        logger.error(f"Error adding blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist/search', methods=['GET'])
+def search_blocklist_candidates():
+    """Search the active metadata source for an artist/album/track to block.
+    Thin wrapper over the manual-match service search so the modal doesn't need
+    to know which source is active."""
+    try:
+        entity_type = (request.args.get('type') or 'artist').strip().lower()
+        if entity_type not in ('artist', 'album', 'track'):
+            return jsonify({"success": False, "error": "invalid type"}), 400
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        from core.metadata.registry import get_primary_source
+        source = get_primary_source() or 'spotify'
+        results = _search_service(source, entity_type, query)
+        return jsonify({"success": True, "source": source, "results": results})
+    except Exception as e:
+        logger.error(f"Error searching blocklist candidates: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/blocklist/<int:entry_id>', methods=['DELETE'])
+def remove_blocklist(entry_id):
+    try:
+        ok = get_database().remove_blocklist_entry(get_current_profile_id(), entry_id)
+        return jsonify({"success": ok})
+    except Exception as e:
+        logger.error(f"Error removing blocklist entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/artist-blacklist', methods=['GET'])
 def get_discovery_artist_blacklist():
     """Get all blacklisted discovery artists."""
@@ -34874,6 +35278,23 @@ def _has_active_downloads():
 # Track whether we auto-paused workers so we only resume ones we paused (not user-paused ones)
 _download_auto_paused = set()
 _download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
+_auto_yield_cause = {}            # name -> 'downloads' | 'discovery' (status label for the UI)
+
+
+def _has_active_discovery():
+    """True while any playlist discovery is actively running (any platform)."""
+    from core.enrichment.yield_policy import discovery_state_active
+    try:
+        for states in (tidal_discovery_states, qobuz_discovery_states,
+                       deezer_discovery_states, youtube_playlist_states,
+                       beatport_chart_states, listenbrainz_playlist_states,
+                       spotify_public_discovery_states, itunes_link_discovery_states):
+            for state in list(states.values()):
+                if discovery_state_active(state):
+                    return True
+    except Exception as e:
+        logger.debug("active discovery check failed: %s", e)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -35033,6 +35454,9 @@ def _emit_rate_monitor_loop():
                         }
                         if svc_key == 'spotify' and enr.get('daily_budget'):
                             entry['worker']['daily_budget'] = enr['daily_budget']
+                            # Budget ring styling: purple when the worker has
+                            # bridged to Spotify Free after spending the budget.
+                            entry['worker']['using_free'] = bool(enr.get('using_free'))
             except Exception as e:
                 logger.debug("enrichment worker status build failed: %s", e)
 
@@ -35074,41 +35498,46 @@ def _emit_enrichment_status_loop():
         'repair': lambda: repair_worker,
     }
 
-    # Workers to auto-pause during downloads (rate-limit sensitive services)
-    yield_workers = {
-        'spotify-enrichment': lambda: spotify_enrichment_worker,
-        'lastfm-enrichment': lambda: lastfm_worker,
-        'genius-enrichment': lambda: genius_worker,
-    }
+    # Yield policy: downloads pause EVERYTHING (post-processing touches every
+    # metadata source — measured 4m+/track when MusicBrainz contended with its
+    # own worker); discovery pauses the API-contention five. The name lists +
+    # decision live in core.enrichment.yield_policy (tested); this loop owns
+    # the pause/resume side effects and the user-override bookkeeping.
+    from core.enrichment.yield_policy import ALL_YIELD_WORKERS, worker_yield_reason
+    yield_workers = {name: workers[name] for name in ALL_YIELD_WORKERS if name in workers}
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
 
-        # Auto-pause/resume rate-limited workers during downloads
+        # Auto-pause/resume workers while foreground work runs
         try:
             downloading = _has_active_downloads()
-            if not downloading:
-                _download_yield_override.clear()  # Reset overrides when downloads finish
+            discovering = _has_active_discovery()
+            if not downloading and not discovering:
+                _download_yield_override.clear()  # Reset overrides when work finishes
             for name, get_w in yield_workers.items():
                 w = get_w()
-                if w is None:
+                if w is None or not hasattr(w, 'paused'):
                     continue
-                if downloading and not w.paused and name not in _download_yield_override:
+                reason = worker_yield_reason(name, downloading, discovering)
+                if reason and not w.paused and name not in _download_yield_override:
                     w.paused = True
                     _download_auto_paused.add(name)
-                    logger.debug(f"Auto-paused {name} during active downloads")
-                elif not downloading and name in _download_auto_paused:
+                    _auto_yield_cause[name] = reason
+                    logger.debug(f"Auto-paused {name} during active {reason}")
+                elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause
                     # marker so the next auto-pause/resume cycle behaves normally.
                     config_key = f"{name.replace('-', '_')}_paused"
                     user_paused = config_manager.get(config_key, False)
                     _download_auto_paused.discard(name)
+                    _auto_yield_cause.pop(name, None)
                     if not user_paused:
                         w.paused = False
-                        logger.debug(f"Auto-resumed {name} after downloads finished")
+                        logger.debug(f"Auto-resumed {name} after foreground work finished")
                     else:
-                        logger.debug(f"Downloads finished but {name} remains paused by user")
+                        logger.debug(f"Foreground work finished but {name} remains paused by user")
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
@@ -35118,9 +35547,9 @@ def _emit_enrichment_status_loop():
                 if worker is None:
                     continue
                 status = worker.get_stats()
-                # Flag workers that were auto-paused for downloads
+                # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
-                    status['yield_reason'] = 'downloads'
+                    status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
@@ -35129,17 +35558,13 @@ def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
-        # Stream status
-        try:
-            with stream_lock:
-                socketio.emit('tool:stream', {
-                    "status": stream_state["status"],
-                    "progress": stream_state["progress"],
-                    "track_info": stream_state["track_info"],
-                    "error_message": stream_state["error_message"]
-                })
-        except Exception as e:
-            logger.debug(f"Error emitting stream status: {e}")
+        # NOTE: no 'tool:stream' broadcast here. Stream state is PER-LISTENER
+        # (Phase 3b sessions) and this thread has no request context, so it can
+        # only ever read the DEFAULT session — which no real browser uses. The
+        # old global emit told every client "stopped" forever, and the player
+        # (which skipped HTTP polling while the socket was up) never learned
+        # its stream was ready. Each client polls /api/stream/status instead,
+        # which resolves its own session from the cookie.
         # Quality Scanner
         try:
             with quality_scanner_lock:
@@ -35270,6 +35695,27 @@ def handle_discovery_unsubscribe(data):
     for pid in data.get('ids', []):
         leave_room(f'discovery:{pid}')
 
+_SYNC_ACTIVE_STATUSES = ('starting', 'syncing', 'running', 'in_progress', 'discovering', 'analyzing')
+_SYNC_AUTOMATION_TYPES = ('playlist_pipeline', 'sync_playlist', 'refresh_mirrored')
+
+
+def _any_playlist_sync_running() -> bool:
+    """True while ANY playlist sync work is running anywhere: a manual
+    per-playlist sync, the UI-triggered mirrored pipeline, or a scheduled
+    auto-sync pipeline (which runs as a playlist-flavored automation)."""
+    with sync_lock:
+        if any((s or {}).get('status') in _SYNC_ACTIVE_STATUSES for s in sync_states.values()):
+            return True
+    with playlist_pipeline_progress_lock:
+        if any((s or {}).get('status') == 'running' for s in playlist_pipeline_progress_states.values()):
+            return True
+    with _auto_progress.progress_lock:
+        return any(
+            s.get('status') == 'running' and s.get('action_type') in _SYNC_AUTOMATION_TYPES
+            for s in _auto_progress.progress_states.values()
+        )
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -35283,6 +35729,14 @@ def _emit_sync_progress_loop():
                         }, room=f'sync:{pid}')
                     except Exception as e:
                         logger.debug("sync progress emit failed: %s", e)
+
+            # Quick Actions gauge heartbeat — UNSCOPED, unlike sync:progress
+            # which only reaches clients subscribed to a playlist room. The
+            # dashboard's Auto-Sync tile needs to light for ALL pipeline
+            # work, including the scheduled auto-sync (an automation).
+            # Emitted only while active; the frontend decays on silence.
+            if _any_playlist_sync_running():
+                socketio.emit('sync:active', {'active': True})
         except Exception as e:
             logger.debug(f"Error in sync progress loop: {e}")
 
@@ -35433,6 +35887,24 @@ def start_runtime_services():
         # Start OAuth callback servers
         logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
+
+        # One-time repair: purge artist album-list cache entries poisoned by
+        # partial watchlist probes (limit=5/max_pages=1 results stored in the
+        # full-discography slot — artist pages showed only the newest handful
+        # of releases for every watchlist artist). The writer is fixed; this
+        # clears what's already bad. Guarded so it runs once per install.
+        try:
+            if not config_manager.get('maintenance.album_cache_purge_v1', False):
+                from core.metadata.cache import get_metadata_cache as _gmc
+                _purged = _gmc().purge_artist_album_lists('spotify')
+                config_manager.set('maintenance.album_cache_purge_v1', True)
+                if _purged:
+                    logger.warning(
+                        "[Startup] Purged %d poisoned artist album-list cache "
+                        "entries (partial watchlist probes); artist pages will "
+                        "refetch full discographies lazily", _purged)
+        except Exception as _purge_err:
+            logger.debug("album cache purge skipped: %s", _purge_err)
 
         # Startup diagnostics: Check and recover stuck flags
         logger.info("Running startup diagnostics...")
