@@ -91,7 +91,11 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'playlist_retention': RETENTION_OPTIONS,
         'dry_run': [True, False],
     }
-    auto_fix = False
+    # Has an auto mode (dry_run off → deletes in-scan). auto_fix is a UI/metadata
+    # flag only — the worker never auto-applies from it; scan() self-manages the
+    # dry_run vs delete decision. Setting True surfaces the Scan → Dry Run /
+    # Auto-fix flow badge (without it the job mislabels as "Scan Only").
+    auto_fix = True
 
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
