@@ -239,3 +239,32 @@ def test_agreeing_volume_markers_still_match(spotify_name, lib_name) -> None:
     """Same volume marker should NOT block a match that other rules accept."""
     assert _albums_likely_match(spotify_name, lib_name)
 
+
+
+@pytest.mark.parametrize(
+    "spotify_name,lib_name",
+    [
+        # Decimal / multi-part volume numbers must be distinguished — the dot is
+        # stripped to a space in normalization, and grabbing only the last digit
+        # made these collapse to the same marker (Sokhi: character-song CDs).
+        ("Character CD Vol.5", "Character CD Vol.5.5"),
+        ("Character CD Vol.5.5", "Character CD Vol.4.5"),
+        ("Anime OST Vol.1.5", "Anime OST Vol.2.5"),
+        # The real CJK album names from the report.
+        ("TVアニメ「【推しの子】」キャラクターソングCD Vol.5",
+         "TVアニメ「【推しの子】」キャラクターソングCD Vol.5.5"),
+    ],
+)
+def test_decimal_volume_markers_block_match(spotify_name, lib_name) -> None:
+    assert not _albums_likely_match(spotify_name, lib_name)
+
+
+@pytest.mark.parametrize(
+    "spotify_name,lib_name",
+    [
+        ("Character CD Vol.5.5", "Character CD Vol.5.5"),       # identical decimal vol
+        ("Character CD Vol.5.5", "Character CD Vol.5.5 (Deluxe)"),
+    ],
+)
+def test_same_decimal_volume_still_matches(spotify_name, lib_name) -> None:
+    assert _albums_likely_match(spotify_name, lib_name)
