@@ -141,3 +141,40 @@ def test_write_real_value_still_overwrites(flac_path):
     result = write_tags_to_file(flac_path, {'artist_name': 'Coldplay'}, embed_cover=False)
     assert result['success'] is True
     assert FLAC(flac_path).get('artist') == ['Coldplay']
+
+
+# ---------------------------------------------------------------------------
+# #824 — full release dates must not be downgraded to just the year
+# ---------------------------------------------------------------------------
+
+def test_diff_full_date_same_year_not_flagged():
+    # File has the full date 2023-11-03; DB has year 2023. Same year → the writer
+    # keeps the full date, so it must NOT show as a change.
+    diff = {d['field']: d for d in build_tag_diff({'year': '2023-11-03'}, {'year': 2023})}
+    assert diff['Year']['changed'] is False
+
+
+def test_diff_different_year_still_flagged():
+    # A genuinely different year is still a real change.
+    diff = {d['field']: d for d in build_tag_diff({'year': '2022-11-03'}, {'year': 2023})}
+    assert diff['Year']['changed'] is True
+
+
+def test_write_preserves_full_date_when_year_matches(flac_path):
+    audio = FLAC(flac_path)
+    audio['date'] = ['2023-11-03']      # file already has the full release date
+    audio.save()
+
+    write_tags_to_file(flac_path, {'year': 2023}, embed_cover=False)   # DB knows only the year
+
+    assert FLAC(flac_path).get('date') == ['2023-11-03']   # full date preserved, NOT downgraded
+
+
+def test_write_corrects_year_when_it_actually_differs(flac_path):
+    audio = FLAC(flac_path)
+    audio['date'] = ['2022']
+    audio.save()
+
+    write_tags_to_file(flac_path, {'year': 2023}, embed_cover=False)
+
+    assert FLAC(flac_path).get('date') == ['2023']         # wrong year still corrected
