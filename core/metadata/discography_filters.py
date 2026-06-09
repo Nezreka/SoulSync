@@ -28,7 +28,30 @@ single source of truth.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
+
+# Split a combined artist credit into its individual artists. Sources like
+# iTunes return collabs as ONE string ("TRVNSPORTER, Narvent & SKVLENT"), not a
+# list — so an exact full-string compare drops every collaborator's discography
+# entry (#830). Split on the common credit separators; " and " / " with " are
+# deliberately excluded (too many real band names contain them).
+_ARTIST_CREDIT_SPLIT_RE = re.compile(
+    r"\s*[,&;/]\s*|\s+(?:feat\.?|ft\.?|featuring|vs\.?|x)\s+",
+    re.IGNORECASE,
+)
+
+
+def _artist_credit_components(name: str) -> List[str]:
+    """Return the individual artist names within a (possibly combined) credit,
+    always including the full string itself (so exact band names with internal
+    separators still match)."""
+    name = (name or "").strip()
+    if not name:
+        return []
+    parts = [name]
+    parts.extend(p.strip() for p in _ARTIST_CREDIT_SPLIT_RE.split(name) if p.strip())
+    return parts
 
 from core.watchlist_scanner import (
     is_acoustic_version,
@@ -47,10 +70,12 @@ def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool
     what the discography fetch returns), or the list-of-dicts shape
     that some upstreams pass directly. Both are accepted.
 
-    Returns True for primary-artist tracks AND feature appearances —
-    the requested artist need only be one of the listed artists. Only
-    drops tracks where the requested artist isn't named at all (the
-    cross-artist compilation case from #559).
+    Returns True for primary-artist tracks AND feature/collab appearances —
+    the requested artist need only be one of the credited artists, INCLUDING
+    when a source (iTunes, etc.) packs the collab into one combined string like
+    "TRVNSPORTER, Narvent & SKVLENT" (#830). Only drops tracks where the
+    requested artist isn't credited at all (the cross-artist compilation case
+    from #559).
     """
     if not requested_artist_name:
         # No artist to compare against — don't filter; let the caller
@@ -70,8 +95,13 @@ def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool
             name = entry.get('name', '') or ''
         else:
             name = str(entry or '')
-        if name.strip().lower() == target:
-            return True
+        # Match the requested artist as a component of the credit, so combined
+        # collab strings ("A, B & C") keep B's discography entry. Component
+        # matching is still exact per-name, so true contamination (the artist
+        # genuinely absent) is dropped exactly as before.
+        for component in _artist_credit_components(name):
+            if component.strip().lower() == target:
+                return True
 
     return False
 
