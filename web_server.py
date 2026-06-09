@@ -17150,9 +17150,9 @@ def _build_master_deps():
 
 
 
-def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
+def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     return _downloads_master.run_full_missing_tracks_process(
-        batch_id, playlist_id, tracks_json, _build_master_deps()
+        batch_id, playlist_id, tracks_json, _build_master_deps(), serialize=serialize
     )
 
 
