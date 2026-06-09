@@ -633,6 +633,13 @@ class SpotifyClient:
         watchlist) use THIS instead of ``is_spotify_authenticated()`` so the
         free source is reachable. Does NOT change auth semantics."""
         from core.spotify_free_metadata import should_offer_spotify_metadata
+        # The enrichment worker's prefer-free opt-in (set on its own client)
+        # makes the no-auth source the active path even without auth or the
+        # 'no-auth Spotify' source choice — so metadata IS available to it. This
+        # only fires on a client carrying _prefer_free (the worker's), so
+        # interactive/watchlist availability is unchanged.
+        if getattr(self, '_prefer_free', False) and self._free_installed():
+            return True
         try:
             authed = self.is_spotify_authenticated()
         except Exception:

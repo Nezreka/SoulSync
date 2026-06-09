@@ -3839,7 +3839,7 @@
                                         <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
-                                            <option value="spotify_free">Spotify Free (no credentials)</option>
+                                            <option value="spotify_free">Spotify (no auth)</option>
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
                                             <option value="discogs">Discogs</option>
@@ -3849,20 +3849,11 @@
                                     <div class="callback-info">
                                         <div class="callback-help">Where artist, album, and track metadata comes from:<br>
                                             • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
-                                            • <strong>Spotify Free</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site), can't search albums by name (album results come from iTunes/Deezer instead), and can't read your personal library or playlists.<br>
+                                            • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
                                             • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
                                             • <strong>Discogs</strong> — needs a personal access token.<br><br>
-                                            Tip: if you pick <strong>Spotify Free</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to free while Spotify is rate-limited — then switches back automatically.</div>
-                                    </div>
-                                    <div class="form-group" style="margin-top: 12px;">
-                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                                            <input type="checkbox" id="metadata-spotify-free-enrichment" style="width: auto; margin: 0;">
-                                            <span>Use Spotify Free for background enrichment</span>
-                                        </label>
-                                        <div class="callback-info">
-                                            <div class="callback-help">Runs the background enrichment worker on the no-credentials Spotify Free source even when your Spotify account is connected — sparing your official API quota (and avoiding rate-limit bans) for interactive search and playlist sync, since bulk enrichment is what usually trips Spotify's limits. Needs the bundled Spotify Free package. Trade-off: Spotify Free can't provide artist genres. Leave off to enrich via your official account as usual.</div>
-                                        </div>
+                                            Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to no-auth while Spotify is rate-limited — then switches back automatically.</div>
                                     </div>
                                 </div>
 
@@ -3901,6 +3892,15 @@
                                             <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
                                                 onclick="disconnectSpotify()" style="display: none;">🔌
                                                 Disconnect</button>
+                                        </div>
+                                        <div class="form-group" style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
+                                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                                                <input type="checkbox" id="metadata-spotify-free-enrichment" style="width: auto; margin: 0;">
+                                                <span>Use Spotify (no auth) for background enrichment</span>
+                                            </label>
+                                            <div class="callback-info">
+                                                <div class="callback-help">Runs the background metadata enrichment worker on the no-auth Spotify source instead of this connected account — keeping bulk enrichment off your official API quota (and dodging rate-limit bans), so your account is reserved for interactive search and playlist sync. <strong>On by default.</strong> Turn off to enrich through your connected account instead. Works even with no account connected. Note: the no-auth source can't supply artist genres.</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
