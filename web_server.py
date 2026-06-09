@@ -9577,6 +9577,7 @@ def _build_library_tag_db_data(track_data, album_genres=None):
         'track_artist': track_data.get('track_artist'),
         'album_title': track_data.get('album_title'),
         'year': track_data.get('year'),
+        'release_date': track_data.get('release_date'),  # #824: full date wins over year when present
         'genres': album_genres,
         'track_number': track_data.get('track_number'),
         'disc_number': track_data.get('disc_number'),
@@ -9613,7 +9614,7 @@ def get_track_tag_preview(track_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9689,7 +9690,7 @@ def get_batch_tag_preview():
         placeholders = ','.join('?' for _ in track_ids)
         cursor.execute(f"""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9774,7 +9775,7 @@ def write_track_tags(track_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9868,7 +9869,7 @@ def write_tracks_tags_batch():
         placeholders = ','.join('?' * len(track_ids))
         cursor.execute(f"""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id

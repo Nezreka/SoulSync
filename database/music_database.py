@@ -1020,6 +1020,15 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
                 logger.info("Repaired missing api_track_count column on albums table")
 
+            # Full release date (#824). Additive + nullable: NULL means "only the
+            # year is known", and every reader falls back to albums.year, so this
+            # is safe to ship dormant. Populated by enrichment + manual edit;
+            # consumed by the tag writer to write the full date (e.g. 2023-09-01)
+            # instead of truncating it to the year.
+            if album_cols and 'release_date' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN release_date TEXT DEFAULT NULL")
+                logger.info("Added release_date column to albums table (#824)")
+
             # Canonical album version (#765 / #767-Bug2). Additive + nullable:
             # a NULL canonical means "unresolved" and every tool falls back to
             # today's behavior, so this is safe to ship dormant. Columns are
@@ -1352,6 +1361,7 @@ class MusicDatabase:
                     artist_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     year INTEGER,
+                    release_date TEXT,
                     thumb_url TEXT,
                     genres TEXT,
                     track_count INTEGER,
@@ -10507,6 +10517,7 @@ class MusicDatabase:
                         MIN(a.id) as id,
                         a.title,
                         a.year,
+                        MAX(a.release_date) as release_date,
                         SUM(a.track_count) as track_count,
                         MAX(a.thumb_url) as thumb_url,
                         MAX(a.musicbrainz_release_id) as musicbrainz_release_id,
@@ -10566,6 +10577,7 @@ class MusicDatabase:
                         'id': album_row['id'],
                         'title': album_row['title'],
                         'year': album_row['year'],
+                        'release_date': album_row['release_date'],
                         'image_url': album_row['thumb_url'],
                         'owned': True,  # All albums in our DB are owned
                         'track_count': album_row['track_count'],
@@ -10648,7 +10660,7 @@ class MusicDatabase:
 
     # Field whitelists for safe updates
     ARTIST_EDITABLE_FIELDS = {'name', 'genres', 'summary', 'style', 'mood', 'label'}
-    ALBUM_EDITABLE_FIELDS = {'title', 'year', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
+    ALBUM_EDITABLE_FIELDS = {'title', 'year', 'release_date', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
     TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'bpm', 'explicit', 'style', 'mood'}
 
     def get_artist_full_detail(self, artist_id) -> Dict[str, Any]:
