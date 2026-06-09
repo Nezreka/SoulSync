@@ -61,6 +61,35 @@ class TestTrackArtistMatches:
         assert track_artist_matches(['DRAKE'], 'Drake') is True
         assert track_artist_matches(['Drake'], 'drake') is True
 
+    def test_combined_collab_credit_string_matches_component(self):
+        """#830 (Vicky-2418): iTunes packs a collab into ONE string. The
+        requested artist is one of several credited — must match. This is the
+        exact real case from the report (Narvent's 'Miss You (Ambient Remix)')."""
+        credit = ['TRVNSPORTER, Narvent & SKVLENT']
+        assert track_artist_matches(credit, 'Narvent') is True
+        assert track_artist_matches(credit, 'TRVNSPORTER') is True
+        assert track_artist_matches(credit, 'SKVLENT') is True
+
+    def test_combined_credit_still_drops_absent_artist(self):
+        """The #559 contamination guard survives: an artist genuinely absent
+        from a combined credit is still dropped."""
+        assert track_artist_matches(['TRVNSPORTER, Narvent & SKVLENT'], 'Drake') is False
+
+    def test_feat_forms_match_component(self):
+        for credit in (['Drake feat. Narvent'], ['Drake ft. Narvent'],
+                       ['Drake featuring Narvent'], ['Drake x Narvent']):
+            assert track_artist_matches(credit, 'Narvent') is True
+
+    def test_no_substring_false_positive(self):
+        """Component matching is exact per-name — a longer name that merely
+        contains the target must NOT match."""
+        assert track_artist_matches(['Narventos'], 'Narvent') is False
+
+    def test_band_name_with_internal_separator_still_matches_exactly(self):
+        """A real band name containing a separator still matches as the full
+        string (we keep the whole credit as a candidate alongside the split)."""
+        assert track_artist_matches(['Florence + the Machine'], 'Florence + the Machine') is True
+
     def test_match_handles_whitespace_padding(self):
         """Trailing whitespace in either side mustn't break the match."""
         assert track_artist_matches(['  Drake  '], 'Drake') is True
@@ -87,12 +116,14 @@ class TestTrackArtistMatches:
         assert track_artist_matches([{'name': 'Drake'}], 'Drake') is True
         assert track_artist_matches([{'name': 'Random'}], 'Drake') is False
 
-    def test_substring_does_not_match(self):
-        """A song by "Drake & Future" should not match "Drake" via
-        substring — that's exactly the false-positive case the bug
-        report describes. Exact full-name match only."""
-        assert track_artist_matches(['Drake & Future'], 'Drake') is False
+    def test_substring_does_not_match_but_component_does(self):
+        """No SUBSTRING matching — "Drakeo the Ruler" must not match "Drake".
+        But a combined collab credit IS component-matched (#830): "Drake &
+        Future" matches "Drake" because Drake is genuinely one of the credited
+        artists. The #559 guard drops artists who aren't credited AT ALL, not
+        legit collaborators packed into one string by sources like iTunes."""
         assert track_artist_matches(['Drakeo the Ruler'], 'Drake') is False
+        assert track_artist_matches(['Drake & Future'], 'Drake') is True
 
 
 # ---------------------------------------------------------------------------
