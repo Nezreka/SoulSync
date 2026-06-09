@@ -354,8 +354,15 @@ def _normalize_album_for_match(name: str) -> str:
     return cleaned
 
 
+# Capture the FULL trailing number, including multi-part / decimal volumes.
+# Normalization strips the dot in "Vol.5.5" to "vol 5 5", so without the
+# `(?:\s+\d+)*` the extractor grabbed only the last "5" — making "Vol.5",
+# "Vol.5.5" and "Vol.4.5" all look like volume "5" and collapse together. That
+# made the watchlist treat tracks from different character-song CD volumes as
+# duplicates and skip them (Sokhi: partially-filled discography never completed).
 _VOLUME_MARKER_RE = re.compile(
-    r'\b(?:vol(?:ume)?|pt|part|disc|book|chapter|episode)\.?\s*(\d+)\b|\b(\d+)\s*$',
+    r'\b(?:vol(?:ume)?|pt|part|disc|book|chapter|episode)\.?\s*(\d+(?:\s+\d+)*)\b'
+    r'|\b(\d+(?:\s+\d+)*)\s*$',
     re.IGNORECASE,
 )
 
