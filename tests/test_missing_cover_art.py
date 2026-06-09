@@ -390,3 +390,42 @@ def test_media_server_only_album_empty_thumb_still_flagged(monkeypatch):
 
     result = mca.MissingCoverArtJob().scan(context)
     assert result.findings_created == 1   # media-server-only + empty thumb → flagged
+
+
+def test_unresolved_path_falls_back_to_raw_when_file_exists(tmp_path, monkeypatch):
+    # Docker case (Sokhi): the path-mapping layer returns None, but the raw DB
+    # path is already a real file in the container. The scan must use it as-is —
+    # like the apply does (`_resolve_file_path(...) or p`) — so the album's
+    # folder is actually checked instead of the album being skipped.
+    track = tmp_path / 'Album' / '01.flac'
+    track.parent.mkdir()
+    track.write_bytes(b'')
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, str(track))
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)  # mapping fails
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)             # files have art
+    # real folder has no cover.jpg → should flag for the sidecar
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())    # API finds nothing
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 1   # raw path used → folder checked → flagged
+    assert context.findings[0]['details']['sidecar_from_embedded'] is True
+
+
+def test_unresolved_path_with_no_real_file_still_skips(tmp_path, monkeypatch):
+    # Guard: the raw-path fallback must NOT fire for a path that isn't a real
+    # file (no false "local" on a genuinely media-server-only album).
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/does/not/exist/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
+    called = []
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or True)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # no real file, db has thumb → skipped
+    assert called == []                   # never treated as local
