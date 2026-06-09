@@ -1102,12 +1102,16 @@ class NavidromeClient(MediaServerClient):
                 return self.create_playlist(playlist_name, tracks)
 
             primary = existing_playlists[0]
-            existing_tracks = self.get_playlist_tracks(primary.id)
+            # #823 round 2: the old dedupe read `t.id` — but NavidromeTrack only
+            # defines `ratingKey`, so the existing-ids set was ALWAYS empty and
+            # every sync re-appended the whole matched list (every track N
+            # times). Same bug as the Jellyfin append; dedupe on ratingKey.
             existing_ids = {
-                str(t.id) for t in existing_tracks if hasattr(t, 'id') and t.id
-            }
+                str(getattr(t, 'ratingKey', '') or '')
+                for t in self.get_playlist_tracks(primary.id)
+            } - {''}
 
-            new_track_ids = []
+            desired_ids = []
             for t in tracks:
                 tid = None
                 if hasattr(t, 'ratingKey'):
@@ -1116,8 +1120,11 @@ class NavidromeClient(MediaServerClient):
                     tid = str(t.id) if t.id else None
                 elif isinstance(t, dict):
                     tid = str(t.get('id') or '')
-                if tid and tid not in existing_ids:
-                    new_track_ids.append(tid)
+                if tid:
+                    desired_ids.append(tid)
+
+            from core.sync.playlist_edit import plan_playlist_append
+            new_track_ids = plan_playlist_append(existing_ids, desired_ids)
 
             if not new_track_ids:
                 logger.info(

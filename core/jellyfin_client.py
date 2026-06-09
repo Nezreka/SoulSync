@@ -1566,20 +1566,40 @@ class JellyfinClient(MediaServerClient):
                 return self.create_playlist(playlist_name, tracks)
 
             playlist_id = existing_playlist.id
-            existing_tracks = self.get_playlist_tracks(playlist_id)
-            existing_ids = {
-                str(t.id) for t in existing_tracks if hasattr(t, 'id') and t.id
-            }
+            # #823 round 2: the old dedupe read `t.id` off get_playlist_tracks()
+            # results — but JellyfinTrack only defines `ratingKey`, so the
+            # existing-ids set was ALWAYS empty and every sync re-appended the
+            # whole matched list ("added 22 ... skipped 0" on a playlist that
+            # already had them, every track N times). Fetch the playlist's items
+            # from the canonical /Playlists/{id}/Items endpoint (the same one
+            # reconcile uses — works on Jellyfin GUIDs and Emby numeric ids) and
+            # dedupe on the raw item Id; fall back to ratingKey if that fails.
+            existing_ids = set()
+            items_resp = self._make_request(
+                f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if items_resp:
+                for item in items_resp.get('Items', []):
+                    iid = str(item.get('Id') or '')
+                    if iid:
+                        existing_ids.add(iid)
+            else:
+                existing_ids = {
+                    str(getattr(t, 'ratingKey', '') or '')
+                    for t in self.get_playlist_tracks(playlist_id)
+                } - {''}
 
-            new_track_ids = []
+            desired_ids = []
             for t in tracks:
                 tid = None
                 if hasattr(t, 'id'):
                     tid = str(t.id) if t.id else None
                 elif isinstance(t, dict):
                     tid = str(t.get('Id') or t.get('id') or '')
-                if tid and tid not in existing_ids and self._is_valid_guid(tid):
-                    new_track_ids.append(tid)
+                if tid and self._is_valid_guid(tid):
+                    desired_ids.append(tid)
+
+            from core.sync.playlist_edit import plan_playlist_append
+            new_track_ids = plan_playlist_append(existing_ids, desired_ids)
 
             if not new_track_ids:
                 logger.info(

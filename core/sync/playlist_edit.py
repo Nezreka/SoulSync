@@ -109,6 +109,34 @@ def plan_playlist_reconcile(
     return {"add": add, "remove": remove}
 
 
+def plan_playlist_append(
+    current_ids: List[str],
+    desired_ids: List[str],
+) -> List[str]:
+    """Plan an append: which desired ids are NOT already in the playlist.
+
+    Used by ``sync_mode='append'`` (#823 round 2): the Jellyfin/Emby and
+    Navidrome appends deduped with ``{t.id for t in existing}`` — but their
+    track wrappers only define ``ratingKey``, never ``id``, so the existing-ids
+    set was ALWAYS empty and every sync re-appended the full matched list
+    (every track N times, "skipped 0 already present"). Pure planner so the
+    dedupe logic is testable; the caller fetches current ids however its
+    server API works and applies the returned adds.
+
+    Order-preserving and duplicate-safe: desired order is kept, ids already
+    present are dropped, and duplicates WITHIN desired are emitted once.
+    """
+    current_set = {str(t) for t in current_ids}
+    out: List[str] = []
+    seen = set()
+    for d in desired_ids:
+        tid = str(d)
+        if tid and tid not in current_set and tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return out
+
+
 VALID_SYNC_MODES = ("replace", "append", "reconcile")
 
 
@@ -129,6 +157,7 @@ __all__ = [
     "plan_playlist_add",
     "remove_one_occurrence",
     "plan_playlist_reconcile",
+    "plan_playlist_append",
     "normalize_sync_mode",
     "VALID_SYNC_MODES",
 ]

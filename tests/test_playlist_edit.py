@@ -161,3 +161,38 @@ def test_normalize_falls_back_for_unknown():
 def test_normalize_all_real_modes_pass_through():
     for m in ('replace', 'append', 'reconcile'):
         assert normalize_sync_mode(m, 'replace') == m
+
+
+# ── plan_playlist_append (#823 round 2) ──────────────────────────────────────
+# The Jellyfin/Emby + Navidrome appends deduped on `t.id`, but their track
+# wrappers only define `ratingKey` — the existing-ids set was always empty, so
+# every sync re-appended the full matched list (every track N times,
+# "skipped 0 already present"). The planner is the now-testable dedupe.
+
+from core.sync.playlist_edit import plan_playlist_append  # noqa: E402
+
+
+def test_append_skips_already_present():
+    # carlosjfcasero's case: second sync of an unchanged playlist adds NOTHING.
+    assert plan_playlist_append(['a', 'b', 'c'], ['a', 'b', 'c']) == []
+
+
+def test_append_adds_only_new_in_desired_order():
+    assert plan_playlist_append(['a', 'c'], ['a', 'b', 'c', 'd']) == ['b', 'd']
+
+
+def test_append_to_empty_playlist_adds_all():
+    assert plan_playlist_append([], ['a', 'b']) == ['a', 'b']
+
+
+def test_append_dedupes_within_desired():
+    assert plan_playlist_append(['x'], ['a', 'a', 'x', 'b', 'a']) == ['a', 'b']
+
+
+def test_append_stringifies_ids():
+    # Emby numeric ids may arrive as ints on one side and strings on the other.
+    assert plan_playlist_append([16607838], ['16607838', '999']) == ['999']
+
+
+def test_append_ignores_empty_ids():
+    assert plan_playlist_append(['a'], ['', 'b']) == ['b']
