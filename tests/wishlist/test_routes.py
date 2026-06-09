@@ -561,3 +561,54 @@ def test_add_album_track_to_wishlist_requires_required_fields():
         "success": False,
         "error": "Missing required fields: track, artist, album",
     }
+
+
+# ── #825: don't add already-owned tracks to the wishlist (respects the toggle) ──
+
+def _own_track_args():
+    return dict(track={"id": "t", "name": "Song", "artists": [{"name": "A"}]},
+                artist={"id": "a1", "name": "A"},
+                album={"id": "al1", "name": "Album"}, source_type="album")
+
+
+def test_add_album_track_skips_owned_when_duplicates_off(monkeypatch):
+    from config.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
+    runtime, service, db, _logger, _ = _build_runtime()
+    db.check_track_exists = lambda *a, **k: (object(), 0.95)   # already owned
+
+    payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
+
+    assert status == 200
+    assert payload.get("skipped") is True
+    assert service.add_calls == []                             # nothing added
+
+
+def test_add_album_track_adds_missing_when_duplicates_off(monkeypatch):
+    from config.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
+    runtime, service, db, _logger, _ = _build_runtime()
+    db.check_track_exists = lambda *a, **k: (None, 0.0)        # not in library
+
+    payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
+
+    assert status == 200
+    assert not payload.get("skipped")
+    assert len(service.add_calls) == 1                         # added
+
+
+def test_add_album_track_adds_owned_when_duplicates_on(monkeypatch):
+    from config.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: True if key == 'wishlist.allow_duplicate_tracks' else default)
+    runtime, service, db, _logger, _ = _build_runtime()
+    called = []
+    db.check_track_exists = lambda *a, **k: called.append(1) or (object(), 0.99)
+
+    payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
+
+    assert status == 200
+    assert len(service.add_calls) == 1                         # added anyway (user wants dupes)
+    assert called == []                                        # ownership check skipped entirely

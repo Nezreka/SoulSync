@@ -423,6 +423,33 @@ def add_album_track_to_wishlist(
 
         track_data = _build_track_data(track, album)
 
+        # #825: don't add a track that's already in the library, unless the user
+        # has opted into duplicates. The manual album "add to wishlist" modal
+        # otherwise dumped owned tracks straight into the wishlist with no check
+        # (carlosjfcasero) — and the auto-cleanup may not reliably remove them.
+        # Respects the same wishlist.allow_duplicate_tracks toggle the watchlist
+        # scan + cleanup use: OFF → skip owned, ON → add anyway. (The quality
+        # re-download flow uses a different endpoint, so it's unaffected.)
+        try:
+            from config.settings import config_manager as _cfg
+            if not _cfg.get('wishlist.allow_duplicate_tracks', True):
+                _db = runtime.get_music_database()
+                _existing, _conf = _db.check_track_exists(
+                    track.get('name', ''), artist.get('name', ''),
+                    confidence_threshold=0.7,
+                    server_source=runtime.active_server,
+                    album=album.get('name', ''),
+                )
+                if _existing and _conf >= 0.7:
+                    runtime.logger.info(
+                        "[Wishlist Add] skipping '%s' by '%s' — already in library "
+                        "(allow_duplicate_tracks is off)",
+                        track.get('name'), artist.get('name'))
+                    return {"success": True, "skipped": True,
+                            "message": f"'{track.get('name')}' is already in your library"}, 200
+        except Exception as _own_err:
+            runtime.logger.debug("Wishlist add ownership check failed (adding anyway): %s", _own_err)
+
         enhanced_source_context = {
             **(source_context or {}),
             "artist_id": artist.get("id"),

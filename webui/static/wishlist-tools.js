@@ -953,6 +953,7 @@ async function handleAddToWishlist() {
 
         let successCount = 0;
         let errorCount = 0;
+        let skippedCount = 0;   // already-in-library tracks the backend declined to add (#825)
 
         // Add each track to wishlist individually
         for (const track of tracks) {
@@ -1026,7 +1027,10 @@ async function handleAddToWishlist() {
 
                 const result = await response.json();
 
-                if (result.success) {
+                if (result.success && result.skipped) {
+                    skippedCount++;   // already in library — not added (#825)
+                    console.log(`⏭️ "${track.name}" already in library — skipped`);
+                } else if (result.success) {
                     successCount++;
                     console.log(`✅ Added "${track.name}" to wishlist`);
                 } else {
@@ -1040,12 +1044,15 @@ async function handleAddToWishlist() {
             }
         }
 
-        // Show completion message
-        if (successCount > 0) {
-            const message = errorCount > 0
-                ? `Added ${successCount}/${tracks.length} tracks to wishlist (${errorCount} failed)`
-                : `Added ${successCount} tracks to wishlist`;
-            showToast(message, successCount === tracks.length ? 'success' : 'warning');
+        // Show completion message (#825: report already-owned tracks honestly
+        // instead of counting them as "added").
+        if (successCount === 0 && skippedCount > 0 && errorCount === 0) {
+            showToast(`All ${skippedCount} track${skippedCount !== 1 ? 's' : ''} already in your library`, 'success');
+        } else if (successCount > 0) {
+            let message = `Added ${successCount} track${successCount !== 1 ? 's' : ''} to wishlist`;
+            if (skippedCount > 0) message += ` (${skippedCount} already owned)`;
+            if (errorCount > 0) message += ` — ${errorCount} failed`;
+            showToast(message, errorCount > 0 ? 'warning' : 'success');
         } else {
             showToast('Failed to add any tracks to wishlist', 'error');
         }
@@ -1365,6 +1372,7 @@ async function addModalTracksToWishlist(playlistId) {
     try {
         let successCount = 0;
         let errorCount = 0;
+        let skippedCount = 0;   // already-in-library tracks the backend declined to add (#825)
 
         // Add each track to wishlist individually
         let wingItSkipped = 0;
@@ -1479,11 +1487,14 @@ async function addModalTracksToWishlist(playlistId) {
             }
         }
 
-        // Show result toast
-        if (successCount > 0) {
-            let message = errorCount > 0
-                ? `Added ${successCount}/${tracks.length} tracks to wishlist (${errorCount} failed)`
-                : `Added ${successCount} tracks to wishlist`;
+        // Show result toast (#825: report already-owned skips honestly).
+        if (successCount === 0 && skippedCount > 0 && errorCount === 0 && wingItSkipped === 0) {
+            showToast(`All ${skippedCount} track${skippedCount !== 1 ? 's' : ''} already in your library`, 'success');
+            await closeDownloadMissingModal(playlistId);
+        } else if (successCount > 0) {
+            let message = `Added ${successCount} track${successCount !== 1 ? 's' : ''} to wishlist`;
+            if (skippedCount > 0) message += ` (${skippedCount} already owned)`;
+            if (errorCount > 0) message += ` — ${errorCount} failed`;
             if (wingItSkipped > 0) message += ` (${wingItSkipped} wing-it skipped)`;
             showToast(message, 'success');
 
