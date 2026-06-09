@@ -6260,11 +6260,47 @@ class MusicDatabase:
                 ))
             
             return tracks
-            
+
         except Exception as e:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
-    
+
+    def get_album_by_spotify_album_id(self, spotify_album_id: str) -> Optional[DatabaseAlbum]:
+        """Fetch a single album by its (enriched) Spotify album id, or None.
+
+        Used by the download path builder (#829) to reuse an album's existing
+        on-disk folder when re-downloading into the same album — matching the
+        exact stored Spotify id before falling back to fuzzy name+artist.
+        """
+        if not spotify_album_id:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT albums.*, artists.name as artist_name
+                FROM albums
+                JOIN artists ON albums.artist_id = artists.id
+                WHERE albums.spotify_album_id = ?
+                LIMIT 1
+            """, (spotify_album_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            genres = json.loads(row['genres']) if row['genres'] else None
+            album = DatabaseAlbum(
+                id=row['id'], artist_id=row['artist_id'], title=row['title'],
+                year=row['year'], thumb_url=row['thumb_url'], genres=genres,
+                track_count=row['track_count'], duration=row['duration'],
+                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
+            )
+            album.artist_name = row['artist_name']
+            return album
+        except Exception as e:
+            logger.error(f"Error getting album by spotify_album_id {spotify_album_id}: {e}")
+            return None
+
     def search_artists(self, query: str, limit: int = 50, server_source: str = None) -> List[DatabaseArtist]:
         """Search artists by name, optionally filtered by server source.
         Uses diacritic-insensitive matching so 'Tiesto' finds 'Tiësto'."""
