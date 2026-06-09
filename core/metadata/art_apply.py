@@ -198,8 +198,15 @@ def apply_art_to_album_files(
             logger.warning("Could not embed art into %s: %s", fp, exc)
             result["failed"] += 1
 
-    target_dir = folder or (os.path.dirname(paths[0]) if paths else None)
-    if target_dir and os.path.isdir(target_dir) and not folder_has_cover_sidecar(target_dir):
+    # Prefer the caller's folder, but if it doesn't actually exist (e.g. a raw
+    # DB path that isn't mounted in this container), fall back to the real
+    # directory of the files we just wrote to — never silently skip the sidecar
+    # because a passed-in folder was wrong (Sokhi: cover.jpg never written).
+    target_dir = folder if (folder and os.path.isdir(folder)) else None
+    if not target_dir and paths:
+        cand = os.path.dirname(paths[0])
+        target_dir = cand if os.path.isdir(cand) else None
+    if target_dir and not folder_has_cover_sidecar(target_dir):
         # Prefer the album's OWN embedded art for the cover.jpg sidecar: it's
         # always present once the files are arted (we may have just embedded it),
         # needs no API call, and the sidecar matches the files exactly

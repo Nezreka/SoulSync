@@ -314,3 +314,23 @@ def test_apply_skips_cover_when_sidecar_exists(tmp_path, monkeypatch):
     aa.apply_art_to_album_files([str(f)], {}, {}, folder=str(tmp_path))
     assert (tmp_path / 'cover.jpg').read_bytes() == b'EXISTING'   # untouched
     assert dl_called == []
+
+
+def test_apply_cover_falls_back_to_file_dir_when_folder_doesnt_exist(tmp_path, monkeypatch):
+    # The Sokhi bug: the caller passed the raw DB folder (e.g. Jellyfin's
+    # /data/music/...) which doesn't exist in the container, so the cover.jpg
+    # write was silently skipped. Now it falls back to the real directory of
+    # the files and writes there anyway.
+    real_dir = tmp_path / 'real'
+    real_dir.mkdir()
+    f = real_dir / '01.flac'; f.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[SimpleNamespace(data=b'EMB')], tags=None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'embed_album_art_metadata', lambda *a, **k: True)
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
+
+    res = aa.apply_art_to_album_files([str(f)], {}, {},
+                                      folder='/data/music/does/not/exist/in/container')
+
+    assert (real_dir / 'cover.jpg').read_bytes() == b'EMB'   # written to the REAL dir
+    assert res['cover_written'] is True

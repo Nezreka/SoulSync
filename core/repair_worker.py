@@ -1394,7 +1394,14 @@ class RepairWorker:
             'album_name': album_title, 'album_image_url': artwork_url,
             'musicbrainz_release_id': mbid,
         }
-        folder = details.get('album_folder') or os.path.dirname(resolved[0])
+        # Use the RESOLVED file's directory — NOT details['album_folder'], which
+        # is the raw DB path (e.g. Jellyfin's /data/music) and frequently does
+        # NOT exist inside the SoulSync container (only the resolved /app/...
+        # path does). Passing the raw folder made os.path.isdir() fail in
+        # apply_art_to_album_files, silently skipping the cover.jpg write while
+        # embedding (which uses the resolved paths) still worked — Sokhi's
+        # "embeds art but never writes cover.jpgs".
+        folder = os.path.dirname(resolved[0])
         art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
 
         embedded = art_result.get('embedded', 0)
