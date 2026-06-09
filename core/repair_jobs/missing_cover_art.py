@@ -140,6 +140,15 @@ class MissingCoverArtJob(RepairJob):
         logger.info("Found %d albums missing cover art", total)
         download_folder = (context.config_manager.get('soulseek.download_path', '')
                            if context.config_manager else None)
+        # Skip-reason breakdown so a "0 findings" scan tells us WHY each album
+        # was skipped instead of guessing (Sokhi cover.jpg saga). Logged in the
+        # summary line below.
+        skip_reasons = {
+            'have_disk_art': 0,        # local file has embedded art + sidecar (or sidecar not wanted)
+            'no_local_db_has_art': 0,  # file path didn't resolve; DB already has a thumb
+            'no_art_source': 0,        # needs fix, but no API art found and nothing embedded to extract
+        }
+        _diag_logged = 0
 
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
@@ -205,7 +214,23 @@ class MissingCoverArtJob(RepairJob):
                 embed_missing = db_missing
                 sidecar_from_embedded = False
                 needs_fix = db_missing
+
+            # Diagnostic: dump the decision inputs for the first few albums so a
+            # confusing "0 findings" scan reveals path-resolution + on-disk state
+            # (Sokhi: scans kept returning 0 with no way to see why).
+            if _diag_logged < 5:
+                logger.info(
+                    "[cover-diag] album=%r db_path=%r resolved=%r local=%s embedded=%s "
+                    "sidecar=%s db_missing=%s cover_enabled=%s needs_fix=%s",
+                    title, rep_path, resolved_rep, has_local, has_embedded, has_sidecar,
+                    db_missing, cover_sidecar_enabled, needs_fix)
+                _diag_logged += 1
+
             if not needs_fix:
+                if not has_local:
+                    skip_reasons['no_local_db_has_art'] += 1
+                else:
+                    skip_reasons['have_disk_art'] += 1
                 result.skipped += 1
                 continue
 
@@ -303,6 +328,7 @@ class MissingCoverArtJob(RepairJob):
                         logger.debug("Error creating cover art finding for album %s: %s", album_id, e)
                         result.errors += 1
             else:
+                skip_reasons['no_art_source'] += 1
                 result.skipped += 1
 
             if context.update_progress and (i + 1) % 5 == 0:
@@ -313,6 +339,13 @@ class MissingCoverArtJob(RepairJob):
 
         logger.info("Cover art scan: %d albums checked, %d found art, %d skipped",
                      result.scanned, result.findings_created, result.skipped)
+        if result.skipped:
+            logger.info(
+                "[cover-diag] skip breakdown — have_disk_art=%d (already have embedded+sidecar), "
+                "no_local_db_has_art=%d (file path didn't resolve, DB has thumb), "
+                "no_art_source=%d (needed art but none found/embedded)",
+                skip_reasons['have_disk_art'], skip_reasons['no_local_db_has_art'],
+                skip_reasons['no_art_source'])
         return result
 
     def _try_source(self, source, source_album_id, title, artist_name):
