@@ -734,6 +734,14 @@ class iTunesWorker:
                         UPDATE albums SET year = ?
                         WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
                     """, (year, album_id))
+                # #824: also store the FULL release date when iTunes has one
+                # (YYYY-MM or YYYY-MM-DD). Only when empty — never clobber a
+                # manually-set release_date.
+                if len(album_obj.release_date) > 4:
+                    cursor.execute("""
+                        UPDATE albums SET release_date = ?
+                        WHERE id = ? AND (release_date IS NULL OR release_date = '')
+                    """, (album_obj.release_date, album_id))
 
             # Cache the authoritative expected track count for the Album
             # Completeness repair job (see set_album_api_track_count docstring).

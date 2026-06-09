@@ -178,3 +178,41 @@ def test_write_corrects_year_when_it_actually_differs(flac_path):
     write_tags_to_file(flac_path, {'year': 2023}, embed_cover=False)
 
     assert FLAC(flac_path).get('date') == ['2023']         # wrong year still corrected
+
+
+# ---------------------------------------------------------------------------
+# #824 Part 2 — DB release_date (full date) is written, and wins over year
+# ---------------------------------------------------------------------------
+
+def test_write_uses_db_release_date_over_year(flac_path):
+    write_tags_to_file(flac_path, {'year': 2023, 'release_date': '2023-09-01'},
+                       embed_cover=False)
+    assert FLAC(flac_path).get('date') == ['2023-09-01']   # full DB date written, not the year
+
+
+def test_write_db_release_date_overrides_existing_file_date(flac_path):
+    audio = FLAC(flac_path)
+    audio['date'] = ['2023-11-03']        # file has a different (but same-year) date
+    audio.save()
+    write_tags_to_file(flac_path, {'year': 2023, 'release_date': '2023-09-01'},
+                       embed_cover=False)
+    # The DB's explicit full date is authoritative — it replaces the file's date.
+    assert FLAC(flac_path).get('date') == ['2023-09-01']
+
+
+def test_write_falls_back_to_year_when_no_release_date(flac_path):
+    write_tags_to_file(flac_path, {'year': 2023, 'release_date': None}, embed_cover=False)
+    assert FLAC(flac_path).get('date') == ['2023']
+
+
+def test_diff_uses_release_date_when_present():
+    # File has a full date that differs from the DB's release_date → real change.
+    diff = {d['field']: d for d in build_tag_diff(
+        {'year': '2023-11-03'}, {'year': 2023, 'release_date': '2023-09-01'})}
+    assert diff['Year']['changed'] is True
+    assert diff['Year']['db_value'] == '2023-09-01'
+
+    # File already equals the DB release_date → no change.
+    diff = {d['field']: d for d in build_tag_diff(
+        {'year': '2023-09-01'}, {'year': 2023, 'release_date': '2023-09-01'})}
+    assert diff['Year']['changed'] is False

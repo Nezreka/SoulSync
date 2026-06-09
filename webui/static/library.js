@@ -3754,6 +3754,7 @@ function renderAlbumMetaRow(album) {
     const fields = [
         { key: 'title', label: 'Title', value: album.title || '' },
         { key: 'year', label: 'Year', value: album.year || '', type: 'number' },
+        { key: 'release_date', label: 'Release Date', value: album.release_date || '', placeholder: 'YYYY-MM-DD' },
         { key: 'genres', label: 'Genres', value: Array.isArray(album.genres) ? album.genres.join(', ') : (album.genres || '') },
         { key: 'label', label: 'Label', value: album.label || '' },
         { key: 'style', label: 'Style', value: album.style || '' },
@@ -3774,6 +3775,7 @@ function renderAlbumMetaRow(album) {
             const input = document.createElement('input');
             input.className = 'enhanced-album-meta-input';
             input.type = f.type || 'text';
+            if (f.placeholder) input.placeholder = f.placeholder;
             input.dataset.albumId = album.id;
             input.dataset.field = f.key;
             input.value = String(f.value);
@@ -5952,6 +5954,7 @@ async function saveAlbumMetadata(albumId) {
 
     const inputs = metaRow.querySelectorAll('.enhanced-album-meta-input');
     const updates = {};
+    let invalidDate = false;
 
     inputs.forEach(input => {
         const field = input.dataset.field;
@@ -5965,10 +5968,19 @@ async function saveAlbumMetadata(albumId) {
         } else if (field === 'year' || field === 'explicit' || field === 'track_count') {
             const numVal = value !== '' ? parseInt(value) : null;
             if (numVal !== (album[field] || null)) updates[field] = numVal;
+        } else if (field === 'release_date') {
+            // Accept empty, YYYY, YYYY-MM or YYYY-MM-DD (#824 full release dates).
+            if (value && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(value)) { invalidDate = true; return; }
+            if ((value || '') !== (album.release_date || '')) updates[field] = value || null;
         } else {
             if ((value || '') !== (album[field] || '')) updates[field] = value || null;
         }
     });
+
+    if (invalidDate) {
+        showToast('Release Date must be YYYY-MM-DD (or just YYYY)', 'error');
+        return;
+    }
 
     if (Object.keys(updates).length === 0) {
         showToast('No album changes to save', 'error');

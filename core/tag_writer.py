@@ -210,16 +210,20 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             db_str = ', '.join(db_val) if db_val else ''
             db_val = db_str if db_str else None
 
-        # Special: year — DB stores int, file stores string
-        if db_key == 'year' and db_val is not None:
-            db_str = str(db_val)
-            db_val = str(db_val)
-            # Don't flag a full file date (2023-11-03) → year (2023) as a change
-            # when the years already match: the writer preserves the full date,
-            # so it isn't actually changing (#824). Only a different year is a
-            # real change.
-            if file_str and file_str[:4] == db_str:
-                file_str = db_str
+        # Special: year / release date (#824). Prefer the full release_date when
+        # the DB has one — it's authoritative, compare it directly. Otherwise use
+        # the year int, for which a MORE-specific file date with the same year is
+        # preserved (not flagged as a change). DB year is int, file is string.
+        if db_key == 'year':
+            release_date = db_data.get('release_date')
+            if release_date:
+                db_val = str(release_date)
+                db_str = str(release_date).strip()
+            elif db_val is not None:
+                db_str = str(db_val)
+                db_val = str(db_val)
+                if file_str and file_str[:4] == db_str:
+                    file_str = db_str
 
         # Only mark as changed if DB has a value AND it differs from file
         # (writer skips fields where DB value is empty, so don't show them as diffs)
@@ -325,7 +329,10 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             album = guard_placeholder_overwrite(album, _current.get('album'))
             album_artist = guard_placeholder_overwrite(album_artist, _current.get('album_artist'))
 
-        year = db_data.get('year')
+        # Prefer the full release_date (e.g. 2023-09-01) when the DB has one;
+        # fall back to the year-only int. _date_to_write() then writes the full
+        # date and still preserves an equally-specific existing file date (#824).
+        year = db_data.get('release_date') or db_data.get('year')
         genres = db_data.get('genres')
         track_num = db_data.get('track_number')
         total_tracks = db_data.get('track_count')
