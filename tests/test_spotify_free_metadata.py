@@ -234,3 +234,74 @@ def test_selected_but_package_missing_is_graceful():
 def test_connected_ratelimited_but_no_package_no_bridge():
     avail, free = _gate(authed=False, has_creds=True, selected=False, installed=False, rate_limited=True)
     assert avail is False and free is False
+
+
+# ── #(free album search): rank + artist-discography workaround ──────────────
+
+from core.spotify_free_metadata import (  # noqa: E402
+    rank_albums_by_name, SpotifyFreeMetadataClient,
+)
+
+
+def test_rank_albums_by_name_orders_best_first_and_limits():
+    albums = [{'name': 'Random Access Memories'}, {'name': 'GNX'},
+              {'name': 'GNX (Deluxe)'}, {'name': 'untitled unmastered.'}]
+    out = rank_albums_by_name(albums, 'GNX', limit=2)
+    assert [a['name'] for a in out] == ['GNX', 'GNX (Deluxe)']
+
+
+def test_rank_albums_by_name_handles_empty():
+    assert rank_albums_by_name([], 'GNX') == []
+    assert rank_albums_by_name(None, 'GNX') == []
+
+
+def test_search_albums_via_artist_resolves_through_discography():
+    c = SpotifyFreeMetadataClient()
+    c.search_artists = lambda q, limit=5: [
+        {'id': 'art_other', 'name': 'Some Other Band'},
+        {'id': 'art_k', 'name': 'Kendrick Lamar'},
+    ]
+    c.get_artist_albums_list = lambda aid, limit=50: (
+        [{'id': 'al1', 'name': 'DAMN.'}, {'id': 'al2', 'name': 'GNX'}]
+        if aid == 'art_k' else [])
+    out = c.search_albums_via_artist('Kendrick Lamar', 'GNX', limit=3)
+    assert out and out[0]['name'] == 'GNX'        # picked the right artist + ranked
+
+
+def test_search_albums_via_artist_empty_without_artist_or_album():
+    c = SpotifyFreeMetadataClient()
+    c.search_artists = lambda q, limit=5: [{'id': 'a', 'name': 'X'}]
+    assert c.search_albums_via_artist('', 'GNX') == []
+    assert c.search_albums_via_artist('X', '') == []
+
+
+def test_search_albums_via_artist_empty_when_no_artist_match():
+    c = SpotifyFreeMetadataClient()
+    c.search_artists = lambda q, limit=5: []      # nothing found
+    assert c.search_albums_via_artist('Nobody', 'GNX') == []
+
+
+def test_client_search_albums_uses_free_via_artist_when_active():
+    """SpotifyClient.search_albums bridges album matching through Spotify Free
+    (artist discography) when free is active, instead of dropping to iTunes/Deezer."""
+    c = SpotifyClient.__new__(SpotifyClient)
+    fake_free = SpotifyFreeMetadataClient()
+    fake_free.search_albums_via_artist = lambda artist, album, limit: [
+        {'id': 'al2', 'name': 'GNX',
+         'artists': [{'name': 'Kendrick Lamar', 'id': 'art_k'}]}
+    ]
+    c._free_meta_client = fake_free
+    fake_cache = type('C', (), {'get_search_results': lambda *a, **k: None})()
+
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=False), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=False), \
+         patch('core.spotify_client.get_metadata_cache', return_value=fake_cache), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=True):
+        cm.get_spotify_config.return_value = {}
+        cm.get.side_effect = lambda k, d=None: True if k == 'metadata.spotify_free' else d
+        results = c.search_albums('Kendrick Lamar GNX', limit=5,
+                                  artist='Kendrick Lamar', album='GNX')
+
+    assert len(results) == 1 and results[0].name == 'GNX'
+    assert results[0].id == 'al2'

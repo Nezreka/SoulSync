@@ -768,7 +768,10 @@ class SpotifyWorker:
             return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
-        results = self.client.search_albums(query, limit=5)
+        # Pass artist + album names separately too, so the no-creds Spotify Free
+        # path can resolve the album via the artist's discography (SpotipyFree has
+        # no album-name search) when bridging a budget/rate-limit ban.
+        results = self.client.search_albums(query, limit=5, artist=artist_name, album=album_name)
 
         if not results:
             self._mark_status('album', album_id, 'not_found')

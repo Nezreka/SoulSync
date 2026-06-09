@@ -1548,11 +1548,17 @@ class SpotifyClient:
         return []
 
     @rate_limited
-    def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Album]:
+    def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                      artist: str = None, album: str = None) -> List[Album]:
         """Search for albums.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``artist`` + ``album`` (the names, passed separately) enable the no-creds
+        Spotify Free path: SpotipyFree has no album-name search, so when Free is
+        active it resolves the album via the artist's discography. Callers without
+        that context (a bare query) skip the Free album path.
         """
         cache = get_metadata_cache()
         # Check Spotify cache first so cached data remains usable even when
@@ -1592,7 +1598,21 @@ class SpotifyClient:
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'search_albums')
                 logger.error(f"Error searching albums via Spotify: {e}")
-                # Fall through to iTunes fallback
+                # Fall through to free / iTunes fallback
+
+        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when
+        # official Spotify can't serve us (no auth / rate-limited / budget spent),
+        # before the iTunes/Deezer fallback. Albums have no name-search upstream,
+        # so resolve via the artist's discography — needs artist + album names.
+        # Gated by _free_active() so it never runs while auth is healthy.
+        if allow_fallback and self._free_active() and artist and album:
+            try:
+                objs = [Album.from_spotify_album(a)
+                        for a in self._free_meta.search_albums_via_artist(artist, album, min(limit, 10))]
+                if objs:
+                    return objs
+            except Exception as e:
+                logger.debug("SpotipyFree album search failed: %s", e)
 
         # Fallback (iTunes or Deezer)
         if allow_fallback:
