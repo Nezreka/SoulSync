@@ -185,6 +185,14 @@ class MissingCoverArtJob(RepairJob):
                 download_folder=download_folder,
                 config_manager=context.config_manager,
             ) if rep_path else None
+            # Match the apply (_fix_missing_cover_art line ~1376: `... or p`): if
+            # the path-mapping layer returns nothing but the raw DB path is
+            # already a real file (the common Docker case where the container
+            # path == the stored path), use it as-is. Without this the scan never
+            # sees the folder and skips the album, while the apply WOULD have
+            # written the cover.jpg — the exact gap behind Sokhi's 0-findings.
+            if not resolved_rep and rep_path and os.path.isfile(rep_path):
+                resolved_rep = rep_path
             has_local = bool(resolved_rep)
             # Check embedded art and the cover.jpg sidecar SEPARATELY (not the
             # combined album_has_art_on_disk, which returns True if EITHER is
