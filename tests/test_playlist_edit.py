@@ -138,6 +138,15 @@ def test_normalize_keeps_reconcile_from_config():
     assert normalize_sync_mode('', 'reconcile') == 'reconcile'
 
 
+def test_normalize_keeps_append_from_config():
+    # #823 — an AUTOMATED sync (mirrored auto-sync / Playlist Pipeline) passes no
+    # per-request mode, so it must resolve to the user's configured global mode
+    # instead of hardcoding 'replace' (which recreated the playlist + wiped its
+    # image/description). Default 'replace' users are unaffected.
+    assert normalize_sync_mode(None, 'append') == 'append'
+    assert normalize_sync_mode(None, 'replace') == 'replace'
+
+
 def test_normalize_request_overrides_config():
     assert normalize_sync_mode('append', 'reconcile') == 'append'
     assert normalize_sync_mode('reconcile', 'replace') == 'reconcile'
