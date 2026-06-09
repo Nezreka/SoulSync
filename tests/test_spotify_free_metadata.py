@@ -305,3 +305,91 @@ def test_client_search_albums_uses_free_via_artist_when_active():
 
     assert len(results) == 1 and results[0].name == 'GNX'
     assert results[0].id == 'al2'
+
+
+# ── prefer-free (enrichment opt-in) + the use_spotify root-cause fix ─────────
+
+def _free_active_with(prefer_free, installed, authed=True, rate_limited=False,
+                      selected=False, budget=False):
+    c = SpotifyClient.__new__(SpotifyClient)
+    if prefer_free:
+        c._prefer_free = True
+    if budget:
+        c._budget_exhausted_use_free = True
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=authed), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=rate_limited), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=installed):
+        cm.get.side_effect = lambda k, d=None: selected if k == 'metadata.spotify_free' else d
+        return c._free_active()
+
+
+def test_prefer_free_activates_even_when_authed_healthy_under_budget():
+    # The enrichment opt-in: free serves even though official is perfectly usable.
+    assert _free_active_with(prefer_free=True, installed=True) is True
+
+
+def test_prefer_free_inert_without_package():
+    # Graceful: opt-in set but SpotipyFree missing -> stays on official.
+    assert _free_active_with(prefer_free=True, installed=False) is False
+
+
+def test_no_prefer_free_authed_healthy_stays_official():
+    assert _free_active_with(prefer_free=False, installed=True, selected=True) is False
+
+
+def _client_that_forbids_official(prefer_free=False, budget=False):
+    """A SpotifyClient whose official .sp blows up if touched + a Free client that
+    serves albums — so a passing search proves official was skipped."""
+    c = SpotifyClient.__new__(SpotifyClient)
+    if prefer_free:
+        c._prefer_free = True
+    if budget:
+        c._budget_exhausted_use_free = True
+
+    class _Sp:
+        def search(self, *a, **k):
+            raise AssertionError("official Spotify API must not be called when deferring to Free")
+    c.sp = _Sp()
+    fake_free = SpotifyFreeMetadataClient()
+    fake_free.search_albums_via_artist = lambda artist, album, limit: [
+        {'id': 'al2', 'name': 'GNX', 'artists': [{'name': 'Kendrick Lamar', 'id': 'art_k'}]}]
+    c._free_meta_client = fake_free
+    return c
+
+
+def test_search_albums_prefers_free_when_authed_and_prefer_free_set():
+    """Root-cause regression: prefer_free makes an AUTHED, healthy client defer to
+    Spotify Free instead of the official API. Previously the use_spotify gate
+    (= is_spotify_authenticated()) ignored _free_active() and hit official."""
+    c = _client_that_forbids_official(prefer_free=True)
+    fake_cache = type('C', (), {'get_search_results': lambda *a, **k: None})()
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=True), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=False), \
+         patch('core.spotify_client.get_metadata_cache', return_value=fake_cache), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=True):
+        cm.get_spotify_config.return_value = {'client_id': 'x', 'client_secret': 'y'}
+        cm.get.side_effect = lambda k, d=None: d
+        results = c.search_albums('Kendrick Lamar GNX', limit=5,
+                                  artist='Kendrick Lamar', album='GNX')
+    assert len(results) == 1 and results[0].id == 'al2'   # Free served; official untouched
+
+
+def test_search_albums_diverts_to_free_when_budget_exhausted_and_authed():
+    """Budget→Free bridge regression: an AUTHED client that has spent the daily
+    budget defers to Free instead of hammering the official API (which the budget
+    exists to protect). This is the divert that previously never happened."""
+    c = _client_that_forbids_official(budget=True)
+    fake_cache = type('C', (), {'get_search_results': lambda *a, **k: None})()
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=True), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=False), \
+         patch('core.spotify_client.get_metadata_cache', return_value=fake_cache), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=True):
+        cm.get_spotify_config.return_value = {'client_id': 'x', 'client_secret': 'y'}
+        # metadata.spotify_free=True so the budget path's _free_available() holds
+        cm.get.side_effect = lambda k, d=None: True if k == 'metadata.spotify_free' else d
+        results = c.search_albums('Kendrick Lamar GNX', limit=5,
+                                  artist='Kendrick Lamar', album='GNX')
+    assert len(results) == 1 and results[0].id == 'al2'
