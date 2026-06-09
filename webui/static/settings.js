@@ -1061,6 +1061,8 @@ async function loadSettingsData() {
         const _metaSel = (_fbSrc === 'spotify' && settings.metadata?.spotify_free === true)
             ? 'spotify_free' : _fbSrc;
         document.getElementById('metadata-fallback-source').value = _metaSel;
+        const _efEl = document.getElementById('metadata-spotify-free-enrichment');
+        if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment === true;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -2886,7 +2888,10 @@ async function saveSettings(quiet = false) {
             // 'Spotify Free' is stored as the spotify source + a flag, so all
             // downstream 'spotify' routing is unchanged.
             fallback_source: metadataSource === 'spotify_free' ? 'spotify' : metadataSource,
-            spotify_free: metadataSource === 'spotify_free'
+            spotify_free: metadataSource === 'spotify_free',
+            // Independent opt-in: run the enrichment worker on Spotify Free even
+            // when an official account is connected (spares the official quota).
+            spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
