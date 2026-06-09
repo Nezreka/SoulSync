@@ -45,6 +45,11 @@ function debouncedAutoSaveSettings() {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // #827: the Logs tab has no savable settings — its live-viewer controls
+    // (source picker, filters, auto-scroll) were tripping the auto-save and
+    // flooding app.log with "Settings saved" lines, drowning out the logs the
+    // user is trying to read. Never auto-save while the Logs tab is active.
+    if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
 }
