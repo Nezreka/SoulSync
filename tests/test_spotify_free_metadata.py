@@ -393,3 +393,34 @@ def test_search_albums_diverts_to_free_when_budget_exhausted_and_authed():
         results = c.search_albums('Kendrick Lamar GNX', limit=5,
                                   artist='Kendrick Lamar', album='GNX')
     assert len(results) == 1 and results[0].id == 'al2'
+
+
+# ── default-ON enrichment: prefer_free makes metadata available to the worker ──
+
+def _metadata_available(prefer_free, installed, authed=False, selected=False):
+    c = SpotifyClient.__new__(SpotifyClient)
+    if prefer_free:
+        c._prefer_free = True
+    with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=authed), \
+         patch('core.spotify_client.config_manager') as cm, \
+         patch('core.spotify_client._is_globally_rate_limited', return_value=False), \
+         patch.object(_sfm, 'spotify_free_installed', return_value=installed):
+        cm.get.side_effect = lambda k, d=None: selected if k == 'metadata.spotify_free' else d
+        return c.is_spotify_metadata_available()
+
+
+def test_prefer_free_makes_metadata_available_without_auth_or_source():
+    # Default-ON enrichment: the worker runs via the no-auth path on the toggle
+    # alone — no account connected, no 'no-auth Spotify' source selected.
+    assert _metadata_available(prefer_free=True, installed=True) is True
+
+
+def test_prefer_free_metadata_unavailable_without_package():
+    assert _metadata_available(prefer_free=True, installed=False) is False
+
+
+def test_interactive_metadata_availability_unaffected_by_prefer_free():
+    # A client WITHOUT _prefer_free (interactive/global): no auth + no source -> unavailable.
+    assert _metadata_available(prefer_free=False, installed=True) is False
+    # ...and authed is available as before.
+    assert _metadata_available(prefer_free=False, installed=True, authed=True) is True

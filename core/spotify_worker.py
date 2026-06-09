@@ -213,26 +213,29 @@ class SpotifyWorker:
                     interruptible_sleep(self._stop_event, min(remaining, 60))  # Check again every 60s max
                     continue
 
-                # Is the worker serving via the no-creds Spotify Free source this
-                # iteration? The daily budget and post-ban cooldown both exist to
-                # protect the REAL authenticated API from bans — they don't apply
-                # to free (a different, anonymous path). Computed once and reused
-                # below; the loop already probes auth, so no extra quota cost.
-                # Worker opt-in: when the user enables Spotify Free for enrichment
-                # (metadata.spotify_free_enrichment), prefer the no-creds source
-                # even while authed + under budget — bulk enrichment is the work
-                # that bans the real API, so this spares the official quota for
-                # interactive use. _free_active() honors this flag (and still falls
-                # back to official only if free can't serve); set only on the
-                # worker's own client, so interactive paths stay official-first.
-                # Cheap config read; harmless when Spotify Free isn't installed.
+                # Enrichment runs on the no-auth Spotify source by DEFAULT
+                # (metadata.spotify_free_enrichment, ON unless turned off): bulk
+                # enrichment is the workload that bans the real API, so we keep it
+                # off your connected account's quota and reserve official Spotify
+                # for interactive search + playlist sync. The flag overrides auth
+                # for the worker (authed users still enrich via the no-auth path)
+                # and also lets the worker run with no auth at all. _free_active()
+                # and is_spotify_metadata_available() both honor it; set only on
+                # the worker's OWN client, so interactive paths stay official-first.
+                # Harmless when the no-auth package isn't installed (the methods
+                # fall back to official, then iTunes/Deezer).
                 try:
                     from config.settings import config_manager as _cfg
                     self.client._prefer_free = bool(
-                        _cfg.get('metadata.spotify_free_enrichment', False))
+                        _cfg.get('metadata.spotify_free_enrichment', True))
                 except Exception:  # noqa: S110 — prefer-free toggle is best-effort
-                    self.client._prefer_free = False
+                    self.client._prefer_free = True
 
+                # Is the worker serving via the no-auth Spotify source this
+                # iteration? The daily budget and post-ban cooldown both exist to
+                # protect the REAL authenticated API from bans — they don't apply
+                # to the no-auth path. Computed once and reused below; the loop
+                # already probes auth, so no extra quota cost.
                 budget_exhausted = self._is_daily_budget_exhausted()
 
                 # Daily budget is a REAL-API ban protection. When it's spent, if

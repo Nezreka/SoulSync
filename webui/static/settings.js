@@ -1062,7 +1062,9 @@ async function loadSettingsData() {
             ? 'spotify_free' : _fbSrc;
         document.getElementById('metadata-fallback-source').value = _metaSel;
         const _efEl = document.getElementById('metadata-spotify-free-enrichment');
-        if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment === true;
+        // Default ON: unset (undefined) reads as enabled, matching the worker's
+        // config default (metadata.spotify_free_enrichment defaults True).
+        if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment !== false;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
