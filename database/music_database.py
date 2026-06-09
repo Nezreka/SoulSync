@@ -7668,6 +7668,24 @@ class MusicDatabase:
                     ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
                 best_title_similarity = max(best_title_similarity, ctx_sim)
 
+            # #825: a bracketed qualifier that is a SUBTITLE — not a version
+            # marker and not numeric — is the same song. 'Llamando a la tierra
+            # (Serenade From the Stars)' vs the library's bare 'Llamando a la
+            # tierra': the subtitle restates nothing (so #808 keeps it) and the
+            # length penalty crushed the pair to ~0.14 — sync re-added it to
+            # the wishlist forever and cleanup (same matcher) never removed it.
+            # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
+            # are kept by the helper, so their mismatch penalty still stands.
+            from core.text.title_match import strip_subtitle_qualifiers
+            sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
+            sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
+            if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
+                sub_sim = self._string_similarity(sub_search, sub_db)
+                sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
+                if sub_ratio < 0.7:
+                    sub_sim *= sub_ratio  # stripped forms still length-guarded
+                best_title_similarity = max(best_title_similarity, sub_sim)
+
             # Word-level guard: SequenceMatcher's char ratio over-credits
             # different songs that share a long substring or only a stopword
             # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
