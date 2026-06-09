@@ -24136,9 +24136,20 @@ def _run_sync_task(
     automation_id=None,
     profile_id=1,
     playlist_image_url='',
-    sync_mode='replace',
+    sync_mode=None,
     skip_wishlist_add=False,
 ):
+    # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
+    # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
+    # configured global "Playlist sync mode" instead of hardcoding 'replace'.
+    # Hardcoding replace meant every AUTOMATED sync recreated the server
+    # playlist, wiping its custom image + description even when the user chose
+    # Append/Reconcile (#823 carlosjfcasero). The global default is still
+    # 'replace', so default users are unaffected; only users who set
+    # Append/Reconcile get the change. (Mirrors _submit_sync_task.)
+    if sync_mode is None:
+        from core.sync.playlist_edit import normalize_sync_mode
+        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
