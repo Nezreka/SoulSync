@@ -1626,6 +1626,8 @@ async function loadProfileManageList() {
     profiles.forEach(p => {
         const item = document.createElement('div');
         item.className = 'profile-manage-item';
+        const isCurrent = currentProfile && currentProfile.id === p.id;
+        if (isCurrent) item.classList.add('is-current');
 
         const av = document.createElement('div');
         renderProfileAvatar(av, p);
@@ -1637,14 +1639,21 @@ async function loadProfileManageList() {
         nameDiv.className = 'name';
         nameDiv.textContent = p.name + (p.has_pin ? ' 🔒' : '');
         info.appendChild(nameDiv);
-        const roleTags = [];
-        if (p.is_admin) roleTags.push('Admin');
-        if (p.can_download === false) roleTags.push('No Downloads');
-        if (p.allowed_pages) roleTags.push(`${p.allowed_pages.length} pages`);
-        if (roleTags.length) {
+        // Role/status as pills
+        const pills = [];
+        if (isCurrent) pills.push({ text: 'You', cls: 'profile-role-pill--current' });
+        if (p.is_admin) pills.push({ text: 'Admin', cls: 'profile-role-pill--admin' });
+        if (p.can_download === false) pills.push({ text: 'No Downloads', cls: '' });
+        if (p.allowed_pages) pills.push({ text: `${p.allowed_pages.length} pages`, cls: '' });
+        if (pills.length) {
             const roleDiv = document.createElement('div');
             roleDiv.className = 'role';
-            roleDiv.textContent = roleTags.join(' · ');
+            pills.forEach(pill => {
+                const span = document.createElement('span');
+                span.className = ('profile-role-pill ' + pill.cls).trim();
+                span.textContent = pill.text;
+                roleDiv.appendChild(span);
+            });
             info.appendChild(roleDiv);
         }
         item.appendChild(info);
@@ -1663,7 +1672,7 @@ async function loadProfileManageList() {
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
         editBtn.title = 'Edit profile';
-        editBtn.textContent = '✏️';
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         actions.appendChild(editBtn);
 
         if (!p.is_admin) {
@@ -1671,7 +1680,7 @@ async function loadProfileManageList() {
             delBtn.className = 'profile-delete-btn';
             delBtn.dataset.id = p.id;
             delBtn.title = 'Delete profile';
-            delBtn.textContent = '🗑️';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
             actions.appendChild(delBtn);
         }
 
