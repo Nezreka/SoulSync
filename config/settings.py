@@ -684,7 +684,13 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
-                "replace_lower_quality": False
+                "replace_lower_quality": False,
+                # Use the top Staging folder as the artist (Artist/Album layouts,
+                # mixtapes). On by default to preserve the long-standing import
+                # behaviour for existing users. Turn OFF if you stage a mixed pile
+                # of songs under one container folder, otherwise that folder's name
+                # overrides every metadata-identified artist (the "soulsync" case).
+                "folder_artist_override": True
             },
             "m3u_export": {
                 "enabled": False,

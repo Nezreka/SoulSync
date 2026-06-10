@@ -219,11 +219,57 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "trigger": sidecar.get("trigger", "unknown"),
                 "source_username": source_username,
                 "source_filename": source_filename,
+                "thumb_url": _extract_context_thumb(ctx),
             }
         )
 
     entries.sort(key=lambda e: e["id"], reverse=True)
     return entries
+
+
+def get_quarantine_entry_context(quarantine_dir: str, entry_id: str) -> Dict[str, Any]:
+    """The sidecar's embedded pipeline ``context`` dict for one entry.
+    Returns {} for thin/legacy sidecars, missing entries or read errors."""
+    _, sidecar_path = _resolve_entry_paths(quarantine_dir, entry_id)
+    if not sidecar_path or not os.path.isfile(sidecar_path):
+        return {}
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+        ctx = loaded.get("context") if isinstance(loaded, dict) else None
+        return ctx if isinstance(ctx, dict) else {}
+    except Exception as exc:
+        logger.debug("quarantine context read failed for %s: %s", entry_id, exc)
+        return {}
+
+
+def _extract_context_thumb(ctx: Dict[str, Any]) -> str:
+    """Album-art URL from a sidecar's pipeline context — same lookup chain the
+    library-history recorder uses (album/spotify_album image, then album_info,
+    then the track_info's embedded album images). Empty string when absent."""
+    def _first_image(album: Any) -> str:
+        if not isinstance(album, dict):
+            return ""
+        url = album.get("image_url") or ""
+        if url:
+            return url
+        images = album.get("images") or []
+        if images and isinstance(images[0], dict):
+            return images[0].get("url", "") or ""
+        return ""
+
+    thumb = _first_image(ctx.get("album")) or _first_image(ctx.get("spotify_album"))
+    if not thumb:
+        album_info = ctx.get("album_info")
+        if isinstance(album_info, dict):
+            thumb = album_info.get("album_image_url", "") or ""
+    if not thumb:
+        ti = ctx.get("track_info")
+        if isinstance(ti, dict):
+            thumb = _first_image(ti.get("album"))
+            if not thumb:
+                thumb = ti.get("image_url", "") or ""
+    return thumb
 
 
 def _resolve_entry_paths(quarantine_dir: str, entry_id: str) -> Tuple[Optional[str], Optional[str]]:

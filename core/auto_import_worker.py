@@ -1577,15 +1577,12 @@ class AutoImportWorker:
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
 
-        # Parent folder artist override — OPT-IN via import.folder_artist_override
-        # (default off). When enabled it uses the top Staging folder as the artist
-        # for Artist/Album or Artist/<category>/Album layouts, which helps
-        # mixtapes/compilations whose embedded tags carry DJ names. Off by default
-        # because it otherwise clobbers a confidently metadata-identified artist
-        # when a user stages a mixed pile under a single container folder (the
-        # "soulsync" mass-mislabel incident).
+        # Parent folder artist override via import.folder_artist_override.
+        # Default on to preserve the legacy Artist/Album staging behavior.
+        # Users who stage mixed piles under one container folder can turn it off
+        # to keep the metadata-identified artist.
         try:
-            if self._config_manager.get('import.folder_artist_override', False):
+            if self._config_manager.get('import.folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
                 rel_path = os.path.relpath(candidate.path, staging_root)
                 folder_artist = resolve_folder_artist(rel_path, artist_name, enabled=True)

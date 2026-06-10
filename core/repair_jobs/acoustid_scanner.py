@@ -53,10 +53,6 @@ class AcoustIDScannerJob(RepairJob):
         'title_similarity': 0.70,
         'artist_similarity': 0.60,
         'batch_size': 200,
-        # Skip tracks the user force-imported via the version-mismatch
-        # fallback (they are expected to mismatch; default: still scan them
-        # but report as informational).
-        'skip_force_imported': False,
     }
     auto_fix = False  # User chooses fix action per finding
 
@@ -228,9 +224,11 @@ class AcoustIDScannerJob(RepairJob):
             )
 
         # Verification status from the embedded SOULSYNC_VERIFICATION tag.
-        # force_imported = user accepted this file as best candidate after the
-        # retry budget was exhausted — a mismatch here is EXPECTED. Either skip
-        # (job setting) or downgrade the finding to informational below.
+        # Only a human decision short-circuits the scan: the user explicitly
+        # confirmed the file via the review queue. Everything else (verified /
+        # unverified / force_imported / untagged) is re-checked; force_imported
+        # mismatches are reported as informational below since a mismatch
+        # there is EXPECTED (the user accepted the best candidate).
         file_verif_status = None
         try:
             from core.tag_writer import read_file_tags as _rft
@@ -243,13 +241,6 @@ class AcoustIDScannerJob(RepairJob):
             if context.report_progress:
                 context.report_progress(
                     log_line=f'Skipped (human-verified): {fname}', log_type='skip')
-            return
-        if file_verif_status == 'force_imported' and \
-                self._get_settings(context).get('skip_force_imported', False):
-            if context.report_progress:
-                context.report_progress(
-                    log_line=f'Skipped (force-imported fallback): {fname}',
-                    log_type='skip')
             return
 
         # Fingerprint-collision guard: when the TOP recording's length is wildly
@@ -289,17 +280,26 @@ class AcoustIDScannerJob(RepairJob):
             aliases_provider=_aliases,
         )
 
-        # Refresh the DB column from the file tag (the tag travels with the
-        # file and survives DB resets; the tracks row is the UI-facing cache).
-        if file_verif_status:
-            try:
-                conn = context.db._get_connection()
-                conn.cursor().execute(
-                    "UPDATE tracks SET verification_status = ? WHERE id = ?",
-                    (file_verif_status, track_id))
-                getattr(conn, 'commit', lambda: None)()
-            except Exception as e:
-                logger.debug("verification_status refresh failed for %s: %s", track_id, e)
+        # Persist the scan outcome so it feeds the same review pipeline as
+        # import-time verification: PASS backfills 'verified' on untagged or
+        # previously-unverified files; SKIP (ambiguous / cross-script / no
+        # hard confirmation) marks untagged files 'unverified' so they surface
+        # in the Downloads-page review queue. force_imported is never blessed
+        # here (normalize() strips version words, so an instrumental can PASS
+        # the title check) and 'verified' is never downgraded by a SKIP (the
+        # import-time check ran with richer candidate metadata). FAIL keeps
+        # the finding flow below.
+        new_status = file_verif_status
+        if outcome.decision == Decision.PASS and file_verif_status in (None, '', 'unverified'):
+            new_status = 'verified'
+        elif outcome.decision == Decision.SKIP and not file_verif_status:
+            new_status = 'unverified'
+        if new_status:
+            self._persist_status(
+                context, track_id, fpath,
+                (expected.get('file_path') or '').strip() or None,
+                new_status, write_tag=(new_status != file_verif_status),
+                expected=expected)
 
         if outcome.decision != Decision.FAIL:
             if context.report_progress:
@@ -361,6 +361,56 @@ class AcoustIDScannerJob(RepairJob):
                 result.findings_created += 1
             else:
                 result.findings_skipped_dedup += 1
+
+    def _persist_status(self, context, track_id, fpath, db_path, status, write_tag,
+                        expected=None):
+        """Persist a verification status to the file tag (durable, travels with
+        the file), the tracks row (UI cache) and any library_history rows for
+        this file (feeds the Unverified review queue on the Downloads page).
+        ``db_path`` is the unresolved DB-side path — history rows may store
+        either form, so both are matched.
+
+        Files SoulSync never downloaded have no history row at all — for an
+        'unverified' outcome one is inserted (download_source 'acoustid_scan')
+        so EVERY scan-flagged file lands in the review queue, not just past
+        downloads. Re-scans then match this row via file_path (no duplicates).
+        """
+        if not status:
+            return
+        if write_tag:
+            try:
+                from core.tag_writer import write_verification_status
+                write_verification_status(fpath, status)
+            except Exception as e:
+                logger.debug("verification tag write failed for %s: %s", fpath, e)
+        try:
+            conn = context.db._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE tracks SET verification_status = ? WHERE id = ?",
+                (status, track_id))
+            matched = 0
+            for p in {p for p in (fpath, db_path) if p}:
+                cur.execute(
+                    "UPDATE library_history SET verification_status = ? WHERE file_path = ?",
+                    (status, p))
+                matched += max(getattr(cur, 'rowcount', 0) or 0, 0)
+            if status == 'unverified' and matched == 0:
+                exp = expected or {}
+                cur.execute(
+                    """INSERT INTO library_history
+                       (event_type, title, artist_name, album_name, file_path,
+                        thumb_url, download_source, verification_status)
+                       VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
+                    (exp.get('title') or os.path.basename(fpath),
+                     exp.get('artist') or None,
+                     exp.get('album_title') or None,
+                     db_path or fpath,
+                     exp.get('album_thumb_url') or None,
+                     status))
+            getattr(conn, 'commit', lambda: None)()
+        except Exception as e:
+            logger.debug("verification_status persist failed for %s: %s", track_id, e)
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         """Load all tracks from DB keyed by track ID."""

@@ -1,4 +1,4 @@
-"""Folder-artist override is opt-in and never clobbers an identified artist.
+"""Folder-artist override can be disabled to keep an identified artist.
 
 Background
 ----------
@@ -12,16 +12,15 @@ named ``soulsync`` therefore got the album-artist of *every* file forced to
 with a Spotify/MusicBrainz id. Navidrome groups by album-artist, so 65 singles
 collapsed under a bogus "soulsync" artist.
 
-``resolve_folder_artist`` is the extracted, pure decision. It must:
-- return ``None`` (i.e. keep the identified artist) when the feature is OFF,
-  regardless of folder structure — this is the regression guard;
-- only when explicitly enabled, reproduce the original folder-derived artist.
+``resolve_folder_artist`` is the extracted, pure decision. It must keep the
+identified artist when the feature is OFF, and reproduce the original
+folder-derived artist when enabled.
 """
 
 from core.imports.folder_artist import resolve_folder_artist
 
 
-# --- OFF by default: never override (the bug fix) ---------------------------
+# --- Disabled: never override -----------------------------------------------
 
 def test_disabled_keeps_identified_artist_even_with_artist_album_structure():
     # The 'soulsync' mass mis-file: identified artist is real, folder is a
@@ -41,7 +40,7 @@ def test_disabled_returns_none_for_clean_artist_album_path():
     ) is None
 
 
-# --- Enabled: original behaviour is available on request --------------------
+# --- Enabled: original behaviour --------------------------------------------
 
 def test_enabled_uses_top_folder_as_artist_when_it_differs():
     assert resolve_folder_artist(
