@@ -2673,7 +2673,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .helper-first-launch-tip {
     position: fixed;
     bottom: 34px;
-    right: 84px;
+    /* Clear the ? float button (right:24 + 48 wide → left edge ~72px from the
+       right) AND its 8px pulse ring, with margin, so the tip never covers the
+       button (#817). Was 84px — only ~4px off the pulse ring, so they touched. */
+    right: 96px;
     padding: 8px 16px;
     background: rgba(16, 16, 16, 0.95);
     border: 1px solid rgba(var(--accent-rgb), 0.3);
@@ -19886,6 +19889,651 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 14px;
     color: rgb(var(--accent-light-rgb));
     margin-bottom: 10px;
+}
+
+/* #831: expandable per-run track ledger under the scan summary */
+.watchlist-scan-tracks-toggle {
+    margin-top: 10px;
+    padding: 5px 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    color: #ccc;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.watchlist-scan-tracks-toggle:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.watchlist-scan-tracks {
+    margin-top: 10px;
+    max-height: 280px;
+    overflow-y: auto;
+    text-align: left;
+}
+
+.watchlist-scan-tracks-section {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #888;
+    margin: 10px 0 4px;
+}
+
+.watchlist-scan-tracks .watchlist-live-addition-item {
+    position: relative;
+}
+
+.watchlist-scan-track-badge {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.watchlist-scan-track-badge.added {
+    background: rgba(80, 200, 120, 0.15);
+    color: #6fd99a;
+}
+
+.watchlist-scan-track-badge.skipped {
+    background: rgba(255, 255, 255, 0.08);
+    color: #999;
+}
+
+/* ── #831 round 2: full-width live scan deck ───────────────────────────── */
+
+.wl-scan-deck {
+    width: 100%;
+    margin-top: 15px;
+    padding: 18px 20px 16px;
+    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.07), rgba(255, 255, 255, 0.02) 55%);
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    text-align: left;
+}
+
+.wl-scan-deck-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wl-scan-live-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55);
+    animation: wl-live-pulse 1.6s ease-out infinite;
+}
+
+@keyframes wl-live-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+    70% { box-shadow: 0 0 0 9px rgba(var(--accent-rgb), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+}
+
+.wl-scan-live-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.wl-scan-progress-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.wl-scan-counters {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.wl-scan-counter {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wl-scan-counter.added {
+    background: rgba(80, 200, 120, 0.1);
+    border-color: rgba(80, 200, 120, 0.25);
+}
+
+.wl-scan-counter-num {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    display: inline-block;
+}
+
+.wl-scan-counter.added .wl-scan-counter-num {
+    color: #6fd99a;
+}
+
+.wl-scan-counter-num.pop {
+    animation: wl-counter-pop 0.35s ease;
+}
+
+@keyframes wl-counter-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.35); }
+    100% { transform: scale(1); }
+}
+
+.wl-scan-counter-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.wl-scan-progress {
+    margin: 12px 0 14px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+}
+
+.wl-scan-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    position: relative;
+    transition: width 0.6s ease;
+}
+
+.wl-scan-progress-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: wl-progress-shimmer 1.8s linear infinite;
+}
+
+@keyframes wl-progress-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.wl-scan-deck-body {
+    display: grid;
+    grid-template-columns: minmax(320px, 1.1fr) minmax(300px, 1fr);
+    gap: 24px;
+    align-items: stretch;
+}
+
+@media (max-width: 760px) {
+    .wl-scan-deck-body { grid-template-columns: 1fr; }
+}
+
+/* Hero — big square portrait (artist-page language) with the current album
+   stamped as an overlay badge, so the layout NEVER shifts when album art is
+   missing: the badge keeps its slot and shows a glyph placeholder instead. */
+.wl-scan-hero {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-width: 0;
+}
+
+.wl-scan-portrait {
+    position: relative;
+    width: 148px;
+    height: 148px;
+    border-radius: 16px;
+    background: #181818;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(var(--accent-rgb), 0.25);
+    flex-shrink: 0;
+}
+
+/* glyph placeholder behind the (possibly hidden) artist image */
+.wl-scan-portrait::before {
+    content: '♪';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 42px;
+    color: rgba(255, 255, 255, 0.12);
+}
+
+.wl-scan-portrait-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+    object-fit: cover;
+}
+
+.wl-scan-album-thumb {
+    position: absolute;
+    right: -12px;
+    bottom: -12px;
+    width: 62px;
+    height: 62px;
+    border-radius: 10px;
+    background: #181818;
+    border: 3px solid #121212;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.wl-scan-album-thumb::before {
+    content: '♪';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.15);
+}
+
+.wl-scan-album-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.wl-scan-hero-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+}
+
+.wl-scan-artist-name {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-scan-phase {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: rgba(var(--accent-light-rgb), 0.9);
+}
+
+/* Fixed-height "now checking" block — placeholders keep the slot when the
+   scan hasn't reached an album/track yet, so nothing jumps. */
+.wl-scan-now {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0 8px 8px 0;
+    min-height: 44px;
+}
+
+.wl-scan-album-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-scan-track-name {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Feed — inset panel (artist-page sidebar language) with a FIXED height so
+   the deck is the same size whether 0 or 10 tracks have been added. */
+.wl-scan-feed {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 172px;
+    padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+}
+
+.wl-scan-feed-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #6fd99a;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.wl-scan-feed-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item {
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item img {
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item.is-new {
+    animation: wl-feed-slide-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes wl-feed-slide-in {
+    0% { opacity: 0; transform: translateY(-10px) scale(0.96); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── #831 round 2: scan history modal run cards ────────────────────────── */
+
+.wlh-run {
+    margin-bottom: 6px;
+}
+
+.wlh-run-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.wlh-run-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wlh-run-when {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.wlh-run-status.cancelled {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: rgba(248, 113, 113, 0.12);
+    color: #f87171;
+}
+
+.wlh-run-stats {
+    margin-left: auto;
+    display: flex;
+    gap: 14px;
+}
+
+.wlh-run-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.wlh-run-stat.added {
+    color: #6fd99a;
+}
+
+.wlh-run-stat i {
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.wlh-run-body {
+    padding: 8px 6px 4px 14px;
+}
+
+.wlh-run-body .origin-modal-loading,
+.wlh-empty {
+    padding: 16px;
+}
+
+.wlh-run-body .watchlist-live-addition-item {
+    margin-bottom: 4px;
+}
+
+/* ── #831 round 3: watchlist action chips (artist-page button language) ── */
+
+.wl-chip {
+    --chip-rgb: 148, 163, 184;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-family: inherit;
+    color: rgba(var(--chip-rgb), 1);
+    background: linear-gradient(135deg, rgba(var(--chip-rgb), 0.15) 0%, rgba(var(--chip-rgb), 0.05) 100%);
+    border: 1px solid rgba(var(--chip-rgb), 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    outline: none;
+    overflow: hidden;
+}
+
+.wl-chip:hover {
+    background: linear-gradient(135deg, rgba(var(--chip-rgb), 0.25) 0%, rgba(var(--chip-rgb), 0.12) 100%);
+    border-color: rgba(var(--chip-rgb), 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(var(--chip-rgb), 0.25);
+}
+
+.wl-chip:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.wl-chip svg {
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.wl-chip:hover svg {
+    transform: scale(1.12);
+}
+
+.wl-chip--blue   { --chip-rgb: 96, 165, 250; }
+.wl-chip--green  { --chip-rgb: 111, 217, 154; }
+.wl-chip--amber  { --chip-rgb: 251, 191, 36; }
+.wl-chip--red    { --chip-rgb: 248, 113, 113; }
+.wl-chip--slate  { --chip-rgb: 165, 180, 203; }
+
+/* Primary CTA — solid accent gradient + shimmer sweep */
+.wl-chip--cta {
+    color: #fff;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    border: 1px solid rgba(var(--accent-light-rgb), 0.6);
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.wl-chip--cta:hover {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    border-color: rgba(var(--accent-light-rgb), 0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.5);
+}
+
+.wl-chip-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.25) 50%, transparent 60%);
+    transform: translateX(-100%);
+    animation: wl-chip-shimmer 3.2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes wl-chip-shimmer {
+    0% { transform: translateX(-100%); }
+    55% { transform: translateX(100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Header meta chips */
+.wl-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wl-meta-chip--accent {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+/* ── #831 round 3: Global Settings modal reskin ───────────────────────── */
+
+.wl-global-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.wl-global-modal-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+.wl-global-modal-sub {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.wl-global-modal-close {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.wl-global-modal-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* Option cards: live checked-state feedback (applies to the per-artist config
+   modal too — same components, same standard). */
+.config-option:has(input[type="checkbox"]:checked) {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.07);
+}
+
+.config-option:has(input[type="checkbox"]:checked) .config-option-icon {
+    filter: none;
+    opacity: 1;
+}
+
+.config-option:not(:has(input[type="checkbox"]:checked)) .config-option-icon {
+    filter: grayscale(0.7);
+    opacity: 0.55;
+}
+
+/* The global-override master toggle gets a stronger enabled treatment */
+.global-override-toggle.enabled {
+    border-color: rgba(var(--accent-rgb), 0.6) !important;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.04)) !important;
+    box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12);
+}
+
+.wl-global-modal .config-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: rgb(var(--accent-light-rgb));
 }
 
 /* Watchlist Search */
@@ -59389,7 +60037,11 @@ body.reduce-effects #page-particles-canvas {
 }
 
 .adl-batch-panel.collapsed .adl-batch-active,
-.adl-batch-panel.collapsed .adl-batch-history-section {
+.adl-batch-panel.collapsed .adl-batch-history-section,
+/* The active-batches summary line ("N batches · M downloading · …") is shown
+   via JS and was NOT hidden on collapse, so it overflowed the 44px rail as
+   clipped text (#814). Hide it with the rest of the panel body. */
+.adl-batch-panel.collapsed .adl-batch-summary {
     display: none;
 }
 
@@ -61931,7 +62583,10 @@ body.reduce-effects .dash-card::after {
 }
 .dash-card:hover {
     border-color: rgba(var(--accent-rgb), 0.35);
-    transform: translateY(-3px);
+    /* No translateY lift: moving the card up on hover pulls its bottom edge off
+       the cursor when you hover that edge, which un-hovers → drops → re-hovers
+       in a rapid flicker loop (#816). The stronger shadow + glow below already
+       reads as "raised" without moving the hit box. */
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.40),
         0 4px 14px rgba(0, 0, 0, 0.22),
@@ -62133,7 +62788,9 @@ body.reduce-effects .dash-card::after {
 
 .qa-tile:hover,
 .qa-tile:focus-visible {
-    transform: translateY(-2px);
+    /* No translateY lift — see .dash-card:hover (#816 hover-flicker). overflow
+       is hidden here so a pseudo-element gap-buffer can't help; the glow/shadow
+       below carries the hover state. */
     border-color: rgba(var(--accent-rgb), 0.32);
     box-shadow:
         0 16px 40px rgba(0, 0, 0, 0.5),
@@ -62306,7 +62963,11 @@ body.reduce-effects .dash-card::after {
     align-items: center;
     justify-content: space-between;
     gap: clamp(4px, 0.5cqw, 8px);
-    opacity: 0.45;
+    /* The flow sits in the bottom row, directly behind the green "Open →" CTA —
+       at 0.45 the accent nodes/line competed with the CTA and read as clutter
+       (#816 "automations looks a bit strange"). Toned to a faint background
+       texture; it still brightens on hover. */
+    opacity: 0.22;
     transition: opacity 0.35s ease;
 }
 
@@ -66690,6 +67351,55 @@ body.em-scroll-lock { overflow: hidden; }
 .origin-row-delete {
     border-color: rgba(248, 113, 113, 0.4) !important;
     color: #f87171 !important;
+}
+
+/* #831: origins grouped by what triggered them (artist / playlist) */
+.origin-group {
+    margin-bottom: 6px;
+}
+
+.origin-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.origin-group-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.origin-group-caret {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    width: 12px;
+}
+
+.origin-group-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.origin-group-count {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.origin-group-body {
+    padding: 4px 0 2px 6px;
 }
 
 /* ── Blocklist modal (artist/album/track bans) ── */

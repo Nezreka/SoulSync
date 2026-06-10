@@ -302,18 +302,21 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
     @classmethod
     def _track_matches_qualifiers(cls, track, qualifiers: List[str]) -> bool:
-        """Issue #589 — qualifier check must inspect both track.name AND
-        track.album.name. For MTV Unplugged-style releases the live /
-        unplugged signal lives in the album title, not the track title.
-        A track passes if every required qualifier appears as a whole
-        word in either the track name OR its album name.
+        """Issue #589 — qualifier check must inspect track.name, track.version
+        AND track.album.name. Tidal stores remix/live/edit qualifiers in a
+        dedicated `version` attribute (e.g. name="Emerge", version="Junkie XL
+        Remix"), and for MTV Unplugged-style releases the live / unplugged
+        signal lives in the album title. A track passes if every required
+        qualifier appears as a whole word in the track name, its version, OR
+        its album name.
         """
         if not qualifiers:
             return True
         track_name = (getattr(track, 'name', '') or '').lower()
+        version = (getattr(track, 'version', '') or '').lower()
         album = getattr(track, 'album', None)
         album_name = (getattr(album, 'name', '') or '').lower() if album else ''
-        haystack = f"{track_name} {album_name}".strip()
+        haystack = f"{track_name} {version} {album_name}".strip()
         if not haystack:
             return False
         for kw in qualifiers:
@@ -475,6 +478,17 @@ class TidalDownloadClient(DownloadSourcePlugin):
     def _tidal_to_track_result(self, track, quality_info: dict) -> TrackResult:
         artist_name = track.artist.name if track.artist else 'Unknown Artist'
         title = track.name or 'Unknown Title'
+        # Tidal keeps remix/live/edition qualifiers in a separate `version`
+        # attribute (e.g. name="Emerge", version="Junkie XL Remix"). The
+        # matcher only scores `title`, so without folding the version in,
+        # every remix/live/edit candidate presents as the bare base track
+        # and MusicMatchingEngine's strict version check rejects it against
+        # a "... (Junkie XL Remix)" request. Append the version (unless it's
+        # already in the name) so the candidate title is the full
+        # "Title (Version)".
+        version = getattr(track, 'version', None)
+        if version and version.strip() and version.strip().lower() not in title.lower():
+            title = f"{title} ({version.strip()})"
         album_name = track.album.name if track.album else None
 
         duration_ms = int(track.duration * 1000) if track.duration else None
@@ -548,6 +562,62 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
         return init_uri, segment_uris
 
+    # Tidal aggressively rate-limits the trackManifests endpoint. When a
+    # batch fans out, a bare request fails 429 instantly, the quality tier is
+    # burned, the track is re-queued, and the retry hammers again — a
+    # self-amplifying storm (thousands of 429s, downloads stalled, only the
+    # lowest tier squeaking through). Honour the server's Retry-After (or back
+    # off exponentially) so downloads pace themselves to whatever rate Tidal
+    # allows instead of slamming the wall and instant-failing.
+    _MANIFEST_MAX_RETRIES = 5
+    _MANIFEST_BACKOFF_BASE = 2.0   # seconds → 2, 4, 8, 16, 32 (capped)
+    _MANIFEST_BACKOFF_CAP = 30.0
+
+    @classmethod
+    def _retry_after_seconds(cls, response, attempt: int) -> float:
+        """Backoff delay for a rate-limited response: honour a numeric
+        Retry-After header when present, else exponential backoff (capped)."""
+        retry_after = response.headers.get('Retry-After') if response is not None else None
+        if retry_after:
+            try:
+                return min(max(float(retry_after), 0.0), cls._MANIFEST_BACKOFF_CAP)
+            except (TypeError, ValueError):
+                pass
+        return min(cls._MANIFEST_BACKOFF_BASE * (2 ** attempt), cls._MANIFEST_BACKOFF_CAP)
+
+    def _sleep_with_shutdown(self, delay: float) -> bool:
+        """Sleep up to `delay` seconds in small slices. Returns True if a
+        shutdown was requested mid-sleep so the caller can bail early."""
+        slept = 0.0
+        while slept < delay:
+            if self.shutdown_check and self.shutdown_check():
+                return True
+            chunk = min(0.5, delay - slept)
+            time.sleep(chunk)
+            slept += chunk
+        return False
+
+    def _get_with_rate_limit_retry(self, url: str, *, params=None, headers=None,
+                                   timeout: int = 20):
+        """HTTP GET that backs off and retries on 429 (and transient 5xx),
+        honouring Retry-After. Returns the final Response (the caller still
+        calls raise_for_status); a persistent rate-limit after all retries
+        returns the last 429 response so existing error handling applies."""
+        response = None
+        for attempt in range(self._MANIFEST_MAX_RETRIES + 1):
+            response = http_requests.get(url, params=params, headers=headers, timeout=timeout)
+            if response.status_code != 429 and response.status_code < 500:
+                return response
+            if attempt >= self._MANIFEST_MAX_RETRIES:
+                return response
+            delay = self._retry_after_seconds(response, attempt)
+            logger.warning(
+                f"Tidal returned {response.status_code} on manifest fetch — backing off "
+                f"{delay:.1f}s (attempt {attempt + 1}/{self._MANIFEST_MAX_RETRIES})")
+            if self._sleep_with_shutdown(delay):
+                return response
+        return response
+
     def _get_hls_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
         q_info = HLS_QUALITY_MAP.get(quality, HLS_QUALITY_MAP['lossless'])
         formats = q_info['formats']
@@ -573,7 +643,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
         }
 
         try:
-            response = http_requests.get(url, params=params, headers=headers, timeout=20)
+            response = self._get_with_rate_limit_retry(url, params=params, headers=headers, timeout=20)
             response.raise_for_status()
             data = response.json()
         except http_requests.HTTPError as e:

@@ -633,6 +633,13 @@ class SpotifyClient:
         watchlist) use THIS instead of ``is_spotify_authenticated()`` so the
         free source is reachable. Does NOT change auth semantics."""
         from core.spotify_free_metadata import should_offer_spotify_metadata
+        # The enrichment worker's prefer-free opt-in (set on its own client)
+        # makes the no-auth source the active path even without auth or the
+        # 'no-auth Spotify' source choice — so metadata IS available to it. This
+        # only fires on a client carrying _prefer_free (the worker's), so
+        # interactive/watchlist availability is unchanged.
+        if getattr(self, '_prefer_free', False) and self._free_installed():
+            return True
         try:
             authed = self.is_spotify_authenticated()
         except Exception:
@@ -646,13 +653,21 @@ class SpotifyClient:
         term covers the brief window before the auth cache refreshes. When authed
         + healthy the official path returns first, so this never opens.
 
-        Three activations fall out of this: a no-auth user who chose Spotify
+        Activations that fall out of this: a no-auth user who chose Spotify
         Free (free is their source), a connected user mid-rate-limit (free
-        bridges the ban), and a connected user who has spent the enrichment
-        worker's real-API daily budget (``_budget_exhausted_use_free``, set by
-        the worker) — so a Spotify-Free user is never paused by the budget, it
-        just switches to the uncapped free source. See _free_wanted()."""
+        bridges the ban), a connected user who has spent the enrichment worker's
+        real-API daily budget (``_budget_exhausted_use_free``, set by the worker)
+        — so a Spotify-Free user is never paused by the budget — and the worker
+        opt-in below. See _free_wanted()."""
         from core.spotify_free_metadata import should_use_free_fallback
+        # Worker opt-in (metadata.spotify_free_enrichment): prefer the no-creds
+        # source for enrichment even while authed + healthy + under budget, to
+        # spare the official quota for interactive use. The flag IS the explicit
+        # opt-in, so it only needs the package installed — not the 'Spotify Free'
+        # metadata-source choice — and it's set only on the enrichment worker's
+        # own client, so interactive search/resolve stay official-first.
+        if getattr(self, '_prefer_free', False) and self._free_installed():
+            return True
         if not self._free_available():
             return False
         try:
@@ -1426,7 +1441,11 @@ class SpotifyClient:
             if tracks:
                 return tracks
 
-        use_spotify = self.is_spotify_authenticated()
+        # Skip the official API when the no-creds free source should serve this
+        # (no-auth / rate-limited — where auth is already False — plus the
+        # budget-bridge and the worker's prefer-free opt-in, where auth is True
+        # but we deliberately defer to free). The free branch below then runs.
+        use_spotify = self.is_spotify_authenticated() and not self._free_active()
 
         if use_spotify:
             try:
@@ -1492,7 +1511,11 @@ class SpotifyClient:
                 artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
                 return artists
 
-        use_spotify = self.is_spotify_authenticated()
+        # Skip the official API when the no-creds free source should serve this
+        # (no-auth / rate-limited — where auth is already False — plus the
+        # budget-bridge and the worker's prefer-free opt-in, where auth is True
+        # but we deliberately defer to free). The free branch below then runs.
+        use_spotify = self.is_spotify_authenticated() and not self._free_active()
 
         if use_spotify:
             try:
@@ -1548,11 +1571,17 @@ class SpotifyClient:
         return []
 
     @rate_limited
-    def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Album]:
+    def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True,
+                      artist: str = None, album: str = None) -> List[Album]:
         """Search for albums.
 
         When allow_fallback is True, falls back to the configured metadata source
         if Spotify is unavailable or returns an error.
+
+        ``artist`` + ``album`` (the names, passed separately) enable the no-creds
+        Spotify Free path: SpotipyFree has no album-name search, so when Free is
+        active it resolves the album via the artist's discography. Callers without
+        that context (a bare query) skip the Free album path.
         """
         cache = get_metadata_cache()
         # Check Spotify cache first so cached data remains usable even when
@@ -1568,7 +1597,11 @@ class SpotifyClient:
             if albums:
                 return albums
 
-        use_spotify = self.is_spotify_authenticated()
+        # Skip the official API when the no-creds free source should serve this
+        # (no-auth / rate-limited — where auth is already False — plus the
+        # budget-bridge and the worker's prefer-free opt-in, where auth is True
+        # but we deliberately defer to free). The free branch below then runs.
+        use_spotify = self.is_spotify_authenticated() and not self._free_active()
 
         if use_spotify:
             try:
@@ -1592,7 +1625,21 @@ class SpotifyClient:
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'search_albums')
                 logger.error(f"Error searching albums via Spotify: {e}")
-                # Fall through to iTunes fallback
+                # Fall through to free / iTunes fallback
+
+        # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when
+        # official Spotify can't serve us (no auth / rate-limited / budget spent),
+        # before the iTunes/Deezer fallback. Albums have no name-search upstream,
+        # so resolve via the artist's discography — needs artist + album names.
+        # Gated by _free_active() so it never runs while auth is healthy.
+        if allow_fallback and self._free_active() and artist and album:
+            try:
+                objs = [Album.from_spotify_album(a)
+                        for a in self._free_meta.search_albums_via_artist(artist, album, min(limit, 10))]
+                if objs:
+                    return objs
+            except Exception as e:
+                logger.debug("SpotipyFree album search failed: %s", e)
 
         # Fallback (iTunes or Deezer)
         if allow_fallback:
@@ -1623,7 +1670,7 @@ class SpotifyClient:
                 # Fallback cache hit — delegate to fallback client which reconstructs enhanced format
                 return self._fallback.get_track_details(track_id)
 
-        if self.is_spotify_authenticated():
+        if self.is_spotify_authenticated() and not self._free_active():
             try:
                 track_data = self.sp.track(track_id)
 
@@ -1725,7 +1772,7 @@ class SpotifyClient:
                 # Fallback cache hit — delegate to fallback client
                 return self._fallback.get_album(album_id)
 
-        if self.is_spotify_authenticated():
+        if self.is_spotify_authenticated() and not self._free_active():
             try:
                 album_data = self.sp.album(album_id)
                 if album_data:
@@ -1768,7 +1815,7 @@ class SpotifyClient:
         if cached:
             return cached
 
-        if self.is_spotify_authenticated():
+        if self.is_spotify_authenticated() and not self._free_active():
             try:
                 # Get first page of tracks
                 first_page = self.sp.album_tracks(album_id)
@@ -1862,7 +1909,7 @@ class SpotifyClient:
                 except Exception as e:
                     logger.debug("artist albums cache reuse: %s", e)
 
-        if self.is_spotify_authenticated():
+        if self.is_spotify_authenticated() and not self._free_active():
             try:
                 albums = []
                 raw_items = []
@@ -1980,7 +2027,7 @@ class SpotifyClient:
                 return self._fallback.get_artist(artist_id)
             return None
 
-        if self.is_spotify_authenticated():
+        if self.is_spotify_authenticated() and not self._free_active():
             try:
                 result = self.sp.artist(artist_id)
                 if result:

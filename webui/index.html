@@ -3839,7 +3839,7 @@
                                         <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
-                                            <option value="spotify_free">Spotify Free (no credentials)</option>
+                                            <option value="spotify_free">Spotify (no auth)</option>
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
                                             <option value="discogs">Discogs</option>
@@ -3849,11 +3849,11 @@
                                     <div class="callback-info">
                                         <div class="callback-help">Where artist, album, and track metadata comes from:<br>
                                             • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
-                                            • <strong>Spotify Free</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site), can't search albums by name (album results come from iTunes/Deezer instead), and can't read your personal library or playlists.<br>
+                                            • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
                                             • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
                                             • <strong>Discogs</strong> — needs a personal access token.<br><br>
-                                            Tip: if you pick <strong>Spotify Free</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to free while Spotify is rate-limited — then switches back automatically.</div>
+                                            Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to no-auth while Spotify is rate-limited — then switches back automatically.</div>
                                     </div>
                                 </div>
 
@@ -3892,6 +3892,15 @@
                                             <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
                                                 onclick="disconnectSpotify()" style="display: none;">🔌
                                                 Disconnect</button>
+                                        </div>
+                                        <div class="form-group" style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
+                                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
+                                                <input type="checkbox" id="metadata-spotify-free-enrichment" style="width: auto; margin: 0;">
+                                                <span>Use Spotify (no auth) for background enrichment</span>
+                                            </label>
+                                            <div class="callback-info">
+                                                <div class="callback-help">Runs the background metadata enrichment worker on the no-auth Spotify source instead of this connected account — keeping bulk enrichment off your official API quota (and dodging rate-limit bans), so your account is reserved for interactive search and playlist sync. <strong>On by default.</strong> Turn off to enrich through your connected account instead. Works even with no account connected. Note: the no-auth source can't supply artist genres.</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -6958,28 +6967,53 @@
                                 Watchlist
                             </h2>
                             <div class="watchlist-page-meta">
-                                <span class="watchlist-page-count" id="watchlist-page-count">0 artists</span>
-                                <span class="watchlist-page-timer" id="watchlist-next-auto-timer">Next Auto: --</span>
+                                <span class="wl-meta-chip" id="watchlist-page-count">0 artists</span>
+                                <span class="wl-meta-chip wl-meta-chip--accent" id="watchlist-next-auto-timer">Next Auto: --</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Scan status / live activity (IDs match old modal for compatibility) -->
                     <div id="watchlist-scan-status" class="watchlist-page-scan-status" style="display: none;">
-                        <div id="watchlist-live-activity" class="watchlist-live-activity" style="display: none;">
-                            <div class="watchlist-live-activity-col">
-                                <img id="watchlist-artist-img" class="watchlist-live-activity-artist-img" src="" alt="Artist" onerror="this.style.display='none';" />
-                                <div id="watchlist-artist-name" class="watchlist-live-activity-label">Waiting...</div>
+                        <!-- #831 round 2: full-width live "scan deck" -->
+                        <div id="watchlist-live-activity" class="wl-scan-deck" style="display: none;">
+                            <div class="wl-scan-deck-head">
+                                <span class="wl-scan-live-dot"></span>
+                                <span class="wl-scan-live-label">Scanning</span>
+                                <span id="wl-scan-progress-text" class="wl-scan-progress-text"></span>
+                                <div class="wl-scan-counters">
+                                    <div class="wl-scan-counter">
+                                        <span id="wl-scan-found" class="wl-scan-counter-num">0</span>
+                                        <span class="wl-scan-counter-label">found</span>
+                                    </div>
+                                    <div class="wl-scan-counter added">
+                                        <span id="wl-scan-added" class="wl-scan-counter-num">0</span>
+                                        <span class="wl-scan-counter-label">added</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="watchlist-live-activity-col">
-                                <img id="watchlist-album-img" class="watchlist-live-activity-album-img" src="" alt="Album" onerror="this.style.display='none';" />
-                                <div id="watchlist-album-name" class="watchlist-live-activity-label">Waiting...</div>
-                            </div>
-                            <div class="watchlist-live-activity-feed">
-                                <div class="watchlist-live-activity-feed-label">Current Track:</div>
-                                <div id="watchlist-track-name" class="watchlist-live-activity-track">Waiting...</div>
-                                <div class="watchlist-live-activity-feed-label-orange">Recently Added:</div>
-                                <div id="watchlist-additions-feed" style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px;"></div>
+                            <div class="wl-scan-progress"><div id="wl-scan-progress-bar" class="wl-scan-progress-bar" style="width: 0%;"></div></div>
+                            <div class="wl-scan-deck-body">
+                                <div class="wl-scan-hero">
+                                    <div class="wl-scan-portrait">
+                                        <img id="watchlist-artist-img" class="wl-scan-portrait-img" src="" alt="" onerror="this.style.display='none';" />
+                                        <div class="wl-scan-album-thumb">
+                                            <img id="watchlist-album-img" src="" alt="" onerror="this.style.display='none';" />
+                                        </div>
+                                    </div>
+                                    <div class="wl-scan-hero-text">
+                                        <div id="watchlist-artist-name" class="wl-scan-artist-name">Waiting…</div>
+                                        <div id="wl-scan-phase" class="wl-scan-phase">starting…</div>
+                                        <div class="wl-scan-now">
+                                            <div id="watchlist-album-name" class="wl-scan-album-name">—</div>
+                                            <div id="watchlist-track-name" class="wl-scan-track-name">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="wl-scan-feed">
+                                    <div class="wl-scan-feed-label">Added to wishlist this run</div>
+                                    <div id="watchlist-additions-feed" class="wl-scan-feed-list"></div>
+                                </div>
                             </div>
                         </div>
                         <div id="watchlist-page-scan-summary" class="scan-status-summary" style="display: none;"></div>
@@ -6987,27 +7021,32 @@
 
                     <!-- Action buttons -->
                     <div class="watchlist-page-actions">
-                        <button class="btn btn--primary" id="scan-watchlist-btn" onclick="startWatchlistScan()">
+                        <button class="wl-chip wl-chip--cta" id="scan-watchlist-btn" onclick="startWatchlistScan()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             Scan for New Releases
+                            <span class="wl-chip-shimmer"></span>
                         </button>
-                        <button class="btn btn--secondary" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
+                        <button class="wl-chip wl-chip--red" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             Cancel Scan
                         </button>
-                        <button class="btn btn--secondary" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
+                        <button class="wl-chip wl-chip--blue" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Update Similar Artists
                         </button>
-                        <button class="btn btn--secondary" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
+                        <button class="wl-chip wl-chip--slate" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                             Global Settings
                         </button>
-                        <button class="btn btn--secondary" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
+                        <button class="wl-chip wl-chip--green" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Download Origins
                         </button>
-                        <button class="btn btn--secondary" id="watchlist-page-blocklist-btn" onclick="openBlocklistModal('artist')" title="Block artists, albums or tracks from ever being downloaded">
+                        <button class="wl-chip wl-chip--amber" id="watchlist-page-history-btn" onclick="openWatchlistHistoryModal()" title="Every past scan and the tracks it added to the wishlist">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
+                            History
+                        </button>
+                        <button class="wl-chip wl-chip--red" id="watchlist-page-blocklist-btn" onclick="openBlocklistModal('artist')" title="Block artists, albums or tracks from ever being downloaded">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
                             Blocklist
                         </button>
@@ -7689,18 +7728,13 @@
 
     <!-- Watchlist Global Config Modal -->
     <div class="modal-overlay hidden" id="watchlist-global-config-modal-overlay">
-        <div class="watchlist-artist-config-modal" id="watchlist-global-config-modal">
-            <div class="watchlist-artist-config-header" style="padding: 24px 28px;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="font-size: 28px;">⚙️</span>
-                    <div>
-                        <h2 style="color: #fff; margin: 0; font-size: 22px;">Global Watchlist Settings</h2>
-                        <p style="color: #b3b3b3; margin: 4px 0 0; font-size: 13px;">
-                            Override per-artist settings for all watchlist scans
-                        </p>
-                    </div>
+        <div class="watchlist-artist-config-modal wl-global-modal" id="watchlist-global-config-modal">
+            <div class="wl-global-modal-head">
+                <div>
+                    <h2 class="wl-global-modal-title">Global Watchlist Settings</h2>
+                    <p class="wl-global-modal-sub">Override per-artist settings for all watchlist scans.</p>
                 </div>
-                <span class="watchlist-artist-config-close" onclick="closeWatchlistGlobalSettingsModal()">&times;</span>
+                <button class="wl-global-modal-close" onclick="closeWatchlistGlobalSettingsModal()" aria-label="Close">✕</button>
             </div>
 
             <div class="watchlist-artist-config-content">
@@ -8154,6 +8188,7 @@
     <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>

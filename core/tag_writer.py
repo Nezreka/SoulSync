@@ -210,10 +210,20 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             db_str = ', '.join(db_val) if db_val else ''
             db_val = db_str if db_str else None
 
-        # Special: year — DB stores int, file stores string
-        if db_key == 'year' and db_val is not None:
-            db_str = str(db_val)
-            db_val = str(db_val)
+        # Special: year / release date (#824). Prefer the full release_date when
+        # the DB has one — it's authoritative, compare it directly. Otherwise use
+        # the year int, for which a MORE-specific file date with the same year is
+        # preserved (not flagged as a change). DB year is int, file is string.
+        if db_key == 'year':
+            release_date = db_data.get('release_date')
+            if release_date:
+                db_val = str(release_date)
+                db_str = str(release_date).strip()
+            elif db_val is not None:
+                db_str = str(db_val)
+                db_val = str(db_val)
+                if file_str and file_str[:4] == db_str:
+                    file_str = db_str
 
         # Only mark as changed if DB has a value AND it differs from file
         # (writer skips fields where DB value is empty, so don't show them as diffs)
@@ -319,7 +329,10 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             album = guard_placeholder_overwrite(album, _current.get('album'))
             album_artist = guard_placeholder_overwrite(album_artist, _current.get('album_artist'))
 
-        year = db_data.get('year')
+        # Prefer the full release_date (e.g. 2023-09-01) when the DB has one;
+        # fall back to the year-only int. _date_to_write() then writes the full
+        # date and still preserves an equally-specific existing file date (#824).
+        year = db_data.get('release_date') or db_data.get('year')
         genres = db_data.get('genres')
         track_num = db_data.get('track_number')
         total_tracks = db_data.get('track_count')
@@ -390,13 +403,12 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             if art_ok:
                 written.append('cover_art')
 
-        # Save
-        if isinstance(audio.tags, ID3):
-            audio.save(v1=0, v2_version=4)
-        elif isinstance(audio, FLAC):
-            audio.save(deleteid3=True)
-        else:
-            audio.save()
+        # Save — atomically (#819): write into a temp copy + atomic replace so an
+        # interrupted/OOM-killed save can never truncate the user's file. Same
+        # format kwargs as before, just routed through the shared atomic helper.
+        from types import SimpleNamespace
+        from core.metadata.common import save_audio_file
+        save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile))
 
         return {'success': True, 'written_fields': written}
 
@@ -443,6 +455,20 @@ def _multi_artist_write_enabled() -> bool:
         return False
 
 
+def _date_to_write(existing: Optional[str], year) -> str:
+    """Value to write for the date/year tag. Writes the DB year, BUT keeps an
+    existing, MORE-specific file date (e.g. ``2023-11-03``) when its year already
+    matches — so enrichment/retag never downgrades a real full release date to
+    just the year (#824). When the years differ (a genuine correction) or the
+    file has no date, the year is written as before."""
+    year_str = str(year)
+    if existing:
+        existing = str(existing).strip()
+        if len(existing) > 4 and existing[:4] == year_str:
+            return existing
+    return year_str
+
+
 def _write_id3(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
                artists_list: Optional[List[str]] = None) -> List[str]:
@@ -474,8 +500,9 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         audio.tags.add(TALB(encoding=3, text=[album]))
         written.append('album')
     if year is not None:
+        existing_date = _id3_text(audio.tags, 'TDRC')
         audio.tags.delall('TDRC')
-        audio.tags.add(TDRC(encoding=3, text=[str(year)]))
+        audio.tags.add(TDRC(encoding=3, text=[_date_to_write(existing_date, year)]))
         written.append('year')
     if genre:
         audio.tags.delall('TCON')
@@ -521,7 +548,7 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         audio['album'] = [album]
         written.append('album')
     if year is not None:
-        audio['date'] = [str(year)]
+        audio['date'] = [_date_to_write(_vorbis_first(audio, 'date'), year)]
         written.append('year')
     if genre:
         audio['genre'] = [genre]
@@ -565,7 +592,7 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
         audio['\xa9alb'] = [album]
         written.append('album')
     if year is not None:
-        audio['\xa9day'] = [str(year)]
+        audio['\xa9day'] = [_date_to_write(_mp4_first(audio, '\xa9day'), year)]
         written.append('year')
     if genre:
         audio['\xa9gen'] = [genre]

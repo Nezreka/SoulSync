@@ -27,9 +27,30 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+from difflib import SequenceMatcher
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_name(s: str) -> str:
+    """Lowercase + collapse whitespace for loose name comparison."""
+    return ' '.join((s or '').lower().split())
+
+
+def rank_albums_by_name(albums: list[dict], album_name: str, limit: int = 10) -> list[dict]:
+    """Rank Spotify-shaped album dicts by name similarity to ``album_name`` (best
+    first) and return up to ``limit``. Pure (no network) so it's unit-testable.
+
+    Used to turn an artist's whole discography into the most-relevant album
+    candidates, since SpotipyFree has no album-name search of its own."""
+    target = _norm_name(album_name)
+    scored = [
+        (SequenceMatcher(None, _norm_name((alb or {}).get('name', '')), target).ratio(), alb)
+        for alb in (albums or [])
+    ]
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [alb for _score, alb in scored[:limit]]
 
 _installed_cache: Optional[bool] = None
 
@@ -186,8 +207,45 @@ class SpotifyFreeMetadataClient:
 
     def search_albums(self, query: str, limit: int = 10) -> list[dict]:
         # No album-name search exists in SpotipyFree/spotapi. Albums are only
-        # reachable by id or via an artist's discography.
+        # reachable by id or via an artist's discography — see
+        # search_albums_via_artist() for the artist-scoped workaround.
         return []
+
+    def search_albums_via_artist(self, artist_name: str, album_name: str,
+                                 limit: int = 10) -> list[dict]:
+        """Find an album by name using ONLY the free source: SpotipyFree has no
+        album-name search, so resolve the artist (best name match) and scan their
+        discography for the album. Returns Spotify-shaped album dicts ranked by
+        similarity to ``album_name`` (best first); the caller applies its own
+        match threshold. Empty when artist/album is missing or no artist matches.
+
+        This is what lets the budget/rate-limit bridge match albums on Spotify
+        Free instead of being unable to (the gap that previously dropped album
+        enrichment straight through to the iTunes/Deezer fallback)."""
+        if not (artist_name and album_name):
+            return []
+        try:
+            artists = self.search_artists(artist_name, limit=5)
+        except Exception as e:
+            logger.debug(f"SpotipyFree search_albums_via_artist artist lookup failed: {e}")
+            return []
+        if not artists:
+            return []
+        target_artist = _norm_name(artist_name)
+        best = max(
+            artists,
+            key=lambda a: SequenceMatcher(
+                None, _norm_name(a.get('name', '')), target_artist).ratio(),
+        )
+        artist_id = best.get('id')
+        if not artist_id:
+            return []
+        try:
+            albums = self.get_artist_albums_list(artist_id, limit=50)
+        except Exception as e:
+            logger.debug(f"SpotipyFree search_albums_via_artist discography failed: {e}")
+            return []
+        return rank_albums_by_name(albums, album_name, limit)
 
     # -- entity lookups ---------------------------------------------------
     def get_album(self, album_id: str, include_tracks: bool = True) -> Optional[dict]:

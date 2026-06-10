@@ -649,6 +649,27 @@ class MusicDatabase:
                     logger.info(f"Added {_col} column to library_history")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
 
+            # Watchlist scan history (#831 round 2) — one row per scan run with
+            # its full track ledger (added/skipped), so the Watchlist page can
+            # show what every past run did. Wishlist rows erode as tracks
+            # download, so this is the durable record.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_scan_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL UNIQUE,
+                    profile_id INTEGER DEFAULT 1,
+                    status TEXT NOT NULL,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    total_artists INTEGER DEFAULT 0,
+                    artists_scanned INTEGER DEFAULT 0,
+                    tracks_found INTEGER DEFAULT 0,
+                    tracks_added INTEGER DEFAULT 0,
+                    track_events TEXT
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wsr_completed ON watchlist_scan_runs (completed_at DESC)")
+
             # Auto-import history — tracks auto-import scan results and processing status
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS auto_import_history (
@@ -1020,6 +1041,15 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
                 logger.info("Repaired missing api_track_count column on albums table")
 
+            # Full release date (#824). Additive + nullable: NULL means "only the
+            # year is known", and every reader falls back to albums.year, so this
+            # is safe to ship dormant. Populated by enrichment + manual edit;
+            # consumed by the tag writer to write the full date (e.g. 2023-09-01)
+            # instead of truncating it to the year.
+            if album_cols and 'release_date' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN release_date TEXT DEFAULT NULL")
+                logger.info("Added release_date column to albums table (#824)")
+
             # Canonical album version (#765 / #767-Bug2). Additive + nullable:
             # a NULL canonical means "unresolved" and every tool falls back to
             # today's behavior, so this is safe to ship dormant. Columns are
@@ -1352,6 +1382,7 @@ class MusicDatabase:
                     artist_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     year INTEGER,
+                    release_date TEXT,
                     thumb_url TEXT,
                     genres TEXT,
                     track_count INTEGER,
@@ -6250,11 +6281,47 @@ class MusicDatabase:
                 ))
             
             return tracks
-            
+
         except Exception as e:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
-    
+
+    def get_album_by_spotify_album_id(self, spotify_album_id: str) -> Optional[DatabaseAlbum]:
+        """Fetch a single album by its (enriched) Spotify album id, or None.
+
+        Used by the download path builder (#829) to reuse an album's existing
+        on-disk folder when re-downloading into the same album — matching the
+        exact stored Spotify id before falling back to fuzzy name+artist.
+        """
+        if not spotify_album_id:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT albums.*, artists.name as artist_name
+                FROM albums
+                JOIN artists ON albums.artist_id = artists.id
+                WHERE albums.spotify_album_id = ?
+                LIMIT 1
+            """, (spotify_album_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            genres = json.loads(row['genres']) if row['genres'] else None
+            album = DatabaseAlbum(
+                id=row['id'], artist_id=row['artist_id'], title=row['title'],
+                year=row['year'], thumb_url=row['thumb_url'], genres=genres,
+                track_count=row['track_count'], duration=row['duration'],
+                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+                updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
+            )
+            album.artist_name = row['artist_name']
+            return album
+        except Exception as e:
+            logger.error(f"Error getting album by spotify_album_id {spotify_album_id}: {e}")
+            return None
+
     def search_artists(self, query: str, limit: int = 50, server_source: str = None) -> List[DatabaseArtist]:
         """Search artists by name, optionally filtered by server source.
         Uses diacritic-insensitive matching so 'Tiesto' finds 'Tiësto'."""
@@ -7621,6 +7688,24 @@ class MusicDatabase:
                 if ctx_ratio < 0.7:
                     ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
                 best_title_similarity = max(best_title_similarity, ctx_sim)
+
+            # #825: a bracketed qualifier that is a SUBTITLE — not a version
+            # marker and not numeric — is the same song. 'Llamando a la tierra
+            # (Serenade From the Stars)' vs the library's bare 'Llamando a la
+            # tierra': the subtitle restates nothing (so #808 keeps it) and the
+            # length penalty crushed the pair to ~0.14 — sync re-added it to
+            # the wishlist forever and cleanup (same matcher) never removed it.
+            # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
+            # are kept by the helper, so their mismatch penalty still stands.
+            from core.text.title_match import strip_subtitle_qualifiers
+            sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
+            sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
+            if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
+                sub_sim = self._string_similarity(sub_search, sub_db)
+                sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
+                if sub_ratio < 0.7:
+                    sub_sim *= sub_ratio  # stripped forms still length-guarded
+                best_title_similarity = max(best_title_similarity, sub_sim)
 
             # Word-level guard: SequenceMatcher's char ratio over-credits
             # different songs that share a long substring or only a stopword
@@ -10507,6 +10592,7 @@ class MusicDatabase:
                         MIN(a.id) as id,
                         a.title,
                         a.year,
+                        MAX(a.release_date) as release_date,
                         SUM(a.track_count) as track_count,
                         MAX(a.thumb_url) as thumb_url,
                         MAX(a.musicbrainz_release_id) as musicbrainz_release_id,
@@ -10566,6 +10652,7 @@ class MusicDatabase:
                         'id': album_row['id'],
                         'title': album_row['title'],
                         'year': album_row['year'],
+                        'release_date': album_row['release_date'],
                         'image_url': album_row['thumb_url'],
                         'owned': True,  # All albums in our DB are owned
                         'track_count': album_row['track_count'],
@@ -10648,7 +10735,7 @@ class MusicDatabase:
 
     # Field whitelists for safe updates
     ARTIST_EDITABLE_FIELDS = {'name', 'genres', 'summary', 'style', 'mood', 'label'}
-    ALBUM_EDITABLE_FIELDS = {'title', 'year', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
+    ALBUM_EDITABLE_FIELDS = {'title', 'year', 'release_date', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
     TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'bpm', 'explicit', 'style', 'mood'}
 
     def get_artist_full_detail(self, artist_id) -> Dict[str, Any]:
@@ -12477,6 +12564,75 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
+
+    def save_watchlist_scan_run(self, run_id, profile_id=1, status='completed',
+                                started_at=None, completed_at=None,
+                                total_artists=0, artists_scanned=0,
+                                tracks_found=0, tracks_added=0,
+                                track_events=None, keep_last=100) -> bool:
+        """Persist one watchlist scan run + its track ledger (#831 round 2).
+
+        Idempotent on run_id (re-saving a run replaces it). Prunes the table to
+        the most recent ``keep_last`` runs so history can't grow unbounded."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO watchlist_scan_runs
+                    (run_id, profile_id, status, started_at, completed_at,
+                     total_artists, artists_scanned, tracks_found, tracks_added,
+                     track_events)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (run_id, profile_id, status, started_at, completed_at,
+                  total_artists, artists_scanned, tracks_found, tracks_added,
+                  json.dumps(track_events or [])))
+            cursor.execute("""
+                DELETE FROM watchlist_scan_runs WHERE id NOT IN (
+                    SELECT id FROM watchlist_scan_runs
+                    ORDER BY completed_at DESC, id DESC LIMIT ?
+                )
+            """, (keep_last,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving watchlist scan run {run_id}: {e}")
+            return False
+
+    def get_watchlist_scan_runs(self, limit=30, profile_id=None):
+        """Recent watchlist scan runs, newest first — WITHOUT track ledgers
+        (fetch those per-run via get_watchlist_scan_run_events)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = "WHERE profile_id = ?" if profile_id is not None else ""
+            params = ([profile_id] if profile_id is not None else []) + [limit]
+            cursor.execute(f"""
+                SELECT run_id, profile_id, status, started_at, completed_at,
+                       total_artists, artists_scanned, tracks_found, tracks_added
+                FROM watchlist_scan_runs {where}
+                ORDER BY completed_at DESC, id DESC LIMIT ?
+            """, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting watchlist scan runs: {e}")
+            return []
+
+    def get_watchlist_scan_run_events(self, run_id):
+        """The track ledger (added/skipped events) for one scan run."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT track_events FROM watchlist_scan_runs WHERE run_id = ?",
+                (run_id,))
+            row = cursor.fetchone()
+            if not row or not row['track_events']:
+                return []
+            events = json.loads(row['track_events'])
+            return events if isinstance(events, list) else []
+        except Exception as e:
+            logger.error(f"Error getting watchlist scan run events for {run_id}: {e}")
+            return []
 
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the

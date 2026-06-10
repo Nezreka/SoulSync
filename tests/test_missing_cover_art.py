@@ -281,3 +281,151 @@ def test_result_matches_unit():
     # no artist on result → require exact title
     assert m({'title': 'Album'}, 'Album', 'Artist')
     assert not m({'title': 'Album Deluxe'}, 'Album', 'Artist')
+
+
+# ── disk-art check must run on the RESOLVED path (flags-every-album bug) ──
+
+def _add_track(conn, path):
+    conn.execute(
+        "INSERT INTO tracks (id, album_id, file_path, disc_number, track_number) "
+        "VALUES (1, 1, ?, 1, 1)", (path,))
+    conn.commit()
+
+
+def test_scan_checks_disk_art_on_resolved_path(monkeypatch):
+    # Album already has a DB thumb (db not missing) and a track whose DB path
+    # only resolves via mapping. The disk-art check must run on the RESOLVED
+    # path — checking the raw path would fail on path-mapped setups and flag
+    # the whole library while the apply (which resolves) finds art present.
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/plex/raw/song.flac')
+    context = _make_context(conn)
+    checked = {}
+    monkeypatch.setattr(mca, 'resolve_library_file_path',
+                        lambda raw, **k: '/resolved/song.flac' if raw == '/plex/raw/song.flac' else None)
+    monkeypatch.setattr(mca, 'file_has_embedded_art',
+                        lambda p: checked.update(path=p) or True)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)  # has cover.jpg too
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert checked.get('path') == '/resolved/song.flac'   # resolved, not raw
+    assert result.findings_created == 0                    # embedded + cover.jpg → not flagged
+
+
+def test_scan_unresolvable_path_not_flagged_disk_missing(monkeypatch):
+    # An unreachable file (resolve → None) must NOT be claimed as "missing disk
+    # art" — we can't know, so don't false-flag. (Album has a thumb already.)
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/gone/song.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
+    called = []
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or False)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: called.append(d) or False)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # thumb present, disk unknown → not flagged
+    assert called == []                   # never checked art on a None path
+
+
+def test_local_album_with_embedded_and_sidecar_not_flagged(monkeypatch):
+    # Has BOTH embedded art AND a cover.jpg — nothing missing, even with an
+    # empty DB thumb cache. (Boulder: don't flag albums that already have art.)
+    conn = _make_db((1, 'Album', 1, '', None, None, None, None, None))  # empty thumb
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: True)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # has both → not "missing"
+    assert result.skipped == 1
+
+
+def test_embedded_art_but_no_cover_jpg_is_flagged(monkeypatch):
+    # Sokhi: files HAVE embedded art but no cover.jpg sidecar. With cover.jpg
+    # enabled (default), it's flagged so the filler writes the sidecar — even
+    # when the API finds NO art (the apply extracts the embedded art).
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)      # embedded present
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)  # but no cover.jpg
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())  # API finds nothing
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # flagged for the missing sidecar
+    assert context.findings[0]['details']['sidecar_from_embedded'] is True
+
+
+def test_local_album_without_file_art_still_flagged(monkeypatch):
+    # Local album whose files genuinely lack art → still flagged (real case).
+    # Give it a source id + findable art so a finding is created when flagged.
+    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))
+    _add_track(conn, '/music/Album/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: raw)
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: False)     # no embedded art
+    monkeypatch.setattr(mca, 'folder_has_cover_sidecar', lambda d: False)
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # files lack art → flagged
+
+
+def test_media_server_only_album_empty_thumb_still_flagged(monkeypatch):
+    # No local files (media-server-only) + empty thumb → DB thumb is the only
+    # art, so still flag it.
+    conn = _make_db((1, 'Album', 1, '', 'sp-album', None, None, None, None))  # no track added
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient(album_image='https://img/x'))
+
+    result = mca.MissingCoverArtJob().scan(context)
+    assert result.findings_created == 1   # media-server-only + empty thumb → flagged
+
+
+def test_unresolved_path_falls_back_to_raw_when_file_exists(tmp_path, monkeypatch):
+    # Docker case (Sokhi): the path-mapping layer returns None, but the raw DB
+    # path is already a real file in the container. The scan must use it as-is —
+    # like the apply does (`_resolve_file_path(...) or p`) — so the album's
+    # folder is actually checked instead of the album being skipped.
+    track = tmp_path / 'Album' / '01.flac'
+    track.parent.mkdir()
+    track.write_bytes(b'')
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, str(track))
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)  # mapping fails
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: True)             # files have art
+    # real folder has no cover.jpg → should flag for the sidecar
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: _FakeClient())    # API finds nothing
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 1   # raw path used → folder checked → flagged
+    assert context.findings[0]['details']['sidecar_from_embedded'] is True
+
+
+def test_unresolved_path_with_no_real_file_still_skips(tmp_path, monkeypatch):
+    # Guard: the raw-path fallback must NOT fire for a path that isn't a real
+    # file (no false "local" on a genuinely media-server-only album).
+    conn = _make_db((1, 'Album', 1, 'https://has/thumb', None, None, None, None, None))
+    _add_track(conn, '/does/not/exist/01.flac')
+    context = _make_context(conn)
+    monkeypatch.setattr(mca, 'resolve_library_file_path', lambda raw, **k: None)
+    called = []
+    monkeypatch.setattr(mca, 'file_has_embedded_art', lambda p: called.append(p) or True)
+
+    result = mca.MissingCoverArtJob().scan(context)
+
+    assert result.findings_created == 0   # no real file, db has thumb → skipped
+    assert called == []                   # never treated as local

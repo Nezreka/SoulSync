@@ -213,11 +213,29 @@ class SpotifyWorker:
                     interruptible_sleep(self._stop_event, min(remaining, 60))  # Check again every 60s max
                     continue
 
-                # Is the worker serving via the no-creds Spotify Free source this
+                # Enrichment runs on the no-auth Spotify source by DEFAULT
+                # (metadata.spotify_free_enrichment, ON unless turned off): bulk
+                # enrichment is the workload that bans the real API, so we keep it
+                # off your connected account's quota and reserve official Spotify
+                # for interactive search + playlist sync. The flag overrides auth
+                # for the worker (authed users still enrich via the no-auth path)
+                # and also lets the worker run with no auth at all. _free_active()
+                # and is_spotify_metadata_available() both honor it; set only on
+                # the worker's OWN client, so interactive paths stay official-first.
+                # Harmless when the no-auth package isn't installed (the methods
+                # fall back to official, then iTunes/Deezer).
+                try:
+                    from config.settings import config_manager as _cfg
+                    self.client._prefer_free = bool(
+                        _cfg.get('metadata.spotify_free_enrichment', True))
+                except Exception:  # noqa: S110 — prefer-free toggle is best-effort
+                    self.client._prefer_free = True
+
+                # Is the worker serving via the no-auth Spotify source this
                 # iteration? The daily budget and post-ban cooldown both exist to
                 # protect the REAL authenticated API from bans — they don't apply
-                # to free (a different, anonymous path). Computed once and reused
-                # below; the loop already probes auth, so no extra quota cost.
+                # to the no-auth path. Computed once and reused below; the loop
+                # already probes auth, so no extra quota cost.
                 budget_exhausted = self._is_daily_budget_exhausted()
 
                 # Daily budget is a REAL-API ban protection. When it's spent, if
@@ -768,7 +786,10 @@ class SpotifyWorker:
             return
 
         query = f"{artist_name} {album_name}" if artist_name else album_name
-        results = self.client.search_albums(query, limit=5)
+        # Pass artist + album names separately too, so the no-creds Spotify Free
+        # path can resolve the album via the artist's discography (SpotipyFree has
+        # no album-name search) when bridging a budget/rate-limit ban.
+        results = self.client.search_albums(query, limit=5, artist=artist_name, album=album_name)
 
         if not results:
             self._mark_status('album', album_id, 'not_found')
@@ -929,6 +950,14 @@ class SpotifyWorker:
                         UPDATE albums SET year = ?
                         WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
                     """, (year, album_id))
+                # #824: also store the FULL release date when Spotify has one
+                # (YYYY-MM or YYYY-MM-DD, not just a bare year). Only when empty —
+                # never clobber a manually-set release_date.
+                if len(album_obj.release_date) > 4:
+                    cursor.execute("""
+                        UPDATE albums SET release_date = ?
+                        WHERE id = ? AND (release_date IS NULL OR release_date = '')
+                    """, (album_obj.release_date, album_id))
 
             # Cache the authoritative expected track count for the Album
             # Completeness repair job (see set_album_api_track_count docstring).

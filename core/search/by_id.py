@@ -33,6 +33,7 @@ an injected ``client_resolver`` (defaulting to the orchestrator's
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, NamedTuple, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -42,13 +43,13 @@ logger = logging.getLogger(__name__)
 # providers whose public links a user would paste AND whose get-by-id returns
 # the common Spotify-shaped dict. Streaming download backends (Tidal/Qobuz)
 # return raw API shapes and aren't metadata-link sources, so they're omitted.
-SUPPORTED_SOURCES = ('spotify', 'itunes', 'musicbrainz', 'deezer')
+SUPPORTED_SOURCES = ('spotify', 'itunes', 'musicbrainz', 'deezer', 'discogs')
 
 # Domains we recognize — used to detect a pasted URL even when the user
 # omitted the scheme (e.g. "open.spotify.com/album/…").
 _KNOWN_HOSTS = (
     'open.spotify.com', 'music.apple.com', 'itunes.apple.com',
-    'musicbrainz.org', 'deezer.com',
+    'musicbrainz.org', 'deezer.com', 'discogs.com',
 )
 
 
@@ -72,7 +73,7 @@ class LookupTarget(NamedTuple):
 
 def _kind_from_keyword(keyword: str) -> Optional[str]:
     """Map a URL/URI path keyword to a lookup kind."""
-    if keyword in ('album', 'release', 'release-group'):
+    if keyword in ('album', 'release', 'release-group', 'master'):
         return 'album'
     if keyword in ('track', 'recording', 'song'):
         return 'track'
@@ -129,6 +130,18 @@ def _parse_url(raw: str) -> list[LookupTarget]:
         # link.deezer.com short links can't be resolved without a network
         # redirect; only handle canonical /album/ /track/ paths.
         return _by_keyword('deezer')
+
+    if 'discogs.com' in host:
+        # Discogs paths are /artist/<id>-Slug, /release/<id>-Slug,
+        # /master/<id>-Slug — the id is embedded with a slug, so strip to the
+        # leading number. (Discogs has no standalone track URLs; tracks live
+        # inside a release, so only artist/album resolve.)
+        out = []
+        for t in _by_keyword('discogs'):
+            m = re.match(r'(\d+)', t.id)
+            if m:
+                out.append(t._replace(id=m.group(1)))
+        return out
 
     return []
 
@@ -254,7 +267,7 @@ def _fetch_album(client: Any, source: str, identifier: str) -> Optional[dict]:
     (the modal re-fetches the full tracklist on open)."""
     if source == 'deezer':
         return client.get_album_metadata(identifier, include_tracks=False)
-    if source in ('itunes', 'musicbrainz'):
+    if source in ('itunes', 'musicbrainz', 'discogs'):
         return client.get_album(identifier, include_tracks=False)
     return client.get_album(identifier)  # spotify
 
@@ -274,8 +287,8 @@ def _fetch_artist(client: Any, source: str, identifier: str) -> Optional[dict]:
 
 # Shown in the dropdown's empty state so the user knows what to do next.
 _MSG_NOT_A_LINK = (
-    'Paste a full link from Spotify, Apple Music, MusicBrainz, or Deezer '
-    '(a bare ID is ambiguous).'
+    'Paste a full link from Spotify, Apple Music, Deezer, Discogs, or '
+    'MusicBrainz (a bare ID is ambiguous).'
 )
 _MSG_NOT_FOUND = "Couldn't resolve that link — double-check it's correct."
 

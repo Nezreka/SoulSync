@@ -561,3 +561,93 @@ class TestDeezerDirectDownloadFlow:
         assert meta["_artists_list"] == ["FAYAN", "Dalton"]
         assert meta["artist"] == "FAYAN;Dalton"
         assert meta["title"] == "VERLIEBT IN MICH"
+
+
+class TestSourceResolutionFromRealDownloadPayload:
+    """Netti93 round 3: the prior tests set context['source'] — a field the
+    REAL Search → Download Now flow never had. The serialized search results
+    carried no source at all, so get_import_source() resolved '' and the
+    Deezer contributors upgrade never ran on direct downloads (single-artist
+    tags until a Retag). These pin the actual payload shapes end to end."""
+
+    def _staging_context(self, track_info):
+        # Shape built by core/downloads/staging.py:457 for a stream download.
+        return {
+            "track_info": track_info,
+            "spotify_artist": {"name": "August Burns Red", "id": None},
+            "spotify_album": {"name": "Death Below"},
+            "original_search_result": {
+                "username": "tidal", "filename": "/x.flac",
+                "title": "Sonic Salvation", "artist": "August Burns Red",
+                "spotify_clean_title": "Sonic Salvation",
+                "spotify_clean_album": "Death Below",
+                "spotify_clean_artist": "August Burns Red",
+                "track_number": 1, "disc_number": 1,
+            },
+            "is_album_download": False,
+            "staging_source": True,
+        }
+
+    def _fake_deezer(self):
+        return SimpleNamespace(get_track_details=MagicMock(return_value={
+            "id": "3966840171", "name": "Sonic Salvation",
+            "artists": ["August Burns Red", "Polaris"],
+        }))
+
+    def test_source_in_track_info_triggers_upgrade(self):
+        """The fixed flow: serialized search result carries source='deezer'
+        inside track_info (no context-level source) → upgrade fires."""
+        from core.metadata import source as src_module
+
+        track_info = {
+            "id": "3966840171", "name": "Sonic Salvation",
+            "source": "deezer",
+            "artists": ["August Burns Red"],
+            "album": {"name": "Death Below", "id": None},
+        }
+        fake_deezer = self._fake_deezer()
+        with patch.object(src_module, "get_config_manager",
+                          return_value=_make_cfg({"metadata_enhancement.tags.write_multi_artist": True})), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(
+                self._staging_context(track_info), {"name": "August Burns Red", "id": ""}, {})
+
+        assert meta["_artists_list"] == ["August Burns Red", "Polaris"]
+        fake_deezer.get_track_details.assert_called_once_with("3966840171")
+
+    def test_underscore_source_shape_also_triggers_upgrade(self):
+        """Discography/wishlist payloads carry '_source' instead of 'source' —
+        get_import_source must honor that shape too."""
+        from core.metadata import source as src_module
+
+        track_info = {
+            "id": "3966840171", "name": "Sonic Salvation",
+            "_source": "deezer",
+            "artists": ["August Burns Red"],
+        }
+        fake_deezer = self._fake_deezer()
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(
+                self._staging_context(track_info), {"name": "August Burns Red", "id": ""}, {})
+
+        assert meta["_artists_list"] == ["August Burns Red", "Polaris"]
+        fake_deezer.get_track_details.assert_called_once_with("3966840171")
+
+    def test_sourceless_payload_still_no_upgrade(self):
+        """A payload with no source anywhere (pre-fix shape) must not crash —
+        and must not call the Deezer API blindly."""
+        from core.metadata import source as src_module
+
+        track_info = {
+            "id": "3966840171", "name": "Sonic Salvation",
+            "artists": ["August Burns Red"],
+        }
+        fake_deezer = self._fake_deezer()
+        with patch.object(src_module, "get_config_manager", return_value=_make_cfg()), \
+             patch("core.metadata.get_deezer_client", return_value=fake_deezer):
+            meta = src_module.extract_source_metadata(
+                self._staging_context(track_info), {"name": "August Burns Red", "id": ""}, {})
+
+        assert meta["_artists_list"] == ["August Burns Red"]
+        fake_deezer.get_track_details.assert_not_called()

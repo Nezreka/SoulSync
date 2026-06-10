@@ -315,7 +315,52 @@ class _BatchStateAccessImpl:
                 row['album_bundle_state'] = 'failed'
 
 
-def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps):
+# Task states that mean a batch still has work in flight. While ANY of a batch's
+# tasks is in one of these, a serialized album-pool worker keeps its slot.
+_NON_TERMINAL_TASK_STATUSES = ('pending', 'queued', 'searching', 'downloading', 'post_processing')
+
+
+def _wait_for_batch_drain(batch_id: str, poll_seconds: float = 1.5,
+                          max_wait_seconds: float = 3600.0) -> None:
+    """Block until every task in ``batch_id`` reaches a terminal state (the batch
+    is fully drained), the batch is removed, shutdown is requested, or a safety
+    cap elapses.
+
+    Used to make the dedicated album-bundle pool actually SERIALIZE albums: the
+    worker holds its pool slot for the album's whole lifetime instead of
+    returning the instant downloads are started. That stops every album from
+    dumping its tracks into the shared download pool at once (Sokhi: "searching
+    for way too many tracks at once"). It's a PASSIVE wait — the downloads are
+    driven by the monitor + completion callbacks on other threads, so this never
+    drives the work and can't deadlock; worst case the cap releases the slot and
+    the downloads simply finish in the background."""
+    from core.downloads import monitor as _monitor
+    start = time.time()
+    while True:
+        if getattr(_monitor, 'IS_SHUTTING_DOWN', False):
+            return
+        with tasks_lock:
+            batch = download_batches.get(batch_id)
+            if not batch:
+                return
+            queue = list(batch.get('queue', ()) or ())
+            still_working = any(
+                download_tasks.get(t, {}).get('status') in _NON_TERMINAL_TASK_STATUSES
+                for t in queue
+            )
+        if not still_working:
+            return
+        if time.time() - start > max_wait_seconds:
+            logger.warning(
+                "[Album Serialize] batch %s not drained after %.0fs — releasing the "
+                "album-pool slot (its downloads continue in the background)",
+                batch_id, max_wait_seconds)
+            return
+        time.sleep(poll_seconds)
+
+
+def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,
+                                    serialize: bool = False):
     """
     A master worker that handles the entire missing tracks process:
     1. Runs the analysis.
@@ -1149,6 +1194,16 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
         deps.download_monitor.start_monitoring(batch_id)
         deps.start_next_batch_of_downloads(batch_id)
+
+        # Album-bundle batches run on the dedicated album pool and pass
+        # serialize=True: hold this pool slot until the album finishes so only a
+        # few albums are ever in flight at once, instead of every album batch
+        # immediately starting and flooding the shared download pool with
+        # 'searching' tracks (#740 / Sokhi). The residual + playlist + manual
+        # paths run on the shared download pool and DON'T serialize (blocking
+        # there would steal an actual download worker).
+        if serialize:
+            _wait_for_batch_drain(batch_id)
 
     except Exception as e:
         logger.error(f"Master worker for batch {batch_id} failed: {e}")

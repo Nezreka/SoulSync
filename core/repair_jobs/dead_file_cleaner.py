@@ -36,7 +36,17 @@ class DeadFileCleanerJob(RepairJob):
     icon = 'repair-icon-deadfile'
     default_enabled = True
     default_interval_hours = 24
-    default_settings = {}
+    default_settings = {
+        # Mass-false-positive guard: if at least this fraction of tracks resolve
+        # to no file on disk, treat it as a path-mapping/mount problem (SoulSync
+        # can't SEE the library — e.g. Docker, or library.music_paths unset for
+        # this environment) rather than thousands of individually-deleted files,
+        # and abort without creating findings. Mirrors the transfer-folder abort.
+        'max_unresolved_fraction': 0.5,
+        # ...but only once the library is at least this big — a small library can
+        # legitimately have a high dead fraction.
+        'min_tracks_for_guard': 25,
+    }
     auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
@@ -87,8 +97,29 @@ class DeadFileCleanerJob(RepairJob):
         if context.config_manager:
             download_folder = context.config_manager.get('soulseek.download_path', '')
 
+        # Mass-false-positive guard thresholds (see default_settings).
+        max_unresolved_fraction = 0.5
+        min_tracks_for_guard = 25
+        if context.config_manager:
+            try:
+                max_unresolved_fraction = float(context.config_manager.get(
+                    self.get_config_key('max_unresolved_fraction'), 0.5))
+            except (TypeError, ValueError):
+                max_unresolved_fraction = 0.5
+            try:
+                min_tracks_for_guard = int(context.config_manager.get(
+                    self.get_config_key('min_tracks_for_guard'), 25))
+            except (TypeError, ValueError):
+                min_tracks_for_guard = 25
+
         if context.report_progress:
             context.report_progress(phase=f'Checking {total} tracks...', total=total)
+
+        # Collect unresolvable tracks first; decide whether they're genuine dead
+        # files or a systemic path problem AFTER the full pass (below). A "None"
+        # from the resolver means "couldn't find it at any known base dir" — which
+        # for a mis-mounted library is EVERY track, not a real deletion.
+        dead_rows = []
 
         for i, row in enumerate(tracks):
             if context.check_stop():
@@ -112,43 +143,74 @@ class DeadFileCleanerJob(RepairJob):
                                            config_manager=context.config_manager)
 
             if resolved is None:
-                # File is truly missing — create finding
-                if context.report_progress:
-                    context.report_progress(
-                        log_line=f'Missing: {title or "Unknown"} — {os.path.basename(file_path)}',
-                        log_type='error'
-                    )
-                if context.create_finding:
-                    try:
-                        inserted = context.create_finding(
-                            job_id=self.job_id,
-                            finding_type='dead_file',
-                            severity='warning',
-                            entity_type='track',
-                            entity_id=str(track_id),
-                            file_path=file_path,
-                            title=f'Missing file: {title or "Unknown"}',
-                            description=f'Track "{title}" by {artist_name or "Unknown"} points to a file that no longer exists',
-                            details={
-                                'track_id': track_id,
-                                'title': title,
-                                'artist': artist_name,
-                                'album': album_title,
-                                'original_path': file_path,
-                                'album_thumb_url': album_thumb or None,
-                                'artist_thumb_url': artist_thumb or None,
-                            }
-                        )
-                        if inserted:
-                            result.findings_created += 1
-                        else:
-                            result.findings_skipped_dedup += 1
-                    except Exception as e:
-                        logger.debug("Error creating dead file finding for track %s: %s", track_id, e)
-                        result.errors += 1
+                dead_rows.append(row)
 
             if context.update_progress and (i + 1) % 100 == 0:
                 context.update_progress(i + 1, total)
+
+        # Mass-false-positive guard: a large fraction of unresolvable paths almost
+        # always means SoulSync can't SEE the library (Docker mount, or
+        # Settings → Library → Music Paths not set for this environment), NOT that
+        # thousands of files were individually deleted. Refuse to flag and say so
+        # — same principle as the transfer-folder abort above. (#828: a Plex-on-
+        # macOS user in Docker had all 5,250 tracks flagged because their stored
+        # /Volumes/... paths don't exist inside the container.)
+        if (dead_rows
+                and result.scanned >= min_tracks_for_guard
+                and len(dead_rows) >= result.scanned * max_unresolved_fraction):
+            logger.error(
+                "Dead file scan: %d/%d tracks unresolvable (>= %.0f%%) — aborting without "
+                "creating findings; this is a path-mapping/mount problem, not deleted files.",
+                len(dead_rows), result.scanned, max_unresolved_fraction * 100)
+            result.errors += 1
+            if context.report_progress:
+                context.report_progress(
+                    phase='Aborted — too many unreachable paths',
+                    log_line=(f"{len(dead_rows)} of {result.scanned} tracks point to paths SoulSync "
+                              f"can't reach — almost always a path-mapping issue (Docker mount, or "
+                              f"Settings → Library → Music Paths), not deleted files. No findings created."),
+                    log_type='error'
+                )
+            if context.update_progress:
+                context.update_progress(total, total)
+            return result
+
+        # A small fraction unresolvable — treat as genuine dead files and report.
+        for row in dead_rows:
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Missing: {title or "Unknown"} — {os.path.basename(file_path)}',
+                    log_type='error'
+                )
+            if context.create_finding:
+                try:
+                    inserted = context.create_finding(
+                        job_id=self.job_id,
+                        finding_type='dead_file',
+                        severity='warning',
+                        entity_type='track',
+                        entity_id=str(track_id),
+                        file_path=file_path,
+                        title=f'Missing file: {title or "Unknown"}',
+                        description=f'Track "{title}" by {artist_name or "Unknown"} points to a file that no longer exists',
+                        details={
+                            'track_id': track_id,
+                            'title': title,
+                            'artist': artist_name,
+                            'album': album_title,
+                            'original_path': file_path,
+                            'album_thumb_url': album_thumb or None,
+                            'artist_thumb_url': artist_thumb or None,
+                        }
+                    )
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
+                except Exception as e:
+                    logger.debug("Error creating dead file finding for track %s: %s", track_id, e)
+                    result.errors += 1
 
         if context.update_progress:
             context.update_progress(total, total)

@@ -354,8 +354,15 @@ def _normalize_album_for_match(name: str) -> str:
     return cleaned
 
 
+# Capture the FULL trailing number, including multi-part / decimal volumes.
+# Normalization strips the dot in "Vol.5.5" to "vol 5 5", so without the
+# `(?:\s+\d+)*` the extractor grabbed only the last "5" — making "Vol.5",
+# "Vol.5.5" and "Vol.4.5" all look like volume "5" and collapse together. That
+# made the watchlist treat tracks from different character-song CD volumes as
+# duplicates and skip them (Sokhi: partially-filled discography never completed).
 _VOLUME_MARKER_RE = re.compile(
-    r'\b(?:vol(?:ume)?|pt|part|disc|book|chapter|episode)\.?\s*(\d+)\b|\b(\d+)\s*$',
+    r'\b(?:vol(?:ume)?|pt|part|disc|book|chapter|episode)\.?\s*(\d+(?:\s+\d+)*)\b'
+    r'|\b(\d+(?:\s+\d+)*)\s*$',
     re.IGNORECASE,
 )
 
@@ -1313,6 +1320,19 @@ class WatchlistScanner:
                             logger.info("Skipping album with placeholder tracks: %s", album_name)
                             continue
                         if not self._should_include_release(len(tracks), artist):
+                            # Make the type-filter skip visible — otherwise a user
+                            # with "Albums" toggled off just sees missing tracks
+                            # with no explanation (Sokhi #815-adjacent: 14 singles,
+                            # 0 albums because include_albums was off).
+                            _n = len(tracks)
+                            _kind = 'album' if _n >= 7 else ('EP' if _n >= 4 else 'single')
+                            logger.info(
+                                "Skipping %s '%s' (%d tracks) — release type filter "
+                                "(albums=%s, eps=%s, singles=%s) excludes it",
+                                _kind, album_name, _n,
+                                getattr(artist, 'include_albums', True),
+                                getattr(artist, 'include_eps', True),
+                                getattr(artist, 'include_singles', True))
                             continue
 
                         album_image_url = ''
@@ -1356,14 +1376,34 @@ class WatchlistScanner:
                                 if scan_state is not None:
                                     scan_state['tracks_found_this_scan'] += 1
 
-                                if self.add_track_to_wishlist(track, album_data, artist):
+                                added = self.add_track_to_wishlist(
+                                    track, album_data, artist,
+                                    scan_run_id=(scan_state or {}).get('scan_run_id', ''),
+                                )
+
+                                track_artists = track.get('artists', [])
+                                track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
+
+                                # #831: per-run ledger so the completed-scan
+                                # summary can list WHICH tracks the counts mean.
+                                # 'skipped' = found-new but add_to_wishlist
+                                # declined (already queued in the wishlist, or
+                                # the artist is blocklisted). Capped for sanity.
+                                if scan_state is not None:
+                                    events = scan_state.setdefault('scan_track_events', [])
+                                    if len(events) < 500:
+                                        events.append({
+                                            'track_name': track_name,
+                                            'artist_name': track_artist_name,
+                                            'album_name': album_name,
+                                            'album_image_url': album_image_url,
+                                            'status': 'added' if added else 'skipped',
+                                        })
+
+                                if added:
                                     artist_added_tracks += 1
                                     if scan_state is not None:
                                         scan_state['tracks_added_this_scan'] += 1
-
-                                    track_artists = track.get('artists', [])
-                                    track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
-                                    if scan_state is not None:
                                         scan_state['recent_wishlist_additions'].insert(0, {
                                             'track_name': track_name,
                                             'artist_name': track_artist_name,
@@ -2204,7 +2244,8 @@ class WatchlistScanner:
             logger.warning(f"Error checking if track exists: {track_name}: {e}")
             return True  # Assume missing if we can't check
     
-    def add_track_to_wishlist(self, track, album, watchlist_artist: WatchlistArtist) -> bool:
+    def add_track_to_wishlist(self, track, album, watchlist_artist: WatchlistArtist,
+                              scan_run_id: str = '') -> bool:
         """Add a missing track to the wishlist"""
         try:
             # Handle both dict and object track/album formats
@@ -2286,7 +2327,9 @@ class WatchlistScanner:
                     'watchlist_artist_name': watchlist_artist.artist_name,
                     'watchlist_artist_id': watchlist_artist.spotify_artist_id,
                     'album_name': album_name,
-                    'scan_timestamp': datetime.now().isoformat()
+                    'scan_timestamp': datetime.now().isoformat(),
+                    # #831: groups wishlist rows by the scan run that added them.
+                    'scan_run_id': scan_run_id or '',
                 },
                 profile_id=getattr(watchlist_artist, 'profile_id', 1)
             )

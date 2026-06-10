@@ -173,13 +173,19 @@ class TestJellyfinAppendToPlaylist:
         mock_create.assert_called_once_with("Test", new_tracks)
 
     def test_filters_out_already_present_tracks(self):
-        """Reporter's exact case for Jellyfin — only new GUIDs go in."""
+        """Reporter's exact case for Jellyfin — only new GUIDs go in.
+
+        #823 round 2: existing ids now come from the canonical
+        /Playlists/{id}/Items request ({'Items':[{'Id': ...}]}) — the old
+        get_playlist_tracks path returned JellyfinTrack objects that only
+        define `ratingKey`, so the previous `t.id` dedupe was always empty and
+        every sync re-appended everything. These mocks pin the REAL shape."""
         client = _make_jellyfin_client()
         existing_playlist = SimpleNamespace(id='pl-1')
-        existing_tracks = [
-            SimpleNamespace(id='aaaaaaaa-bbbb-cccc-dddd-000000000001'),
-            SimpleNamespace(id='aaaaaaaa-bbbb-cccc-dddd-000000000002'),
-        ]
+        items_resp = {'Items': [
+            {'Id': 'aaaaaaaa-bbbb-cccc-dddd-000000000001'},
+            {'Id': 'aaaaaaaa-bbbb-cccc-dddd-000000000002'},
+        ]}
         incoming = [
             SimpleNamespace(id='aaaaaaaa-bbbb-cccc-dddd-000000000001'),  # present
             SimpleNamespace(id='aaaaaaaa-bbbb-cccc-dddd-000000000003'),  # NEW
@@ -194,7 +200,7 @@ class TestJellyfinAppendToPlaylist:
 
         with patch.object(client, 'ensure_connection', return_value=True), \
              patch.object(client, 'get_playlist_by_name', return_value=existing_playlist), \
-             patch.object(client, 'get_playlist_tracks', return_value=existing_tracks), \
+             patch.object(client, '_make_request', return_value=items_resp), \
              patch.object(client, '_is_valid_guid', return_value=True), \
              patch('core.jellyfin_client.requests.post', side_effect=fake_post):
             result = client.append_to_playlist("Test", incoming)
@@ -206,9 +212,26 @@ class TestJellyfinAppendToPlaylist:
     def test_short_circuits_when_no_new_tracks(self):
         client = _make_jellyfin_client()
         existing_playlist = SimpleNamespace(id='pl-1')
-        existing_tracks = [SimpleNamespace(id='guid-1')]
+        items_resp = {'Items': [{'Id': 'guid-1'}]}
         with patch.object(client, 'ensure_connection', return_value=True), \
              patch.object(client, 'get_playlist_by_name', return_value=existing_playlist), \
+             patch.object(client, '_make_request', return_value=items_resp), \
+             patch.object(client, '_is_valid_guid', return_value=True), \
+             patch('core.jellyfin_client.requests.post') as mock_post:
+            result = client.append_to_playlist("Test", [SimpleNamespace(id='guid-1')])
+        assert result is True
+        mock_post.assert_not_called()
+
+    def test_falls_back_to_ratingkey_tracks_when_items_request_fails(self):
+        """When /Playlists/{id}/Items fails, dedupe falls back to
+        get_playlist_tracks — reading ratingKey (the attr that EXISTS on
+        JellyfinTrack), not the never-present `.id` of the original bug."""
+        client = _make_jellyfin_client()
+        existing_playlist = SimpleNamespace(id='pl-1')
+        existing_tracks = [SimpleNamespace(ratingKey='guid-1')]
+        with patch.object(client, 'ensure_connection', return_value=True), \
+             patch.object(client, 'get_playlist_by_name', return_value=existing_playlist), \
+             patch.object(client, '_make_request', return_value=None), \
              patch.object(client, 'get_playlist_tracks', return_value=existing_tracks), \
              patch.object(client, '_is_valid_guid', return_value=True), \
              patch('core.jellyfin_client.requests.post') as mock_post:
@@ -221,7 +244,7 @@ class TestJellyfinAppendToPlaylist:
         existing_playlist = SimpleNamespace(id='pl-1')
         with patch.object(client, 'ensure_connection', return_value=True), \
              patch.object(client, 'get_playlist_by_name', return_value=existing_playlist), \
-             patch.object(client, 'get_playlist_tracks', return_value=[]), \
+             patch.object(client, '_make_request', return_value={'Items': []}), \
              patch.object(client, '_is_valid_guid', return_value=True), \
              patch('core.jellyfin_client.requests.post',
                    return_value=SimpleNamespace(status_code=500, text='server error')):
@@ -256,9 +279,12 @@ class TestNavidromeAppendToPlaylist:
         mock_create.assert_called_once()
 
     def test_filters_out_already_present_tracks_and_calls_subsonic(self):
+        # #823 round 2: existing tracks are NavidromeTrack objects, which only
+        # define `ratingKey` — the old `t.id` dedupe was always empty. These
+        # mocks pin the REAL attribute so the dedupe is actually exercised.
         client = _make_navidrome_client()
         existing_playlists = [SimpleNamespace(id='pl-1', title='Test')]
-        existing_tracks = [SimpleNamespace(id='100'), SimpleNamespace(id='101')]
+        existing_tracks = [SimpleNamespace(ratingKey='100'), SimpleNamespace(ratingKey='101')]
         incoming = [
             SimpleNamespace(id='100'),  # present
             SimpleNamespace(id='102'),  # NEW
@@ -287,7 +313,7 @@ class TestNavidromeAppendToPlaylist:
     def test_short_circuits_when_no_new_tracks(self):
         client = _make_navidrome_client()
         existing_playlists = [SimpleNamespace(id='pl-1', title='Test')]
-        existing_tracks = [SimpleNamespace(id='100')]
+        existing_tracks = [SimpleNamespace(ratingKey='100')]
         with patch.object(client, 'ensure_connection', return_value=True), \
              patch.object(client, 'get_playlists_by_name', return_value=existing_playlists), \
              patch.object(client, 'get_playlist_tracks', return_value=existing_tracks), \
