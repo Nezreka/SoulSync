@@ -19,8 +19,11 @@ Quarantined files are never imported, so they carry no status.
 VERIFIED = 'verified'
 UNVERIFIED = 'unverified'
 FORCE_IMPORTED = 'force_imported'
+# Set by the user via the review queue ("yes, this file IS the right track").
+# Outranks machine states: the scanner skips these entirely.
+HUMAN_VERIFIED = 'human_verified'
 
-ALL_STATUSES = (VERIFIED, UNVERIFIED, FORCE_IMPORTED)
+ALL_STATUSES = (VERIFIED, UNVERIFIED, FORCE_IMPORTED, HUMAN_VERIFIED)
 
 # The file tag name (Vorbis comment key / ID3 TXXX desc / MP4 freeform).
 TAG_NAME = 'SOULSYNC_VERIFICATION'

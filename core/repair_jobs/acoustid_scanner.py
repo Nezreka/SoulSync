@@ -237,6 +237,13 @@ class AcoustIDScannerJob(RepairJob):
             file_verif_status = (_rft(fpath) or {}).get('verification_status')
         except Exception:
             pass
+        if file_verif_status == 'human_verified':
+            # The user explicitly confirmed this file via the review queue —
+            # never second-guess a human decision.
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Skipped (human-verified): {fname}', log_type='skip')
+            return
         if file_verif_status == 'force_imported' and \
                 self._get_settings(context).get('skip_force_imported', False):
             if context.report_progress:

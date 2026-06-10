@@ -7512,6 +7512,76 @@ def stream_quarantine_item(entry_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/verification/<int:history_id>/stream', methods=['GET'])
+def stream_verification_item(history_id):
+    """Stream a completed download for the verification review queue (listen
+    before approving). Path comes ONLY from the history row — no client paths."""
+    try:
+        rows = get_database().get_library_history_rows_by_ids([history_id])
+        if not rows or not rows[0].get('file_path'):
+            return jsonify({"error": "History entry or file path not found"}), 404
+        file_path = rows[0]['file_path']
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found on disk"}), 404
+        ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+        mimetype = _AUDIO_MIME_TYPES.get(ext, 'audio/mpeg')
+        return _serve_audio_file_with_range(file_path, mimetype_override=mimetype)
+    except Exception as e:
+        logger.error(f"[Verification] Error streaming history {history_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/approve', methods=['POST'])
+def approve_verification_item(history_id):
+    """User confirmed the file IS the right track: set human_verified on the
+    history row, the file tag, and (best-effort) the tracks row. The AcoustID
+    scanner skips human-verified files entirely."""
+    try:
+        from core.matching.verification_status import HUMAN_VERIFIED
+        from core.tag_writer import write_verification_status
+        db = get_database()
+        rows = db.get_library_history_rows_by_ids([history_id])
+        if not rows:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        file_path = rows[0].get('file_path') or ''
+        conn = db._get_connection()
+        conn.cursor().execute(
+            "UPDATE library_history SET verification_status = ? WHERE id = ?",
+            (HUMAN_VERIFIED, history_id))
+        if file_path:
+            conn.cursor().execute(
+                "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
+                (HUMAN_VERIFIED, file_path))
+        conn.commit()
+        tag_written = bool(file_path) and write_verification_status(file_path, HUMAN_VERIFIED)
+        return jsonify({"success": True, "tag_written": tag_written})
+    except Exception as e:
+        logger.error(f"[Verification] Approve failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/delete', methods=['POST'])
+def delete_verification_item(history_id):
+    """User decided the file is wrong: delete it from disk and drop the
+    history row (the media-server mirror cleans the tracks row on next scan)."""
+    try:
+        db = get_database()
+        rows = db.get_library_history_rows_by_ids([history_id])
+        if not rows:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        file_path = rows[0].get('file_path') or ''
+        file_deleted = False
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            file_deleted = True
+            logger.info(f"[Verification] Deleted rejected file: {file_path}")
+        db.delete_library_history_rows([history_id])
+        return jsonify({"success": True, "file_deleted": file_deleted})
+    except Exception as e:
+        logger.error(f"[Verification] Delete failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
 def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
