@@ -67727,6 +67727,8 @@ body.em-scroll-lock { overflow: hidden; }
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-brand) 45%, transparent); transition: box-shadow 0.16s;
 }
 .ss-card.active .ss-card-disc { box-shadow: 0 0 0 3px var(--ss-brand), 0 0 22px color-mix(in srgb, var(--ss-brand) 55%, transparent); }
+/* White/light wordmark logos (Plex, SoulSync) need a dark disc to be visible. */
+.ss-disc--dark { background: #1f2329 !important; }
 .ss-card--locked { opacity: 0.38; cursor: not-allowed; }
 .ss-card[disabled] { cursor: default; }
 .ss-card-logo { width: 34px; height: 34px; object-fit: contain; }
