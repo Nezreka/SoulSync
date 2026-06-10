@@ -16,7 +16,7 @@ import tempfile
 
 import pytest
 
-_TMP = tempfile.mkdtemp(prefix='ss-admin-gate-')
+_TMP = tempfile.mkdtemp(prefix='soulsync-testdb-gate-')
 os.environ['DATABASE_PATH'] = os.path.join(_TMP, 'gate.db')
 os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 
