@@ -25645,7 +25645,13 @@ def get_active_sources():
             'success': True,
             'editable': get_current_profile_id() == 1,  # admin writes the global default
             'metadata': {
+                # `active` = the configured choice (what the user picked / edits).
+                # `effective` = what's actually used after auth/availability
+                # fallback (e.g. configured 'spotify' but not authenticated →
+                # the app falls back). Surfacing both stops the modal disagreeing
+                # with the sidebar/Settings status.
                 'active': config_manager.get('metadata.fallback_source', 'deezer') or 'deezer',
+                'effective': _get_metadata_fallback_source(),
                 'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
             },
             'server': {
