@@ -216,3 +216,53 @@ def test_admin_connections_marks_admin(client):
 def test_disconnect_admin_spotify_rejected(client):
     # Admin's Spotify is the app account (Settings) — not disconnectable here.
     assert client.post('/api/profiles/me/connections/spotify/disconnect').status_code == 400
+
+
+# ── Tidal: per-profile connect status + the token-save-redirect safety ────────
+
+def test_tidal_connection_status_and_disconnect(client, nonadmin_profile):
+    db = web_server.get_database()
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    # unconnected
+    assert client.get('/api/profiles/me/connections').get_json()['connections']['tidal']['connected'] is False
+    # seed tokens → connected
+    db.set_profile_tidal_tokens(nonadmin_profile, 'acc-tok', 'ref-tok')
+    assert client.get('/api/profiles/me/connections').get_json()['connections']['tidal']['connected'] is True
+    # disconnect → cleared
+    assert client.post('/api/profiles/me/connections/tidal/disconnect').get_json()['success']
+    assert db.get_profile_tidal(nonadmin_profile) == {}
+    assert client.get('/api/profiles/me/connections').get_json()['connections']['tidal']['connected'] is False
+
+
+def test_disconnect_unsupported_service_400(client, nonadmin_profile):
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    assert client.post('/api/profiles/me/connections/deezer/disconnect').status_code == 400
+
+
+def test_tidal_token_refresh_redirects_to_profile_not_global(client, nonadmin_profile):
+    # THE safety guarantee: a per-profile Tidal client's token save must write to
+    # the PROFILE, never the global tidal_tokens slot the app runs on.
+    from config.settings import config_manager
+    db = web_server.get_database()
+    config_manager.set('tidal_tokens', {'access_token': 'ADMIN-ACC', 'refresh_token': 'ADMIN-REF'})
+    db.set_profile_tidal_tokens(nonadmin_profile, 'p-acc', 'p-ref')
+    web_server.clear_profile_tidal_client(nonadmin_profile)
+
+    c = web_server.get_tidal_client_for_profile(nonadmin_profile)
+    assert c is not web_server.tidal_client            # a dedicated per-profile client
+    # simulate a refresh writing new tokens
+    c.access_token = 'p-acc-NEW'
+    c.refresh_token = 'p-ref-NEW'
+    c._save_tokens()
+
+    assert db.get_profile_tidal(nonadmin_profile) == {'access_token': 'p-acc-NEW', 'refresh_token': 'p-ref-NEW'}
+    # global slot untouched
+    assert config_manager.get('tidal_tokens') == {'access_token': 'ADMIN-ACC', 'refresh_token': 'ADMIN-REF'}
+
+
+def test_tidal_admin_and_unconnected_use_global_client(client):
+    assert web_server.get_tidal_client_for_profile(1) is web_server.tidal_client
+    assert web_server.get_tidal_client_for_profile(None) is web_server.tidal_client
+    assert web_server.get_tidal_client_for_profile(987654) is web_server.tidal_client

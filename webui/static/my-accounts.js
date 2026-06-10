@@ -18,6 +18,11 @@ const _MA_SERVICES = [
         logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
         connect: (pid) => `/auth/spotify?profile_id=${pid}`,
     },
+    {
+        id: 'tidal', name: 'Tidal', brand: '#00cfe8', dark: true,
+        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tidal-light.png',
+        connect: (pid) => `/auth/tidal?profile_id=${pid}`,
+    },
 ];
 
 function _maEsc(s) {
@@ -84,9 +89,9 @@ function _maRender(body, data) {
     const rows = _MA_SERVICES.map(svc => {
         const c = conns[svc.id] || {};
         const connected = !!c.connected;
-        // Admin's Spotify is the app account managed in Settings — not a personal
-        // connection here.
-        const adminNote = (isAdmin && svc.id === 'spotify');
+        // Admin uses the global app account (set up in Settings) for every
+        // service — not a personal connection here.
+        const adminNote = isAdmin;
         let action;
         if (adminNote) {
             action = `<span class="ma-note">Managed in Settings (app account)</span>`;
@@ -99,7 +104,7 @@ function _maRender(body, data) {
         }
         return `
             <div class="ma-row" style="--ma-brand:${svc.brand}">
-                <span class="ma-disc"><img class="ma-logo" src="${svc.logo}" alt=""
+                <span class="ma-disc${svc.dark ? ' ma-disc--dark' : ''}"><img class="ma-logo" src="${svc.logo}" alt=""
                       onerror="this.style.display='none'"></span>
                 <div class="ma-row-info">
                     <div class="ma-row-name">${_maEsc(svc.name)}</div>
