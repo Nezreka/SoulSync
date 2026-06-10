@@ -20077,57 +20077,100 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .wl-scan-deck-body {
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.2fr);
-    gap: 20px;
+    grid-template-columns: minmax(320px, 1.1fr) minmax(300px, 1fr);
+    gap: 24px;
+    align-items: stretch;
 }
 
 @media (max-width: 760px) {
     .wl-scan-deck-body { grid-template-columns: 1fr; }
 }
 
-.wl-scan-stage {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    min-width: 0;
-}
-
-.wl-scan-stage-row {
+/* Hero — big square portrait (artist-page language) with the current album
+   stamped as an overlay badge, so the layout NEVER shifts when album art is
+   missing: the badge keeps its slot and shows a glyph placeholder instead. */
+.wl-scan-hero {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 20px;
     min-width: 0;
 }
 
-.wl-scan-artist-img {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    border: 2px solid rgb(var(--accent-rgb));
-    box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.3);
-    object-fit: cover;
-    background: #1a1a1a;
+.wl-scan-portrait {
+    position: relative;
+    width: 148px;
+    height: 148px;
+    border-radius: 16px;
+    background: #181818;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(var(--accent-rgb), 0.25);
     flex-shrink: 0;
 }
 
-.wl-scan-album-img {
-    width: 64px;
-    height: 64px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    object-fit: cover;
-    background: #1a1a1a;
-    flex-shrink: 0;
-    transition: opacity 0.3s ease;
+/* glyph placeholder behind the (possibly hidden) artist image */
+.wl-scan-portrait::before {
+    content: '♪';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 42px;
+    color: rgba(255, 255, 255, 0.12);
 }
 
-.wl-scan-stage-text {
+.wl-scan-portrait-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+    object-fit: cover;
+}
+
+.wl-scan-album-thumb {
+    position: absolute;
+    right: -12px;
+    bottom: -12px;
+    width: 62px;
+    height: 62px;
+    border-radius: 10px;
+    background: #181818;
+    border: 3px solid #121212;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.wl-scan-album-thumb::before {
+    content: '♪';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.15);
+}
+
+.wl-scan-album-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.wl-scan-hero-text {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
 }
 
 .wl-scan-artist-name {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
     color: #fff;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -20136,14 +20179,27 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .wl-scan-phase {
     font-size: 12px;
-    color: rgba(var(--accent-light-rgb), 0.85);
-    margin-top: 2px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: rgba(var(--accent-light-rgb), 0.9);
+}
+
+/* Fixed-height "now checking" block — placeholders keep the slot when the
+   scan hasn't reached an album/track yet, so nothing jumps. */
+.wl-scan-now {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0 8px 8px 0;
+    min-height: 44px;
 }
 
 .wl-scan-album-name {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(255, 255, 255, 0.9);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -20158,25 +20214,45 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     white-space: nowrap;
 }
 
+/* Feed — inset panel (artist-page sidebar language) with a FIXED height so
+   the deck is the same size whether 0 or 10 tracks have been added. */
 .wl-scan-feed {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 172px;
+    padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
 }
 
 .wl-scan-feed-label {
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
     color: #6fd99a;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
 }
 
 .wl-scan-feed-list {
-    max-height: 176px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 5px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
 }
 
 .wl-scan-feed-list .watchlist-live-addition-item {
