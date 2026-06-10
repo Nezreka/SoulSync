@@ -461,6 +461,7 @@ class MusicDatabase:
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_service_credentials(cursor)
+            self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
 
@@ -3852,6 +3853,228 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error in per-profile service credentials migration: {e}")
+
+    def _add_service_credential_sets(self, cursor):
+        """Named, switchable credential sets per auth service + each profile's
+        selection of which set is active (Phase 0 foundation).
+
+        Additive only — two new tables, no change to existing tables/columns.
+        Dormant until the resolver + UI are wired in a later phase, so this
+        migration changes no runtime behaviour for existing installs.
+        """
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'service_credentials_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying service-credential-sets migration...")
+
+            # Admin-created named credential sets. `payload` is a Fernet-encrypted
+            # JSON blob (same key as per-profile tokens), so secrets stay encrypted
+            # at rest. UNIQUE(service, label) keeps pill names distinct per service.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS service_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(service, label)
+                )
+            """)
+
+            # Per-profile selection of which credential set is active for a
+            # service. A missing row (or NULL credential_id) means "fall back to
+            # the global/admin default" — so a profile never breaks if its
+            # chosen set is later removed.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_service_credentials (
+                    profile_id INTEGER NOT NULL,
+                    service TEXT NOT NULL,
+                    credential_id INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (profile_id, service)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_service_credentials_service "
+                "ON service_credentials (service)"
+            )
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('service_credentials_v1', '1')"
+            )
+            logger.info("Service-credential-sets migration completed")
+        except Exception as e:
+            logger.error(f"Error in service-credential-sets migration: {e}")
+
+    # ── Service credential sets (named, switchable per profile) ──────────────
+
+    def create_service_credential(self, service: str, label: str, payload: dict):
+        """Create a named credential set for a service. Returns the new id, or
+        None on failure / duplicate (service, label). Payload is encrypted."""
+        try:
+            from config.settings import config_manager
+            enc = config_manager._encrypt_value(payload) if payload else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO service_credentials (service, label, payload) VALUES (?, ?, ?)",
+                    (service, label, enc),
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            logger.warning(f"Service credential '{label}' already exists for {service}")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating service credential ({service}/{label}): {e}")
+            return None
+
+    def update_service_credential(self, credential_id: int, label: str = None,
+                                  payload: dict = None) -> bool:
+        """Update a credential set's label and/or payload. Only provided fields
+        change. Returns True if a row was updated."""
+        try:
+            from config.settings import config_manager
+            sets, params = [], []
+            if label is not None:
+                sets.append("label = ?")
+                params.append(label)
+            if payload is not None:
+                sets.append("payload = ?")
+                params.append(config_manager._encrypt_value(payload) if payload else None)
+            if not sets:
+                return False
+            sets.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(credential_id)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE service_credentials SET {', '.join(sets)} WHERE id = ?", params
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.IntegrityError:
+            logger.warning(f"Rename of credential {credential_id} collides with an existing label")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating service credential {credential_id}: {e}")
+            return False
+
+    def delete_service_credential(self, credential_id: int) -> bool:
+        """Delete a credential set and clear any profile selections that point
+        at it (so those profiles fall back to the global default). Returns True
+        if the set existed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profile_service_credentials SET credential_id = NULL, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE credential_id = ?",
+                    (credential_id,),
+                )
+                cursor.execute("DELETE FROM service_credentials WHERE id = ?", (credential_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting service credential {credential_id}: {e}")
+            return False
+
+    def list_service_credentials(self, service: str = None):
+        """List credential sets (metadata only — never the payload). Optionally
+        filtered to one service. Returns dicts: id, service, label, timestamps."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if service:
+                    cursor.execute(
+                        "SELECT id, service, label, created_at, updated_at FROM service_credentials "
+                        "WHERE service = ? ORDER BY label COLLATE NOCASE",
+                        (service,),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT id, service, label, created_at, updated_at FROM service_credentials "
+                        "ORDER BY service, label COLLATE NOCASE"
+                    )
+                return [
+                    {'id': r[0], 'service': r[1], 'label': r[2],
+                     'created_at': r[3], 'updated_at': r[4]}
+                    for r in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"Error listing service credentials: {e}")
+            return []
+
+    def get_service_credential(self, credential_id: int):
+        """Get a credential set WITH its decrypted payload, or None. For the
+        resolver / client wiring — not for shipping to the browser."""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, service, label, payload FROM service_credentials WHERE id = ?",
+                    (credential_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                payload = config_manager._decrypt_value(row[3]) if row[3] else {}
+                return {'id': row[0], 'service': row[1], 'label': row[2],
+                        'payload': payload if isinstance(payload, dict) else {}}
+        except Exception as e:
+            logger.error(f"Error reading service credential {credential_id}: {e}")
+            return None
+
+    def set_profile_service_credential(self, profile_id: int, service: str,
+                                       credential_id) -> bool:
+        """Select which credential set is active for a profile + service.
+        Pass credential_id=None to clear (fall back to global). Upsert."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_service_credentials (profile_id, service, credential_id) "
+                    "VALUES (?, ?, ?) "
+                    "ON CONFLICT(profile_id, service) DO UPDATE SET "
+                    "credential_id = excluded.credential_id, updated_at = CURRENT_TIMESTAMP",
+                    (profile_id, service, credential_id),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting profile {profile_id} {service} credential: {e}")
+            return False
+
+    def get_profile_service_credential_id(self, profile_id: int, service: str):
+        """Return the credential_id a profile selected for a service, or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT credential_id FROM profile_service_credentials "
+                    "WHERE profile_id = ? AND service = ?",
+                    (profile_id, service),
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error reading profile {profile_id} {service} selection: {e}")
+            return None
+
+    def resolve_profile_service_credential(self, profile_id: int, service: str):
+        """Resolve a profile's ACTIVE credential payload for a service: the
+        decrypted payload of its selected set, or None when it hasn't selected
+        one (or the set was deleted) — caller then uses the global/admin default.
+        Stale-safe: a dangling selection resolves to None, not an error."""
+        cred_id = self.get_profile_service_credential_id(profile_id, service)
+        if not cred_id:
+            return None
+        cred = self.get_service_credential(cred_id)
+        return cred['payload'] if cred else None
 
     def _add_soul_id_columns(self, cursor):
         """Add soul_id columns to artists, albums, and tracks tables."""
