@@ -315,3 +315,29 @@ def test_real_session_still_wins_over_background(client, nonadmin_profile):
         assert body['is_admin'] is False  # it's the non-admin session, not 999/admin
     finally:
         reset_background_profile(tok)
+
+
+# ── Part 2: the playlist SOURCE adapters read per-profile (sync handlers) ──────
+# bootstrap now passes get_*_client_for_profile as the source adapters'
+# client_getter; these prove that composition resolves per the current profile
+# context and stays on the global client for admin (the existing pipelines).
+
+def test_spotify_source_adapter_resolves_per_profile():
+    from core.playlists.sources.spotify import SpotifyPlaylistSource
+    src = SpotifyPlaylistSource(web_server.get_spotify_client_for_profile)
+    # admin / no override -> the global client (admin pipelines unchanged)
+    assert src._client() is web_server.spotify_client
+    # a background owner override flows through the resolver, re-resolved per
+    # call (unconnected profile -> safe global fallback, never a frozen client)
+    from core.profile_context import set_background_profile, reset_background_profile
+    tok = set_background_profile(424242)
+    try:
+        assert src._client() is web_server.spotify_client
+    finally:
+        reset_background_profile(tok)
+
+
+def test_tidal_source_adapter_resolves_per_profile():
+    from core.playlists.sources.tidal import TidalPlaylistSource
+    src = TidalPlaylistSource(web_server.get_tidal_client_for_profile)
+    assert src._client() is web_server.tidal_client   # admin -> global, unchanged
