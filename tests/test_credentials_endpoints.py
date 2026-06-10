@@ -17,7 +17,7 @@ import tempfile
 import pytest
 
 # Redirect the DB before importing web_server so it never touches a real library.
-_TMP = tempfile.mkdtemp(prefix='ss-cred-ep-')
+_TMP = tempfile.mkdtemp(prefix='soulsync-testdb-cred-')
 os.environ['DATABASE_PATH'] = os.path.join(_TMP, 'creds_ep.db')
 os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 
