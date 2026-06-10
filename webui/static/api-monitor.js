@@ -3276,15 +3276,21 @@ function handleWatchlistScanData(data) {
     if (liveActivity && data.status === 'scanning') {
         liveActivity.style.display = liveActivity.classList.contains('wl-scan-deck') ? 'block' : 'flex';
 
-        // Update artist image and name
+        // Update artist image and name (hide the img when THIS artist has no
+        // photo, so the previous artist's portrait doesn't linger and the
+        // glyph placeholder shows instead)
         const artistImg = document.getElementById('watchlist-artist-img');
         const artistName = document.getElementById('watchlist-artist-name');
-        if (artistImg && data.current_artist_image_url) {
-            artistImg.src = data.current_artist_image_url;
-            artistImg.style.display = 'block';
+        if (artistImg) {
+            if (data.current_artist_image_url) {
+                artistImg.src = data.current_artist_image_url;
+                artistImg.style.display = 'block';
+            } else {
+                artistImg.style.display = 'none';
+            }
         }
         if (artistName) {
-            artistName.textContent = data.current_artist_name || 'Processing...';
+            artistName.textContent = data.current_artist_name || 'Starting…';
         }
 
         // Update album image and name
@@ -3297,13 +3303,14 @@ function handleWatchlistScanData(data) {
             albumImg.style.display = 'none';
         }
         if (albumName) {
-            albumName.textContent = data.current_album || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+            albumName.textContent = data.current_album
+                || (data.current_phase === 'fetching_discography' ? 'Fetching releases…' : 'Looking for new releases…');
         }
 
-        // Update current track
+        // Update current track ('' keeps the slot without echoing the album line)
         const trackName = document.getElementById('watchlist-track-name');
         if (trackName) {
-            trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+            trackName.textContent = data.current_track_name || '—';
         }
 
         // #831 round 2: scan-deck extras — artist progress bar, live counters,
