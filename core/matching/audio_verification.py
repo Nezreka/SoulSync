@@ -16,6 +16,10 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("audio_verification")
+
 # Thresholds — the single definition both paths share.
 MIN_ACOUSTID_SCORE = 0.80       # Minimum fingerprint score to trust a match.
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity to consider a match.
@@ -117,6 +121,18 @@ def _alias_aware_artist_sim(expected_artist: str, actual_artist: str,
         expected_artist, actual_artist, aliases=resolved,
         threshold=ARTIST_MATCH_THRESHOLD, similarity=similarity,
     )
+    # Diagnostic: an alias rescued a comparison direct similarity would have
+    # failed. INFO since it's a user-visible decision (PASS instead of FAIL).
+    if score >= ARTIST_MATCH_THRESHOLD and direct < ARTIST_MATCH_THRESHOLD:
+        from core.matching.artist_aliases import best_alias_match
+        winner, _ = best_alias_match(
+            expected_artist, actual_artist, resolved, similarity=similarity,
+        )
+        logger.info(
+            "Artist alias rescued comparison: expected=%r vs actual=%r "
+            "(direct sim=%.2f, alias %r → score=%.2f)",
+            expected_artist, actual_artist, direct, winner, score,
+        )
     return score
 
 
