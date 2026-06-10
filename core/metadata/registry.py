@@ -415,6 +415,14 @@ def get_primary_source_status(
         )
         if source == "spotify":
             connected = bool(client and client.is_spotify_authenticated())
+            # No-auth composite (fallback_source='spotify' + metadata.spotify_free):
+            # works without authentication, so treat the free path's availability
+            # as "connected" too.
+            if not connected and _get_config_value("metadata.spotify_free", False):
+                try:
+                    connected = bool(client and client.is_spotify_metadata_available())
+                except Exception:
+                    connected = False
         elif source == "hydrabase":
             connected = bool(client and (client.is_connected() if hasattr(client, "is_connected") else client.is_authenticated()))
         elif client is not None and hasattr(client, "is_authenticated"):
@@ -424,8 +432,17 @@ def get_primary_source_status(
     except Exception:
         connected = False
 
+    # Report the composite-aware source for DISPLAY: "Spotify (no auth)" is
+    # stored as fallback_source='spotify' + metadata.spotify_free=true. The raw
+    # 'spotify' is kept above for the connected/auth checks; consumers that
+    # label the source (sidebar, dashboard card) get 'spotify_free' so they
+    # stop mislabeling no-auth as plain Spotify.
+    display_source = source
+    if source == "spotify" and _get_config_value("metadata.spotify_free", False):
+        display_source = "spotify_free"
+
     return {
-        "source": source,
+        "source": display_source,
         "connected": connected,
         "response_time": round((time.time() - started) * 1000, 1),
     }

@@ -3438,6 +3438,9 @@ async function revokeApiKey(keyId, label) {
 
 // Dashboard-specific test functions that create activity items
 async function testDashboardConnection(service) {
+    // 'spotify_free' is a display-only label for the no-auth composite; the real
+    // service to test is 'spotify'.
+    if (service === 'spotify_free') service = 'spotify';
     try {
         showLoadingOverlay(`Testing ${service} service...`);
 
