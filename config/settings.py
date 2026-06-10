@@ -66,6 +66,12 @@ class ConfigManager:
         
         self._load_config()
 
+    # Placeholder shipped to the browser in place of a configured secret
+    # (#832 follow-up). The settings UI shows it as masked dots; if it's
+    # round-tripped back on save, ``set()`` treats it as "keep existing" so the
+    # real value is never overwritten by the mask.
+    REDACTED_SENTINEL = '__redacted_unchanged__'
+
     # Dot-notation paths to sensitive config values that must be encrypted at rest.
     # Paths pointing to dicts encrypt the entire dict as a JSON blob.
     _SENSITIVE_PATHS = frozenset({
@@ -792,7 +798,40 @@ class ConfigManager:
 
         return value
 
+    def redacted_config(self) -> Dict[str, Any]:
+        """Deep copy of the live config with every sensitive value masked.
+
+        Used for ``GET /api/settings`` so decrypted secrets never reach the
+        browser (#832 follow-up). A *set* secret becomes ``REDACTED_SENTINEL``
+        (the UI renders it as masked dots); an unset one stays empty so the UI
+        can show "not configured". Dict-valued secrets (OAuth sessions) collapse
+        to the sentinel too — the UI has no field for them anyway. The matching
+        guard in ``set()`` turns a round-tripped sentinel back into a no-op.
+        """
+        import copy
+        data = copy.deepcopy(self.config_data)
+        for path in self._SENSITIVE_PATHS:
+            keys = path.split('.')
+            parent = data
+            for k in keys[:-1]:
+                if isinstance(parent, dict) and k in parent:
+                    parent = parent[k]
+                else:
+                    parent = None
+                    break
+            if not isinstance(parent, dict):
+                continue
+            leaf = keys[-1]
+            if leaf in parent and parent[leaf] not in (None, '', {}, [], 0, False):
+                parent[leaf] = self.REDACTED_SENTINEL
+        return data
+
     def set(self, key: str, value: Any):
+        # The UI round-trips REDACTED_SENTINEL for any secret the user didn't
+        # touch — never let the mask overwrite the real value (#832 follow-up).
+        if value == self.REDACTED_SENTINEL and key in self._SENSITIVE_PATHS:
+            return
+
         keys = key.split('.')
         config = self.config_data
 
