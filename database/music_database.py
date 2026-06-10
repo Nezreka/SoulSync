@@ -649,6 +649,27 @@ class MusicDatabase:
                     logger.info(f"Added {_col} column to library_history")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
 
+            # Watchlist scan history (#831 round 2) — one row per scan run with
+            # its full track ledger (added/skipped), so the Watchlist page can
+            # show what every past run did. Wishlist rows erode as tracks
+            # download, so this is the durable record.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_scan_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL UNIQUE,
+                    profile_id INTEGER DEFAULT 1,
+                    status TEXT NOT NULL,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    total_artists INTEGER DEFAULT 0,
+                    artists_scanned INTEGER DEFAULT 0,
+                    tracks_found INTEGER DEFAULT 0,
+                    tracks_added INTEGER DEFAULT 0,
+                    track_events TEXT
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wsr_completed ON watchlist_scan_runs (completed_at DESC)")
+
             # Auto-import history — tracks auto-import scan results and processing status
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS auto_import_history (
@@ -12543,6 +12564,75 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
+
+    def save_watchlist_scan_run(self, run_id, profile_id=1, status='completed',
+                                started_at=None, completed_at=None,
+                                total_artists=0, artists_scanned=0,
+                                tracks_found=0, tracks_added=0,
+                                track_events=None, keep_last=100) -> bool:
+        """Persist one watchlist scan run + its track ledger (#831 round 2).
+
+        Idempotent on run_id (re-saving a run replaces it). Prunes the table to
+        the most recent ``keep_last`` runs so history can't grow unbounded."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO watchlist_scan_runs
+                    (run_id, profile_id, status, started_at, completed_at,
+                     total_artists, artists_scanned, tracks_found, tracks_added,
+                     track_events)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (run_id, profile_id, status, started_at, completed_at,
+                  total_artists, artists_scanned, tracks_found, tracks_added,
+                  json.dumps(track_events or [])))
+            cursor.execute("""
+                DELETE FROM watchlist_scan_runs WHERE id NOT IN (
+                    SELECT id FROM watchlist_scan_runs
+                    ORDER BY completed_at DESC, id DESC LIMIT ?
+                )
+            """, (keep_last,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving watchlist scan run {run_id}: {e}")
+            return False
+
+    def get_watchlist_scan_runs(self, limit=30, profile_id=None):
+        """Recent watchlist scan runs, newest first — WITHOUT track ledgers
+        (fetch those per-run via get_watchlist_scan_run_events)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = "WHERE profile_id = ?" if profile_id is not None else ""
+            params = ([profile_id] if profile_id is not None else []) + [limit]
+            cursor.execute(f"""
+                SELECT run_id, profile_id, status, started_at, completed_at,
+                       total_artists, artists_scanned, tracks_found, tracks_added
+                FROM watchlist_scan_runs {where}
+                ORDER BY completed_at DESC, id DESC LIMIT ?
+            """, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting watchlist scan runs: {e}")
+            return []
+
+    def get_watchlist_scan_run_events(self, run_id):
+        """The track ledger (added/skipped events) for one scan run."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT track_events FROM watchlist_scan_runs WHERE run_id = ?",
+                (run_id,))
+            row = cursor.fetchone()
+            if not row or not row['track_events']:
+                return []
+            events = json.loads(row['track_events'])
+            return events if isinstance(events, list) else []
+        except Exception as e:
+            logger.error(f"Error getting watchlist scan run events for {run_id}: {e}")
+            return []
 
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the

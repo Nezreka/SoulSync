@@ -3224,6 +3224,35 @@ function renderWatchlistScanTrackLedger(events) {
         </div>`;
 }
 
+// Human-readable phase line for the scan deck ("checking_album_2_of_5" →
+// "Checking album 2 of 5").
+function _wlPrettyPhase(data) {
+    const phase = data.current_phase || '';
+    if (!phase) return 'Working…';
+    const m = phase.match(/^checking_album_(\d+)_of_(\d+)$/);
+    if (m) return `Checking album ${m[1]} of ${m[2]}`;
+    const map = {
+        starting: 'Starting…',
+        fetching_discography: 'Fetching releases…',
+        populating_discovery_pool: 'Populating discovery…',
+        updating_listenbrainz: 'Updating ListenBrainz…',
+    };
+    return map[phase] || phase.replace(/_/g, ' ');
+}
+
+// Update a live counter and replay its pop animation when the value changes.
+function _wlBumpCounter(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = String(value);
+    if (el.textContent !== text) {
+        el.textContent = text;
+        el.classList.remove('pop');
+        void el.offsetWidth;  // restart the CSS animation
+        el.classList.add('pop');
+    }
+}
+
 function toggleWatchlistScanTracks(btn) {
     const list = btn.parentElement.querySelector('.watchlist-scan-tracks');
     if (!list) return;
@@ -3245,7 +3274,7 @@ function handleWatchlistScanData(data) {
 
     // Update live visual activity display
     if (liveActivity && data.status === 'scanning') {
-        liveActivity.style.display = 'flex';
+        liveActivity.style.display = liveActivity.classList.contains('wl-scan-deck') ? 'block' : 'flex';
 
         // Update artist image and name
         const artistImg = document.getElementById('watchlist-artist-img');
@@ -3277,21 +3306,44 @@ function handleWatchlistScanData(data) {
             trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
         }
 
-        // Update wishlist additions feed
+        // #831 round 2: scan-deck extras — artist progress bar, live counters,
+        // readable phase. All optional elements, so the legacy modal markup
+        // (which lacks them) keeps working untouched.
+        const total = data.total_artists || 0;
+        const idx = total ? Math.min((data.current_artist_index || 0) + 1, total) : 0;
+        const progText = document.getElementById('wl-scan-progress-text');
+        if (progText) progText.textContent = total ? `${idx} / ${total} artists` : '';
+        const progBar = document.getElementById('wl-scan-progress-bar');
+        if (progBar && total) progBar.style.width = `${Math.round((100 * idx) / total)}%`;
+        const phaseEl = document.getElementById('wl-scan-phase');
+        if (phaseEl) phaseEl.textContent = _wlPrettyPhase(data);
+        _wlBumpCounter('wl-scan-found', data.tracks_found_this_scan || 0);
+        _wlBumpCounter('wl-scan-added', data.tracks_added_this_scan || 0);
+
+        // Update wishlist additions feed — only re-render when it actually
+        // changed, so the slide-in animation plays once per new track instead
+        // of replaying on every poll.
         const additionsFeed = document.getElementById('watchlist-additions-feed');
         if (additionsFeed) {
-            if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
-                additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
-                    <div class="watchlist-live-addition-item">
-                        <img src="${item.album_image_url || ''}" alt="" onerror="this.style.display='none';" />
-                        <div class="watchlist-live-addition-item-info">
-                            <div class="watchlist-live-addition-item-track">${item.track_name}</div>
-                            <div class="watchlist-live-addition-item-artist">${item.artist_name}</div>
+            const additions = data.recent_wishlist_additions || [];
+            const feedKey = additions.map(a => a.track_name).join('');
+            if (additionsFeed.dataset.feedKey !== feedKey) {
+                const grew = additions.length > 0 && additionsFeed.dataset.feedKey !== undefined
+                    && feedKey.length > (additionsFeed.dataset.feedKey || '').length;
+                additionsFeed.dataset.feedKey = feedKey;
+                if (additions.length > 0) {
+                    additionsFeed.innerHTML = additions.map((item, i) => `
+                        <div class="watchlist-live-addition-item${grew && i === 0 ? ' is-new' : ''}">
+                            <img src="${escapeHtml(item.album_image_url || '')}" alt="" onerror="this.style.display='none';" />
+                            <div class="watchlist-live-addition-item-info">
+                                <div class="watchlist-live-addition-item-track">${escapeHtml(item.track_name || '')}</div>
+                                <div class="watchlist-live-addition-item-artist">${escapeHtml(item.artist_name || '')}</div>
+                            </div>
                         </div>
-                    </div>
-                `).join('');
-            } else {
-                additionsFeed.innerHTML = '<div class="watchlist-live-addition-empty">No tracks added yet...</div>';
+                    `).join('');
+                } else {
+                    additionsFeed.innerHTML = '<div class="watchlist-live-addition-empty">No tracks added yet…</div>';
+                }
             }
         }
     } else if (liveActivity && data.status !== 'scanning') {

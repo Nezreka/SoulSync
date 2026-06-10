@@ -6975,20 +6975,45 @@
 
                     <!-- Scan status / live activity (IDs match old modal for compatibility) -->
                     <div id="watchlist-scan-status" class="watchlist-page-scan-status" style="display: none;">
-                        <div id="watchlist-live-activity" class="watchlist-live-activity" style="display: none;">
-                            <div class="watchlist-live-activity-col">
-                                <img id="watchlist-artist-img" class="watchlist-live-activity-artist-img" src="" alt="Artist" onerror="this.style.display='none';" />
-                                <div id="watchlist-artist-name" class="watchlist-live-activity-label">Waiting...</div>
+                        <!-- #831 round 2: full-width live "scan deck" -->
+                        <div id="watchlist-live-activity" class="wl-scan-deck" style="display: none;">
+                            <div class="wl-scan-deck-head">
+                                <span class="wl-scan-live-dot"></span>
+                                <span class="wl-scan-live-label">Scanning</span>
+                                <span id="wl-scan-progress-text" class="wl-scan-progress-text"></span>
+                                <div class="wl-scan-counters">
+                                    <div class="wl-scan-counter">
+                                        <span id="wl-scan-found" class="wl-scan-counter-num">0</span>
+                                        <span class="wl-scan-counter-label">found</span>
+                                    </div>
+                                    <div class="wl-scan-counter added">
+                                        <span id="wl-scan-added" class="wl-scan-counter-num">0</span>
+                                        <span class="wl-scan-counter-label">added</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="watchlist-live-activity-col">
-                                <img id="watchlist-album-img" class="watchlist-live-activity-album-img" src="" alt="Album" onerror="this.style.display='none';" />
-                                <div id="watchlist-album-name" class="watchlist-live-activity-label">Waiting...</div>
-                            </div>
-                            <div class="watchlist-live-activity-feed">
-                                <div class="watchlist-live-activity-feed-label">Current Track:</div>
-                                <div id="watchlist-track-name" class="watchlist-live-activity-track">Waiting...</div>
-                                <div class="watchlist-live-activity-feed-label-orange">Recently Added:</div>
-                                <div id="watchlist-additions-feed" style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px;"></div>
+                            <div class="wl-scan-progress"><div id="wl-scan-progress-bar" class="wl-scan-progress-bar" style="width: 0%;"></div></div>
+                            <div class="wl-scan-deck-body">
+                                <div class="wl-scan-stage">
+                                    <div class="wl-scan-stage-row">
+                                        <img id="watchlist-artist-img" class="wl-scan-artist-img" src="" alt="" onerror="this.style.display='none';" />
+                                        <div class="wl-scan-stage-text">
+                                            <div id="watchlist-artist-name" class="wl-scan-artist-name">Waiting…</div>
+                                            <div id="wl-scan-phase" class="wl-scan-phase">starting…</div>
+                                        </div>
+                                    </div>
+                                    <div class="wl-scan-stage-row">
+                                        <img id="watchlist-album-img" class="wl-scan-album-img" src="" alt="" onerror="this.style.display='none';" />
+                                        <div class="wl-scan-stage-text">
+                                            <div id="watchlist-album-name" class="wl-scan-album-name">—</div>
+                                            <div id="watchlist-track-name" class="wl-scan-track-name">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="wl-scan-feed">
+                                    <div class="wl-scan-feed-label">Added to wishlist this run</div>
+                                    <div id="watchlist-additions-feed" class="wl-scan-feed-list"></div>
+                                </div>
                             </div>
                         </div>
                         <div id="watchlist-page-scan-summary" class="scan-status-summary" style="display: none;"></div>
@@ -7015,6 +7040,10 @@
                         <button class="btn btn--secondary" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Download Origins
+                        </button>
+                        <button class="btn btn--secondary" id="watchlist-page-history-btn" onclick="openWatchlistHistoryModal()" title="Every past scan and the tracks it added to the wishlist">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
+                            History
                         </button>
                         <button class="btn btn--secondary" id="watchlist-page-blocklist-btn" onclick="openBlocklistModal('artist')" title="Block artists, albums or tracks from ever being downloaded">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
@@ -8163,6 +8192,7 @@
     <script src="{{ url_for('static', filename='track-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
