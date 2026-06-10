@@ -67677,3 +67677,48 @@ body.em-scroll-lock { overflow: hidden; }
 /* Service Status is admin-only — non-admins get no clickable affordance. */
 .status-section--locked { cursor: default; }
 .status-section--locked:hover { background: transparent; }
+
+/* ── My Accounts (per-profile self-auth for playlist services) ── */
+.ma-overlay { display: flex; align-items: center; justify-content: center; }
+.ma-modal {
+    background: linear-gradient(160deg, #181a21 0%, #121319 100%);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 18px;
+    width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
+    overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,0.65);
+}
+.ma-modal.ma-in { animation: ss-pop 0.22s cubic-bezier(0.2,0.9,0.3,1.2); }
+.ma-topbar {
+    display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(var(--accent-light-rgb),0.05);
+}
+.ma-topbar-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
+.ma-topbar-logo { width: 36px; height: 36px; object-fit: contain; }
+.ma-topbar-titles { flex: 1; }
+.ma-topbar-title { margin: 0; font-size: 1.2rem; }
+.ma-topbar-sub { color: rgba(255,255,255,0.5); font-size: 0.82rem; margin-top: 2px; }
+.ma-icon-btn { background: rgba(255,255,255,0.06); border: none; color: #fff; width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 1.1rem; }
+.ma-icon-btn:hover { background: rgba(255,255,255,0.14); }
+.ma-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.ma-empty { color: rgba(255,255,255,0.4); font-style: italic; padding: 24px 0; text-align: center; }
+.ma-row {
+    display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
+}
+.ma-disc {
+    width: 46px; height: 46px; flex-shrink: 0; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ma-brand) 55%, transparent);
+}
+.ma-logo { width: 28px; height: 28px; object-fit: contain; }
+.ma-row-info { flex: 1; min-width: 0; }
+.ma-row-name { font-weight: 600; font-size: 0.98rem; }
+.ma-row-status { font-size: 0.8rem; color: rgba(255,255,255,0.45); }
+.ma-row-status.is-on { color: var(--ma-brand); }
+.ma-row-action { display: flex; align-items: center; gap: 10px; }
+.ma-account { font-size: 0.82rem; color: rgba(255,255,255,0.7); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ma-note { font-size: 0.78rem; color: rgba(255,255,255,0.4); font-style: italic; }
+.ma-btn { border: none; border-radius: 9px; padding: 8px 18px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+.ma-btn--connect { background: var(--ma-brand); color: #0a0a0a; }
+.ma-btn--connect:hover { filter: brightness(1.1); }
+.ma-btn--ghost { background: transparent; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.18); }
+.ma-btn--ghost:hover { background: rgba(255,255,255,0.06); color: #fff; }

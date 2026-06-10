@@ -196,3 +196,23 @@ def test_spotify_free_composite_roundtrips_like_settings(client):
     client.post('/api/profiles/active-sources', json={'metadata_source': 'spotify'})
     assert config_manager.get('metadata.spotify_free') is False
     assert client.get('/api/profiles/me/active-sources').get_json()['metadata']['active'] == 'spotify'
+
+
+# ── My Accounts: per-profile connection status (Spotify) ──────────────────────
+
+def test_connections_status_unconnected(client, nonadmin_profile):
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    body = client.get('/api/profiles/me/connections').get_json()
+    assert body['success'] and body['is_admin'] is False
+    assert body['connections']['spotify']['connected'] is False
+
+
+def test_admin_connections_marks_admin(client):
+    body = client.get('/api/profiles/me/connections').get_json()
+    assert body['is_admin'] is True
+
+
+def test_disconnect_admin_spotify_rejected(client):
+    # Admin's Spotify is the app account (Settings) — not disconnectable here.
+    assert client.post('/api/profiles/me/connections/spotify/disconnect').status_code == 400

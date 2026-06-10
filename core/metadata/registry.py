@@ -187,18 +187,37 @@ def _build_profile_spotify_cache_key(profile_id: int, creds: Dict[str, Any]) -> 
 
 
 def get_spotify_client_for_profile(profile_id: Optional[int] = None):
-    """Get a profile-specific Spotify client or fall back to the global one."""
+    """Get a profile-specific Spotify client or fall back to the global one.
+
+    Shared-app model: a profile authenticates its OWN Spotify account through
+    the GLOBAL app credentials (client_id/secret) and gets its own token cache
+    (``.spotify_cache_profile_<id>``). A profile that set its own app creds
+    (legacy) still works. A profile that hasn't connected — no token cache —
+    falls back to the global/admin client, so nothing changes for them or for
+    background workers (which run as profile 1)."""
     if profile_id is None or profile_id == 1:
         return get_spotify_client()
 
     try:
-        creds = _profile_spotify_credentials_provider(profile_id)
-        if not creds or not creds.get("client_id"):
-            return get_spotify_client()
+        creds = _profile_spotify_credentials_provider(profile_id) or {}
     except Exception:
         return get_spotify_client()
 
-    cache_key = _build_profile_spotify_cache_key(profile_id, creds)
+    # Effective OAuth app creds: the profile's own (legacy) else the global app.
+    client_id = creds.get("client_id") or _get_config_value("spotify.client_id", "")
+    client_secret = creds.get("client_secret") or _get_config_value("spotify.client_secret", "")
+    redirect_uri = (creds.get("redirect_uri")
+                    or _get_config_value("spotify.redirect_uri", "http://127.0.0.1:8888/callback"))
+
+    import os
+    cache_path = f"config/.spotify_cache_profile_{profile_id}"
+    # Only use a per-profile client when this profile has actually connected
+    # (its own token cache exists). Otherwise use the global/admin client.
+    if not client_id or not os.path.exists(cache_path):
+        return get_spotify_client()
+
+    cache_key = _build_profile_spotify_cache_key(
+        profile_id, {"client_id": client_id, "client_secret": client_secret, "redirect_uri": redirect_uri})
     with _client_cache_lock:
         client = _client_cache.get(cache_key)
         if client is not None and getattr(client, "sp", None) is not None:
@@ -210,11 +229,11 @@ def get_spotify_client_for_profile(profile_id: Optional[int] = None):
         import spotipy
 
         auth_manager = SpotifyOAuth(
-            client_id=creds["client_id"],
-            client_secret=creds["client_secret"],
-            redirect_uri=creds.get("redirect_uri", "http://127.0.0.1:8888/callback"),
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
             scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-            cache_path=f"config/.spotify_cache_profile_{profile_id}",
+            cache_path=cache_path,
             state=f"profile_{profile_id}",
         )
 
