@@ -19,8 +19,8 @@ const _MA_SERVICES = [
         connect: (pid) => `/auth/spotify?profile_id=${pid}`,
     },
     {
-        id: 'tidal', name: 'Tidal', brand: '#00cfe8', dark: true,
-        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tidal-light.png',
+        id: 'tidal', name: 'Tidal', brand: '#00cfe8',
+        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tidal.png',
         connect: (pid) => `/auth/tidal?profile_id=${pid}`,
     },
     {
