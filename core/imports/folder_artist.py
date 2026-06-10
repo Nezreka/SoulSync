@@ -8,7 +8,7 @@ user staged everything under one container folder (see the "soulsync" incident).
 
 This module isolates that decision as a pure function so it can be:
 - gated behind an opt-in setting (``import.folder_artist_override``,
-  default off), and
+  default on for legacy compatibility), and
 - unit-tested without standing up the whole import worker.
 """
 
